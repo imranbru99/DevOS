@@ -32,10 +32,15 @@ def main():
         print("  win       WinLayer prefix manager and compatibility doctor")
         print("  android   Waydroid container manager and APK runner")
         print("  watchdog  System memory pressure and storage audit")
+        print("  net       Wi-Fi and Ethernet connection manager")
+        print("  sound     PipeWire audio and volume controller")
+        print("  driver    GPU, Wi-Fi, Bluetooth, and printer drivers")
         sys.exit(0)
 
     sub = sys.argv[1]
     args = sys.argv[2:]
+
+    hardware_script = os.path.join(COMPONENTS_DIR, "settings", "hardware_manager.py")
 
     dispatch_map = {
         "app": os.path.join(COMPONENTS_DIR, "apphub", "hub.py"),
@@ -45,7 +50,18 @@ def main():
         "win": os.path.join(COMPONENTS_DIR, "winlayer", "prefix_manager.py"),
         "android": os.path.join(COMPONENTS_DIR, "androidlayer", "waydroid_manager.py"),
         "watchdog": os.path.join(COMPONENTS_DIR, "ai-agent", "system_watchdog.py"),
+        "net": hardware_script,
+        "sound": hardware_script,
+        "driver": hardware_script,
     }
+
+    # Normalize subcommands for hardware manager
+    if sub == "net" and not args:
+        args = ["net-status"]
+    elif sub == "sound" and not args:
+        args = ["sound-status"]
+    elif sub == "driver" and not args:
+        args = ["driver-status"]
 
     if sub in dispatch_map:
         target_script = dispatch_map[sub]

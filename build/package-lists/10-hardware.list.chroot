@@ -1,36 +1,52 @@
-# Firmware and Microcode
+# DevOS Hardware, Drivers, Audio & Network Package List
+# Comprehensive driver and peripheral hardware support for modern laptops and desktops
+
+# 1. Firmware and CPU Microcode
 linux-firmware
 intel-microcode
 amd64-microcode
+firmware-sof-signed
 
-# Graphics and Video Acceleration
+# 2. Graphics, Display, and Video Acceleration
 mesa-vulkan-drivers
 mesa-va-drivers
 libvulkan1
 vulkan-tools
 intel-media-va-driver
 vainfo
+brightnessctl
+ddcutil
 
-# Proprietary Driver Detection / Management
+# 3. GPU Proprietary Driver Detection / Management
 ubuntu-drivers-common
 
-# Networking and Wireless
+# 4. Networking, Wi-Fi & Ethernet
+network-manager
 wpasupplicant
 wireless-regdb
 wireless-tools
-network-manager
+iw
+ethtool
+iproute2
+net-tools
 rfkill
 
-# Bluetooth
+# 5. Bluetooth & Wireless Audio Codecs
 bluez
 bluez-tools
+libspa-0.2-bluetooth
 
-# Audio & Media foundation
+# 6. Audio & Sound Subsystem (PipeWire + WirePlumber)
 pipewire
 pipewire-alsa
 pipewire-pulse
+pipewire-audio
 wireplumber
+alsa-utils
 
-# Printing on demand (cups daemon masked/socket activated)
+# 7. Printing & Scanning (Driverless IPP Everywhere + Legacy)
 cups
 cups-client
+cups-ipp-utils
+ipp-usb
+sane-utils
