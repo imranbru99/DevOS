@@ -1,0 +1,24 @@
+# DevOS Windows Compatibility & Gaming Package List (Phase 3)
+# Wine Staging, Vulkan DXVK translation, and GameMode
+
+# Wine & 32-bit Architecture Support
+wine
+wine64
+winetricks
+
+# Vulkan & DirectX Translation Libraries
+libvulkan1
+mesa-vulkan-drivers
+vulkan-tools
+dxvk
+
+# Performance & Process Boosters
+gamemode
+mangohud
+
+# Sandbox & Container Isolation
+bubblewrap
+firejail
+cabextract
+p7zip-full
+unzip

@@ -1,0 +1,35 @@
+{
+  "models": [
+    {
+      "title": "DevOS Local Code Model (Offline)",
+      "provider": "openai",
+      "model": "qwen2.5-coder",
+      "apiBase": "http://127.0.0.1:11434/v1",
+      "apiKey": "devos-offline-key"
+    }
+  ],
+  "tabAutocompleteModel": {
+    "title": "DevOS Fast Inline Completion (1.5B)",
+    "provider": "openai",
+    "model": "qwen2.5-coder-1.5b",
+    "apiBase": "http://127.0.0.1:11434/v1",
+    "apiKey": "devos-offline-key"
+  },
+  "customCommands": [
+    {
+      "name": "test",
+      "prompt": "Write comprehensive unit tests for this code using standard framework conventions.",
+      "description": "Generate unit tests"
+    },
+    {
+      "name": "optimize",
+      "prompt": "Optimize this code for execution speed and memory efficiency in DevOS.",
+      "description": "Optimize code"
+    }
+  ],
+  "contextProviders": [
+    { "name": "diff" },
+    { "name": "code" },
+    { "name": "terminal" }
+  ]
+}

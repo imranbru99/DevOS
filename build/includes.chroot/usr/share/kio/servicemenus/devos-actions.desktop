@@ -1,0 +1,26 @@
+[Desktop Entry]
+Type=Service
+ServiceTypes=KonqPopupMenu/Plugin
+MimeType=all/allfiles;inode/directory;application/x-msdownload;application/vnd.android.package-archive;
+Actions=OpenWithCode;AnalyzeWinLayer;InstallAndroid;NewDevProject;
+X-KDE-Priority=TopLevel
+
+[Desktop Action OpenWithCode]
+Name=Open in VSCodium
+Icon=com.vscodium.codium
+Exec=codium "%f"
+
+[Desktop Action AnalyzeWinLayer]
+Name=Analyze with WinLayer Doctor
+Icon=security-high
+Exec=python3 /usr/lib/devos/components/devos_cli.py win doctor "%f"
+
+[Desktop Action InstallAndroid]
+Name=Install on DevOS Android (Waydroid)
+Icon=smartphone
+Exec=python3 /usr/lib/devos/components/devos_cli.py app install "%f"
+
+[Desktop Action NewDevProject]
+Name=Create Local Dev Project Here (devserver)
+Icon=network-server
+Exec=python3 /usr/lib/devos/components/devos_cli.py serve new "%n"

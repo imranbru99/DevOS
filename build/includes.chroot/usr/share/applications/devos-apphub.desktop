@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=DevOS App Hub
+Comment=Universal Installer for Windows, Linux, and Android Applications
+Exec=python3 /usr/lib/devos/components/devos_cli.py app install %f
+Icon=system-software-install
+Terminal=false
+Type=Application
+MimeType=application/vnd.android.package-archive;application/vnd.debian.binary-package;application/vnd.appimage;
+Categories=System;PackageManager;
+StartupNotify=true
