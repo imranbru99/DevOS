@@ -15,14 +15,15 @@ strings:
     releaseNotesUrl:     https://github.com/devos-project/devos/releases
 
 images:
-    productLogo:         "logo.png"
-    productIcon:         "icon.png"
+    productLogo:         "welcome.png"
+    productIcon:         "welcome.png"
     productWelcome:      "welcome.png"
+    productWallpaper:    "wallpaper.jpg"
 
 slideshow:               "show.qml"
 
 style:
-   sidebarBackground:    "#1e1e2e"
-   sidebarTextColor:     "#cdd6f4"
-   sidebarTextHighlight: "#89b4fa"
-   sidebarSelect:        "#313244"
+   sidebarBackground:    "#0a0c13"
+   sidebarTextColor:     "#94a3b8"
+   sidebarTextHighlight: "#38bdf8"
+   sidebarSelect:        "#1e293b"
