@@ -1,0 +1,52 @@
+# Base system and kernel
+linux-generic-hwe-24.04
+casper
+systemd
+systemd-sysv
+systemd-oomd
+udev
+dbus
+sudo
+bash
+coreutils
+findutils
+grep
+sed
+gawk
+tar
+gzip
+bzip2
+xz-utils
+zstd
+curl
+wget
+ca-certificates
+gnupg
+iproute2
+iputils-ping
+net-tools
+
+# Filesystem & Storage
+btrfs-progs
+snapper
+cryptsetup
+e2fsprogs
+dosfstools
+parted
+fdisk
+
+# Bootloaders
+grub-pc-bin
+grub-efi-amd64-bin
+grub-efi-amd64-signed
+shim-signed
+efibootmgr
+
+# Performance & Memory Management
+zram-tools
+earlyoom
+
+# Minimal Plymouth for boot splash
+plymouth
+plymouth-themes
+plymouth-label

@@ -1,0 +1,36 @@
+# Firmware and Microcode
+linux-firmware
+intel-microcode
+amd64-microcode
+
+# Graphics and Video Acceleration
+mesa-vulkan-drivers
+mesa-va-drivers
+libvulkan1
+vulkan-tools
+intel-media-va-driver
+vainfo
+
+# Proprietary Driver Detection / Management
+ubuntu-drivers-common
+
+# Networking and Wireless
+wpasupplicant
+wireless-regdb
+wireless-tools
+network-manager
+rfkill
+
+# Bluetooth
+bluez
+bluez-tools
+
+# Audio & Media foundation
+pipewire
+pipewire-alsa
+pipewire-pulse
+wireplumber
+
+# Printing on demand (cups daemon masked/socket activated)
+cups
+cups-client

@@ -1,0 +1,57 @@
+# DevOS Package & Component Versions Lockfile
+# Release: 24.04 LTS (Noble Numbat)
+# Architecture: amd64
+# Generated: 2026-10-10
+
+# Base Distribution
+DISTRO_RELEASE=noble
+UBUNTU_SERIES=24.04
+KERNEL_FLAVOR=linux-generic-hwe-24.04
+
+# Core Components
+PACKAGE_KERNEL=linux-image-generic-hwe-24.04
+PACKAGE_INITRAMFS=initramfs-tools
+PACKAGE_LIVE_BOOT=casper
+PACKAGE_SYSTEMD=systemd
+PACKAGE_SYSTEMD_OOMD=systemd-oomd
+PACKAGE_ZRAM=zram-tools
+PACKAGE_EARLYOOM=earlyoom
+PACKAGE_BTRFS=btrfs-progs
+PACKAGE_SNAPPER=snapper
+PACKAGE_CRYPTSETUP=cryptsetup
+
+# Firmware & Graphics
+PACKAGE_FIRMWARE=linux-firmware
+PACKAGE_MESA=mesa-vulkan-drivers
+PACKAGE_VULKAN_LOADER=libvulkan1
+PACKAGE_UBUNTU_DRIVERS=ubuntu-drivers-common
+PACKAGE_VA_DRIVERS=mesa-va-drivers
+
+# Bootloader & Partitioning
+PACKAGE_GRUB_PC=grub-pc-bin
+PACKAGE_GRUB_EFI=grub-efi-amd64-bin
+PACKAGE_GRUB_EFI_SIGNED=grub-efi-amd64-signed
+PACKAGE_SHIM_SIGNED=shim-signed
+PACKAGE_EFIBOOTMGR=efibootmgr
+PACKAGE_PARTED=parted
+PACKAGE_DOSFSTOOLS=dosfstools
+PACKAGE_E2FSPROGS=e2fsprogs
+
+# Installer
+PACKAGE_CALAMARES=calamares
+PACKAGE_KPMCORE=kpmcore
+PACKAGE_CALAMARES_SETTINGS=calamares-settings-ubuntu
+
+# Desktop Baseline (Phase 2 reference)
+PLASMA_DESKTOP=plasma-desktop
+PLASMA_WAYLAND=plasma-workspace-wayland
+SDDM=sddm
+DOLPHIN=dolphin
+KATE=kate
+
+# AI Core Baseline (Phase 4 reference)
+LLAMA_CPP_MIN_VERSION=b3800
+OLLAMA_MIN_VERSION=0.4.0
+DEFAULT_LITE_MODEL="Qwen/Qwen2.5-1.5B-Instruct-GGUF"
+DEFAULT_CODE_MODEL="Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF"
+DEFAULT_EMBED_MODEL="nomic-ai/nomic-embed-text-v1.5-GGUF"

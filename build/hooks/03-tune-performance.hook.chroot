@@ -1,0 +1,43 @@
+#!/bin/bash
+# 03-tune-performance.hook.chroot - Tune memory, swap, and kernel parameters for DevOS
+set -euo pipefail
+
+echo "==> Running DevOS 03-tune-performance hook..."
+
+# 1. Configure zramswap for zstd compression and 50% RAM allocation
+mkdir -p /etc/default
+cat << 'EOF' > /etc/default/zramswap
+# DevOS zram configuration
+ALGO=zstd
+PERCENT=50
+PRIORITY=100
+EOF
+
+systemctl enable zramswap.service || true
+
+# 2. Configure earlyoom (kill memory hog before kernel OOM panic)
+cat << 'EOF' > /etc/default/earlyoom
+# DevOS earlyoom configuration
+EARLYOOM_ARGS="-m 5 -s 10 --avoid '^(systemd|Xorg|kwin_wayland|plasmashell|sddm)$' --prefer '^(chrome|firefox|code)$'"
+EOF
+
+systemctl enable earlyoom || true
+
+# 3. Ensure systemd-oomd is enabled
+systemctl enable systemd-oomd || true
+
+# 4. Kernel sysctl tuning for zram and responsiveness
+cat << 'EOF' > /etc/sysctl.d/99-devos-performance.conf
+# DevOS performance tuning
+# High swappiness encourages using compressed zram before thrashing disk caches
+vm.swappiness = 150
+# Lower cache pressure keeps directory/inode caches in memory longer
+vm.vfs_cache_pressure = 50
+# Watermark scale factor for smoother background reclaim
+vm.watermark_scale_factor = 125
+# Enable BBR congestion control for networking
+net.core.default_qdisc = fq
+net.ipv4.tcp_congestion_control = bbr
+EOF
+
+echo "==> DevOS 03-tune-performance hook completed."

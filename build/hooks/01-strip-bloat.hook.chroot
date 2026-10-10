@@ -1,0 +1,47 @@
+#!/bin/bash
+# 01-strip-bloat.hook.chroot - Remove non-essential files to keep ISO <= 4GB
+set -euo pipefail
+
+echo "==> Running DevOS 01-strip-bloat hook..."
+
+# 1. Remove documentation, manuals, and groff files
+rm -rf /usr/share/doc/*
+rm -rf /usr/share/man/*
+rm -rf /usr/share/info/*
+rm -rf /usr/share/lintian/*
+rm -rf /usr/share/linda/*
+rm -rf /usr/share/bug/*
+
+# 2. Re-create essential copyright directories if needed by packaging guidelines
+mkdir -p /usr/share/doc
+
+# 3. Clean Apt and temporary directories
+apt-get autoremove --purge -y || true
+apt-get clean
+rm -rf /var/lib/apt/lists/*
+rm -rf /var/cache/apt/archives/*
+rm -rf /tmp/* /var/tmp/*
+
+# 4. Prune unused locales - keep English (en) and Bengali (bn)
+if command -v locale-gen >/dev/null 2>&1; then
+    echo "Configuring locales for en_US.UTF-8 and bn_BD.UTF-8..."
+    cat << 'EOF' > /etc/locale.gen
+en_US.UTF-8 UTF-8
+bn_BD.UTF-8 UTF-8
+EOF
+    locale-gen
+fi
+
+# 5. Prevent apt from re-downloading man pages and translation files
+cat << 'EOF' > /etc/apt/apt.conf.d/99devos-nodoc
+path-exclude /usr/share/doc/*
+path-include /usr/share/doc/*/copyright
+path-exclude /usr/share/man/*
+path-exclude /usr/share/groff/*
+path-exclude /usr/share/info/*
+path-exclude /usr/share/lintian/*
+path-exclude /usr/share/linda/*
+Acquire::Languages "none";
+EOF
+
+echo "==> DevOS 01-strip-bloat hook completed."

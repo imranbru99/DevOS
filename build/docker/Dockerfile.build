@@ -1,0 +1,32 @@
+# Containerized reproducible build environment for DevOS ISO
+FROM ubuntu:noble
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV LANG=C.UTF-8
+
+# Install all dependencies needed for debootstrap, chroot management, squashfs, and xorriso
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    debootstrap \
+    squashfs-tools \
+    xorriso \
+    isolinux \
+    syslinux-utils \
+    mtools \
+    dosfstools \
+    grub-pc-bin \
+    grub-efi-amd64-bin \
+    grub-efi-ia32-bin \
+    binutils \
+    rsync \
+    curl \
+    ca-certificates \
+    coreutils \
+    zstd \
+    make \
+    git \
+    sudo \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+
+CMD ["make", "iso"]

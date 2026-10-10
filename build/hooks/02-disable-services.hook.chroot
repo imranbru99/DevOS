@@ -1,0 +1,39 @@
+#!/bin/bash
+# 02-disable-services.hook.chroot - Optimize startup time by disabling bloat services
+set -euo pipefail
+
+echo "==> Running DevOS 02-disable-services hook..."
+
+# 1. Disable / Mask unneeded systemd services
+SERVICES_TO_MASK=(
+    "cups-browsed.service"
+    "ModemManager.service"
+    "avahi-daemon.service"
+    "avahi-daemon.socket"
+    "apport.service"
+    "whoopsie.service"
+    "motd-news.service"
+    "motd-news.timer"
+    "snapd.service"
+    "snapd.socket"
+    "snapd.seeded.service"
+)
+
+for svc in "${SERVICES_TO_MASK[@]}"; do
+    if systemctl list-unit-files | grep -q "^${svc}"; then
+        echo "Masking ${svc}..."
+        systemctl mask "${svc}" || true
+    fi
+done
+
+# 2. Block snapd completely via APT pinning
+cat << 'EOF' > /etc/apt/preferences.d/nosnap.pref
+Package: snapd
+Pin: release *
+Pin-Priority: -10
+EOF
+
+# 3. Enable fstrim.timer for SSD health
+systemctl enable fstrim.timer || true
+
+echo "==> DevOS 02-disable-services hook completed."

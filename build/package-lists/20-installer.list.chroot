@@ -1,0 +1,10 @@
+# Calamares graphical system installer and backend
+calamares
+kpmcore
+calamares-settings-ubuntu
+squashfs-tools
+rsync
+gdisk
+btrfs-progs
+cryptsetup
+snapper

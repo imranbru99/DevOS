@@ -1,0 +1,28 @@
+# DevOS Calamares Branding Descriptor
+---
+componentName:  devos
+welcomeStyleSheet: devos.qss
+
+strings:
+    productName:         DevOS
+    version:             "24.04 LTS"
+    shortVersion:        "24.04"
+    versionedName:       DevOS 24.04 LTS
+    shortVersionedName:  DevOS 24.04
+    bootloaderEntryName: DevOS
+    productUrl:          https://github.com/devos-project/devos
+    supportUrl:          https://github.com/devos-project/devos/issues
+    releaseNotesUrl:     https://github.com/devos-project/devos/releases
+
+images:
+    productLogo:         "logo.png"
+    productIcon:         "icon.png"
+    productWelcome:      "welcome.png"
+
+slideshow:               "show.qml"
+
+style:
+   sidebarBackground:    "#1e1e2e"
+   sidebarTextColor:     "#cdd6f4"
+   sidebarTextHighlight: "#89b4fa"
+   sidebarSelect:        "#313244"
