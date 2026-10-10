@@ -1,0 +1,27 @@
+# DevOS Dolphin Configuration (Windows Explorer Behavior)
+[General]
+ShowFullPath=true
+ViewPropsTimestamp=2026,10,10,12,0,0
+BrowseThroughArchives=true
+OpenFoldersInNewTabs=false
+
+[ContentDisplay]
+DirectorySizeCount=true
+UsePermissions=false
+
+[CompactMode]
+IconSize=22
+
+[DetailsMode]
+IconSize=24
+PreviewSize=32
+
+[IconsMode]
+IconSize=64
+
+[MainWindow]
+MenuBar=Disabled
+ToolBarsMovable=Disabled
+
+[PlacesModel]
+ShowTerminalPanel=true

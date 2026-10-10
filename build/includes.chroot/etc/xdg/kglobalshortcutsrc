@@ -1,0 +1,29 @@
+# DevOS Windows-Style Global Shortcuts for KDE Plasma 6
+[kwin]
+# Win+D: Show Desktop
+Show Desktop=Meta+D,Meta+D,Toggle Show Desktop
+# Win+L: Lock Screen
+Lock Session=Meta+L,Meta+L,Lock Screen
+# Win+R: Run Dialog (KRunner)
+Overview=Meta+W,none,Toggle Overview
+# Win+Arrow Snapping
+Window Quick Tile Left=Meta+Left,none,Quick Tile Window to the Left
+Window Quick Tile Right=Meta+Right,none,Quick Tile Window to the Right
+Window Quick Tile Top=Meta+Up,none,Quick Tile Window to the Top
+Window Quick Tile Bottom=Meta+Down,none,Quick Tile Window to the Bottom
+Window Maximize=Meta+Up,none,Maximize Window
+Window Minimize=Meta+Down,none,Minimize Window
+# Alt+Tab Window Switching
+Walk Through Windows=Alt+Tab,Alt+Tab,Walk Through Windows
+
+[org.kde.krunner.desktop]
+_launch=Meta+R,none,KRunner
+
+[org.kde.spectacle.desktop]
+RectangularRegionScreenShot=Meta+Shift+S,none,Capture Rectangular Region
+
+[org.kde.dolphin.desktop]
+_launch=Meta+E,none,Open File Manager (Explorer)
+
+[plasmashell]
+activate widget 2=Meta,none,Open Start Menu

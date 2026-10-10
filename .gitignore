@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+build_work/
+out/
+tests/qemu/*.qcow2
