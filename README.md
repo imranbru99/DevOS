@@ -9,6 +9,12 @@
   Based on Ubuntu 24.04 LTS · Open source (MIT) · Made by <a href="https://imrandev.bd/">Imran Ahmed (Imran Dev)</a>
 </p>
 
+<p align="center">
+  <a href="https://drive.google.com/drive/folders/1RHM8niXwkPsqzOkiMxxp4tpf41bnyJ01?usp=sharing">
+    <img src="https://img.shields.io/badge/%E2%AC%87%EF%B8%8F_Download_DevOS_ISO-3.3_GB_(Google_Drive)-2563eb?style=for-the-badge&logo=googledrive&logoColor=white" alt="Download DevOS ISO">
+  </a>
+</p>
+
 ---
 
 ## Our aim
@@ -160,22 +166,80 @@ Shut down, restart and uninstall always ask for confirmation first.
 
 ---
 
-## Install DevOS on a PC
+## 💿 Download ISO & Easy Installation Guide (For Everyone)
 
-1. **Download or build** `devos-24.04-amd64.iso` (3.3 GB).
-2. **Write it to a USB stick** (8 GB+) with **balenaEtcher**, or **Rufus in “DD Image” mode**. On Linux/macOS:
-   ```bash
-   sudo dd if=devos-24.04-amd64.iso of=/dev/sdX bs=4M status=progress oflag=sync
-   ```
-3. **Turn off Secure Boot** in your PC's firmware settings (the USB boot loader is not signed yet).
-4. **Boot from the USB** — the DevOS installer opens by itself.
-5. Click through **Welcome → Location → Keyboard → Partitions → Account (optional) → Install**, then restart and remove the USB when the screen goes black.
+You do **not** need to be a developer or Linux expert to install and run DevOS. Follow these 4 easy steps:
 
-### Try it first in Docker (Windows, Docker Desktop)
+---
+
+### Step 1: Download the DevOS ISO File
+- 🔗 **Google Drive Direct Download:** [**Click here to Download DevOS ISO (Google Drive)**](https://drive.google.com/drive/folders/1RHM8niXwkPsqzOkiMxxp4tpf41bnyJ01?usp=sharing)
+- **File size:** ~3.3 GB
+- **What you need:** A USB flash drive (8 GB or larger). *Note: Back up any important files on the USB drive, as flashing will erase it.*
+
+---
+
+### Step 2: Make a Bootable USB Flash Drive (Takes ~3 minutes)
+
+Choose whichever tool is easiest for you:
+
+#### Option A: Rufus (Easiest for Windows users)
+1. Download [Rufus](https://rufus.ie/) (free, portable application — no installation required).
+2. Insert your USB flash drive into your computer.
+3. Open Rufus:
+   - Under **Device**, select your USB drive.
+   - Under **Boot selection**, click **SELECT** and choose the downloaded `devos-24.04-amd64.iso` file.
+   - Click the **START** button at the bottom.
+   - If a prompt asks for write mode, choose **"Write in DD Image mode"** and click **OK**.
+4. Wait until the progress bar reaches 100% and displays **Ready**.
+
+#### Option B: balenaEtcher (Windows, Mac, or Linux)
+1. Download and install [balenaEtcher](https://etcher.balena.io/) (free).
+2. Open balenaEtcher and plug in your USB drive.
+3. Click **Flash from file** and select the downloaded `devos-24.04-amd64.iso`.
+4. Click **Select target** and pick your USB stick.
+5. Click **Flash!** and wait for verification to complete.
+
+*(Advanced Linux/macOS users can also use `sudo dd if=devos-24.04-amd64.iso of=/dev/sdX bs=4M status=progress oflag=sync`)*
+
+---
+
+### Step 3: Boot your PC from the USB
+
+1. **Turn off Secure Boot** in your PC's BIOS / UEFI settings:
+   - Restart your computer and press the BIOS key right as it powers on (usually **F2**, **F12**, **Del**, or **Esc** depending on your computer brand).
+   - Navigate to the **Security** or **Boot** tab, set **Secure Boot** to **Disabled**, then save and exit.
+2. **Open the Boot Menu**:
+   - Turn on your computer and immediately tap your brand's Boot Menu key:
+     - **Dell / Lenovo:** `F12`
+     - **HP:** `F9` or `Esc`
+     - **Asus / Acer:** `F8` or `F12`
+     - **MSI / Gigabyte:** `F11` or `F12`
+   - Select your **USB drive** from the list and press **Enter**.
+
+---
+
+### Step 4: Try or Install DevOS
+
+- **Try it first without touching your hard drive (Live Session):** DevOS boots directly to the desktop. You can test Wi-Fi, audio, the browser, and DevOS AI risk-free before installing anything.
+- **Install permanently to your PC:**
+  1. The **DevOS Installer** opens automatically on the desktop.
+  2. Follow the friendly prompts: **Welcome → Location & Language → Keyboard → Partitions**.
+  3. Under *Partitions*, select:
+     - **Erase disk:** Best for a clean system; sets up high-speed compressed storage automatically.
+     - **Install alongside:** Keeps your existing Windows installation intact and lets you choose your OS at startup.
+  4. Create your account name (password is optional; if left blank, DevOS signs in automatically).
+  5. Click **Install**. The setup completes in about 5–8 minutes.
+  6. When finished, restart your PC and remove the USB drive when the screen turns off.
+
+---
+
+### 🧪 Try it first in Docker (Windows, Docker Desktop)
+Want to test DevOS right from your existing Windows desktop without restarting?
 ```bash
 powershell -ExecutionPolicy Bypass -File .\tests\docker-vm\run-devos-vm.ps1 -Reset
 ```
-Then open **http://localhost:8006**. The VM uses a 40 GB virtual disk (`tests/docker-vm/storage`) — your real drives are never touched. Use `-Iso <path>` for another ISO, `-Legacy` for BIOS boot, `-Stop` to stop. See [`tests/docker-vm/README.md`](tests/docker-vm/README.md).
+Then open **http://localhost:8006** in your browser. The VM uses a virtual disk (`tests/docker-vm/storage`) — your real hard drives are untouched. See [`tests/docker-vm/README.md`](tests/docker-vm/README.md).
 
 ---
 
