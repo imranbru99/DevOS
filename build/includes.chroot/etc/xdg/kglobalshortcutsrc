@@ -27,3 +27,12 @@ _launch=Meta+E,none,Open File Manager (Explorer)
 
 [plasmashell]
 activate widget 2=Meta,none,Open Start Menu
+
+# DevOS AI voice command: press, speak, done (Ctrl+Alt+Space as a second key)
+[services][devos-voice.desktop]
+_launch=Meta+H\tCtrl+Alt+Space
+
+# Same shortcut in the Plasma 5.27 format (group named after the .desktop file).
+[devos-voice.desktop]
+_k_friendly_name=Voice Command
+_launch=Meta+H,none,Voice Command

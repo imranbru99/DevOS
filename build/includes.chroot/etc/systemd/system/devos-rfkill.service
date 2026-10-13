@@ -1,0 +1,12 @@
+[Unit]
+Description=Unblock Wi-Fi and Bluetooth radios
+After=systemd-rfkill.service
+Before=NetworkManager.service bluetooth.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/rfkill unblock all
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

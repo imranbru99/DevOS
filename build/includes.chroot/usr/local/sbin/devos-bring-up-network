@@ -1,0 +1,72 @@
+#!/bin/bash
+# Give a plugged-in Ethernet port an address, and turn the Wi-Fi radio on.
+# NetworkManager may still be opening its socket. Retry briefly, then exit 0
+# so a missing cable does not stop boot.
+set +e
+
+fix_resolver() {
+    systemctl start systemd-resolved >/dev/null 2>&1 || true
+    if [ -e /run/systemd/resolve/stub-resolv.conf ]; then
+        ln -sfn ../run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+    fi
+}
+
+publish_dns() {
+    dev="$1"
+    [ -n "$dev" ] || return 0
+    command -v resolvectl >/dev/null 2>&1 || return 0
+    servers="1.1.1.1 8.8.8.8"
+    got="$(nmcli -g IP4.DNS device show "$dev" 2>/dev/null | tr '|' ' ')"
+    for one in $got; do
+        case "$one" in
+            ''|127.*|0.0.0.0) ;;
+            *) servers="$servers $one" ;;
+        esac
+    done
+    # shellcheck disable=SC2086
+    resolvectl dns "$dev" $servers >/dev/null 2>&1 || true
+    resolvectl default-route "$dev" yes >/dev/null 2>&1 || true
+}
+
+fix_resolver
+
+if ! command -v nmcli >/dev/null 2>&1; then
+    exit 0
+fi
+
+ready=0
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+    if nmcli general status >/dev/null 2>&1; then
+        ready=1
+        break
+    fi
+    sleep 1
+done
+if [ "$ready" -ne 1 ]; then
+    exit 0
+fi
+
+nmcli general reload >/dev/null 2>&1
+nmcli radio wifi on >/dev/null 2>&1
+
+devices="$(nmcli -t -f DEVICE,TYPE device 2>/dev/null)"
+printf '%s\n' "$devices" | while IFS=: read -r dev kind; do
+    [ -n "$dev" ] || continue
+    [ "$dev" = "lo" ] && continue
+    case "$kind" in
+        ethernet|wifi)
+            nmcli device set "$dev" managed yes >/dev/null 2>&1
+            ;;
+    esac
+    if [ "$kind" = "ethernet" ]; then
+        nmcli device connect "$dev" >/dev/null 2>&1
+    fi
+    case "$kind" in
+        ethernet|wifi)
+            publish_dns "$dev"
+            ;;
+    esac
+done
+
+fix_resolver
+exit 0

@@ -1,0 +1,120 @@
+#!/bin/bash
+# 04-branding.hook.chroot - Replace Ubuntu identity and rebuild the boot splash
+set -euo pipefail
+
+echo "==> Running DevOS 04-branding hook..."
+
+if [ -f /usr/local/sbin/devos-apply-branding ]; then
+    /bin/bash /usr/local/sbin/devos-apply-branding
+fi
+
+# casper.conf names the system DevOS. Casper then leaves MP_QUIET empty and
+# runs: modprobe "${MP_QUIET}" -b overlay
+# The empty word is taken as the module name, modprobe fails, and the USB
+# stops at "overlay and no support found" before the installer opens.
+python3 - << 'PY'
+from pathlib import Path
+import sys
+
+root = Path("/usr/share/initramfs-tools/scripts")
+helpers = root / "casper-helpers"
+if helpers.exists():
+    helpers.write_text(helpers.read_text().replace('MP_QUIET=""', 'MP_QUIET="-q"'))
+for name in ("casper", "casper-helpers"):
+    path = root / name
+    if path.exists():
+        path.write_text(path.read_text().replace('modprobe "${MP_QUIET}"', "modprobe ${MP_QUIET}"))
+if helpers.exists() and 'MP_QUIET=""' in helpers.read_text():
+    sys.exit("live boot would call modprobe with an empty module name")
+PY
+
+# Ubuntu's logo is what the splash draws when its theme is still in the initrd.
+# Remove those themes before the initrd is packed, and do not start Plymouth.
+apt-get purge -y plymouth-theme-ubuntu-logo plymouth-theme-spinner plymouth-theme-ubuntu-text >/dev/null 2>&1 || true
+rm -rf \
+    /usr/share/plymouth/themes/ubuntu-logo \
+    /usr/share/plymouth/themes/spinner \
+    /usr/share/plymouth/themes/ubuntu-text \
+    /usr/share/plymouth/themes/bgrt
+# A Windows checkout writes ModuleName=script\r. Plymouth then looks for
+# a module named "script" plus a carriage return and skips the splash.
+sed -i 's/\r$//' /usr/share/plymouth/themes/devos/devos.plymouth /usr/share/plymouth/themes/devos/devos.script
+# The initramfs hook does not read plymouthd.conf. It follows the
+# default.plymouth alternative, which Ubuntu leaves on bgrt. After bgrt
+# is removed, that alternative has no module, Plymouth is skipped, and
+# the USB shows the text console instead of the DevOS starter.
+update-alternatives --install \
+    /usr/share/plymouth/themes/default.plymouth default.plymouth \
+    /usr/share/plymouth/themes/devos/devos.plymouth 200
+update-alternatives --set default.plymouth \
+    /usr/share/plymouth/themes/devos/devos.plymouth
+if command -v plymouth-set-default-theme >/dev/null 2>&1; then
+    plymouth-set-default-theme devos
+fi
+active="$(update-alternatives --query default.plymouth | sed -n 's/^Value: //p')"
+if [ "$active" != "/usr/share/plymouth/themes/devos/devos.plymouth" ]; then
+    echo "Plymouth is still using ${active:-nothing}." >&2
+    exit 1
+fi
+plugin="$(plymouth --get-splash-plugin-path 2>/dev/null || echo /usr/lib/x86_64-linux-gnu/plymouth)"
+if [ ! -f "${plugin}/script.so" ]; then
+    echo "Plymouth script module is missing at ${plugin}/script.so" >&2
+    exit 1
+fi
+
+# Plymouth is off, so casper prints "remove the installation medium" on the
+# text screen while the USB is still the running system. Pulling it there
+# makes squashfs fail with "access beyond end of device". Shut down without
+# that wait. The USB comes out only after the screen is black.
+python3 - << 'PY'
+from pathlib import Path
+
+needle = "Please remove the installation medium"
+message = "DevOS is turning off. Wait until the screen is black, then remove the USB."
+roots = [Path("/usr"), Path("/lib"), Path("/etc")]
+skip = {"firmware", "modules", "doc", "locale", "i18n"}
+found = 0
+for root in roots:
+    if not root.is_dir():
+        continue
+    for path in root.rglob("*"):
+        if not path.is_file() or path.is_symlink():
+            continue
+        if any(part in skip for part in path.parts):
+            continue
+        try:
+            if path.stat().st_size > 1_000_000:
+                continue
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        if needle not in text:
+            # Already rewritten by an earlier build of the same chroot.
+            if message in text:
+                found += 1
+            continue
+        lines = []
+        for line in text.splitlines(keepends=True):
+            stripped = line.strip()
+            if stripped in {"read x", "read reply", "read unused"} or "watch-keystroke" in stripped:
+                indent = line[: len(line) - len(line.lstrip())]
+                lines.append(f"{indent}true\n")
+                continue
+            lines.append(line.replace(needle + ", then press ENTER:", message).replace(needle, message))
+        path.write_text("".join(lines), encoding="utf-8")
+        found += 1
+        print(f"Updated shutdown prompt in {path}")
+if found == 0:
+    raise SystemExit("casper still asks for the USB to be removed while it is in use")
+PY
+
+# GRUB names the entry "${GRUB_DISTRIBUTOR} GNU/Linux". Show just "DevOS".
+if [ -f /etc/grub.d/10_linux ]; then
+    sed -i 's/OS="${GRUB_DISTRIBUTOR} GNU\/Linux"/OS="${GRUB_DISTRIBUTOR}"/' /etc/grub.d/10_linux
+fi
+
+if command -v update-initramfs >/dev/null 2>&1; then
+    update-initramfs -u -k all
+fi
+
+echo "==> DevOS 04-branding hook completed."

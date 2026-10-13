@@ -1,0 +1,12 @@
+{
+    "KPlugin": {
+        "Id": "DevOS-OrbitHalo",
+        "Name": "Orbit Halo",
+        "Authors": [
+            {
+                "Name": "DevOS"
+            }
+        ],
+        "License": "CC-BY-SA-4.0"
+    }
+}

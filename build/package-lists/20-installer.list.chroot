@@ -1,10 +1,14 @@
 # Calamares graphical system installer and backend
 calamares
-kpmcore
-calamares-settings-ubuntu
 squashfs-tools
 rsync
 gdisk
 btrfs-progs
 cryptsetup
 snapper
+ntfs-3g
+os-prober
+partitionmanager
+# grub-mkconfig / update-grub for Calamares' grubcfg and bootloader steps.
+# grub-efi-amd64-bin only pulls grub-common, which does not ship them.
+grub2-common

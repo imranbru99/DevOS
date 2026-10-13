@@ -1,0 +1,22 @@
+# Everyday complete-desktop applications.
+# Falkon is the archive browser (the Ubuntu Firefox package pulls in Snap, which DevOS blocks).
+falkon
+okular
+gwenview
+ark
+kate
+kwrite
+kcalc
+kde-spectacle
+vlc
+systemsettings
+kinfocenter
+plasma-nm
+print-manager
+bluedevil
+breeze
+breeze-icon-theme
+kde-config-gtk-style
+flatpak
+android-tools-adb
+kdialog

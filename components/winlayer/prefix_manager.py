@@ -18,6 +18,8 @@ from doctor import WinLayerDoctor
 
 PREFIXES_ROOT = os.path.expanduser("~/.local/share/winlayer/prefixes")
 DESKTOP_DIR = os.path.expanduser("~/.local/share/applications")
+# Ready-made Windows environment copied for each new app (see prepare_prefix).
+BASE_PREFIX = os.path.expanduser("~/.local/share/winlayer/base")
 
 
 class WinLayerManager:
@@ -51,7 +53,13 @@ class WinLayerManager:
         prefix_dir = self.get_prefix_dir(app_id)
         os.makedirs(prefix_dir, exist_ok=True)
 
-        # 3. Create .desktop Start menu shortcut
+        # 3. Start it under Wine. Earlier versions only wrote the menu entry
+        # below and reported LAUNCHED, so no .exe ever ran.
+        started = self.run_in_wine(abs_exe, prefix_dir, app_id)
+        if started.get("status") != "STARTED":
+            return started
+
+        # 4. Create .desktop Start menu shortcut
         desktop_file = os.path.join(DESKTOP_DIR, f"winlayer-{self.sanitize_name(app_id)}.desktop")
         desktop_content = f"""[Desktop Entry]
 Name={app_id} (Windows)
@@ -71,9 +79,100 @@ Comment=Windows Application running via DevOS WinLayer
             "prefix": prefix_dir,
             "executable": abs_exe,
             "compatibility": analysis.get("compatibility_rating"),
+            "architecture": analysis.get("architecture"),
+            "pid": started.get("pid"),
+            "log": started.get("log"),
             "desktop_shortcut": desktop_file,
             "message": f"Windows app '{app_id}' launched in isolated prefix."
         }
+
+    @staticmethod
+    def wine_command(abs_exe: str) -> List[str]:
+        """Command that opens the file the way Windows would."""
+        ext = os.path.splitext(abs_exe)[1].lower()
+        if ext == ".msi":
+            return ["wine", "msiexec", "/i", abs_exe]
+        if ext in (".bat", ".cmd"):
+            return ["wine", "cmd", "/c", abs_exe]
+        return ["wine", abs_exe]
+
+    @staticmethod
+    def wine_env(prefix_dir: str) -> Dict[str, str]:
+        env = os.environ.copy()
+        env["WINEPREFIX"] = prefix_dir
+        # One 64-bit prefix runs both 32-bit (most installers, e.g. AnyDesk)
+        # and 64-bit programs when wine32:i386 is installed.
+        env["WINEARCH"] = "win64"
+        env.setdefault("WINEDEBUG", "-all")
+        # No Mono/Gecko download prompts on first start.
+        env.setdefault("WINEDLLOVERRIDES", "mscoree,mshtml=")
+        return env
+
+    @staticmethod
+    def is_prepared(prefix_dir: str) -> bool:
+        return os.path.isfile(os.path.join(prefix_dir, "system.reg"))
+
+    def prepare_prefix(self, prefix_dir: str) -> Dict[str, Any]:
+        """Give a new app a ready Windows environment without any Wine window.
+
+        Building one takes 20-60 s and Wine shows its own "configuration is
+        being updated" box with its name and the folder path. DevOS builds a
+        base once with no display (so no box appears) and copies it for each
+        app; on btrfs the copy is a reflink and costs no space.
+        """
+        if self.is_prepared(prefix_dir):
+            return {"status": "READY"}
+        base = BASE_PREFIX
+        if not self.is_prepared(base):
+            os.makedirs(base, exist_ok=True)
+            env = self.wine_env(base)
+            env.pop("DISPLAY", None)
+            env.pop("WAYLAND_DISPLAY", None)
+            try:
+                subprocess.run(["wineboot", "-u"], env=env, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, timeout=600)
+                subprocess.run(["wineserver", "-w"], env=env, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, timeout=120)
+            except (OSError, subprocess.SubprocessError) as exc:
+                return {"status": "ERROR", "error": f"Windows support could not be prepared: {exc}"}
+            if not self.is_prepared(base):
+                return {"status": "ERROR", "error": "Windows support could not be prepared."}
+        if os.path.isdir(prefix_dir) and not os.listdir(prefix_dir):
+            os.rmdir(prefix_dir)
+        copy = subprocess.run(["cp", "-a", "--reflink=auto", base, prefix_dir],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        if copy.returncode != 0:
+            return {"status": "ERROR", "error": f"Windows support could not be prepared: {copy.stderr.strip()}"}
+        return {"status": "READY"}
+
+    def run_in_wine(self, abs_exe: str, prefix_dir: str, app_id: str) -> Dict[str, Any]:
+        """Start the program detached so it keeps running after this CLI exits."""
+        if shutil.which("wine") is None:
+            return {
+                "status": "ERROR",
+                "error": "Windows support (Wine) is not installed on this system.",
+            }
+        prepared = self.prepare_prefix(prefix_dir)
+        if prepared["status"] != "READY":
+            return prepared
+        log_dir = os.path.expanduser("~/.local/share/winlayer/logs")
+        os.makedirs(log_dir, exist_ok=True)
+        log_path = os.path.join(log_dir, f"{self.sanitize_name(app_id)}.log")
+        env = self.wine_env(prefix_dir)
+        try:
+            with open(log_path, "ab") as log:
+                proc = subprocess.Popen(
+                    self.wine_command(abs_exe),
+                    cwd=os.path.dirname(abs_exe),
+                    env=env,
+                    stdin=subprocess.DEVNULL,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                )
+        except OSError as exc:
+            return {"status": "ERROR", "error": f"Could not start Wine: {exc}"}
+        return {"status": "STARTED", "pid": proc.pid, "log": log_path}
 
     def list_prefixes(self) -> List[Dict[str, Any]]:
         """Lists all existing Windows app prefixes."""

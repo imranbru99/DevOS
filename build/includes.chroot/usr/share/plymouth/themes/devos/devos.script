@@ -1,0 +1,73 @@
+# Animated DevOS boot splash. Drawn by Plymouth before the desktop exists.
+Window.SetBackgroundTopColor(0.027, 0.035, 0.063);
+Window.SetBackgroundBottomColor(0.055, 0.090, 0.160);
+
+title_image = Image.Text("DevOS", 0.973, 0.980, 0.996, 1.0);
+title_sprite = Sprite(title_image);
+title_sprite.SetX(Window.GetWidth() / 2 - title_image.GetWidth() / 2);
+title_sprite.SetY(Window.GetHeight() * 0.40);
+title_sprite.SetZ(30);
+
+status_image = Image.Text("Starting the installer", 0.220, 0.741, 0.973, 1.0);
+status_sprite = Sprite(status_image);
+status_sprite.SetX(Window.GetWidth() / 2 - status_image.GetWidth() / 2);
+status_sprite.SetY(Window.GetHeight() * 0.40 + title_image.GetHeight() + 36);
+status_sprite.SetZ(30);
+
+mark_image = Image.Text("======", 0.220, 0.741, 0.973, 1.0);
+mark_sprite = Sprite(mark_image);
+mark_sprite.SetZ(30);
+
+track_image = Image.Text("------------------------------", 0.180, 0.220, 0.300, 1.0);
+track_sprite = Sprite(track_image);
+track_x = Window.GetWidth() / 2 - track_image.GetWidth() / 2;
+track_y = Window.GetHeight() * 0.40 + title_image.GetHeight() + 88;
+track_sprite.SetX(track_x);
+track_sprite.SetY(track_y);
+track_sprite.SetZ(20);
+
+boot_progress = 0;
+last_phrase = -1;
+
+fun set_status(text) {
+    image = Image.Text(text, 0.220, 0.741, 0.973, 1.0);
+    status_sprite.SetImage(image);
+    status_sprite.SetX(Window.GetWidth() / 2 - image.GetWidth() / 2);
+}
+
+fun boot_progress_callback(duration, progress) {
+    if (progress < 0)
+        progress = 0;
+    if (progress > 1)
+        progress = 1;
+    boot_progress = progress;
+}
+
+fun refresh_callback() {
+    now = Plymouth.GetTime();
+    phrase = Math.Int(now / 2.2);
+    if (phrase != last_phrase) {
+        last_phrase = phrase;
+        step = phrase - (Math.Int(phrase / 3) * 3);
+        if (boot_progress > 0.72)
+            set_status("Opening disk setup");
+        else if (step == 0)
+            set_status("Starting DevOS");
+        else if (step == 1)
+            set_status("Loading the installer");
+        else
+            set_status("Preparing the display");
+    }
+    wave = (Math.Sin(now * 2.2) + 1) / 2;
+    title_sprite.SetOpacity(0.78 + (0.22 * wave));
+    span = track_image.GetWidth() - mark_image.GetWidth();
+    if (span < 1)
+        span = 1;
+    travel = Math.Int(now * 70);
+    offset = travel - (Math.Int(travel / span) * span);
+    mark_sprite.SetX(track_x + offset);
+    mark_sprite.SetY(track_y - 2);
+}
+
+Plymouth.SetBootProgressFunction(boot_progress_callback);
+Plymouth.SetRefreshFunction(refresh_callback);

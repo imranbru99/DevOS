@@ -18,13 +18,15 @@ systemctl enable zramswap.service || true
 # 2. Configure earlyoom (kill memory hog before kernel OOM panic)
 cat << 'EOF' > /etc/default/earlyoom
 # DevOS earlyoom configuration
-EARLYOOM_ARGS="-m 5 -s 10 --avoid '^(systemd|Xorg|kwin_wayland|plasmashell|sddm)$' --prefer '^(chrome|firefox|code)$'"
+EARLYOOM_ARGS="-m 5 -s 10 --avoid '^(systemd|Xorg|kwin_x11|kwin_wayland|plasmashell|sddm)$' --prefer '^(chrome|firefox|code)$'"
 EOF
 
 systemctl enable earlyoom || true
 
 # 3. Ensure systemd-oomd is enabled
 systemctl enable systemd-oomd || true
+systemctl enable devos-hardware.service || true
+systemctl enable thermald.service || true
 
 # 4. Kernel sysctl tuning for zram and responsiveness
 cat << 'EOF' > /etc/sysctl.d/99-devos-performance.conf

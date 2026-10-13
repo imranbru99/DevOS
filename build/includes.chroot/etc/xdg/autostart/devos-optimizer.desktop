@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=DevOS Optimizer
+Comment=Keeps the PC fast with friendly cleanup and memory suggestions
+Exec=/usr/bin/python3 /usr/local/share/devos/components/optimizer/optimizer.py --tray
+Icon=preferences-system-performance
+Terminal=false
+OnlyShowIn=KDE;
+X-KDE-autostart-phase=2
+X-GNOME-Autostart-enabled=true
+NoDisplay=true

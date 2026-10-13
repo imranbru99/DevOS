@@ -4,13 +4,15 @@
 # Wine & 32-bit Architecture Support
 wine
 wine64
+# 32-bit Windows programs (most installers, e.g. AnyDesk). Needs the i386
+# architecture, which build-iso.sh enables before installing packages.
+wine32:i386
 winetricks
 
 # Vulkan & DirectX Translation Libraries
 libvulkan1
 mesa-vulkan-drivers
 vulkan-tools
-dxvk
 
 # Performance & Process Boosters
 gamemode

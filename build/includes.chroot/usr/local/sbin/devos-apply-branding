@@ -1,0 +1,77 @@
+#!/bin/bash
+# Re-apply the DevOS name on top of the Ubuntu base.
+# Safe to run more than once: image build, apt upgrades, and the installed system.
+set -u
+
+ensure_divert() {
+    local f="$1"
+    if ! command -v dpkg-divert >/dev/null 2>&1; then
+        return 0
+    fi
+    if dpkg-divert --list "$f" 2>/dev/null | grep -q "diversion of ${f}"; then
+        return 0
+    fi
+    dpkg-divert --local --rename --divert "${f}.ubuntu" --add "$f" >/dev/null 2>&1 || \
+        dpkg-divert --local --divert "${f}.ubuntu" --add "$f" >/dev/null 2>&1 || true
+}
+
+# Keep base-files upgrades from putting the Ubuntu name back.
+ensure_divert /usr/lib/os-release
+ensure_divert /etc/lsb-release
+ensure_divert /etc/issue
+ensure_divert /etc/issue.net
+
+mkdir -p /usr/lib /etc/default/grub.d /usr/share/plymouth/themes/devos /etc/plymouth
+
+cat > /usr/lib/os-release << 'EOF'
+NAME="DevOS"
+VERSION="24.04 LTS"
+ID=devos
+ID_LIKE="ubuntu debian"
+PRETTY_NAME="DevOS 24.04 LTS"
+VERSION_ID="24.04"
+VERSION_CODENAME=noble
+UBUNTU_CODENAME=noble
+HOME_URL="https://github.com/imranbru99/DevOS"
+SUPPORT_URL="https://github.com/imranbru99/DevOS/issues"
+BUG_REPORT_URL="https://github.com/imranbru99/DevOS/issues"
+EOF
+ln -sfn ../usr/lib/os-release /etc/os-release
+
+cat > /etc/lsb-release << 'EOF'
+DISTRIB_ID=DevOS
+DISTRIB_RELEASE=24.04
+DISTRIB_CODENAME=noble
+DISTRIB_DESCRIPTION="DevOS 24.04 LTS"
+EOF
+
+printf '%s\n' 'DevOS 24.04 LTS \n \l' '' > /etc/issue
+printf '%s\n' 'DevOS 24.04 LTS' > /etc/issue.net
+
+cat > /etc/default/grub.d/devos.cfg << 'EOF'
+# DevOS boot-menu title. This file is read after /etc/default/grub.
+GRUB_DISTRIBUTOR="DevOS"
+EOF
+
+if [ -f /etc/default/grub ] && grep -q '^GRUB_DISTRIBUTOR=' /etc/default/grub; then
+    sed -i 's|^GRUB_DISTRIBUTOR=.*|GRUB_DISTRIBUTOR="DevOS"|' /etc/default/grub
+fi
+
+# Keep the animated script splash. The text theme is only three dots.
+
+cat > /etc/plymouth/plymouthd.conf << 'EOF'
+[Daemon]
+Theme=devos
+ShowDelay=0
+EOF
+ln -sfn devos/devos.plymouth /usr/share/plymouth/themes/default.plymouth || true
+if command -v plymouth-set-default-theme >/dev/null 2>&1; then
+    plymouth-set-default-theme devos >/dev/null 2>&1 || true
+fi
+
+# Desktop names: Files, Terminal, Settings, the "DevOS" session.
+if [ -f /usr/local/sbin/devos-debrand-desktop ]; then
+    /bin/bash /usr/local/sbin/devos-debrand-desktop || true
+fi
+
+exit 0

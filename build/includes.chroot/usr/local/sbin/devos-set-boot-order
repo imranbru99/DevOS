@@ -1,0 +1,37 @@
+#!/bin/bash
+# Move the DevOS EFI entry in front of Windows Boot Manager.
+# A missing entry is not a failure: BIOS machines have no EFI variables.
+set +e
+
+if [ ! -d /sys/firmware/efi ]; then
+    exit 0
+fi
+if ! command -v efibootmgr >/dev/null 2>&1; then
+    exit 0
+fi
+
+boot="$(efibootmgr 2>/dev/null)"
+first="$(printf '%s\n' "$boot" | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*[[:space:]]*DevOS.*/\1/p' | head -n 1)"
+if [ -z "$first" ]; then
+    first="$(printf '%s\n' "$boot" | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*[[:space:]]*ubuntu.*/\1/p' | head -n 1)"
+fi
+if [ -z "$first" ]; then
+    exit 0
+fi
+
+order="$(printf '%s\n' "$boot" | sed -n 's/^BootOrder:[[:space:]]*//p' | tr -d ' ')"
+new="$first"
+old_ifs="$IFS"
+IFS=','
+for id in $order; do
+    [ -n "$id" ] || continue
+    if [ "$(printf '%s' "$id" | tr '[:lower:]' '[:upper:]')" = "$(printf '%s' "$first" | tr '[:lower:]' '[:upper:]')" ]; then
+        continue
+    fi
+    new="${new},${id}"
+done
+IFS="$old_ifs"
+
+efibootmgr -o "$new" >/dev/null 2>&1
+efibootmgr -n "$first" >/dev/null 2>&1
+exit 0

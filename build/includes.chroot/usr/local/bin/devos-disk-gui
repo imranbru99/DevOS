@@ -1,0 +1,6 @@
+#!/bin/bash
+# DevOS Visual Storage & Boot Doctor Launcher
+export DISPLAY="${DISPLAY:-:0}"
+export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}"
+
+exec /usr/bin/python3 /usr/local/share/devos/components/settings/disk_doctor_gui.py "$@"

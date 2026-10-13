@@ -6,3 +6,5 @@ __pycache__/
 build_work/
 out/
 tests/qemu/*.qcow2
+tests/docker-vm/storage/
+tests/docker-vm/test-account.txt

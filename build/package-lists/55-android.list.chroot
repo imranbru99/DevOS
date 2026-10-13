@@ -1,0 +1,9 @@
+# Android apps (.apk) through Waydroid. The package comes from the Waydroid
+# project repository that build-iso.sh adds; the Android system image
+# (~800 MB) is downloaded once on first use, so it is not in the ISO.
+waydroid
+# Waydroid draws through Wayland. On the X11 desktop it runs inside a
+# Weston window.
+weston
+# Renames the Android window from "Weston Compositor" to "DevOS Android".
+xdotool

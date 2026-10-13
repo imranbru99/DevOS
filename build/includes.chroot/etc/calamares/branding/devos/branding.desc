@@ -1,29 +1,40 @@
-# DevOS Calamares Branding Descriptor
+# DevOS Calamares Branding Descriptor (Calamares 3.3)
 ---
-componentName:  devos
-welcomeStyleSheet: devos.qss
+componentName: devos
+
+welcomeStyleCalamares: false
+welcomeExpandingLogo: true
+
+windowExpanding: fullscreen
+windowPlacement: center
+
+# Sidebar and the Back/Next bar are drawn by calamares-sidebar.qml and
+# calamares-navigation.qml in this folder. The rest of the window uses
+# stylesheet.qss (Calamares only loads a file with exactly that name).
+sidebar: qml
+navigation: qml
 
 strings:
-    productName:         DevOS
-    version:             "24.04 LTS"
-    shortVersion:        "24.04"
-    versionedName:       DevOS 24.04 LTS
-    shortVersionedName:  DevOS 24.04
+    productName: DevOS
+    version: "24.04 LTS"
+    shortVersion: "24.04"
+    versionedName: DevOS 24.04 LTS
+    shortVersionedName: DevOS 24.04
     bootloaderEntryName: DevOS
-    productUrl:          https://github.com/devos-project/devos
-    supportUrl:          https://github.com/devos-project/devos/issues
-    releaseNotesUrl:     https://github.com/devos-project/devos/releases
+    productUrl: https://github.com/imranbru99/DevOS
+    supportUrl: https://github.com/imranbru99/DevOS/issues
+    releaseNotesUrl: https://github.com/imranbru99/DevOS
 
 images:
-    productLogo:         "welcome.png"
-    productIcon:         "welcome.png"
-    productWelcome:      "welcome.png"
-    productWallpaper:    "wallpaper.jpg"
-
-slideshow:               "show.qml"
+    productIcon: "logo.png"
+    productLogo: "logo.png"
+    productWelcome: "wallpaper.jpg"
 
 style:
-   sidebarBackground:    "#0a0c13"
-   sidebarTextColor:     "#94a3b8"
-   sidebarTextHighlight: "#38bdf8"
-   sidebarSelect:        "#1e293b"
+    SidebarBackground: "#080b14"
+    SidebarText: "#8b97ad"
+    SidebarTextCurrent: "#f8fafc"
+    SidebarBackgroundCurrent: "#16213a"
+
+slideshow: "show.qml"
+slideshowAPI: 2

@@ -6,21 +6,21 @@ Actions=OpenWithCode;AnalyzeWinLayer;InstallAndroid;NewDevProject;
 X-KDE-Priority=TopLevel
 
 [Desktop Action OpenWithCode]
-Name=Open in VSCodium
-Icon=com.vscodium.codium
-Exec=codium "%f"
+Name=Open in DevOS Code
+Icon=kate
+Exec=devos-code "%f"
 
 [Desktop Action AnalyzeWinLayer]
 Name=Analyze with WinLayer Doctor
 Icon=security-high
-Exec=python3 /usr/lib/devos/components/devos_cli.py win doctor "%f"
+Exec=/usr/local/bin/devos win doctor "%f"
 
 [Desktop Action InstallAndroid]
-Name=Install on DevOS Android (Waydroid)
+Name=Install on DevOS Android
 Icon=smartphone
-Exec=python3 /usr/lib/devos/components/devos_cli.py app install "%f"
+Exec=/usr/local/bin/devos-open-app "%f"
 
 [Desktop Action NewDevProject]
 Name=Create Local Dev Project Here (devserver)
 Icon=network-server
-Exec=python3 /usr/lib/devos/components/devos_cli.py serve new "%n"
+Exec=/usr/local/bin/devos serve new "%n"

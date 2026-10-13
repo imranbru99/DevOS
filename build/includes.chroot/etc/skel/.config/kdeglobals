@@ -1,0 +1,15 @@
+[General]
+ColorScheme=DevOS
+fixed=Liberation Mono,11,-1,5,50,0,0,0,0,0
+font=Inter,11,-1,5,50,0,0,0,0,0
+fontWeight=50
+menuFont=Inter,11,-1,5,50,0,0,0,0,0
+smallestReadableFont=Inter,9,-1,5,50,0,0,0,0,0
+toolBarFont=Inter,11,-1,5,50,0,0,0,0,0
+
+[Icons]
+Theme=Papirus-Dark
+
+[KDE]
+LookAndFeelPackage=org.devos.desktop
+widgetStyle=kvantum

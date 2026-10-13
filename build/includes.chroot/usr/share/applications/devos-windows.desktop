@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Windows
+Comment=Show open windows
+Exec=/bin/bash /usr/local/bin/devos-show-windows
+Icon=preferences-system-windows
+Terminal=false
+Categories=System;
+StartupNotify=false
+Keywords=windows;tasks;taskbar;

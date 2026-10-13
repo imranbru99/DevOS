@@ -1,0 +1,12 @@
+{
+    "KPlugin": {
+        "Id": "DevOS-LumenBokeh",
+        "Name": "Lumen Bokeh",
+        "Authors": [
+            {
+                "Name": "DevOS"
+            }
+        ],
+        "License": "CC-BY-SA-4.0"
+    }
+}

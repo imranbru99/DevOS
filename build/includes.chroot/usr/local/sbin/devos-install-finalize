@@ -1,0 +1,105 @@
+#!/bin/bash
+# Calamares runs this inside the new installation, not on the live USB.
+# The live image must keep casper. The installed disk must not.
+set -u
+
+export DEBIAN_FRONTEND=noninteractive
+
+echo "==> Removing the live-session boot hooks from the installed system"
+dpkg --purge casper >/dev/null 2>&1 || true
+dpkg --purge discover laptop-detect >/dev/null 2>&1 || true
+
+rm -rf \
+    /usr/share/initramfs-tools/scripts/casper \
+    /usr/share/initramfs-tools/scripts/casper-bottom \
+    /usr/share/initramfs-tools/scripts/casper-premount \
+    /usr/share/initramfs-tools/hooks/casper
+
+echo "==> Removing live-only login, installer autostart, and passwordless sudo"
+rm -f \
+    /etc/sddm.conf.d/autologin.conf \
+    /etc/xdg/autostart/calamares-welcome.desktop \
+    /etc/sudoers.d/devos \
+    /etc/skel/Desktop/calamares.desktop
+
+rm -f /home/*/Desktop/calamares.desktop /root/Desktop/calamares.desktop 2>/dev/null || true
+
+echo "==> Removing the installer login session"
+# SDDM lists sessions by name and "Install DevOS" sorts before Plasma, so a
+# first login after the reboot would reopen the installer instead of the desktop.
+rm -f \
+    /usr/share/xsessions/devos-install.desktop \
+    /usr/share/wayland-sessions/devos-install.desktop \
+    /usr/share/applications/devos-install.desktop \
+    /usr/local/bin/devos-live-session \
+    /etc/sddm.conf.d/zz-devos-install.conf
+rm -f /etc/systemd/system/sddm.service.wants/devos-force-installer.service
+rm -f /etc/systemd/system/devos-force-installer.service
+
+plasma_session=""
+for s in /usr/share/xsessions/plasma.desktop /usr/share/xsessions/plasmax11.desktop \
+         /usr/share/wayland-sessions/plasma.desktop; do
+    if [ -f "$s" ]; then plasma_session="$s"; break; fi
+done
+if [ -n "$plasma_session" ]; then
+    mkdir -p /var/lib/sddm
+    printf '[Last]\nSession=%s\n' "$plasma_session" > /var/lib/sddm/state.conf
+    chown sddm:sddm /var/lib/sddm/state.conf 2>/dev/null || true
+fi
+
+# The live account "devos" does not exist on the disk. Run the dashboard as
+# the account the installer just created (uid 1000).
+owner="$(getent passwd 1000 | cut -d: -f1)"
+if [ -n "$owner" ] && [ -f /etc/systemd/system/devos-dashboard.service ]; then
+    mkdir -p /etc/systemd/system/devos-dashboard.service.d
+    printf '[Service]\nUser=%s\n' "$owner" > /etc/systemd/system/devos-dashboard.service.d/user.conf
+fi
+
+# The account page lets people install without a password. Give that
+# account an empty password (sudo and the lock screen accept Enter) and
+# open the desktop without the sign-in screen.
+if [ -n "$owner" ]; then
+    hash="$(getent shadow "$owner" | cut -d: -f2)"
+    if python3 - "$hash" << 'PY'
+import sys, warnings
+warnings.filterwarnings("ignore")
+h = sys.argv[1]
+if h in ("", "!", "*", "!*", "!!"):
+    sys.exit(0)
+try:
+    import crypt
+    sys.exit(0 if crypt.crypt("", h) == h else 1)
+except Exception:
+    sys.exit(1)
+PY
+    then
+        echo "==> ${owner} has no password: enabling automatic sign-in"
+        passwd -d "$owner" >/dev/null 2>&1 || true
+        mkdir -p /etc/sddm.conf.d
+        printf '[Autologin]\nUser=%s\nSession=plasma\nRelogin=false\n' "$owner" \
+            > /etc/sddm.conf.d/zz-devos-autologin.conf
+    fi
+fi
+
+# Ensure /vmlinuz and /initrd.img root symlinks exist for the installed kernel
+latest_vmlinuz=$(ls -1 /boot/vmlinuz-* 2>/dev/null | sort -V | tail -n 1)
+latest_initrd=$(ls -1 /boot/initrd.img-* 2>/dev/null | sort -V | tail -n 1)
+if [ -n "$latest_vmlinuz" ]; then
+    ln -sfn "$latest_vmlinuz" /vmlinuz
+fi
+if [ -n "$latest_initrd" ]; then
+    ln -sfn "$latest_initrd" /initrd.img
+fi
+
+# Ensure btrfs driver is guaranteed in target initramfs configuration
+mkdir -p /etc/initramfs-tools
+if ! grep -q '^btrfs' /etc/initramfs-tools/modules 2>/dev/null; then
+    echo "btrfs" >> /etc/initramfs-tools/modules
+fi
+
+echo "==> Applying the DevOS system name"
+if [ -f /usr/local/sbin/devos-apply-branding ]; then
+    /bin/bash /usr/local/sbin/devos-apply-branding || true
+fi
+
+exit 0

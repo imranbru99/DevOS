@@ -1,7 +1,15 @@
 [Default Applications]
+text/html=devos-browser.desktop
+x-scheme-handler/http=devos-browser.desktop
+x-scheme-handler/https=devos-browser.desktop
+text/plain=devos-notepad.desktop
+application/pdf=org.kde.okular.desktop
 application/x-msdownload=devos-winlayer.desktop
 application/x-ms-dos-executable=devos-winlayer.desktop
 application/x-msi=devos-winlayer.desktop
+application/vnd.microsoft.portable-executable=devos-winlayer.desktop
+application/x-msdos-program=devos-winlayer.desktop
+application/x-ms-installer=devos-winlayer.desktop
 application/x-bat=devos-winlayer.desktop
 application/vnd.android.package-archive=devos-apphub.desktop
 application/vnd.debian.binary-package=devos-apphub.desktop

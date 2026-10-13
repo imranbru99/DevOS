@@ -1,0 +1,57 @@
+#!/bin/bash
+# Open the disk installer on the live desktop.
+# Calamares must run as root on X11 or the disk list never appears.
+export DISPLAY="${DISPLAY:-:0}"
+export QT_QPA_PLATFORM=xcb
+# DevOS colours (from /etc/xdg/kdeglobals) for parts stylesheet.qss cannot
+# reach, e.g. the partition legend; Fusion keeps the tested layout.
+export QT_QPA_PLATFORMTHEME=kde
+export QT_STYLE_OVERRIDE=Fusion
+if [ -z "${XAUTHORITY:-}" ] && [ -n "${HOME:-}" ] && [ -f "${HOME}/.Xauthority" ]; then
+    export XAUTHORITY="${HOME}/.Xauthority"
+fi
+
+if ! grep -q 'branding: devos' /etc/calamares/settings.conf 2>/dev/null; then
+    echo "DevOS installer configuration is missing. Ubuntu installation was not started." >&2
+    exit 1
+fi
+
+exec 9>/tmp/devos-installer.lock
+if ! flock -n 9; then
+    exit 0
+fi
+
+sleep 1
+xhost +si:localuser:root >/dev/null 2>&1 || true
+
+run_calamares() {
+    if [ "$(id -u)" -eq 0 ]; then
+        calamares "$@"
+        return $?
+    fi
+    sudo -n \
+        DISPLAY="$DISPLAY" \
+        XAUTHORITY="${XAUTHORITY:-}" \
+        QT_QPA_PLATFORM=xcb \
+        QT_QPA_PLATFORMTHEME=kde \
+        QT_STYLE_OVERRIDE=Fusion \
+        calamares "$@"
+}
+
+log=/tmp/devos-calamares.log
+: > "$log"
+fails=0
+while true; do
+    started=$(date +%s)
+    run_calamares "$@" >>"$log" 2>&1 || true
+    ended=$(date +%s)
+    if [ $((ended - started)) -ge 8 ]; then
+        fails=0
+        continue
+    fi
+    fails=$((fails + 1))
+    if [ "$fails" -ge 4 ] && ! grep -q 'boot=casper' /proc/cmdline; then
+        break
+    fi
+    sleep 2
+done

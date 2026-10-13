@@ -1,0 +1,28 @@
+#!/bin/bash
+# The live session is the disk installer. A fullscreen starter stays on screen
+# until Calamares itself is visible, so the boot never stops on an empty pointer.
+set -u
+
+export DISPLAY="${DISPLAY:-:0}"
+export QT_QPA_PLATFORM=xcb
+
+if ! grep -q 'branding: devos' /etc/calamares/settings.conf 2>/dev/null; then
+    echo "DevOS installer configuration is missing. Ubuntu installation was not started." >&2
+    exit 1
+fi
+
+rm -f \
+    /etc/xdg/autostart/ubuntu-desktop-bootstrap.desktop \
+    /etc/xdg/autostart/ubiquity.desktop \
+    /etc/xdg/autostart/org.gnome.InitialSetup.desktop \
+    2>/dev/null || true
+
+if command -v xsetroot >/dev/null 2>&1; then
+    xsetroot -solid "#070910" >/dev/null 2>&1 || true
+    xsetroot -cursor_name left_ptr >/dev/null 2>&1 || true
+fi
+xhost +si:localuser:root >/dev/null 2>&1 || true
+xhost +local: >/dev/null 2>&1 || true
+
+# boot_ui.py paints the animated starter and then starts calamares.
+exec python3 /usr/local/share/devos/boot_ui.py

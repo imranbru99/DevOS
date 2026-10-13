@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Terminal
+GenericName=Terminal Emulator
+Comment=Command line terminal
+Exec=konsole
+Icon=utilities-terminal
+Type=Application
+Terminal=false
+Categories=Qt;KDE;System;TerminalEmulator;

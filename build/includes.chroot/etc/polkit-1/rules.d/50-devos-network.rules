@@ -1,0 +1,8 @@
+// Let the person at the keyboard use Ethernet, Wi-Fi, and Bluetooth.
+polkit.addRule(function(action, subject) {
+    if (subject.local && subject.active &&
+        (action.id.indexOf("org.freedesktop.NetworkManager.") === 0 ||
+         action.id.indexOf("org.bluez") === 0)) {
+        return polkit.Result.YES;
+    }
+});

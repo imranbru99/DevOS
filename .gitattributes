@@ -1,0 +1,8 @@
+# Everything here ends up inside a Linux image. CRLF breaks shell scripts,
+# hooks and Calamares YAML, so keep LF regardless of core.autocrlf.
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.png binary
+*.jpg binary
+*.iso binary
+*.img binary

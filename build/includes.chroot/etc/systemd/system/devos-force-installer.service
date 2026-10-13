@@ -1,0 +1,14 @@
+[Unit]
+Description=Keep the live USB on the disk installer
+ConditionKernelCommandLine=boot=casper
+DefaultDependencies=no
+After=local-fs.target
+Before=sddm.service display-manager.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /usr/local/sbin/devos-force-installer-session
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sddm.service

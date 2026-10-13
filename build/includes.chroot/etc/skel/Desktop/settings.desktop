@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Name=Settings
+GenericName=System Settings
+Comment=Display, network, sound, and account settings
+Exec=systemsettings
+Icon=preferences-system
+Terminal=false
+Type=Application
+Categories=Settings;DesktopSettings;
+StartupNotify=true

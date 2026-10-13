@@ -1,0 +1,11 @@
+[KTextEditor Renderer]
+Color Theme=DevOS
+Font=JetBrains Mono,13,-1,5,50,0,0,0,0,0
+
+[KTextEditor View]
+Show Line Numbers=true
+Show Folding Markers=true
+Show Scrollbar Marks=true
+Show Scrollbar Mini Map=true
+Dynamic Word Wrap=false
+Show Word Count=false

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=This PC
+GenericName=Files
+Comment=Drives and free space, like This PC
+Exec=python3 /usr/local/bin/devos-files
+Icon=computer
+Type=Application
+Terminal=false
+Categories=Qt;KDE;System;FileTools;FileManager;

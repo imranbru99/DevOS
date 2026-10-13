@@ -17,6 +17,7 @@ sys.path.insert(0, SYS_PATH)
 
 from hardware_detector import HardwareDetector
 from server import HTTPServer, OpenAIHandler, HOST, PORT, engine
+import server
 
 
 class TestDevOSAICore(unittest.TestCase):
@@ -72,7 +73,24 @@ class TestDevOSAICore(unittest.TestCase):
             self.assertIn("choices", data)
             content = data["choices"][0]["message"]["content"]
             self.assertTrue(len(content) > 0)
-            self.assertIn("Hardware Tier", content)
+            # Real facts about this PC, not an internal tier/model report.
+            self.assertIn("This PC", content)
+            self.assertNotIn("qwen", content.lower())
+
+    def test_04b_plain_question_is_not_the_canned_greeting(self):
+        payload = json.dumps({
+            "messages": [{"role": "user", "content": "What is two plus two?"}]
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            f"http://{HOST}:{PORT}/v1/chat/completions",
+            data=payload,
+            headers={"Content-Type": "application/json"}
+        )
+        with urllib.request.urlopen(req) as resp:
+            data = json.loads(resp.read().decode())
+            content = data["choices"][0]["message"]["content"]
+            self.assertNotIn("local assistant running completely offline", content)
+            self.assertNotIn("How can I help you today", content)
 
     def test_05_embeddings_endpoint(self):
         payload = json.dumps({
@@ -93,3 +111,34 @@ class TestDevOSAICore(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestIdleUnload(unittest.TestCase):
+    """The model held 1.6-2.7 GB forever; it must be freed when idle."""
+
+    def test_unloads_after_idle_and_not_before(self):
+        import time as _time
+        eng = server.DevOSAIEngine()
+        eng._llm = object()
+        eng.is_loaded = True
+        eng.idle_timeout_seconds = 300
+        eng.last_activity = _time.time()
+        self.assertFalse(eng.unload_if_idle())
+        self.assertIsNotNone(eng._llm)
+        eng.last_activity = _time.time() - 301
+        self.assertTrue(eng.unload_if_idle())
+        self.assertIsNone(eng._llm)
+        self.assertFalse(eng._load_tried, "the next question loads it again")
+
+    def test_not_unloaded_while_answering(self):
+        import time as _time
+        eng = server.DevOSAIEngine()
+        eng._llm = object()
+        eng.last_activity = _time.time() - 999
+        with eng._lock:
+            import threading
+            result = []
+            t = threading.Thread(target=lambda: result.append(eng.unload_if_idle()))
+            t.start(); t.join()
+        self.assertEqual(result, [False])
+        self.assertIsNotNone(eng._llm)

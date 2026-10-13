@@ -1,32 +1,28 @@
 {
   "workbench.colorTheme": "Default Dark Modern",
   "workbench.iconTheme": "vs-seti",
-  "editor.fontFamily": "'Fira Code', 'JetBrains Mono', Consolas, 'Courier New', monospace",
+  "workbench.startupEditor": "none",
+  "workbench.sideBar.location": "left",
+  "window.commandCenter": true,
+  "window.titleBarStyle": "custom",
+  "window.autoDetectColorScheme": true,
+  "editor.fontFamily": "'JetBrains Mono', 'Fira Code', monospace",
   "editor.fontLigatures": true,
-  "editor.fontSize": 14,
-  "editor.lineHeight": 22,
+  "editor.fontSize": 15,
+  "editor.lineHeight": 24,
   "editor.cursorBlinking": "smooth",
+  "editor.cursorSmoothCaretAnimation": "on",
   "editor.smoothScrolling": true,
+  "editor.bracketPairColorization.enabled": true,
+  "editor.guides.bracketPairs": "active",
+  "editor.minimap.enabled": true,
+  "editor.renderWhitespace": "selection",
   "editor.formatOnSave": true,
   "editor.tabSize": 4,
+  "breadcrumbs.enabled": true,
+  "terminal.integrated.fontFamily": "'JetBrains Mono', monospace",
   "terminal.integrated.defaultProfile.linux": "bash",
   "telemetry.telemetryLevel": "off",
   "update.mode": "none",
-  "security.workspace.trust.enabled": false,
-
-  "continue.enableTabAutocomplete": true,
-  "continue.autocompleteModel": "qwen2.5-coder-1.5b",
-
-  "[php]": {
-    "editor.defaultFormatter": "bmewburn.vscode-intelephense-client"
-  },
-  "[javascript]": {
-    "editor.defaultFormatter": "esbenp.prettier-vscode"
-  },
-  "[typescript]": {
-    "editor.defaultFormatter": "esbenp.prettier-vscode"
-  },
-  "[python]": {
-    "editor.defaultFormatter": "ms-python.python"
-  }
+  "security.workspace.trust.enabled": false
 }

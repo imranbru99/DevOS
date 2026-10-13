@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DevOS 2027 — Premium System Dashboard & Security</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="luxury-dark">
+  <div class="ambient-glow glow-1"></div>
+  <div class="ambient-glow glow-2"></div>
+  <div class="ambient-glow glow-3"></div>
+
+  <!-- Main Container -->
+  <div class="app-layout">
+    <!-- Top Navigation Bar -->
+    <header class="top-nav glass-card">
+      <div class="brand-cluster">
+        <div class="logo-mark">
+          <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect width="32" height="32" rx="8" fill="url(#logo-grad)"/>
+            <path d="M9 16L14 21L23 11" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <defs>
+              <linearGradient id="logo-grad" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+                <stop stop-color="#00f2fe"/>
+                <stop offset="1" stop-color="#4facfe"/>
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+        <div class="brand-titles">
+          <div class="brand-title">DevOS <span class="edition-tag">Desktop</span></div>
+          <div class="brand-sub">This computer</div>
+        </div>
+      </div>
+
+      <nav class="nav-links">
+        <button class="nav-btn active" data-tab="overview">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          Overview
+        </button>
+        <button class="nav-btn" data-tab="security">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          PIN & Security
+        </button>
+        <button class="nav-btn" data-tab="subsystems">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+          Subsystems
+        </button>
+        <button class="nav-btn" data-tab="firstboot">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
+          Setup Wizard
+        <button class="nav-btn" data-tab="storage">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+          Storage & Disks
+        </button>
+      </nav>
+
+      <div class="header-status">
+        <div class="status-pill online">
+          <span class="pulse-dot"></span>
+          <span id="system-status-text">DevOS Live 24.04</span>
+        </div>
+        <div class="clock-badge" id="live-clock">12:00:00</div>
+      </div>
+    </header>
+
+    <!-- Content Sections -->
+    <main class="main-viewport">
+
+      <!-- TAB 1: OVERVIEW -->
+      <section id="tab-overview" class="tab-pane active">
+        <!-- Hero Banner with Quick Installer Action -->
+        <div class="hero-banner glass-card">
+          <div class="hero-content">
+            <span class="badge-luxury">Start here</span>
+            <h1>Welcome to <span class="gradient-text">DevOS</span></h1>
+            <p>Three steps. Each one stays after you restart.</p>
+            <div class="start-steps">
+              <button class="step-card" onclick="launchApp('calamares')">
+                <span class="step-num">1</span>
+                <strong>Install on a disk</strong>
+                <span>See every drive, format the old one, then install.</span>
+              </button>
+              <button class="step-card" onclick="switchTab('security')">
+                <span class="step-num">2</span>
+                <strong>Sign in</strong>
+                <span>The installer asks for your name and password. That password opens DevOS after restart.</span>
+              </button>
+              <button class="step-card" onclick="switchTab('firstboot')">
+                <span class="step-num">3</span>
+                <strong>Choose language</strong>
+                <span>English or Bengali, then you are ready to work.</span>
+              </button>
+            </div>
+          </div>
+          <div class="hero-metrics glass-inset">
+            <div class="metric-mini">
+              <span class="label">NPU / AI Engine</span>
+              <span class="val highlight" id="ai-tier-badge">Auto (Standard)</span>
+            </div>
+            <div class="metric-mini">
+              <span class="label">Memory Compression</span>
+              <span class="val" id="zram-badge">zRAM Active (zstd)</span>
+            </div>
+            <div class="metric-mini">
+              <span class="label">File System</span>
+              <span class="val">Btrfs + Snapper</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Telemetry Cards -->
+        <div class="cards-grid">
+          <div class="telemetry-card glass-card">
+            <div class="card-head">
+              <div class="icon-circle cyan">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="15" x2="23" y2="15"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="15" x2="4" y2="15"/></svg>
+              </div>
+              <div class="card-meta">
+                <h3>Processor & Silicon</h3>
+                <span id="cpu-core-count">Loading CPU...</span>
+              </div>
+            </div>
+            <div class="progress-wrap">
+              <div class="progress-info">
+                <span>CPU Load</span>
+                <span id="cpu-percent">14%</span>
+              </div>
+              <div class="progress-bar"><div class="progress-fill cyan" style="width: 14%;"></div></div>
+            </div>
+          </div>
+
+          <div class="telemetry-card glass-card">
+            <div class="card-head">
+              <div class="icon-circle purple">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 19v-3"/><path d="M10 19v-3"/><path d="M14 19v-3"/><path d="M18 19v-3"/><path d="M6 8V5"/><path d="M10 8V5"/><path d="M14 8V5"/><path d="M18 8V5"/><rect x="2" y="8" width="20" height="8" rx="2"/></svg>
+              </div>
+              <div class="card-meta">
+                <h3>RAM & Fast zRAM</h3>
+                <span id="ram-usage-text">Loading Memory...</span>
+              </div>
+            </div>
+            <div class="progress-wrap">
+              <div class="progress-info">
+                <span>Memory Allocation</span>
+                <span id="ram-percent">28%</span>
+              </div>
+              <div class="progress-bar"><div class="progress-fill purple" id="ram-progress" style="width: 28%;"></div></div>
+            </div>
+          </div>
+
+          <div class="telemetry-card glass-card">
+            <div class="card-head">
+              <div class="icon-circle emerald">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+              </div>
+              <div class="card-meta">
+                <h3>High-Speed Storage</h3>
+                <span id="disk-usage-text">Loading Disk...</span>
+              </div>
+            </div>
+            <div class="progress-wrap">
+              <div class="progress-info">
+                <span>System Root (Btrfs)</span>
+                <span id="disk-percent">25%</span>
+              </div>
+              <div class="progress-bar"><div class="progress-fill emerald" id="disk-progress" style="width: 25%;"></div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Quick Launch Dock -->
+        <div class="dock-section glass-card">
+          <div class="section-title">
+            <h2>Open an app</h2>
+            <span>Chrome, notepad, settings, documents, and files. They stay after restart.</span>
+          </div>
+          <div class="dock-grid">
+            <button class="dock-item" onclick="launchApp('browser')">
+              <div class="dock-icon browser">Web</div>
+              <span>Chrome</span>
+            </button>
+            <button class="dock-item" onclick="launchApp('notepad')">
+              <div class="dock-icon notepad">Note</div>
+              <span>Notepad</span>
+            </button>
+            <button class="dock-item" onclick="launchApp('settings')">
+              <div class="dock-icon settings">Set</div>
+              <span>Settings</span>
+            </button>
+            <button class="dock-item" onclick="launchApp('pdf')">
+              <div class="dock-icon pdf">PDF</div>
+              <span>Documents</span>
+            </button>
+            <button class="dock-item" onclick="launchApp('code')">
+              <div class="dock-icon codium">Code</div>
+              <span>DevOS Code</span>
+            </button>
+            <button class="dock-item" onclick="launchApp('files')">
+              <div class="dock-icon dolphin">Files</div>
+              <span>File Explorer</span>
+            </button>
+            <button class="dock-item" onclick="launchApp('terminal')">
+              <div class="dock-icon terminal">&gt;_</div>
+              <span>Terminal</span>
+            </button>
+            <button class="dock-item" onclick="launchApp('calamares')">
+              <div class="dock-icon calamares">Disk</div>
+              <span>Format &amp; Install</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 2: PIN & SECURITY SETUP -->
+      <section id="tab-security" class="tab-pane">
+        <div class="security-layout">
+          <!-- Left Column: Fast PIN Setup -->
+          <div class="security-panel glass-card">
+            <div class="panel-header">
+              <div class="icon-circle cyan">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              </div>
+              <div>
+                <h2>Unlock PIN</h2>
+                <p>Type 6 numbers. You will use this PIN to unlock DevOS quickly.</p>
+              </div>
+            </div>
+
+            <!-- PIN Display Circles -->
+            <div class="pin-display">
+              <div class="pin-dot" id="dot-1"></div>
+              <div class="pin-dot" id="dot-2"></div>
+              <div class="pin-dot" id="dot-3"></div>
+              <div class="pin-dot" id="dot-4"></div>
+              <div class="pin-dot" id="dot-5"></div>
+              <div class="pin-dot" id="dot-6"></div>
+            </div>
+
+            <!-- Keypad -->
+            <div class="pin-keypad">
+              <button class="key-btn" onclick="pressPin('1')">1</button>
+              <button class="key-btn" onclick="pressPin('2')">2</button>
+              <button class="key-btn" onclick="pressPin('3')">3</button>
+              <button class="key-btn" onclick="pressPin('4')">4</button>
+              <button class="key-btn" onclick="pressPin('5')">5</button>
+              <button class="key-btn" onclick="pressPin('6')">6</button>
+              <button class="key-btn" onclick="pressPin('7')">7</button>
+              <button class="key-btn" onclick="pressPin('8')">8</button>
+              <button class="key-btn" onclick="pressPin('9')">9</button>
+              <button class="key-btn key-clear" onclick="clearPin()">Clear</button>
+              <button class="key-btn" onclick="pressPin('0')">0</button>
+              <button class="key-btn key-del" onclick="backspacePin()">⌫</button>
+            </div>
+
+            <div class="pin-controls">
+              <button class="btn btn-primary w-full" id="save-pin-btn" onclick="submitPin()">
+                Save & Activate PIN
+              </button>
+              <div id="pin-feedback" class="feedback-msg"></div>
+            </div>
+          </div>
+
+          <!-- Right Column: Account Password & PAM Sync -->
+          <div class="security-panel glass-card">
+            <div class="panel-header">
+              <div class="icon-circle purple">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-1-1l-3 3m-2-2l-2 2m-2-2l-3 3M3 21l9-9"/></svg>
+              </div>
+              <div>
+                <h2>Account password</h2>
+                <p>This password signs you in after a restart. It is saved on this computer.</p>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="new-pw">New Password</label>
+              <div class="input-wrap">
+                <input type="password" id="new-pw" placeholder="Enter robust password" oninput="evalPasswordStrength()">
+                <button type="button" class="eye-toggle" onclick="togglePasswordVisibility('new-pw')">👁</button>
+              </div>
+            </div>
+
+            <!-- Strength Meter -->
+            <div class="pw-strength-bar-wrap">
+              <div class="strength-label">
+                <span>Password Strength</span>
+                <span id="strength-text" class="strength-val">Empty</span>
+              </div>
+              <div class="strength-track">
+                <div class="strength-fill" id="strength-fill"></div>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="confirm-pw">Confirm Password</label>
+              <div class="input-wrap">
+                <input type="password" id="confirm-pw" placeholder="Re-enter password" oninput="evalPasswordStrength()">
+                <button type="button" class="eye-toggle" onclick="togglePasswordVisibility('confirm-pw')">👁</button>
+              </div>
+            </div>
+
+            <div class="checklist">
+              <div class="check-item" id="chk-len">✓ At least 8 characters</div>
+              <div class="check-item" id="chk-upper">✓ Contains uppercase letters</div>
+              <div class="check-item" id="chk-num">✓ Contains numbers or symbols</div>
+              <div class="check-item" id="chk-match">✓ Passwords match</div>
+            </div>
+
+            <button class="btn btn-primary w-full" id="save-pw-btn" onclick="submitPassword()">
+              Update System Password
+            </button>
+            <div id="pw-feedback" class="feedback-msg"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 3: SUBSYSTEMS SWITCHBOARD -->
+      <section id="tab-subsystems" class="tab-pane">
+        <div class="section-title">
+          <h2>Apps and tools</h2>
+          <span>Open the tool you need. Windows and Android files install from the file manager.</span>
+        </div>
+
+        <div class="subsystems-grid">
+          <div class="subsystem-card glass-card">
+            <div class="sub-head">
+              <span class="sub-icon">🌐</span>
+              <div class="sub-info">
+                <h3>Local websites</h3>
+                <span>PHP, database, and a local web address for your projects.</span>
+              </div>
+            </div>
+            <div class="sub-status active">Ready on this PC</div>
+            <button class="btn btn-secondary w-full" onclick="launchApp('terminal')">Open terminal</button>
+          </div>
+
+          <div class="subsystem-card glass-card">
+            <div class="sub-head">
+              <span class="sub-icon">🪟</span>
+              <div class="sub-info">
+                <h3>Windows apps</h3>
+                <span>Open an .exe or .msi from Files. A menu shortcut is saved for next time.</span>
+              </div>
+            </div>
+            <div class="sub-status active">Double-click an .exe or .msi</div>
+            <button class="btn btn-secondary w-full" onclick="launchApp('files')">Open Files</button>
+          </div>
+
+          <div class="subsystem-card glass-card">
+            <div class="sub-head">
+              <span class="sub-icon">🤖</span>
+              <div class="sub-info">
+                <h3>Android apps</h3>
+                <span>Open an .apk from Files. The phone app is added to your menu.</span>
+              </div>
+            </div>
+            <div class="sub-status active">Double-click an .apk</div>
+            <button class="btn btn-secondary w-full" onclick="launchApp('files')">Open Files</button>
+          </div>
+
+          <div class="subsystem-card glass-card">
+            <div class="sub-head">
+              <span class="sub-icon">🧠</span>
+              <div class="sub-info">
+                <h3>Code with local AI</h3>
+                <span>The editor and the model run on this PC. No account is required.</span>
+              </div>
+            </div>
+            <div class="sub-status active">Local model on this PC</div>
+            <button class="btn btn-secondary w-full" onclick="launchApp('code')">Open DevOS Code</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB: STORAGE & BOOT DOCTOR -->
+      <section id="tab-storage" class="tab-pane">
+        <div class="section-title">
+          <div class="storage-head-row">
+            <div>
+              <h2>Storage & Boot Doctor</h2>
+              <span>Visual partition manager: detect MBR vs GPT, check EFI compatibility, and solve issues in one click.</span>
+            </div>
+            <div class="storage-actions-top">
+              <button class="btn btn-secondary" onclick="fetchStorageDevices()">
+                🔄 Refresh Disks
+              </button>
+              <button class="btn btn-primary" onclick="launchApp('calamares')">
+                🚀 Launch Installer
+              </button>
+              <button class="btn btn-secondary" onclick="applyStorageAction('/dev/sda', 'reboot_system')">
+                ⏻ Reboot & Eject USB
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Firmware Mode Banner -->
+        <div class="glass-card storage-system-banner" id="firmware-mode-banner">
+          <div class="banner-icon" id="firmware-icon">⚡</div>
+          <div class="banner-text">
+            <h3 id="firmware-title">Checking System Firmware...</h3>
+            <p id="firmware-desc">Detecting whether your PC booted in modern UEFI mode or Legacy BIOS mode.</p>
+          </div>
+        </div>
+
+        <div id="storage-feedback" class="feedback-msg" style="margin-bottom: 16px;"></div>
+
+        <!-- Disks Grid -->
+        <div id="storage-devices-container" class="storage-grid">
+          <div class="loading-state">Scanning attached storage devices and partition schemes...</div>
+        </div>
+      </section>
+
+      <!-- TAB 4: FIRST-BOOT WIZARD -->
+      <section id="tab-firstboot" class="tab-pane">
+        <div class="wizard-container glass-card">
+          <div class="wizard-step" id="wz-step-1">
+            <div class="wizard-icon">✨</div>
+            <h2>Make DevOS yours</h2>
+            <p>This only saves language. It does not copy DevOS onto a disk. Use Install DevOS and format the old system, or removing the USB returns to the old operating system.</p>
+
+            <div class="wizard-options">
+              <div class="opt-group">
+                <label>System Language</label>
+                <select id="wz-lang" class="custom-select">
+                  <option value="en_US.UTF-8">English (United States)</option>
+                  <option value="bn_BD.UTF-8">Bengali / বাংলা (Bangladesh)</option>
+                </select>
+              </div>
+
+              <div class="opt-group">
+                <label>Keyboard Layout</label>
+                <select id="wz-kb" class="custom-select">
+                  <option value="us">English (US Standard)</option>
+                  <option value="bd">Bengali (Probhat / National)</option>
+                </select>
+              </div>
+
+              <div class="opt-group">
+                <label>Telemetry & Privacy</label>
+                <div class="privacy-badge">Private by default. Chat stays on this PC.</div>
+              </div>
+            </div>
+
+            <div class="wizard-actions">
+              <button class="btn btn-primary" onclick="completeFirstBoot()">Save language</button>
+            </div>
+            <div id="wz-feedback" class="feedback-msg"></div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Footer Status Bar -->
+    <footer class="bottom-bar glass-card">
+      <div class="bar-left">
+        <span>DevOS 24.04 LTS</span>
+        <span class="dot-sep">•</span>
+        <span id="foot-host">devos.local</span>
+      </div>
+      <div class="bar-right">
+        <span>KDE Plasma 6 Wayland</span>
+        <span class="dot-sep">•</span>
+        <span>Secure Boot Compatible</span>
+      </div>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

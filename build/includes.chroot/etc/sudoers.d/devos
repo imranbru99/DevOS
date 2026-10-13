@@ -1,0 +1,4 @@
+# DevOS Live and Admin User Sudo Privilege
+# Removed again when the disk install finishes.
+devos ALL=(ALL) NOPASSWD:SETENV: ALL
+%sudo ALL=(ALL) NOPASSWD:SETENV: ALL

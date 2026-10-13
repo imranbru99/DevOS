@@ -1,5 +1,6 @@
 # Base system and kernel
-linux-generic-hwe-24.04
+linux-image-generic
+linux-generic
 casper
 systemd
 systemd-sysv
@@ -36,6 +37,7 @@ parted
 fdisk
 
 # Bootloaders
+grub-common
 grub-pc-bin
 grub-efi-amd64-bin
 grub-efi-amd64-signed

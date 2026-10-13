@@ -1,0 +1,12 @@
+{
+    "KPlugin": {
+        "Id": "DevOS-AuroraVeil",
+        "Name": "Aurora Veil",
+        "Authors": [
+            {
+                "Name": "DevOS"
+            }
+        ],
+        "License": "CC-BY-SA-4.0"
+    }
+}

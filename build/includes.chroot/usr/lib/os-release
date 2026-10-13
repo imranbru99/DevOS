@@ -1,0 +1,11 @@
+NAME="DevOS"
+VERSION="24.04 LTS"
+ID=devos
+ID_LIKE="ubuntu debian"
+PRETTY_NAME="DevOS 24.04 LTS"
+VERSION_ID="24.04"
+VERSION_CODENAME=noble
+UBUNTU_CODENAME=noble
+HOME_URL="https://github.com/imranbru99/DevOS"
+SUPPORT_URL="https://github.com/imranbru99/DevOS/issues"
+BUG_REPORT_URL="https://github.com/imranbru99/DevOS/issues"

@@ -1,10 +1,10 @@
 [Desktop Entry]
 Name=WinLayer (DevOS Windows Compatibility)
 Comment=Run Windows Executables and Installers
-Exec=python3 /usr/lib/devos/components/devos_cli.py win launch %f
+Exec=/usr/local/bin/devos-open-app %f
 Icon=application-x-msdownload
 Terminal=false
 Type=Application
-MimeType=application/x-msdownload;application/x-ms-dos-executable;application/x-msi;application/x-bat;
+MimeType=application/x-msdownload;application/x-ms-dos-executable;application/vnd.microsoft.portable-executable;application/x-msdos-program;application/x-msi;application/x-ms-installer;application/x-bat;
 Categories=System;Emulator;Utility;
 StartupNotify=true

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=DevOS AI
+GenericName=AI Assistant
+Comment=Private assistant on this PC: ask, type or speak commands, read PDFs and images
+Exec=/usr/local/bin/devos-chat
+Icon=preferences-desktop-theme
+Terminal=false
+Categories=Utility;Network;Chat;
+StartupNotify=true
+Keywords=chat;ai;assistant;ask;voice;help;devos ai;

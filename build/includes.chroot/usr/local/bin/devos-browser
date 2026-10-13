@@ -1,0 +1,44 @@
+#!/bin/bash
+# Open Chrome when it is installed. Fall back to Falkon until then.
+# Google picks the search language from the browser, not from the public IP.
+# Ask the network which country this connection is in, then send that language.
+set -u
+
+search_language() {
+    cache="${XDG_CONFIG_HOME:-$HOME/.config}/devos/accept-lang"
+    if [ -s "$cache" ]; then
+        cat "$cache"
+        return
+    fi
+
+    loc=""
+    if command -v curl >/dev/null 2>&1; then
+        loc=$(curl -4 -fsS --max-time 4 https://1.1.1.1/cdn-cgi/trace 2>/dev/null \
+            | sed -n 's/^loc=//p' | tr -d '\r')
+    fi
+
+    case "$loc" in
+        BD) lang="bn-BD,bn,en-US,en" ;;
+        IN) lang="hi-IN,hi,en-IN,en-US,en" ;;
+        PK) lang="ur-PK,ur,en-GB,en" ;;
+        NP) lang="ne-NP,ne,en-US,en" ;;
+        GB|IE) lang="en-GB,en-US,en" ;;
+        *) lang="en-US,en" ;;
+    esac
+
+    if [ -n "$loc" ]; then
+        mkdir -p "$(dirname "$cache")"
+        printf '%s\n' "$lang" > "$cache"
+    fi
+    printf '%s\n' "$lang"
+}
+
+if command -v google-chrome-stable >/dev/null 2>&1; then
+    lang=$(search_language)
+    exec google-chrome-stable --accept-lang="$lang" "$@"
+fi
+if command -v falkon >/dev/null 2>&1; then
+    exec falkon "$@"
+fi
+echo "Chrome is not installed yet. On the installed system, run: sudo devos-install-chrome" >&2
+exit 1

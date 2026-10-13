@@ -1,0 +1,42 @@
+#!/bin/bash
+# The live USB must open the disk installer. Casper can replace the login
+# session with the Plasma desktop, and the status page then covers setup.
+set -u
+
+grep -q 'boot=casper' /proc/cmdline || exit 0
+
+mkdir -p /etc/sddm.conf.d /run/devos-hidden-sessions
+# Hide every normal desktop session on this boot only. The installed disk
+# still receives the original files from the image.
+for session in /usr/share/xsessions/*.desktop /usr/share/wayland-sessions/*.desktop; do
+    [ -f "$session" ] || continue
+    name=$(basename "$session")
+    [ "$name" = "devos-install.desktop" ] && continue
+    hidden="/run/devos-hidden-sessions/$name"
+    cp -a "$session" "$hidden" 2>/dev/null || true
+    mount --bind /dev/null "$session" 2>/dev/null || rm -f "$session"
+done
+
+cat > /etc/sddm.conf.d/zz-devos-install.conf << 'EOF'
+[Autologin]
+User=devos
+Session=devos-install
+Relogin=false
+EOF
+
+# casper-bottom/15autologin appends "Session=plasma.desktop" to /etc/sddm.conf.
+# SDDM reads /etc/sddm.conf after sddm.conf.d, so that line wins, and plasma.desktop
+# was just hidden above: autologin starts an empty session and the installer
+# never appears. Replace the file so the installer session is the only choice.
+cat > /etc/sddm.conf << 'EOF'
+[Autologin]
+User=devos
+Session=devos-install.desktop
+Relogin=false
+
+[General]
+DisplayServer=x11
+EOF
+
+systemctl stop devos-dashboard.service >/dev/null 2>&1 || true
+exit 0

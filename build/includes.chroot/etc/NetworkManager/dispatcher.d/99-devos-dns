@@ -1,0 +1,33 @@
+#!/bin/bash
+# NetworkManager runs this as root when a link changes.
+# Keep the stub resolver in place and publish working name servers.
+iface="$1"
+action="$2"
+
+case "$action" in
+    up|dhcp4-change|connectivity-change) ;;
+    *) exit 0 ;;
+esac
+
+systemctl start systemd-resolved >/dev/null 2>&1 || true
+if [ -e /run/systemd/resolve/stub-resolv.conf ]; then
+    ln -sfn ../run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+fi
+
+command -v resolvectl >/dev/null 2>&1 || exit 0
+
+servers="1.1.1.1 8.8.8.8"
+if command -v nmcli >/dev/null 2>&1; then
+    got="$(nmcli -g IP4.DNS device show "$iface" 2>/dev/null | tr '|' ' ')"
+    for one in $got; do
+        case "$one" in
+            ''|127.*|0.0.0.0) ;;
+            *) servers="$servers $one" ;;
+        esac
+    done
+fi
+
+# shellcheck disable=SC2086
+resolvectl dns "$iface" $servers >/dev/null 2>&1 || true
+resolvectl default-route "$iface" yes >/dev/null 2>&1 || true
+exit 0

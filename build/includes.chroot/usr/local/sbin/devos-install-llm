@@ -1,0 +1,65 @@
+#!/bin/bash
+# Install the on-device chat model and the runtime that runs it.
+set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+
+apt-get install -y --no-install-recommends libgomp1 ca-certificates curl python3-pip >/dev/null
+
+wheel_url="https://github.com/abetlen/llama-cpp-python/releases/download/v0.3.36/llama_cpp_python-0.3.36-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl"
+# The built-in chat model is the tiny one (490 MB, ~0.7 GB RAM) so the ISO
+# stays small and old laptops stay fast. "Smarter DevOS AI" (devos-ai-upgrade)
+# adds the 1.1 GB model on request.
+model_url="https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf"
+dest_dir="/var/lib/DevOS/models"
+dest="${dest_dir}/qwen2.5-0.5b-instruct-q4_k_m.gguf"
+
+mkdir -p "${dest_dir}" /tmp/devos-llm
+# The ISO carries only the tiny model; a reused build tree may still hold the
+# 1.1 GB one from older builds, which would silently stay in the image.
+rm -f "${dest_dir}/qwen2.5-1.5b-instruct-q4_k_m.gguf"
+wheel="/tmp/devos-llm/llama_cpp_python-0.3.36-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl"
+curl -fL --retry 3 --retry-delay 2 -o "${wheel}" "${wheel_url}"
+# Skip pip when the same version is already there (rebuilds of a reused
+# tree): pip itself crashed on exit once after reporting "already installed".
+if ! python3 -c "import llama_cpp, sys; sys.exit(0 if llama_cpp.__version__ == \"0.3.36\" else 1)" 2>/dev/null; then
+    python3 -m pip install --break-system-packages "${wheel}"
+fi
+rm -f "${wheel}"
+python3 -c "import llama_cpp"
+
+# Offline voice commands (Bangla + English) for DevOS AI: speech engine
+# (~6 MB) and the compressed base speech model (60 MB), both on the ISO.
+python3 -c "import pywhispercpp.model" 2>/dev/null || python3 -m pip install --break-system-packages pywhispercpp==1.5.1
+python3 -c "import pywhispercpp.model"
+voice_dir="/usr/share/devos/ai/voice"
+mkdir -p "${voice_dir}"
+if [ ! -s "${voice_dir}/ggml-base-q5_1.bin" ]; then
+    curl -fL --retry 3 --retry-delay 2 -o "${voice_dir}/ggml-base-q5_1.bin.partial" \
+        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q5_1.bin"
+    mv "${voice_dir}/ggml-base-q5_1.bin.partial" "${voice_dir}/ggml-base-q5_1.bin"
+fi
+[ "$(stat -c%s "${voice_dir}/ggml-base-q5_1.bin")" -gt 50000000 ] || { echo "Voice model incomplete" >&2; exit 1; }
+chmod 644 "${voice_dir}/ggml-base-q5_1.bin"
+
+
+if [ ! -s "${dest}" ]; then
+    curl -fL --retry 3 --retry-delay 2 -o "${dest}.partial" "${model_url}"
+    mv "${dest}.partial" "${dest}"
+fi
+
+magic=$(od -An -t x1 -N 4 "${dest}" | tr -d ' \n')
+if [ "${magic}" != "47475546" ]; then
+    echo "The chat model download is not a GGUF file." >&2
+    rm -f "${dest}"
+    exit 1
+fi
+
+size=$(stat -c%s "${dest}")
+if [ "${size}" -lt 400000000 ]; then
+    echo "The chat model file is incomplete (${size} bytes)." >&2
+    rm -f "${dest}"
+    exit 1
+fi
+
+chmod 644 "${dest}"
+echo "Local chat model ready: ${dest} (${size} bytes)"

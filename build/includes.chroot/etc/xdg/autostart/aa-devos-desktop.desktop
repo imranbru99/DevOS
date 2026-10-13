@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=DevOS Desktop
+Comment=Apply the DevOS theme when the desktop opens
+Exec=/bin/bash /usr/local/bin/devos-apply-desktop
+Icon=preferences-desktop-theme
+Terminal=false
+X-KDE-autostart-phase=0
+X-GNOME-Autostart-enabled=true
+OnlyShowIn=KDE;
+NoDisplay=true

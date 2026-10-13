@@ -1,0 +1,9 @@
+[Plymouth Theme]
+Name=DevOS
+Description=DevOS installer boot
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/devos
+ScriptFile=/usr/share/plymouth/themes/devos/devos.script
+# title=DevOS

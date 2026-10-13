@@ -1,0 +1,9 @@
+#!/bin/bash
+# Left-click on the taskbar Windows button. Show every open window.
+if dbus-send --session --dest=org.kde.kglobalaccel --type=method_call \
+    /component/kwin org.kde.kglobalaccel.Component.invokeShortcut string:Overview; then
+    exit 0
+fi
+dbus-send --session --dest=org.kde.kglobalaccel --type=method_call \
+    /component/kwin org.kde.kglobalaccel.Component.invokeShortcut string:Expose
+exit 0

@@ -1,0 +1,12 @@
+{
+    "KPlugin": {
+        "Id": "DevOS-LiquidObsidian",
+        "Name": "Liquid Obsidian",
+        "Authors": [
+            {
+                "Name": "DevOS"
+            }
+        ],
+        "License": "CC-BY-SA-4.0"
+    }
+}

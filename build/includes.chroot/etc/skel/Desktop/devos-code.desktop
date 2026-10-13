@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Name=DevOS Code
+GenericName=Code Editor
+Comment=Code editor
+Exec=devos-code %F
+Icon=code
+Terminal=false
+Type=Application
+Categories=Development;TextEditor;
+MimeType=text/plain;text/x-python;text/x-csrc;application/javascript;
+StartupNotify=true

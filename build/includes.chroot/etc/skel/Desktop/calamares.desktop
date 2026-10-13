@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Format Disk & Install DevOS
+GenericName=Disk Installer
+Comment=Show every disk, format old storage, then install DevOS
+Exec=/bin/bash /usr/local/bin/devos-install-gui
+Icon=system-software-install
+Terminal=false
+Categories=Qt;System;
+StartupNotify=true
+Keywords=install;system;partition;format;setup;
+X-DevOS-Action=Install

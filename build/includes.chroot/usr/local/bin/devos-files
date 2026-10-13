@@ -1,0 +1,425 @@
+#!/usr/bin/env python3
+"""This PC: drives with free space, in the same layout as Windows."""
+
+import json
+import os
+import subprocess
+import sys
+
+try:
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtGui import QFont
+    from PyQt5.QtWidgets import (
+        QApplication,
+        QFrame,
+        QGridLayout,
+        QHBoxLayout,
+        QLabel,
+        QMainWindow,
+        QProgressBar,
+        QPushButton,
+        QScrollArea,
+        QSizePolicy,
+        QVBoxLayout,
+        QWidget,
+    )
+except ImportError:
+    os.execvp("/usr/bin/dolphin", ["/usr/bin/dolphin", "computer:/"])
+
+
+SKIP_PREFIX = ("loop", "zram", "ram", "nbd", "sr", "fd")
+SKIP_FS = {"swap", "squashfs"}
+
+
+def _gb(num):
+    value = float(num) / (1024 ** 3)
+    if value >= 10:
+        return f"{value:.0f} GB"
+    return f"{value:.1f} GB"
+
+
+def _stat_mount(path):
+    try:
+        st = os.statvfs(path)
+    except OSError:
+        return None
+    total = st.f_blocks * st.f_frsize
+    free = st.f_bavail * st.f_frsize
+    if total <= 0:
+        return None
+    return total, free
+
+
+def _walk(nodes, found):
+    for node in nodes:
+        name = node.get("name") or ""
+        if name.startswith(SKIP_PREFIX):
+            continue
+        children = node.get("children") or []
+        if children and node.get("type") == "disk":
+            _walk(children, found)
+            continue
+        fstype = (node.get("fstype") or "").lower()
+        mount = node.get("mountpoint") or ""
+        if fstype in SKIP_FS:
+            continue
+        if not fstype and not mount:
+            continue
+        try:
+            size = int(node.get("size") or 0)
+        except (TypeError, ValueError):
+            size = 0
+        if not mount and fstype in {"vfat", "fat", "fat32", "msdos"} and size < 1024 ** 3:
+            continue
+        found.append(node)
+
+
+def list_drives():
+    found = []
+    try:
+        raw = subprocess.check_output(
+            ["lsblk", "-J", "-b", "-o", "NAME,PATH,SIZE,FSTYPE,LABEL,TYPE,MOUNTPOINT,TRAN"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+        _walk(json.loads(raw).get("blockdevices") or [], found)
+    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError):
+        found = []
+
+    drives = []
+    seen_mounts = set()
+    for node in found:
+        mount = node.get("mountpoint") or ""
+        total = int(node.get("size") or 0)
+        free = None
+        if mount:
+            usage = _stat_mount(mount)
+            if usage:
+                total, free = usage
+            seen_mounts.add(mount)
+        label = (node.get("label") or "").strip()
+        title = label or "Local Disk"
+        drives.append({
+            "title": title,
+            "path": node.get("path") or "",
+            "mount": mount,
+            "total": total,
+            "free": free,
+            "removable": (node.get("tran") or "") == "usb",
+        })
+
+    if "/" not in seen_mounts:
+        usage = _stat_mount("/")
+        if usage:
+            total, free = usage
+            drives.insert(0, {
+                "title": "System",
+                "path": "",
+                "mount": "/",
+                "total": total,
+                "free": free,
+                "removable": False,
+            })
+
+    drives.sort(key=lambda item: (item["removable"], item["title"].lower()))
+    return drives
+
+
+def open_path(path):
+    if path:
+        subprocess.Popen(["/usr/bin/dolphin", path])
+
+
+def open_pc_properties():
+    subprocess.Popen(["kinfocenter"])
+
+
+def open_drive(drive):
+    mount = drive.get("mount") or ""
+    if not mount and drive.get("path"):
+        try:
+            subprocess.run(
+                ["udisksctl", "mount", "-b", drive["path"]],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        except OSError:
+            return
+        for item in list_drives():
+            if item.get("path") == drive.get("path") and item.get("mount"):
+                mount = item["mount"]
+                break
+    if mount:
+        open_path(mount)
+
+
+class DriveCard(QFrame):
+    def __init__(self, drive):
+        super().__init__()
+        self.drive = drive
+        self.setObjectName("driveCard")
+        self.setCursor(Qt.PointingHandCursor)
+        self.setMinimumHeight(118)
+        self.setMinimumWidth(0)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+        icon = QLabel("DISK" if not drive["removable"] else "USB")
+        icon.setObjectName("driveIcon")
+        icon.setAlignment(Qt.AlignCenter)
+        icon.setFixedSize(54, 54)
+
+        title = QLabel(drive["title"])
+        title.setObjectName("driveTitle")
+        title.setFont(QFont("Inter", 13, QFont.DemiBold))
+        title.setWordWrap(True)
+        title.setMinimumWidth(0)
+        title.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+
+        bar = QProgressBar()
+        bar.setTextVisible(False)
+        bar.setFixedHeight(10)
+        total = drive["total"] or 0
+        free = drive["free"]
+        if total > 0 and free is not None:
+            used = max(0, min(100, int(round((total - free) * 100 / total))))
+            bar.setValue(used)
+            space = QLabel(f"{_gb(free)} free of {_gb(total)}")
+        elif total > 0:
+            bar.setValue(0)
+            space = QLabel(f"{_gb(total)}  ·  not mounted")
+        else:
+            bar.setValue(0)
+            space = QLabel("Size unavailable")
+        space.setObjectName("driveSpace")
+        space.setWordWrap(True)
+
+        text = QVBoxLayout()
+        text.setSpacing(8)
+        text.addWidget(title)
+        text.addWidget(bar)
+        text.addWidget(space)
+
+        row = QHBoxLayout(self)
+        row.setContentsMargins(16, 14, 16, 14)
+        row.setSpacing(14)
+        row.addWidget(icon, 0, Qt.AlignTop)
+        row.addLayout(text, 1)
+
+    def mouseDoubleClickEvent(self, event):
+        open_drive(self.drive)
+        super().mouseDoubleClickEvent(event)
+
+
+class SideButton(QPushButton):
+    def __init__(self, text, path, selected=False):
+        super().__init__(text)
+        self.path = path
+        self.setObjectName("sideSelected" if selected else "side")
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFlat(True)
+        self.setMinimumWidth(0)
+        self.clicked.connect(self._open)
+
+    def _open(self):
+        if self.path:
+            open_path(self.path)
+
+
+class ThisPC(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("This PC")
+        self.resize(1180, 720)
+        self._fitted = False
+        self._cards = []
+        self._drives = []
+        self._columns = 0
+
+        root = QWidget()
+        self.setCentralWidget(root)
+        outer = QHBoxLayout(root)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        side = QWidget()
+        side.setObjectName("sidebar")
+        side.setFixedWidth(220)
+        self.side = side
+        side_box = QVBoxLayout(side)
+        side_box.setContentsMargins(12, 18, 12, 18)
+        side_box.setSpacing(2)
+
+        home = os.path.expanduser("~")
+        folders = [
+            ("Pictures", os.path.join(home, "Pictures")),
+            ("Music", os.path.join(home, "Music")),
+            ("Videos", os.path.join(home, "Videos")),
+            ("Downloads", os.path.join(home, "Downloads")),
+            ("Documents", os.path.join(home, "Documents")),
+            ("Desktop", os.path.join(home, "Desktop")),
+        ]
+        for name, path in folders:
+            side_box.addWidget(SideButton(name, path))
+
+        side_box.addSpacing(16)
+        here = SideButton("This PC", "")
+        here.setObjectName("sideSelected")
+        side_box.addWidget(here)
+
+        self.drive_side = QVBoxLayout()
+        self.drive_side.setSpacing(0)
+        self.drive_side.setContentsMargins(14, 0, 0, 0)
+        side_box.addLayout(self.drive_side)
+        side_box.addSpacing(8)
+        side_box.addWidget(SideButton("Network", "network:/"))
+        props = SideButton("PC properties", "")
+        props.clicked.disconnect()
+        props.clicked.connect(lambda _checked=False: open_pc_properties())
+        side_box.addWidget(props)
+        side_box.addStretch(1)
+        outer.addWidget(side)
+
+        main = QWidget()
+        main_box = QVBoxLayout(main)
+        main_box.setContentsMargins(28, 22, 28, 22)
+        main_box.setSpacing(16)
+        heading = QLabel("Devices and drives")
+        heading.setObjectName("heading")
+        heading.setFont(QFont("Inter", 18, QFont.DemiBold))
+        main_box.addWidget(heading)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll = scroll
+        self.board = QWidget()
+        self.board.setMinimumWidth(0)
+        self.board.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.grid = QGridLayout(self.board)
+        self.grid.setContentsMargins(0, 0, 0, 0)
+        self.grid.setHorizontalSpacing(18)
+        self.grid.setVerticalSpacing(18)
+        scroll.setWidget(self.board)
+        main_box.addWidget(scroll, 1)
+        outer.addWidget(main, 1)
+
+        self.setStyleSheet("""
+            QMainWindow, QWidget { background: #0c101a; color: #e8eef6; }
+            #sidebar { background: #10151f; }
+            QPushButton#side, QPushButton#sideSelected {
+                text-align: left;
+                padding: 8px 10px;
+                border: none;
+                border-radius: 8px;
+                color: #d5deea;
+                font-size: 14px;
+            }
+            QPushButton#side:hover { background: #1c2433; }
+            QPushButton#sideSelected { background: #1d4ed8; color: white; }
+            #heading { color: #f8fafc; }
+            #driveCard { background: #171e2b; border-radius: 12px; }
+            #driveCard:hover { background: #1e2738; }
+            #driveIcon {
+                background: #243044;
+                color: #7dd3fc;
+                border-radius: 8px;
+                font-size: 11px;
+                font-weight: 700;
+            }
+            #driveTitle { color: #f8fafc; }
+            #driveSpace { color: #94a3b8; font-size: 13px; }
+            QProgressBar { background: #334155; border: none; border-radius: 5px; }
+            QProgressBar::chunk { background: #38bdf8; border-radius: 5px; }
+            QScrollArea { background: transparent; }
+        """)
+        self.reload()
+
+    def reload(self):
+        while self.grid.count():
+            item = self.grid.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        while self.drive_side.count():
+            item = self.drive_side.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+        drives = list_drives()
+        self._drives = drives
+        if not drives:
+            empty = QLabel("No drives found.")
+            empty.setObjectName("driveSpace")
+            self.grid.addWidget(empty, 0, 0)
+            return
+
+        for drive in drives:
+            label = drive["title"]
+            button = SideButton(label, drive["mount"] or "")
+            button.drive = drive
+            button.clicked.disconnect()
+            button.clicked.connect(lambda _checked=False, item=drive: open_drive(item))
+            self.drive_side.addWidget(button)
+        self.place_cards()
+
+    def column_count(self):
+        width = self.scroll.viewport().width()
+        if width < 520:
+            return 1
+        if width < 860:
+            return 2
+        return 3
+
+    def place_cards(self):
+        while self.grid.count():
+            item = self.grid.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        columns = self.column_count()
+        self._columns = columns
+        for index, drive in enumerate(self._drives):
+            self.grid.addWidget(DriveCard(drive), index // columns, index % columns)
+        for column in range(columns):
+            self.grid.setColumnStretch(column, 1)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if self._fitted:
+            return
+        self._fitted = True
+        screen = self.screen()
+        if screen is None:
+            return
+        area = screen.availableGeometry()
+        self.resize(min(1180, max(760, area.width() - 48)), min(760, max(520, area.height() - 72)))
+        frame = self.frameGeometry()
+        frame.moveCenter(area.center())
+        self.move(frame.topLeft())
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self.width() < 900:
+            self.side.setFixedWidth(180)
+        else:
+            self.side.setFixedWidth(220)
+        width = self.scroll.viewport().width()
+        if width > 0:
+            self.board.setMaximumWidth(width)
+        if self._drives and self.column_count() != self._columns:
+            self.place_cards()
+
+
+def main():
+    app = QApplication(sys.argv)
+    app.setApplicationName("This PC")
+    window = ThisPC()
+    window.show()
+    sys.exit(app.exec_())
+
+
+if __name__ == "__main__":
+    main()

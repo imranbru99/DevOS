@@ -1,0 +1,11 @@
+[Unit]
+Description=Tune CPU and disks for this computer
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/devos-tune-hardware
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

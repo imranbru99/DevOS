@@ -1,0 +1,30 @@
+#!/bin/bash
+# Install Google Chrome as a system package. The program and the user profile
+# stay on disk across shutdown and restart.
+set -euo pipefail
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "Run: sudo devos-install-chrome" >&2
+    exit 1
+fi
+
+if command -v google-chrome-stable >/dev/null 2>&1; then
+    echo "Google Chrome is already installed."
+    echo "Bookmarks, passwords, and history stay in each user's ~/.config/google-chrome folder."
+    exit 0
+fi
+
+deb="$(mktemp --suffix=.deb)"
+trap 'rm -f "${deb}"' EXIT
+
+echo "Downloading Google Chrome..."
+curl -fL --retry 3 -o "${deb}" \
+    https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+
+echo "Installing Google Chrome..."
+DEBIAN_FRONTEND=noninteractive apt-get install -y "${deb}" \
+    || DEBIAN_FRONTEND=noninteractive apt-get install -fy
+
+echo "Google Chrome is installed."
+echo "Open it from the menu. Your data stays in ~/.config/google-chrome and is kept after restart."
+echo "Install Chrome only after DevOS itself is installed on the hard disk. A live USB session forgets it on shutdown."

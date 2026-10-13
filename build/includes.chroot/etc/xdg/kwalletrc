@@ -1,0 +1,7 @@
+[Wallet]
+Enabled=false
+First Use=false
+Launch Manager=false
+Prompt on Open=false
+Close When Idle=true
+Leave Manager Open=false

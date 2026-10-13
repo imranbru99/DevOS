@@ -1,0 +1,3 @@
+# The installed root filesystem is btrfs. Keep the driver in the initramfs
+# so the disk can mount after the USB is removed.
+btrfs

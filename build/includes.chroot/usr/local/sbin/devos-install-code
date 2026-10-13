@@ -1,0 +1,26 @@
+#!/bin/bash
+# Install Visual Studio Code as a system package so the editor matches a current IDE.
+set -euo pipefail
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "Run: sudo devos-install-code" >&2
+    exit 1
+fi
+
+if command -v code >/dev/null 2>&1; then
+    echo "Visual Studio Code is already installed."
+    exit 0
+fi
+
+deb="$(mktemp --suffix=.deb)"
+trap 'rm -f "${deb}"' EXIT
+
+echo "Downloading Visual Studio Code..."
+curl -fL --retry 3 -o "${deb}" \
+    "https://code.visualstudio.com/sha/download?build=stable&os=linux-deb-x64"
+
+echo "Installing Visual Studio Code..."
+DEBIAN_FRONTEND=noninteractive apt-get install -y "${deb}" \
+    || DEBIAN_FRONTEND=noninteractive apt-get install -fy
+
+echo "Visual Studio Code is installed."

@@ -26,6 +26,13 @@ try:
 except ImportError:
     WinLayerManager = None
 
+SYS_PATH_ANDROID = os.path.abspath(os.path.join(os.path.dirname(__file__), "../androidlayer"))
+sys.path.insert(0, SYS_PATH_ANDROID)
+try:
+    from waydroid_manager import WaydroidManager
+except ImportError:
+    WaydroidManager = None
+
 
 class DevOSAppHub:
     """Universal application manager coordinating all runtime layers."""
@@ -77,11 +84,16 @@ class DevOSAppHub:
                 return {"status": "SUCCESS", "runtime": "Windows (WinLayer)", "file": target}
 
             elif runtime == AppTypeRouter.TARGET_ANDROID:
+                if WaydroidManager:
+                    result = WaydroidManager().install_apk(target)
+                    result["runtime"] = "Android (Waydroid)"
+                    result["routing"] = routing
+                    return result
                 return {
-                    "status": "SUCCESS",
+                    "status": "NEEDS_ENGINE",
                     "runtime": "Android (Waydroid)",
                     "routing": routing,
-                    "message": f"Android APK routed to Waydroid container: {target}"
+                    "message": "Android routing is present, but the Waydroid engine is not available.",
                 }
 
             elif runtime in (AppTypeRouter.TARGET_LINUX, AppTypeRouter.TARGET_DEB, AppTypeRouter.TARGET_FLATPAK):

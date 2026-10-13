@@ -1,0 +1,27 @@
+#!/bin/bash
+# DevOS AI: start the on-device AI service, then open the assistant window.
+# Falls back to the older browser chat page if the window cannot start.
+set -u
+
+AI_DIR="/usr/local/share/devos/components/ai-core"
+ASSISTANT="/usr/local/share/devos/components/assistant/assistant.py"
+CHAT_DIR="/usr/local/share/devos/components/dashboard/static"
+PORT=7072
+
+if [ -f "${AI_DIR}/server.py" ]; then
+    if ! ss -ltn 2>/dev/null | grep -q ':11434'; then
+        (cd "${AI_DIR}" && python3 server.py >/var/tmp/devos-ai-core.log 2>&1 &)
+        sleep 0.4
+    fi
+fi
+
+if [ -f "${ASSISTANT}" ] && python3 -c 'import PyQt5.QtWidgets' >/dev/null 2>&1; then
+    exec python3 "${ASSISTANT}" "$@"
+fi
+
+if ! ss -ltn 2>/dev/null | grep -q ":${PORT}"; then
+    python3 -m http.server "${PORT}" --bind 127.0.0.1 --directory "${CHAT_DIR}" >/var/tmp/devos-chat.log 2>&1 &
+    sleep 0.3
+fi
+
+exec /usr/local/bin/devos-browser "http://127.0.0.1:${PORT}/chat.html"

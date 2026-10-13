@@ -1,0 +1,12 @@
+{
+    "KPlugin": {
+        "Id": "DevOS-AbyssCaustics",
+        "Name": "Abyss Caustics",
+        "Authors": [
+            {
+                "Name": "DevOS"
+            }
+        ],
+        "License": "CC-BY-SA-4.0"
+    }
+}

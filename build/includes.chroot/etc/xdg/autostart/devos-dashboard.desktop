@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=DevOS Dashboard
+Comment=Optional status page. Account password is set in the installer, not here.
+Exec=python3 /usr/local/share/devos/components/dashboard/dashboard_server.py --no-browser
+Icon=preferences-system
+Terminal=false
+Categories=System;
+X-GNOME-Autostart-enabled=false
+Hidden=true
+X-KDE-autostart-phase=2
+StartupNotify=false

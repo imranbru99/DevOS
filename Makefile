@@ -30,8 +30,10 @@ iso-docker:
 	docker build -t $(IMAGE_NAME) -f build/docker/Dockerfile.build .
 	@echo "==> Building DevOS ISO inside container..."
 	docker run --rm --privileged \
+		-e DEVOS_WORK_DIR="/tmp/build_work" \
+		-e DEVOS_ZSTD_LEVEL="19" \
 		-v "$(CURDIR):/workspace" \
-		$(IMAGE_NAME) make iso
+		$(IMAGE_NAME) ./build/build-iso.sh
 
 test-qemu-bios:
 	@echo "==> Launching DevOS in QEMU (BIOS mode)..."

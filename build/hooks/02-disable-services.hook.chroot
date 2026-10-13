@@ -17,6 +17,7 @@ SERVICES_TO_MASK=(
     "snapd.service"
     "snapd.socket"
     "snapd.seeded.service"
+    "dnsmasq.service"
 )
 
 for svc in "${SERVICES_TO_MASK[@]}"; do
@@ -24,6 +25,14 @@ for svc in "${SERVICES_TO_MASK[@]}"; do
         echo "Masking ${svc}..."
         systemctl mask "${svc}" || true
     fi
+done
+# dnsmasq and systemd-resolved both want port 53. Keep resolved, and mask
+# dnsmasq even when systemctl cannot see the unit inside the build chroot.
+ln -sfn /dev/null /etc/systemd/system/dnsmasq.service
+# A live USB has no containers. These units print a red FAILED line and
+# make the boot look like the installer crashed.
+for svc in podman-auto-update.service podman-auto-update.timer podman-restart.service; do
+    ln -sfn /dev/null "/etc/systemd/system/${svc}"
 done
 
 # 2. Block snapd completely via APT pinning
@@ -35,5 +44,75 @@ EOF
 
 # 3. Enable fstrim.timer for SSD health
 systemctl enable fstrim.timer || true
+
+# NetworkManager owns Ethernet and Wi-Fi. A masked networkd cannot take the cable.
+systemctl enable NetworkManager.service || true
+systemctl enable systemd-resolved.service || true
+systemctl mask systemd-networkd.service systemd-networkd.socket systemd-networkd-wait-online.service || true
+# systemctl enable can fail in a chroot. Write the boot links directly so
+# name lookup and the cable bring-up still start after install.
+mkdir -p /etc/systemd/system/multi-user.target.wants
+ln -sfn /etc/systemd/system/devos-network.service \
+    /etc/systemd/system/multi-user.target.wants/devos-network.service
+for unit in systemd-resolved.service NetworkManager.service; do
+    if [ -f "/usr/lib/systemd/system/${unit}" ]; then
+        ln -sfn "/usr/lib/systemd/system/${unit}" \
+            "/etc/systemd/system/multi-user.target.wants/${unit}"
+    elif [ -f "/lib/systemd/system/${unit}" ]; then
+        ln -sfn "/lib/systemd/system/${unit}" \
+            "/etc/systemd/system/multi-user.target.wants/${unit}"
+    fi
+done
+# The image build copies the builder DNS (often 127.0.0.11) over this file.
+# Leave the stub symlink so a connected cable can resolve names.
+rm -f /etc/resolv.conf
+ln -s ../run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+chmod 755 /etc/NetworkManager/dispatcher.d/99-devos-dns || true
+systemctl enable bluetooth.service || true
+systemctl enable devos-rfkill.service || true
+systemctl enable devos-network.service || true
+chmod 600 /etc/NetworkManager/system-connections/devos-ethernet.nmconnection || true
+chmod 600 /etc/netplan/01-network-manager-all.yaml || true
+# SDDM refuses the installer session when this script is not executable.
+chmod 755 \
+    /usr/local/bin/devos-live-session \
+    /usr/local/bin/devos-browser \
+    /usr/local/bin/devos-install-gui \
+    /usr/local/sbin/devos-bring-up-network \
+    /usr/local/sbin/devos-install-finalize \
+    /usr/local/sbin/devos-set-boot-order \
+    /usr/local/sbin/devos-force-installer-session \
+    || true
+
+# Live admin can start the installer without a password prompt.
+cat > /etc/sudoers.d/devos << 'EOF'
+devos ALL=(ALL) NOPASSWD:SETENV: ALL
+%sudo ALL=(ALL) NOPASSWD:SETENV: ALL
+EOF
+chown root:root /etc/sudoers.d/devos
+chmod 440 /etc/sudoers.d/devos
+chmod 755 /usr/local/bin/dolphin /usr/local/bin/devos-files || true
+
+# 4. Status page stays off the live USB. The installer session is forced first.
+systemctl enable devos-dashboard.service || true
+systemctl enable devos-force-installer.service || true
+mkdir -p /etc/systemd/system/sddm.service.wants
+ln -sfn /etc/systemd/system/devos-force-installer.service \
+    /etc/systemd/system/sddm.service.wants/devos-force-installer.service
+
+# 5. Local AI used by DevOS Code. It listens only on this computer.
+systemctl enable devos-ai-core.service || true
+
+# Ubuntu's installer must not be available. DevOS uses Calamares only.
+apt-get purge -y ubuntu-desktop-bootstrap ubuntu-desktop-installer ubiquity ubiquity-frontend-gtk gnome-initial-setup >/dev/null 2>&1 || true
+rm -f \
+    /etc/xdg/autostart/ubuntu-desktop-bootstrap.desktop \
+    /etc/xdg/autostart/ubiquity.desktop \
+    /etc/xdg/autostart/org.gnome.InitialSetup.desktop
+
+# App source for native DevOS versions of Windows apps (AnyDesk, Zoom...).
+# devos-open-app also adds it per user, so a failed download here is fine.
+flatpak remote-add --system --if-not-exists flathub \
+    https://dl.flathub.org/repo/flathub.flatpakrepo >/dev/null 2>&1 || true
 
 echo "==> DevOS 02-disable-services hook completed."

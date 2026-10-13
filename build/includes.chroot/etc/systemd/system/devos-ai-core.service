@@ -1,0 +1,13 @@
+[Unit]
+Description=DevOS Local AI Core
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/usr/local/share/devos/components/ai-core
+ExecStart=/usr/bin/python3 /usr/local/share/devos/components/ai-core/server.py
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

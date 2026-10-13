@@ -1,0 +1,52 @@
+#!/bin/bash
+# "Smarter DevOS AI": add the 1.1 GB chat model next to the built-in tiny one
+# and restart the AI service, which prefers the bigger model when present.
+# Run as root (pkexec from the DevOS AI window). Prints "[Downloading] X MB/Y MB"
+# lines that the window turns into a progress bar. "--remove" goes back to
+# the built-in model and frees the space.
+set -u
+
+dir=/var/lib/DevOS/models
+name=qwen2.5-1.5b-instruct-q4_k_m.gguf
+url="https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/${name}"
+dest="${dir}/${name}"
+
+if [ "${1:-}" = "--remove" ]; then
+    rm -f "$dest" "${dest}.partial"
+    systemctl restart devos-ai-core.service
+    echo "Back to the built-in DevOS AI."
+    exit 0
+fi
+
+mkdir -p "$dir"
+free_kb=$(df --output=avail -k "$dir" | tail -n 1)
+if [ "${free_kb:-0}" -lt 2000000 ]; then
+    echo "Smarter DevOS AI needs about 2 GB of free space." >&2
+    exit 1
+fi
+
+size=$(curl -fsSLI "$url" | tr -d '\r' | awk 'tolower($1)=="content-length:"{v=$2} END{print v+0}')
+total_mb=$(( ${size:-0} / 1048576 ))
+for attempt in 1 2 3 4 5 6; do
+    if [ "${size:-0}" -gt 0 ] && [ -f "${dest}.partial" ] && [ "$(stat -c %s "${dest}.partial")" -ge "$size" ]; then
+        break
+    fi
+    curl -fL --retry 5 --retry-delay 3 -C - -s -o "${dest}.partial" "$url" &
+    pid=$!
+    while kill -0 "$pid" 2>/dev/null; do
+        done_mb=$(( $(stat -c %s "${dest}.partial" 2>/dev/null || echo 0) / 1048576 ))
+        echo "[Downloading] ${done_mb}.0 MB/${total_mb}.0 MB"
+        sleep 1
+    done
+    wait "$pid" || true
+done
+
+magic=$(od -An -t x1 -N 4 "${dest}.partial" 2>/dev/null | tr -d ' \n')
+if [ "$magic" != "47475546" ] || [ "$(stat -c %s "${dest}.partial")" -lt 900000000 ]; then
+    echo "The download did not finish. Check the internet connection and try again." >&2
+    exit 1
+fi
+mv "${dest}.partial" "$dest"
+chmod 644 "$dest"
+systemctl restart devos-ai-core.service
+echo "Smarter DevOS AI is ready."

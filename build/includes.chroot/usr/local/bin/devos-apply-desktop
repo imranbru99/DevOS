@@ -1,0 +1,70 @@
+#!/bin/bash
+# The first desktop paint is stock Plasma unless this runs.
+# It applies the DevOS theme, icons, and wallpaper once Plasma is up.
+export DISPLAY="${DISPLAY:-:0}"
+mkdir -p "${HOME}/.config"
+# Falkon must not open the KDE Wallet window. That window blocks the whole screen.
+cat > "${HOME}/.config/kwalletrc" << 'EOF'
+[Wallet]
+Enabled=false
+First Use=false
+Launch Manager=false
+Prompt on Open=false
+Close When Idle=true
+Leave Manager Open=false
+EOF
+# Meta+H = DevOS AI voice command. Plasma 5 only grabs a launcher shortcut
+# that is in the user's own kglobalshortcutsrc and was there when the
+# shortcut service started; on a fresh account the key just typed "h".
+if command -v kwriteconfig5 >/dev/null 2>&1 \
+        && ! grep -q '^_launch=Meta+H' "${HOME}/.config/kglobalshortcutsrc" 2>/dev/null; then
+    kwriteconfig5 --file kglobalshortcutsrc --group devos-voice.desktop --key _k_friendly_name "Voice Command"
+    kwriteconfig5 --file kglobalshortcutsrc --group devos-voice.desktop --key _launch "Meta+H,none,Voice Command"
+    # The service restarts on the next request and reloads the file.
+    pkill -x -u "$(id -u)" kglobalaccel5 2>/dev/null && sleep 1
+    for qd in qdbus qdbus-qt5; do
+        command -v "$qd" >/dev/null 2>&1 && { "$qd" org.kde.kglobalaccel >/dev/null 2>&1; break; }
+    done
+fi
+
+stamp="${HOME}/.config/devos-ui.stamp"
+if [ -f "${stamp}" ]; then
+    exit 0
+fi
+
+qdbus_bin=""
+for candidate in qdbus qdbus-qt5; do
+    if command -v "${candidate}" >/dev/null 2>&1; then
+        qdbus_bin="${candidate}"
+        break
+    fi
+done
+
+ready=0
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+    if [ -n "${qdbus_bin}" ] && "${qdbus_bin}" org.kde.plasmashell >/dev/null 2>&1; then
+        ready=1
+        break
+    fi
+    sleep 1
+done
+
+if command -v kwriteconfig5 >/dev/null 2>&1; then
+    kwriteconfig5 --file kdeglobals --group General --key ColorScheme DevOS
+    kwriteconfig5 --file kdeglobals --group Icons --key Theme Papirus-Dark
+    kwriteconfig5 --file kdeglobals --group KDE --key widgetStyle kvantum
+    kwriteconfig5 --file kdeglobals --group KDE --key LookAndFeelPackage org.devos.desktop
+    kwriteconfig5 --file plasmarc --group Theme --key name breeze-dark
+fi
+
+if command -v lookandfeeltool >/dev/null 2>&1; then
+    lookandfeeltool -a org.devos.desktop >/tmp/devos-ui.log 2>&1 || true
+fi
+
+if [ "${ready}" -eq 1 ]; then
+    "${qdbus_bin}" org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript \
+        "$(cat /usr/local/share/devos/apply-wallpaper.js)" >/dev/null 2>&1 || true
+fi
+
+touch "${stamp}"
+exit 0

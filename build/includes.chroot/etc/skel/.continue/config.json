@@ -1,7 +1,7 @@
 {
   "models": [
     {
-      "title": "DevOS Local Code Model (Offline)",
+      "title": "DevOS AI (Offline)",
       "provider": "openai",
       "model": "qwen2.5-coder",
       "apiBase": "http://127.0.0.1:11434/v1",
@@ -9,7 +9,7 @@
     }
   ],
   "tabAutocompleteModel": {
-    "title": "DevOS Fast Inline Completion (1.5B)",
+    "title": "DevOS AI Autocomplete",
     "provider": "openai",
     "model": "qwen2.5-coder-1.5b",
     "apiBase": "http://127.0.0.1:11434/v1",

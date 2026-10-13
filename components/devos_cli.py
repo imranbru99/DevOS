@@ -25,6 +25,8 @@ def main():
         print("=====================================")
         print("Usage: devos <subsystem> [arguments...]")
         print("\nSubsystems:")
+        print("  dashboard Open Luxury System Dashboard & PIN/Security Hub")
+        print("  setup     Launch Interactive First-Boot Configuration Wizard")
         print("  app       Manage Windows, Linux, and Android applications")
         print("  code      Local AI code assistant and repository generator")
         print("  serve     Local developer server manager (Caddy, PHP, DB, Redis)")
@@ -35,14 +37,19 @@ def main():
         print("  net       Wi-Fi and Ethernet connection manager")
         print("  sound     PipeWire audio and volume controller")
         print("  driver    GPU, Wi-Fi, Bluetooth, and printer drivers")
+        print("  disk      Storage devices, MBR/GPT partition tables & formatting")
         sys.exit(0)
 
     sub = sys.argv[1]
     args = sys.argv[2:]
 
     hardware_script = os.path.join(COMPONENTS_DIR, "settings", "hardware_manager.py")
+    dashboard_script = os.path.join(COMPONENTS_DIR, "dashboard", "dashboard_server.py")
+    disk_script = os.path.join(COMPONENTS_DIR, "settings", "disk_manager.py")
 
     dispatch_map = {
+        "dashboard": dashboard_script,
+        "setup": dashboard_script,
         "app": os.path.join(COMPONENTS_DIR, "apphub", "hub.py"),
         "code": os.path.join(COMPONENTS_DIR, "code-agent", "code_agent.py"),
         "serve": os.path.join(COMPONENTS_DIR, "devserver", "server_manager.py"),
@@ -53,7 +60,12 @@ def main():
         "net": hardware_script,
         "sound": hardware_script,
         "driver": hardware_script,
+        "disk": disk_script,
+        "storage": disk_script,
     }
+
+    if sub == "setup" and "--first-boot" not in args:
+        args.append("--first-boot")
 
     # Normalize subcommands for hardware manager
     if sub == "net" and not args:
@@ -62,6 +74,11 @@ def main():
         args = ["sound-status"]
     elif sub == "driver" and not args:
         args = ["driver-status"]
+    elif sub in ("disk", "storage") and "--gui" in args:
+        disk_script = os.path.join(COMPONENTS_DIR, "settings", "disk_doctor_gui.py")
+        args = [a for a in args if a != "--gui"]
+        dispatch_map["disk"] = disk_script
+        dispatch_map["storage"] = disk_script
 
     if sub in dispatch_map:
         target_script = dispatch_map[sub]

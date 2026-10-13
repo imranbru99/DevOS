@@ -1,0 +1,5 @@
+# Re-tune a disk when it appears, including a drive plugged in later.
+ACTION=="add|change", SUBSYSTEM=="block", KERNEL=="sd[a-z]|nvme[0-9]*n[0-9]*", RUN+="/usr/local/sbin/devos-tune-hardware"
+
+# Keep a USB Bluetooth adapter from sleeping and disappearing.
+ACTION=="add", SUBSYSTEM=="usb", DRIVERS=="btusb", ATTR{power/control}="on"

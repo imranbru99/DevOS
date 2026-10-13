@@ -1,0 +1,12 @@
+{
+    "KPlugin": {
+        "Id": "DevOS-GlassHorizon",
+        "Name": "Glass Horizon",
+        "Authors": [
+            {
+                "Name": "DevOS"
+            }
+        ],
+        "License": "CC-BY-SA-4.0"
+    }
+}

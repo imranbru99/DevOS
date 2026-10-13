@@ -1,0 +1,16 @@
+[Unit]
+Description=DevOS Luxury System Dashboard & First-Boot Daemon
+After=network.target
+# The live USB is the installer. Do not open the status page on that boot.
+ConditionKernelCommandLine=!boot=casper
+
+[Service]
+Type=simple
+User=devos
+WorkingDirectory=/usr/local/share/devos/components/dashboard
+ExecStart=/usr/bin/python3 /usr/local/share/devos/components/dashboard/dashboard_server.py --no-browser --port 7070
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

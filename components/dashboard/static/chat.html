@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chat</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: #0c1220; color: #e8eef8; font-family: Inter, "Liberation Sans", sans-serif; }
+    .app { display: flex; flex-direction: column; height: 100%; }
+    header { padding: 16px 20px; border-bottom: 1px solid rgba(255,255,255,.08); background: rgba(16,24,40,.92); }
+    header h1 { margin: 0; font-size: 20px; }
+    header p { margin: 6px 0 0; color: #b7c3d6; font-size: 13px; }
+    #log { flex: 1; overflow: auto; padding: 20px; display: flex; flex-direction: column; gap: 12px; width: 100%; }
+    .msg { width: fit-content; max-width: 85%; min-width: 0; padding: 12px 14px; border-radius: 14px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .user { margin-left: auto; background: #2563eb; }
+    .assistant { margin-right: auto; background: #1a2438; border: 1px solid rgba(255,255,255,.08); }
+    form { display: flex; gap: 10px; padding: 14px; border-top: 1px solid rgba(255,255,255,.08); min-width: 0; }
+    input { flex: 1; min-width: 0; border: 0; border-radius: 12px; padding: 14px 16px; background: #162033; color: inherit; font: inherit; }
+    button { border: 0; border-radius: 12px; padding: 0 18px; background: #38bdf8; color: #041018; font-weight: 700; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>DevOS AI</h1>
+      <p>Your private assistant. Everything stays on this computer.</p>
+    </header>
+    <div id="log"></div>
+    <form id="ask">
+      <input id="text" autocomplete="off" placeholder="Ask DevOS AI anything: apps, files, Windows or Android programs">
+      <button type="submit">Send</button>
+    </form>
+  </div>
+  <script>
+    const log = document.getElementById("log");
+    const turns = [];
+    function add(role, text) {
+      const el = document.createElement("div");
+      el.className = "msg " + role;
+      el.textContent = text;
+      log.appendChild(el);
+      log.scrollTop = log.scrollHeight;
+      return el;
+    }
+    add("assistant", "Hi, I am DevOS AI. I run on this computer, so your questions stay private. How can I help?");
+    document.getElementById("ask").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const input = document.getElementById("text");
+      const button = event.target.querySelector("button");
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = "";
+      add("user", text);
+      turns.push({ role: "user", content: text });
+      const pending = add("assistant", "Answering on this computer...");
+      button.disabled = true;
+      try {
+        const response = await fetch("http://127.0.0.1:11434/v1/chat/completions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messages: turns })
+        });
+        const data = await response.json();
+        const reply = data.choices && data.choices[0] && data.choices[0].message
+          ? data.choices[0].message.content
+          : "The assistant did not answer.";
+        pending.textContent = reply;
+        turns.push({ role: "assistant", content: reply });
+      } catch (err) {
+        pending.textContent = "The assistant is not running yet. It listens on this PC at port 11434.";
+      } finally {
+        button.disabled = false;
+        input.focus();
+      }
+    });
+  </script>
+</body>
+</html>

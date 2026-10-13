@@ -6,6 +6,7 @@ linux-firmware
 intel-microcode
 amd64-microcode
 firmware-sof-signed
+thermald
 
 # 2. Graphics, Display, and Video Acceleration
 mesa-vulkan-drivers
@@ -22,6 +23,8 @@ ubuntu-drivers-common
 
 # 4. Networking, Wi-Fi & Ethernet
 network-manager
+systemd-resolved
+netplan.io
 wpasupplicant
 wireless-regdb
 wireless-tools

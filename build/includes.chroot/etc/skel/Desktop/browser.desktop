@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Name=Chrome
+GenericName=Web Browser
+Comment=Google Chrome. Bookmarks and sign-in stay on this computer after restart
+Exec=devos-browser %U
+Icon=google-chrome
+Terminal=false
+Type=Application
+Categories=Network;WebBrowser;
+MimeType=text/html;application/xhtml+xml;x-scheme-handler/http;x-scheme-handler/https;
+StartupNotify=true

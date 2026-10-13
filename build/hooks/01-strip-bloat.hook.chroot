@@ -15,14 +15,28 @@ rm -rf /usr/share/bug/*
 # 2. Re-create essential copyright directories if needed by packaging guidelines
 mkdir -p /usr/share/doc
 
-# 3. Clean Apt and temporary directories
+# 3. Keep only the newest kernel. Upgrades in a reused chroot left two
+# (image, modules, extra modules, headers: ~300 MB) and the ISO hit 4 GB.
+latest="$(ls -1 /boot/vmlinuz-* 2>/dev/null | sort -V | tail -n 1 | sed 's#.*/vmlinuz-##; s#-generic$##')"
+if [ -n "$latest" ]; then
+    old_kernels="$(dpkg-query -W -f='${Package}\n' 'linux-image-[0-9]*' 'linux-modules-[0-9]*' \
+        'linux-modules-extra-[0-9]*' 'linux-headers-[0-9]*' 'linux-tools-[0-9]*' 2>/dev/null \
+        | grep -v -- "-${latest}" || true)"
+    if [ -n "$old_kernels" ]; then
+        echo "Removing old kernels (keeping ${latest}): ${old_kernels}"
+        # shellcheck disable=SC2086
+        apt-get purge -y $old_kernels || true
+    fi
+fi
+
+# 4. Clean Apt and temporary directories
 apt-get autoremove --purge -y || true
 apt-get clean
 rm -rf /var/lib/apt/lists/*
 rm -rf /var/cache/apt/archives/*
 rm -rf /tmp/* /var/tmp/*
 
-# 4. Prune unused locales - keep English (en) and Bengali (bn)
+# 5. Prune unused locales - keep English (en) and Bengali (bn)
 if command -v locale-gen >/dev/null 2>&1; then
     echo "Configuring locales for en_US.UTF-8 and bn_BD.UTF-8..."
     cat << 'EOF' > /etc/locale.gen
@@ -32,7 +46,7 @@ EOF
     locale-gen
 fi
 
-# 5. Prevent apt from re-downloading man pages and translation files
+# 6. Prevent apt from re-downloading man pages and translation files
 cat << 'EOF' > /etc/apt/apt.conf.d/99devos-nodoc
 Dir::Cache::pkgcache "";
 Dir::Cache::srcpkgcache "";

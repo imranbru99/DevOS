@@ -1,0 +1,125 @@
+#!/bin/bash
+# One-time Android setup (run as root through pkexec by devos-open-app):
+# download the Android system, pick the graphics mode, start the service.
+#
+# Android draws with the GPU through /dev/dri/renderD*. Without a render node
+# (virtual machines, some old laptops) or with an NVIDIA card, its display
+# service crashes and the Android window stays black, so those machines use
+# the built-in software renderer instead.
+set -u
+
+images=/var/lib/waydroid/images
+
+# Android's system image is a disk image that is loop-mounted. On DevOS's
+# btrfs (zstd compression) it came out with zeroed files ("libpcre2.so has
+# bad ELF magic: 00000000") and Android never booted (black window). Images
+# go into a folder with copy-on-write and compression turned off.
+mkdir -p "$images"
+if [ "$(stat -f -c %T /var/lib/waydroid 2>/dev/null)" = "btrfs" ]; then
+    chattr +C "$images" 2>/dev/null || true
+fi
+
+image_ok() {
+    [ -f "$images/system.img" ] || return 1
+    debugfs -R "cat /system/lib64/libpcre2.so" "$images/system.img" 2>/dev/null \
+        | head -c 4 | grep -q ELF
+}
+
+if [ -f "$images/system.img" ] && ! image_ok; then
+    echo "DevOS: the Android system image is damaged, downloading it again"
+    systemctl stop waydroid-container.service >/dev/null 2>&1 || true
+    rm -f "$images"/*.img /var/lib/waydroid/waydroid.cfg /var/lib/waydroid/waydroid_base.prop
+fi
+
+# Waydroid's own downloader cannot resume. Downloads kept stopping at about
+# 840 of 847 MB ("hash doesn't match"), and an earlier cut-short image was
+# used anyway. DevOS downloads with resume + retry, checks SHA-256, and then
+# gives Waydroid the local images.
+fetch_image() {
+    # $1 = OTA json url, $2 = image name inside the zip (system.img/vendor.img)
+    local meta url sha size name zip
+    meta=$(curl -fsSL --retry 5 "$1") || return 1
+    read -r url sha size name < <(printf '%s' "$meta" | python3 -c '
+import json, sys
+r = json.load(sys.stdin)["response"][0]
+print(r["url"], r["id"], r["size"], r["filename"])')
+    [ -n "$url" ] || return 1
+    zip="/var/lib/waydroid/download/${name}"
+    mkdir -p /var/lib/waydroid/download
+    local total_mb=$((size / 1048576))
+    for attempt in 1 2 3 4 5 6 7 8; do
+        if [ -f "$zip" ] && [ "$(stat -c %s "$zip")" -ge "$size" ]; then
+            break
+        fi
+        curl -fL --retry 5 --retry-delay 3 -C - -s -o "$zip" "$url" &
+        local pid=$!
+        while kill -0 "$pid" 2>/dev/null; do
+            local done_mb=$(( $(stat -c %s "$zip" 2>/dev/null || echo 0) / 1048576 ))
+            echo "[Downloading] ${done_mb}.0 MB/${total_mb}.0 MB"
+            sleep 1
+        done
+        wait "$pid" || true
+    done
+    if [ "$(sha256sum "$zip" | cut -d' ' -f1)" != "$sha" ]; then
+        echo "DevOS: ${name} failed its checksum, it will be downloaded again next time" >&2
+        rm -f "$zip"
+        return 1
+    fi
+    echo "Unpacking ${2}..."
+    python3 -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extract(sys.argv[2], sys.argv[3])' \
+        "$zip" "$2" "$images" || return 1
+    rm -f "$zip"
+}
+
+if [ ! -f "$images/system.img" ]; then
+    fetch_image https://ota.waydro.id/system/lineage/waydroid_x86_64/VANILLA.json system.img || exit 1
+    fetch_image https://ota.waydro.id/vendor/waydroid_x86_64/MAINLINE.json vendor.img || exit 1
+    image_ok || { echo "DevOS: the Android system image is damaged" >&2; exit 1; }
+fi
+
+# Register the verified images. Waydroid skips its own download only for
+# "preinstalled" images in /etc/waydroid-extra/images ("-i" just moves where
+# it downloads to). Also covers a run interrupted after the download.
+mkdir -p /etc/waydroid-extra
+ln -sfn "$images" /etc/waydroid-extra/images
+if [ ! -f /var/lib/waydroid/waydroid.cfg ] || [ ! -f /var/lib/waydroid/waydroid_base.prop ]; then
+    waydroid init -f || exit 1
+fi
+
+# GPU mode only for drivers Android's Mesa supports (Intel, AMD). Virtual
+# GPUs without 3D (virtio_gpu, bochs, vmwgfx), NVIDIA and "no GPU" use the
+# software renderer; a virtio render node alone still gave a black window.
+software=1
+for node in $(ls /dev/dri/renderD* 2>/dev/null || true); do
+    driver=$(basename "$(readlink -f "/sys/class/drm/$(basename "$node")/device/driver" 2>/dev/null)" 2>/dev/null)
+    case "$driver" in
+        i915|xe|amdgpu|radeon) software=0 ;;
+    esac
+done
+
+set_prop() {
+    local key="$1" value="$2" file
+    # waydroid.cfg [properties] survives "waydroid upgrade"; base.prop is
+    # what the running container reads.
+    file=/var/lib/waydroid/waydroid.cfg
+    if [ -f "$file" ]; then
+        grep -q '^\[properties\]' "$file" || printf '\n[properties]\n' >> "$file"
+        sed -i "/^${key} *=/d" "$file"
+        sed -i "/^\[properties\]/a ${key} = ${value}" "$file"
+    fi
+    file=/var/lib/waydroid/waydroid_base.prop
+    if [ -f "$file" ]; then
+        sed -i "/^${key}=/d" "$file"
+        echo "${key}=${value}" >> "$file"
+    fi
+}
+
+if [ "$software" -eq 1 ]; then
+    echo "DevOS: no supported GPU render node, Android uses software rendering"
+    set_prop ro.hardware.gralloc default
+    set_prop ro.hardware.egl swiftshader
+fi
+
+systemctl enable waydroid-container.service >/dev/null 2>&1 || true
+systemctl restart waydroid-container.service
+exit 0

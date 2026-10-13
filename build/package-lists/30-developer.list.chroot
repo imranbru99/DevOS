@@ -5,7 +5,6 @@
 git
 git-lfs
 gh
-lazygit
 
 # Containers & Virtualization
 podman
@@ -67,3 +66,16 @@ jq
 # Code Editors & Viewers
 kate
 neovim
+fonts-jetbrains-mono
+# DevOS AI: PDF reading, text-in-image (OCR, English + Bangla), microphone
+# and volume control, graphics info, app launching
+poppler-utils
+tesseract-ocr
+tesseract-ocr-eng
+tesseract-ocr-ben
+pulseaudio-utils
+pciutils
+libgtk-3-bin
+python3-requests
+python3-tqdm
+libgomp1

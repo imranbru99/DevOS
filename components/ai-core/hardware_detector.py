@@ -58,6 +58,7 @@ class HardwareDetector:
     @staticmethod
     def get_system_ram_gb() -> float:
         """Returns total physical RAM in Gigabytes using OS-native methods."""
+        readings = []
         # 1. Linux /proc/meminfo
         if os.path.exists("/proc/meminfo"):
             try:
@@ -66,7 +67,8 @@ class HardwareDetector:
                         if line.startswith("MemTotal:"):
                             parts = line.split()
                             kb = float(parts[1])
-                            return round(kb / (1024 * 1024), 2)
+                            readings.append(round(kb / (1024 * 1024), 2))
+                            break
             except Exception:
                 pass
 
@@ -91,7 +93,7 @@ class HardwareDetector:
                 stat = MEMORYSTATUSEX()
                 stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
                 ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat))
-                return round(stat.ullTotalPhys / (1024 ** 3), 2)
+                readings.append(round(stat.ullTotalPhys / (1024 ** 3), 2))
             except Exception:
                 pass
 
@@ -99,9 +101,15 @@ class HardwareDetector:
         try:
             pages = os.sysconf("SC_PHYS_PAGES")
             page_size = os.sysconf("SC_PAGE_SIZE")
-            return round((pages * page_size) / (1024 ** 3), 2)
+            if pages > 0 and page_size > 0:
+                readings.append(round((pages * page_size) / (1024 ** 3), 2))
         except Exception:
-            return 8.0
+            pass
+
+        positive = [value for value in readings if value > 0]
+        if positive:
+            return max(positive)
+        return 8.0
 
     @staticmethod
     def detect_gpu() -> Dict[str, Any]:

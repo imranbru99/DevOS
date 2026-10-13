@@ -1,0 +1,111 @@
+#!/bin/bash
+# Show DevOS, not the parts it is built from. Users see "Files", "Terminal",
+# "Settings" and a "DevOS" session instead of Dolphin, Konsole, Plasma or KDE.
+# Runs at image build and after every package change (99devos-branding), so
+# upgrades cannot bring the upstream names back.
+set -u
+
+# Sign-in screen session names ("Desktop Session: Plasma (X11)").
+rename_session() {
+    local file="$1" name="$2"
+    [ -f "$file" ] || return 0
+    sed -i -e "s/^Name=.*/Name=${name}/" -e '/^Name\[/d' -e '/^Comment\[/d' \
+        -e 's/^Comment=.*/Comment=DevOS desktop/' "$file"
+}
+rename_session /usr/share/xsessions/plasma.desktop "DevOS"
+rename_session /usr/share/wayland-sessions/plasmawayland.desktop "DevOS (Wayland)"
+# Weston is only the window Android apps open in, not a desktop to sign in to.
+rm -f /usr/share/wayland-sessions/weston.desktop
+
+# App menu names. Overrides in /usr/local/share/applications win over
+# /usr/share/applications, so the packaged files stay untouched.
+python3 - << 'PY'
+import os, re
+
+SRC = "/usr/share/applications"
+DST = "/usr/local/share/applications"
+RENAME = {
+    "org.kde.dolphin": ("Files", "File manager"),
+    "org.kde.konsole": ("Terminal", "Command line"),
+    "org.kde.kate": ("Text Editor", "Advanced text editor"),
+    "org.kde.okular": ("Document Viewer", "PDF and document viewer"),
+    "org.kde.gwenview": ("Photos", "Image viewer"),
+    "org.kde.ark": ("Archive Manager", "Zip and archive tool"),
+    "org.kde.spectacle": ("Screenshot", "Capture the screen"),
+    "org.kde.kcalc": ("Calculator", "Calculator"),
+    "org.kde.plasma-systemmonitor": ("Task Manager", "Running apps and performance"),
+    "org.kde.partitionmanager": ("Disk Partitions", "Partition editor"),
+    "org.kde.plasma.emojier": ("Emoji Picker", "Emoji"),
+    "org.kde.ConfigurePrinter": ("Printers", "Printer settings"),
+    "org.kde.PrintQueue": ("Print Queue", "Print jobs"),
+    "org.kde.kde-add-printer": ("Add Printer", "Add a printer"),
+    "org.kde.bluedevilsendfile": ("Send via Bluetooth", "Bluetooth file transfer"),
+    "org.kde.bluedevilwizard": ("Pair Bluetooth Device", "Bluetooth"),
+    "org.kde.klipper": ("Clipboard", "Clipboard history"),
+    "systemsettings": ("Settings", "System settings"),
+    "org.kde.kfontview": ("Font Viewer", "Fonts"),
+}
+# Duplicates and tools that only confuse: DevOS has its own entry for these.
+HIDE = [
+    "org.kde.kwrite", "org.kde.falkon", "org.kde.kinfocenter", "kdesystemsettings",
+    "org.kde.kcolorschemeeditor", "org.kde.knetattach", "org.kde.keditfiletype",
+    "org.kde.kwin_rules_dialog", "org.kde.kmenuedit", "org.kde.khelpcenter",
+    "org.kde.kwalletmanager5", "org.kde.drkonqi.coredump.gui", "org.kde.gwenview_importer",
+    "org.kde.knewstuff-dialog", "org.kde.plasmawindowed", "org.kde.kdialog",
+    "org.kde.plasma.settings.open", "kcm_kded", "kcm_plasmasearch",
+]
+
+os.makedirs(DST, exist_ok=True)
+
+def rewrite(app_id, name=None, generic=None, hide=False):
+    src = os.path.join(SRC, app_id + ".desktop")
+    if not os.path.isfile(src):
+        return
+    out, section = [], None
+    with open(src, encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            stripped = line.strip()
+            if stripped.startswith("["):
+                section = stripped
+            main = section == "[Desktop Entry]"
+            if main and re.match(r"^(Name|GenericName|Comment)\[", stripped):
+                continue  # translations would show the old name
+            if main and name and stripped.startswith("Name="):
+                line = f"Name={name}\n"
+            elif main and generic and stripped.startswith("GenericName="):
+                line = f"GenericName={generic}\n"
+            out.append(line)
+            if main and stripped == "[Desktop Entry]" and hide:
+                out.append("NoDisplay=true\n")
+    with open(os.path.join(DST, app_id + ".desktop"), "w", encoding="utf-8") as handle:
+        handle.writelines(out)
+
+for app_id, (name, generic) in RENAME.items():
+    rewrite(app_id, name, generic)
+for app_id in HIDE:
+    rewrite(app_id, hide=True)
+PY
+
+mkdir -p /etc/xdg
+
+# "About this PC" header: DevOS name and logo.
+cat > /etc/xdg/kcm-about-distrorc << 'EOF'
+[General]
+Name=DevOS
+LogoPath=/usr/share/pixmaps/devos-logo.png
+Website=https://github.com/imranbru99/DevOS
+Version=24.04 LTS
+Variant=Desktop
+UseOSReleaseVersion=false
+EOF
+
+# The stock login splash is the upstream logo. DevOS opens straight to the
+# desktop instead (also faster).
+cat > /etc/xdg/ksplashrc << 'EOF'
+[KSplash]
+Engine=none
+Theme=None
+EOF
+
+update-desktop-database /usr/local/share/applications >/dev/null 2>&1 || true
+exit 0

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Service
+Name=DevOS
+Comment=DevOS dark desktop
+X-KDE-ServiceTypes=Plasma/LookAndFeel
+X-KDE-PluginInfo-Name=org.devos.desktop
+X-KDE-PluginInfo-Author=DevOS
+X-KDE-PluginInfo-Version=1.0
+X-KDE-PluginInfo-Category=Plasma Look and Feel
+X-Plasma-MainScript=defaults
+X-KDE-fallbackPackage=org.kde.breezedark.desktop

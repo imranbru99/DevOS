@@ -1,0 +1,13 @@
+{
+    "KPackageStructure": "Plasma/LookAndFeel",
+    "KPlugin": {
+        "Authors": [{ "Name": "DevOS" }],
+        "Category": "Plasma Look And Feel",
+        "Description": "DevOS dark desktop",
+        "Id": "org.devos.desktop",
+        "Name": "DevOS",
+        "ServiceTypes": ["Plasma/LookAndFeel"],
+        "Version": "1.0"
+    },
+    "X-KDE-fallbackPackage": "org.kde.breezedark.desktop"
+}

@@ -1,0 +1,65 @@
+[$Version]
+update_info=kwin.upd:kwin-5.18-keep-above-lower.upd,kwin.upd:kwin-5.21-desktop-grid-click-behavior.upd
+
+[Desktops]
+Number=1
+Rows=1
+
+[EdgeBarrier]
+CornerBarrier=false
+EdgeBarrier=0
+
+[MouseBindings]
+CommandActiveTitlebar1=Raise
+CommandActiveTitlebar2=Lower
+CommandActiveTitlebar3=Operations menu
+CommandInactiveTitlebar1=Activate and raise
+CommandInactiveTitlebar2=Activate and lower
+CommandInactiveTitlebar3=Operations menu
+CommandTitlebarWheel=Switch to Window Above/Below
+
+[Plugins]
+breezedecorationEnabled=true
+overviewEnabled=true
+presentwindowsEnabled=true
+blurEnabled=true
+kwin4_effect_fadeEnabled=true
+kwin4_effect_scaleEnabled=true
+slidingpopupsEnabled=true
+squashEnabled=true
+
+[Compositing]
+Enabled=true
+LatencyPolicy=Low
+
+[Windows]
+AutoRaise=false
+AutoRaiseInterval=750
+BorderSnapZone=10
+BorderlessMaximizedWindows=false
+CenterByShortcut=false
+ClickRaise=true
+DelayFocus=false
+FocusPolicy=ClickToFocus
+FocusStealingPreventionLevel=1
+GeometryTip=false
+HideUtilityWindowsForInactive=true
+InactiveTabsSkipTaskbar=false
+NextFocusPrefersMouse=false
+Placement=Smart
+RollOverDesktops=true
+SeparateScreenFocus=false
+ShadeHover=false
+ShadeHoverInterval=250
+SnapOnlyWhenOverlapping=false
+TitlebarDoubleClickCommand=Maximize
+WindowSnapZone=10
+
+[org.kde.kdecoration2]
+BorderSize=Normal
+ButtonsOnLeft=M
+ButtonsOnRight=IAX
+CloseOnDoubleClickOnMenu=false
+ShowToolTips=true
+library=org.kde.breeze
+theme=Breeze

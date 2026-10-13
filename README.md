@@ -1,373 +1,292 @@
-# DevOS: The AI-Native, Ultra-Optimized Windows Alternative for Web Developers
+<p align="center">
+  <img src="build/includes.chroot/etc/calamares/branding/devos/logo.png" width="120" alt="DevOS logo">
+</p>
 
-![DevOS Banner](https://raw.githubusercontent.com/devos-project/devos/main/build/branding/wallpapers/banner.png)
+<h1 align="center">DevOS</h1>
 
-> **DevOS** is the ultimate user-friendly, lightweight Windows alternative for web developers. Built on **Ubuntu 24.04 LTS (Noble Numbat)**, it runs Windows (`.exe` / `.msi`), Linux (Flatpak / `.deb` / AppImage), and Android (`.apk`) apps out of the box with 100% offline local AI, turnkey web stacks (Laravel, Next.js, Caddy, DBs on `*.test`), btrfs zstd compression, and anti-hang memory tuning. Fast, private, and bloat-free.
-
----
-
-## 🌟 Executive Summary
-
-DevOS bridges the gap between Windows user familiarity and Linux developer power:
-1. **Familiar Windows UX:** Fluent Dark theme with acrylic blur, bottom centered/left taskbar, Start Menu, Dolphin Explorer with breadcrumbs and "This PC", and identical Windows keyboard shortcuts (`Win`, `Win+E`, `Win+D`, `Win+R`, `Win+Shift+S`, `Ctrl+Shift+Esc`).
-2. **Universal App Hub:** Seamlessly double-click or install **any** application. A magic-byte type router automatically directs `.exe`/`.msi` to **WinLayer** (Wine/Proton-GE/DXVK), `.apk` to **AndroidLayer** (Waydroid multi-window), and `.deb`/AppImage/Flatpak to **LinuxLayer**.
-3. **100% Offline, Free AI Stack:** Ships an OpenAI-compatible daemon on `127.0.0.1:11434/v1`, auto-assigning hardware-tiered local models (Qwen2.5 / Llama 3) based on system RAM and GPU (NVIDIA CUDA, AMD ROCm, Intel Vulkan).
-4. **2027 Era Silicon & NPU Acceleration:** Automated on-die **NPU** discovery (Intel AI Boost, AMD Ryzen AI XDNA 2, Qualcomm Snapdragon X Elite) running ambient intelligence at 2–3 Watts with zero fan noise and 85% battery savings.
-5. **Turnkey Developer Workstation:** Pre-configured with **VSCodium** (VS Code without telemetry) + Continue local AI assistant, rootless Podman/Docker, PHP 8.3/Composer/Laravel, Node.js/pnpm, Python/pipx, and a Laragon-style manager (**`devserver`**) for one-click local `https://*.test` environments with automatic SSL (`mkcert`).
-6. **Anti-Hang & Storage Optimization:** Default **btrfs + zstd:3** filesystem compression reduces heavy 10–20 GB Windows/Chrome applications by 50% on disk. In-RAM compressed `zram` swap, `earlyoom`, and Linux PSI memory stall monitoring guarantee the desktop **never freezes** under heavy loads.
-7. **Complete Hardware & Driver Control:** Plug-and-play Wi-Fi/Ethernet management, PipeWire 1.0 pro-audio with Sound Open Firmware (SOF), LDAC/aptX Bluetooth, driverless IPP printing, and automated NVIDIA proprietary driver installation.
+<p align="center">
+  <b>One fast desktop for your Linux, Windows and Android apps — with a private AI assistant built in.</b><br>
+  Based on Ubuntu 24.04 LTS · Open source (MIT) · Made by <a href="https://imrandev.bd/">Imran Ahmed (Imran Dev)</a>
+</p>
 
 ---
 
-## 📐 System Architecture
+## Our aim
 
+DevOS exists to give people — especially Windows users and developers — **an operating system that feels familiar on day one, stays fast on ordinary laptops, and respects their privacy**:
+
+- **Run what you already use.** Double-click a Windows `.exe`, an Android `.apk` or a Linux app and it opens. When a better native version of the app exists, DevOS offers it.
+- **Stay fast on modest hardware.** A 3.3 GB ISO, a small on-device AI that gives its memory back when idle, compressed memory and storage, and a built-in optimizer.
+- **AI that works for you, privately.** DevOS AI runs entirely on your PC: it answers questions about your computer, does things for you (open apps, search, save notes, set reminders…), reads PDFs and images, and understands your voice in Bangla and English — nothing is sent to the cloud.
+- **Premium, simple, and yours.** A polished dark design, one-click install with no account required, and no telemetry.
+
+---
+
+## Highlights
+
+| | |
+|---|---|
+| 🪟 **Windows apps** | `.exe` / `.msi` open with a double-click (32- and 64-bit). Popular apps such as AnyDesk, Zoom, Discord, Spotify and Steam get their **native DevOS version** offered instead. |
+| 🤖 **Android apps** | `.apk` files install into a built-in Android system (downloaded once on first use, ~850 MB). WhatsApp, Telegram, Spotify and similar APKs are offered as native DevOS apps — no Android download needed. |
+| ✨ **DevOS AI** | Private on-device assistant: PC questions, actions, notes, web search, reminders, PDFs, text-in-images, photos, voice (Bangla + English), **Meta+H** push-to-talk and optional **“Hey DevOS”**. |
+| 🧹 **DevOS Optimizer** | Finds apps you haven't used for 15+ minutes and offers to close them; cleans temp files, caches, the Recycle Bin and Windows-app leftovers. |
+| 📦 **Apps window** | Windows-style *Installed apps*: uninstall Linux, Windows and Android apps, clear cache, reset data and browser cookies. |
+| 📝 **Notepad** | Windows 11-style tabs; **unsaved text survives crashes and power cuts**. |
+| 💻 **Developer ready** | VS Code, Git, Node.js, Python, PHP + Composer, MariaDB, PostgreSQL, Redis, SQLite, Podman (Docker-compatible). |
+| 🎨 **Premium look** | Dark DevOS theme, icons-only taskbar, **21 wallpapers**, a modern installer, DevOS names everywhere (Files, Terminal, Settings…). |
+| ⚡ **Small & fast** | 3.3 GB ISO, boots straight to the desktop, compressed RAM swap, btrfs + zstd storage, memory-hog protection. |
+
+---
+
+## What you get
+
+### 1. Installer
+- Modern full-screen installer: welcome page, location, keyboard, disk, account, summary, progress.
+- **Erase disk** creates an EFI partition plus a btrfs system (subvolumes for `/`, `/home`, `/.snapshots`, `/var/log`, `/var/cache`; zstd compression). Manual partitioning and full-disk encryption (LUKS) are available too.
+- **The account is optional.** Name, sign-in name and computer name are pre-filled; leave the password empty and DevOS signs in automatically (you can add a password later).
+- Boots on **UEFI and legacy BIOS** PCs, from USB or DVD. After install it starts **straight to the desktop** — no boot menu wait (the menu still appears when Windows is installed alongside).
+
+### 2. Desktop that feels like Windows
+- Start menu with the DevOS logo, **icons-only taskbar** (many apps fit; windows of one app are grouped), system tray and clock.
+- Desktop shortcuts: Apps, Chrome, DevOS AI, DevOS Code, Documents, Notepad, Settings, Terminal, This PC, VLC and more.
+- **Windows keyboard shortcuts**
+
+  | Keys | Action |
+  |---|---|
+  | `Win` | Start menu |
+  | `Win + E` | Files (file explorer) |
+  | `Win + D` | Show desktop |
+  | `Win + R` | Run / search |
+  | `Win + L` | Lock |
+  | `Win + Shift + S` | Screenshot of a region |
+  | `Win + ← → ↑ ↓` | Snap / maximise / minimise windows |
+  | `Win + H` | **DevOS AI voice command** |
+
+- **21 wallpapers**: the DevOS default plus 20 premium designs (Aurora Veil, Silk Current, Nebula Drift, Glass Horizon…), with previews in *Configure Desktop and Wallpaper*. See [`tools/wallpapers/preview.jpg`](tools/wallpapers/preview.jpg).
+- Everything is called **DevOS**: the sign-in session, “About this PC”, and apps named by what they do — *Files, Terminal, Text Editor, Photos, Document Viewer, Settings, Task Manager*.
+
+### 3. Run any app
+
+#### Windows programs (`.exe`, `.msi`)
+- Double-click to run. Each app gets its own isolated Windows environment, prepared **silently** the first time (no technical pop-ups) and copied instantly for every new app on btrfs.
+- 32-bit installers (most setup files) and 64-bit programs are supported.
+- **Native versions first:** for AnyDesk, Zoom, Discord, Spotify, Telegram, WhatsApp, Steam, OBS, Slack, Firefox, Brave, GIMP, Blender, Audacity, LibreOffice, Postman and TeamViewer (Remmina), DevOS offers to install the **DevOS (native) version** from Flathub — faster and fully featured (e.g. AnyDesk's remote control only works natively). You can still run the Windows version.
+
+#### Android apps (`.apk`)
+- Double-click an APK: on first use DevOS asks once to download the Android system (~850 MB, shown with a real progress bar, resumable and checksum-verified), then installs and opens the app in a **DevOS Android** window. Installed apps appear in the app menu.
+- Works on Intel and AMD graphics; other GPUs and virtual machines automatically use software rendering.
+- Popular apps with native versions (WhatsApp, Telegram, Spotify, Discord, Zoom…) skip the Android download entirely.
+
+#### Linux apps
+- Thousands of apps from **Flathub** (preconfigured), plus `.deb` packages and AppImages.
+
+#### Apps window — uninstall and clean
+- One list of every installed app (Linux, Windows, Android) with search, sort by size and type filter.
+- **Uninstall**, **Clear cache**, and **Reset data & cookies** (for browsers: cookies and cache, optionally history, passwords and bookmarks). System parts are protected from removal.
+- Right-click any app shortcut → **Uninstall…**
+
+### 4. DevOS AI — your private assistant
+Open **DevOS AI** from the desktop, or press **Win + H** and just speak.
+
+**Ask about your PC** — “What's my PC config?”, “How much RAM?”, “How many apps are installed?” — answered from real system data, not guesses.
+
+**Tell it what to do** (typed or spoken, typos are fine):
+
+| Say or type | DevOS AI does |
+|---|---|
+| “Go to Chrome and search HP latest laptop” | Opens Chrome with that Google search |
+| “Play lo-fi music on YouTube” / “Directions to Dhaka airport” | YouTube / Maps search |
+| “Open Notepad and save my name Imran Ahmed, number 0151…” | Saves a note in *Documents/Notes* and opens it |
+| “Take a note: buy milk, eggs and bread” | Same, as a note |
+| “Remind me in 10 minutes to call mom” / “Set a timer for 5 minutes” | Desktop reminder, even if the window is closed |
+| “Send an email to x@y.com about the meeting” | Opens a ready email draft (never sends by itself) |
+| “Open my Downloads” / “Make a folder called Projects on the desktop” | Files and folders |
+| “Open Wi-Fi settings”, “Volume up”, “Brightness down”, “Take a screenshot”, “Lock the screen” | Settings and system actions |
+| “Close Chrome”, “Free up space”, “Open Apps” | App and cleanup actions |
+
+Shut down, restart and uninstall always ask for confirmation first.
+
+**Documents & images**
+- Attach a **PDF**, Word file or text file and ask “Summarize this” or a question about it.
+- **Read text in images** (English + Bangla) instantly, no download.
+- **Describe photos** (“What's in this picture?”) with an optional one-time 296 MB download.
+
+**Voice**
+- Offline speech recognition for **Bangla and English** (included in the ISO).
+- **Win + H**: speak a command; a small pill shows what was heard and the result.
+- **“Hey DevOS”** hands-free mode (off by default, one switch in the sidebar), with battery and CPU guards and a tray icon to pause it.
+
+**Experience**
+- Modern chat window: conversation history sidebar with search, rename and delete; answers stream in word by word; Stop button; copy and regenerate; drag-and-drop files.
+- **Fast and light:** the built-in model is small (0.5B, ~490 MB); the first words usually appear in under a second, and its memory is **released after 5 idle minutes**.
+- **Smarter DevOS AI:** one click adds a larger model (1.1 GB) for better free-form answers; one click removes it again.
+- **Private:** runs only on your PC; chats, files and voice never leave it.
+- Also available to apps: an OpenAI-compatible local API at `http://127.0.0.1:11434/v1` (used by DevOS Code's AI features).
+
+### 5. DevOS Optimizer
+- Tray app that watches for apps you haven't used for 15+ minutes and that use a lot of memory, and offers **Close / Keep / Don't ask again** (never touches system processes).
+- **Clean up**: temporary files, app and browser caches, Recycle Bin, Windows-app temp files, old crash logs, and (optionally) old downloads — with sizes shown first and a confirmation.
+- Low disk space warnings, and an **Ask DevOS AI** button for tips based on what's using your PC.
+
+### 6. Notepad
+- Tabs, find & replace, go to line, zoom, word wrap, line/column status bar — like Windows 11 Notepad.
+- **Never lose text:** every tab (including unsaved *Untitled* ones) is saved automatically and restored after a crash, a forced close or a power cut.
+
+### 7. For developers
+- **VS Code** (“DevOS Code”) with DevOS AI wired in for offline chat and autocomplete; Copilot cloud chat is switched off.
+- Git, Git LFS, GitHub CLI, Node.js + npm, Python 3 + pip/venv/pipx, PHP 8.3 (FPM + common extensions) + Composer, MariaDB, PostgreSQL, Redis, SQLite, Podman / podman-compose (Docker-compatible), Neovim, tmux, ripgrep, fzf, btop, jq.
+- `devos serve` scaffolds Laravel, Next.js and FastAPI projects and shows the status of local services.
+
+### 8. Performance and reliability
+- **zram** compressed swap in RAM (zstd, 50%) and tuned kernel settings for heavy loads.
+- **earlyoom + systemd-oomd** stop runaway programs before the desktop freezes.
+- **btrfs with zstd compression** saves disk space and is snapshot-ready (Snapper installed).
+- Unneeded services (snapd, apport, telemetry) are removed or masked; boots straight to the desktop.
+
+### 9. Hardware
+- Wi-Fi and Ethernet (NetworkManager), Bluetooth, PipeWire audio, printers and scanners (CUPS / IPP), Intel and AMD graphics (Mesa + Vulkan), NVIDIA via the driver manager, broad firmware support.
+
+---
+
+## System requirements
+
+| | Minimum | Recommended |
+|---|---|---|
+| Processor | 64-bit (x86-64), 2 cores | 4+ cores |
+| Memory | 4 GB | **8 GB** (for Android apps + AI + browser at the same time) |
+| Storage | 30 GB | 64 GB+ SSD |
+| Firmware | UEFI or legacy BIOS | UEFI |
+| Graphics | Any | Intel or AMD (hardware-accelerated Android apps) |
+
+---
+
+## Install DevOS on a PC
+
+1. **Download or build** `devos-24.04-amd64.iso` (3.3 GB).
+2. **Write it to a USB stick** (8 GB+) with **balenaEtcher**, or **Rufus in “DD Image” mode**. On Linux/macOS:
+   ```bash
+   sudo dd if=devos-24.04-amd64.iso of=/dev/sdX bs=4M status=progress oflag=sync
+   ```
+3. **Turn off Secure Boot** in your PC's firmware settings (the USB boot loader is not signed yet).
+4. **Boot from the USB** — the DevOS installer opens by itself.
+5. Click through **Welcome → Location → Keyboard → Partitions → Account (optional) → Install**, then restart and remove the USB when the screen goes black.
+
+### Try it first in Docker (Windows, Docker Desktop)
+```bash
+powershell -ExecutionPolicy Bypass -File .\tests\docker-vm\run-devos-vm.ps1 -Reset
 ```
-+-----------------------------------------------------------------------+
-|                             DevOS Desktop                             |
-|        KDE Plasma 6 (Wayland Default)  *  Fluent Dark Acrylic UI      |
-+-----------------------------------------------------------------------+
-|  Start Menu  |  Taskbar  |  Dolphin Explorer  |  DevOS Control Center  |
-+-----------------------------------------------------------------------+
-                                   |
-         +-------------------------+-------------------------+
-         |                         |                         |
-         v                         v                         v
-+------------------+     +-------------------+     +--------------------+
-|  Universal Apps  |     |  Developer Stack  |     |   Local AI Engine  |
-+------------------+     +-------------------+     +--------------------+
-| * WinLayer       |     | * devserver (Web) |     | * NPU Accelerator  |
-|   (Wine/Proton)  |     |   Caddy/PHP-FPM   |     |   Intel/AMD/Snapdr |
-| * LinuxLayer     |     |   MariaDB/Postgres|     | * Hardware Tiering |
-|   Flatpak/deb/App|     |   Redis/Mailpit   |     |   Lite/Std/Pro     |
-| * AndroidLayer   |     | * VSCodium + AI   |     | * OpenAI Daemon    |
-|   Waydroid LXC   |     | * Podman / Docker |     |   (127.0.0.1:11434)|
-| * Type Router &  |     | * One-Click       |     | * Semantic Memory  |
-|   ClamAV Scan    |     |   https://*.test  |     | * Smart Shell Heal |
-+------------------+     +-------------------+     +--------------------+
-         |                         |                         |
-         +-------------------------+-------------------------+
-                                   |
-                                   v
-+-----------------------------------------------------------------------+
-|                         DevOS Linux Foundation                        |
-+-----------------------------------------------------------------------+
-| * Ubuntu 24.04 LTS (Noble) Minimal Core (Zero Snap Bloat / No Spyware)|
-| * HWE Kernel + BBR TCP + EarlyOOM + systemd-oomd (PSI Memory Shield)   |
-| * In-RAM zram Swap (zstd algorithm, 50% RAM allocation)               |
-| * btrfs Filesystem with zstd:3 Compression & Snapper Snapshots        |
-| * Hybrid BIOS + UEFI Boot with Secure Boot (shim-signed)              |
-+-----------------------------------------------------------------------+
-```
+Then open **http://localhost:8006**. The VM uses a 40 GB virtual disk (`tests/docker-vm/storage`) — your real drives are never touched. Use `-Iso <path>` for another ISO, `-Legacy` for BIOS boot, `-Stop` to stop. See [`tests/docker-vm/README.md`](tests/docker-vm/README.md).
 
 ---
 
-## 🚀 Key Feature Breakdown
+## Build the ISO from source
 
-### 1. Windows Look & Feel (Zero Learning Curve)
-- **Taskbar & Start Menu:** Centered or left-aligned icons, Windows 11-style Start Menu with pinned apps and recent files, system tray, clock, and peek-at-desktop corner.
-- **Dolphin Configured Like Explorer:** Breadcrumb address bar, details view mode, "This PC" folder hierarchy, and right-click actions ("Open in VSCodium", "Analyze with WinLayer Doctor", "Install on DevOS Android").
-- **Windows Keyboard Shortcuts:**
-  - `Win` $\to$ Open Start Menu
-  - `Win + E` $\to$ Open File Explorer (Dolphin)
-  - `Win + D` $\to$ Show / Hide Desktop
-  - `Win + R` $\to$ Run Command Dialog (KRunner)
-  - `Win + L` $\to$ Lock Workstation
-  - `Win + Shift + S` $\to$ Snipping Tool (Spectacle)
-  - `Win + Left / Right / Up / Down` $\to$ Window Tiling & Snapping
-  - `Alt + Tab` $\to$ Window Switcher
-  - `Ctrl + Shift + Esc` $\to$ System Task Manager (`btop`)
-- **Typography:** Microsoft fonts are aliased to open-source metrics-compatible typography via Fontconfig:
-  - `Segoe UI` $\to$ **Inter**
-  - `Arial` $\to$ **Liberation Sans**
-  - `Calibri` $\to$ **Carlito**
-  - `Cambria` $\to$ **Caladea**
-  - `Consolas / Monospace` $\to$ **Fira Code**
-
----
-
-### 2. Universal App Hub: Run Any Application
-DevOS eliminates package format silos. Double-click or run any app from a single interface:
-
-| Runtime | Handled Formats | Execution Engine | Isolation & Features |
-|---|---|---|---|
-| **Windows** | `.exe`, `.msi`, `.bat`, `.lnk` | **WinLayer** (Wine Staging, Proton-GE, DXVK, VKD3D-Proton) | Per-app isolated prefixes, btrfs reflink deduplication (0 MB added space), real Start Menu shortcuts. |
-| **Linux** | Flatpak, AppImage, `.deb`, APT | **LinuxLayer** (Flathub, Native APT, Distrobox) | Flathub enabled by default, FUSE3 AppImage integration, dependency-resolved `.deb` installer. |
-| **Android** | `.apk`, `.xapk`, `.apks` | **AndroidLayer** (Waydroid on Wayland) | Multi-window floating mode, shared clipboard, shared folder (`~/Android`), `adb` debugging, F-Droid & Aurora Store preinstalled. |
-
-#### Magic-Byte File Type Router
-DevOS does **not** rely on file extensions. Even if a file is mislabeled (e.g. `installer.png`), the [type_router.py](file:///c:/docker/DevOS/components/apphub/type_router.py) inspects the binary headers:
-- `MZ` $\to$ Routes to WinLayer
-- `PK + AndroidManifest.xml` $\to$ Routes to Waydroid
-- `\x7fELF` $\to$ Routes to LinuxLayer
-- `!<arch> + debian-binary` $\to$ Routes to APT
-
-#### Pre-Execution Safety Scan
-Before running downloaded binaries, [safety_scanner.py](file:///c:/docker/DevOS/components/apphub/safety_scanner.py) performs:
-- **Malware Signature Checks:** ClamAV definitions + EICAR test verification.
-- **Android Permission Audits:** Flags dangerous permissions (SMS interception, accessibility spyware, overlay windows, device admin).
-- **PE Header Inspection:** [doctor.py](file:///c:/docker/DevOS/components/winlayer/doctor.py) flags kernel-level anti-cheat/DRM (Vanguard, BattlEye) and suggests native VM fallback if needed.
-
----
-
-### 3. Local AI Core, NPU Acceleration & Auto-Healing
-
-#### 2027 Era NPU Silicon Support ([npu_accelerator.py](file:///c:/docker/DevOS/components/ai-core/npu_accelerator.py))
-- Detects **Intel AI Boost NPU**, **AMD Ryzen AI XDNA 2**, and **Qualcomm Snapdragon X Elite NPU**.
-- Runs ambient conversational AI at **2.0W to 3.0W**, keeping discrete GPUs asleep and saving up to **85% battery life**.
-
-#### Automatic Hardware Tiering ([hardware_detector.py](file:///c:/docker/DevOS/components/ai-core/hardware_detector.py))
-- **Lite ($\le 8\text{ GB}$ RAM, CPU):** Qwen2.5 1.5B/3B Instruct & Qwen2.5-Coder 1.5B.
-- **Standard ($16\text{ GB}$ RAM / 6–8 GB VRAM):** Qwen2.5 7B Instruct & Qwen2.5-Coder 7B.
-- **Pro ($32\text{ GB}+$ RAM / 12–24 GB VRAM):** Qwen2.5 14B/32B & Qwen2.5-Coder 14B/32B.
-
-#### AI-Native Auto-Healing Smart Shell ([smart_shell.py](file:///c:/docker/DevOS/components/ai-agent/smart_shell.py))
-- Automatically intercepts failed terminal commands (`$? != 0` or missing packages).
-- Diagnoses port collisions (`address already in use`), missing modules, and typos, offering verified **1-keystroke fixes**.
-
-#### Privacy-Preserving Semantic Vector Memory ([semantic_memory.py](file:///c:/docker/DevOS/components/ai-core/semantic_memory.py))
-- On-device vector embeddings for local codebase, config, and file search without invasive screen recording or cloud telemetry.
-
----
-
-### 4. Turnkey Developer Workstation (`devserver`)
-
-#### Laragon-Style Local Stack Manager
-[server_manager.py](file:///c:/docker/DevOS/components/devserver/server_manager.py) manages local services with on-demand socket activation to conserve RAM:
-- **Web:** Caddy / Nginx reverse proxy
-- **PHP:** PHP 8.3 FPM + all extensions
-- **Databases:** MariaDB (MySQL), PostgreSQL, SQLite, Redis
-- **Mail Sandbox:** Mailpit (Web UI on port 8025)
-- **One-Click Projects:** Scaffold a new project with automatic `https://*.test` local domains, trusted SSL certificates (`mkcert`), and database creation:
-  ```bash
-  devos serve new myapp --stack laravel
-  devos serve new webapp --stack nextjs
-  devos serve new backend --stack fastapi
-  ```
-
-#### Telemetry-Free IDE & Local Code Agent
-- **VSCodium Preconfigured:** Equipped with the **Continue** local AI extension connected to `http://127.0.0.1:11434/v1`.
-- **Inline Tab Completion:** Fast local completion via `Qwen2.5-Coder 1.5B`.
-- **Local Code Agent CLI:**
-  ```bash
-  devos code "Add an Eloquent User model with email verification" --framework laravel
-  ```
-
----
-
-### 5. Heavy-Load Anti-Hang Performance Shield
-
-Why DevOS **never freezes** under heavy load:
-
-1. **In-RAM Compressed Swap (`zram` with `zstd`):** 50% RAM allocation paired with `vm.swappiness = 150` eliminates slow SSD disk thrashing.
-2. **I/O Flush Throttling:** `vm.dirty_ratio = 10` and `vm.dirty_background_ratio = 5` ensure disk writes never stall the GUI compositor.
-3. **PSI Memory Stall Monitoring (`systemd-oomd`):** Monitors `/proc/pressure/memory` and terminates runaway cgroups before the machine locks up.
-4. **Smart Process Hierarchy (`earlyoom`):** Explicitly protects `kwin_wayland`, `plasmashell`, `sddm`, and `systemd` from termination while sacrificing memory-leaking background tabs or rogue processes.
-5. **Transparent Filesystem Compression (`btrfs + zstd:3`):** Compresses apps and caches on the fly, cutting 10–20 GB applications down to ~5–10 GB while speeding up NVMe read speeds.
-
----
-
-### 6. Comprehensive Hardware, Audio & Driver Control
-
-- **Wi-Fi & Ethernet Controller:** Fast scanning, connecting, static IP, and DNS configuration (`devos net`).
-- **PipeWire 1.0 Pro-Audio:** Sub-millisecond audio latency with Sound Open Firmware (SOF) and high-fidelity Bluetooth codecs (LDAC, aptX-HD).
-- **GPU Drivers:** Out-of-the-box AMD RADV Vulkan and Intel ANV Vulkan; 1-click NVIDIA proprietary driver installer (`devos driver driver-install`).
-- **Driverless Printing:** USB and Network IPP Everywhere printing via `ipp-usb` with zero driver downloads required.
-
----
-
-## 💻 DevOS Master CLI Reference
-
-The unified `devos` command provides a single interface to manage the entire OS:
+Requirements: Docker (Linux or Docker Desktop) or an Ubuntu 24.04 host, ~25 GB free space, internet.
 
 ```bash
-# Universal App Hub
-devos app search <keyword>               # Search Flathub, APT, F-Droid, WinLayer
-devos app install <file.exe | apk | deb> # Auto-route by magic bytes and install
-devos app list                           # List installed universal apps
-
-# Local Code Agent
-devos code "Generate a user auth service" --framework laravel
-devos code "Create a responsive navbar"   --framework nextjs
-
-# Local Developer Server (Laragon-style)
-devos serve status                       # Check Caddy, PHP, DB, Redis, Mailpit
-devos serve new myapp --stack laravel    # Provision https://myapp.test with SSL
-devos serve list                         # List provisioned virtual hosts
-
-# System AI Assistant
-devos ai "Turn on dark mode"
-devos ai "Find files larger than 100MB"
-devos ai "Why did the database service crash?"
-
-# Windows Layer (WinLayer)
-devos win doctor setup.exe               # Analyze PE headers & anti-cheat
-devos win launch app.exe                 # Launch in isolated prefix
-devos win list                           # List active Windows prefixes
-
-# Android Layer (Waydroid)
-devos android status                     # Check container & Wayland status
-devos android install package.apk        # Install APK into multi-window container
-
-# Hardware, Networking & Audio
-devos net                                # Check network connections & IP
-devos net wifi-scan                      # Scan nearby Wi-Fi networks
-devos net wifi-connect "SSID" --password # Connect to Wi-Fi
-devos sound                              # View PipeWire audio devices
-devos sound volume 80                    # Set master audio volume
-devos driver                             # Inspect GPU, Vulkan, and firmware
-
-# System Watchdog & Heavy Load Optimizer
-devos watchdog --check-pressure          # Check Linux PSI memory stall pressure
-devos watchdog --audit-space             # Audit reclaimable Chrome & Wine cache
-devos watchdog --optimize                # Compress and optimize heavy app storage
+git clone https://github.com/imranbru99/DevOS.git
+cd DevOS
+make iso-docker          # containerized build -> out/devos-24.04-amd64.iso
 ```
 
----
-
-## 🛠️ Building the DevOS ISO
-
-You can build the bootable ISO natively on an Ubuntu 24.04 host or inside a reproducible Docker container.
-
-### Prerequisites (Host Build)
-- Clean Ubuntu 24.04 LTS (Noble) installation with root/sudo privileges.
-- At least 25 GB of free disk space.
-
-### Step 1: Install Build Tools
+Manual container build (keeps a reusable build cache so rebuilds take ~25 minutes):
 ```bash
-git clone https://github.com/devos-project/devos.git
-cd devos
-sudo make setup
+docker build -t devos-builder -f build/docker/Dockerfile.build .
+docker run --rm --privileged \
+  -e DEVOS_WORK_DIR=/build_work -e DEVOS_ZSTD_LEVEL=19 \
+  -v devos-work:/build_work -v "$PWD:/workspace" -w /workspace \
+  devos-builder ./build/build-iso.sh
 ```
 
-### Step 2: Build the Hybrid ISO
-```bash
-# Native Build
-sudo make iso
+Useful options: `DEVOS_ISO_NAME` (output file name), `DEVOS_ZSTD_LEVEL` (15 = faster build, 19 = smaller ISO), `UBUNTU_MIRROR`. The build fails on purpose if the ISO exceeds 4 GB or if any system file is world-writable.
 
-# Or Reproducible Containerized Build (Docker / Podman)
-make iso-docker
-```
-The resulting hybrid BIOS+UEFI image will be saved to:
-```
-out/devos-24.04-amd64.iso
-```
-
----
-
-## 🧪 Testing with QEMU
-
-Test your freshly built ISO in virtualized environments before flashing to hardware:
-
-### Legacy BIOS Mode:
-```bash
-make test-qemu-bios
-```
-
-### Modern UEFI Mode (OVMF):
-```bash
-make test-qemu-uefi
-```
-
-### Automated Unit Test Suite:
-Run the built-in test suite verifying all 34 core subsystems:
+**Tests**
 ```bash
 python3 -m unittest discover -s tests/unit
-# Result: Ran 34 tests in 0.567s. OK.
 ```
 
 ---
 
-## 💾 Installation on Real Hardware
+## Command line
 
-1. **Flash to USB:**
-   - **Ventoy (Recommended):** Simply copy `devos-24.04-amd64.iso` onto your Ventoy USB drive.
-   - **Rufus:** Select GPT partition scheme and UEFI target.
-   - **dd (Linux / macOS):**
-     ```bash
-     sudo dd if=out/devos-24.04-amd64.iso of=/dev/sdX bs=4M status=progress oflag=sync
-     ```
-2. **Boot Your PC:** Select your USB drive in the BIOS/UEFI boot menu.
-3. **Launch Calamares:** Click "Install DevOS" on the desktop.
-4. **Partitioning:** Choose **btrfs** (default) with automated Snapper subvolumes and optionally check **Encrypt system (LUKS)**.
-5. **Reboot:** Enjoy your AI-native, developer-first operating system!
+```bash
+devos app install <file.exe|file.apk|file.deb>   # install / run any app
+devos app search <name>                          # search the app catalog
+devos win launch <app.exe>                       # run a Windows program
+devos win doctor <app.exe>                       # compatibility check
+devos android setup                              # one-time Android download
+devos android install <app.apk>                  # install an Android app
+devos serve new myapp --stack laravel            # scaffold a project (laravel | nextjs | fastapi)
+devos serve status                               # local developer services
+devos ai "find files larger than 100MB"          # system assistant
+devos net | devos sound | devos driver | devos disk   # network, audio, drivers, storage
+devos watchdog --check-pressure                  # memory pressure check
+```
 
 ---
 
-## 🗂️ Repository Layout
+## Repository layout
 
 ```
 DevOS/
-├── Makefile                                       # Master build & test targets
-├── README.md                                      # Comprehensive documentation
-├── CHANGELOG.md                                   # Version tracking & release log
-├── THIRD_PARTY_NOTICES.md                         # Open-source license attribution
-├── LICENSES/                                      # Open-source license files
 ├── build/
-│   ├── build-iso.sh                               # Master hybrid ISO builder
-│   ├── setup-build-env.sh                         # Host dependencies installer
-│   ├── versions.lock                              # Exact locked package versions
-│   ├── docker/
-│   │   └── Dockerfile.build                       # Reproducible build container
-│   ├── package-lists/                             # Modular chroot package lists
-│   │   ├── 00-base.list.chroot                    # Kernel, systemd, btrfs, zram
-│   │   ├── 10-hardware.list.chroot                # Firmware, mesa, vulkan, audio
-│   │   ├── 20-installer.list.chroot               # Calamares installer engine
-│   │   ├── 30-developer.list.chroot               # PHP, Node, Python, Podman, DBs
-│   │   └── 50-wine.list.chroot                    # Wine, Proton, DXVK, GameMode
-│   ├── hooks/                                     # Chroot optimization hooks
-│   │   ├── 01-strip-bloat.hook.chroot             # Doc/man purge, locale pruner
-│   │   ├── 02-disable-services.hook.chroot        # Mask cups-browsed, snapd, apport
-│   │   └── 03-tune-performance.hook.chroot        # zram (zstd), earlyoom, sysctl
-│   ├── includes.chroot/                           # Rootfs filesystem injection
-│   │   ├── etc/calamares/                         # Calamares installer configuration
-│   │   ├── etc/fonts/conf.d/                      # Fontconfig Windows font aliases
-│   │   ├── etc/skel/                              # Default user VSCodium & Continue configs
-│   │   ├── etc/sysctl.d/                          # Heavy-load anti-hang kernel configs
-│   │   ├── etc/xdg/                               # Windows shortcuts & MIME mappings
-│   │   └── usr/share/                             # Desktop entries & context menus
-│   └── branding/                                  # Wallpapers, Plymouth, Calamares
+│   ├── build-iso.sh                 # Builds the hybrid BIOS + UEFI ISO
+│   ├── docker/Dockerfile.build      # Reproducible build container
+│   ├── package-lists/               # Packages (base, hardware, desktop, apps, installer, developer, Wine, Android)
+│   ├── hooks/                       # Clean-up, services, performance, branding
+│   └── includes.chroot/             # Files placed into the system (installer branding, desktop, scripts)
 ├── components/
-│   ├── devos_cli.py                               # Master unified CLI dispatcher
-│   ├── ai-core/                                   # Local OpenAI daemon, NPU & aimodel
-│   ├── ai-agent/                                  # System assistant, shell healer & watchdog
-│   ├── code-agent/                                # Local Code Agent & repo mapper
-│   ├── devserver/                                 # Laragon-style local server manager
-│   ├── winlayer/                                  # Windows prefix manager & PE doctor
-│   ├── linuxlayer/                                # Linux package handlers
-│   ├── androidlayer/                              # Waydroid container manager
-│   ├── apphub/                                    # Universal App Hub & safety scan
-│   ├── first-boot/                                # First-boot setup wizard
-│   └── settings/                                  # DevOS Control Center & hardware manager
+│   ├── assistant/                   # DevOS AI app: chat window, commands, voice, documents, photos
+│   ├── ai-core/                     # Local AI service (OpenAI-compatible API on 127.0.0.1:11434)
+│   ├── apps/                        # Apps window (uninstall, cache, cookies)
+│   ├── optimizer/                   # DevOS Optimizer (idle apps, clean-up)
+│   ├── notepad/                     # Notepad with crash-proof sessions
+│   ├── apphub/                      # App routing, safety scan, native-version catalog
+│   ├── winlayer/                    # Windows programs
+│   ├── androidlayer/                # Android apps
+│   ├── devserver/ code-agent/ ai-agent/ settings/ dashboard/ first-boot/ linuxlayer/
+│   └── devos_cli.py                 # `devos` command
 ├── tests/
-│   ├── qemu/                                      # QEMU BIOS & UEFI smoke runners
-│   └── unit/                                      # Comprehensive 34 unit tests
-├── tools/
-│   └── size-report.sh                             # Debloat audit & package size tool
-├── docs/
-│   ├── phase-1-plan.md                            # Phase 1 architectural specification
-│   ├── HEAVY_LOAD_AND_STORAGE_OPTIMIZATION.md     # Anti-hang & btrfs zstd deep-dive
-│   ├── MODERN_2027_OS_ARCHITECTURE.md             # NPU & 2027-era AI architecture
-│   ├── HARDWARE_DRIVERS_AND_NETWORKING.md         # Network, audio & driver guide
-│   ├── WINDOWS_COMPAT.md                          # WinLayer compatibility guide
-│   ├── ANDROID_COMPAT.md                          # Waydroid integration & licensing
-│   ├── DEVELOPER_WORKSTATION.md                   # Devserver & coding guide
-│   └── COMING_FROM_WINDOWS.md                     # Transition guide for Windows users
-└── .github/workflows/
-    └── build-iso.yml                              # CI workflow for ISO builds & tests
+│   ├── unit/                        # Automated tests
+│   └── docker-vm/                   # Run the ISO in Docker Desktop
+├── tools/wallpapers/                # Wallpaper generator + preview
+└── docs/                            # Guides (coming from Windows, compatibility, performance…)
 ```
 
 ---
 
-## 📜 Legal & Licensing Compliance
+## Known limitations
 
-- **No Proprietary Microsoft Assets:** DevOS contains no Microsoft binaries, fonts, or copyrighted code. All Windows compatibility is achieved via **Wine, Proton, DXVK, and open-source font metric substitutions**.
-- **No Proprietary Google Apps:** The Android environment uses open-source AOSP/LineageOS images with **F-Droid and Aurora Store**. Proprietary Google Play Services are **never bundled in the ISO**.
-- **Telemetry Free:** No personal telemetry or usage data leaves your machine.
-- **License Attribution:** Comprehensive package notices are documented in [THIRD_PARTY_NOTICES.md](file:///c:/docker/DevOS/THIRD_PARTY_NOTICES.md) and [LICENSES/](file:///c:/docker/DevOS/LICENSES/).
+- **Secure Boot** must be off to boot the USB stick.
+- **Android apps** need the one-time ~850 MB download and an installed system (not the live USB). Apps that require Google Play services, or that only contain ARM code, may not run.
+- **Windows apps:** most everyday programs work; games with kernel anti-cheat, drivers and some remote-control tools don't (DevOS offers native versions where they exist).
+- **DevOS AI's built-in model is small:** great for commands and PC questions, simpler for open conversation — turn on *Smarter DevOS AI* for better answers. Voice recognition quality depends on your microphone.
+- Window title bars still show some programs' own names.
+- Google Chrome asks you to accept Google's terms on first launch.
+
+## Roadmap
+
+- Signed boot loader for Secure Boot
+- NPU / GPU acceleration for DevOS AI on supported laptops
+- ARM-app translation and optional app store for Android
+- Wayland session with native multi-window Android apps
+- Automatic system snapshots before updates
+- More native-version matches and one-click app catalog
+
+---
+
+## Privacy & licensing
+
+- **No telemetry.** DevOS AI, voice and document features run locally; nothing is uploaded.
+- DevOS's own code is released under the **MIT License** ([`LICENSE`](LICENSE)).
+- DevOS includes open-source components under their own licenses (Ubuntu packages, KDE Plasma, Calamares, Wine, Waydroid, llama.cpp, whisper.cpp, and the open-weight Qwen2.5 and SmolVLM models), plus **Google Chrome** and **Microsoft Visual Studio Code**, which are distributed under their vendors' terms. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) and [`LICENSES/`](LICENSES/).
+- DevOS is not affiliated with Microsoft, Google or Canonical. The Android system is open-source LineageOS without Google services.
 
 ---
 
 ## 🤝 Let's Connect & Collaborate
+
+DevOS is created and maintained by **Imran Ahmed (Imran Dev)**. Contributions, issues and ideas are welcome on [GitHub](https://github.com/imranbru99/DevOS).
 
 I am open to **Senior Remote Full-Stack Roles, AI Platform Architecture Contracts, and Enterprise Technical Advisory**.
 
@@ -387,4 +306,4 @@ I am open to **Senior Remote Full-Stack Roles, AI Platform Architecture Contract
 
 ---
 
-**DevOS Project** &copy; 2026. Distributed under the [MIT License](file:///c:/docker/DevOS/LICENSES/MIT.txt).
+**DevOS** © 2026 Imran Ahmed. Released under the [MIT License](LICENSE).

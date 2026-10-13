@@ -1,0 +1,189 @@
+#!/usr/bin/env python3
+"""Open a downloaded Windows (.exe/.msi) or Android (.apk) file with plain messages.
+
+Double-clicking a file in Dolphin or Chrome lands here. Earlier versions
+printed the App Hub JSON in a dialog; this one starts the app and only
+speaks up when the user has to decide something or something went wrong.
+"""
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+
+COMPONENTS = "/usr/local/share/devos/components"
+TITLE = "DevOS"
+
+
+def dialog(*args):
+    if shutil.which("kdialog"):
+        return subprocess.run(["kdialog", "--title", TITLE, *args]).returncode
+    print(" ".join(args[1:]), file=sys.stderr)
+    return 1
+
+
+def popup(text, seconds=6):
+    if shutil.which("kdialog"):
+        subprocess.Popen(["kdialog", "--title", TITLE, "--passivepopup", text, str(seconds)])
+    else:
+        print(text)
+
+
+class Busy:
+    """kdialog progress window. steps=0 is a moving bar; steps=100 shows a percentage."""
+
+    def __init__(self, text, steps=0):
+        self.ref = None
+        if shutil.which("kdialog"):
+            out = subprocess.run(["kdialog", "--title", TITLE, "--progressbar", text, str(steps)],
+                                 capture_output=True, text=True).stdout.split()
+            self.ref = out if len(out) == 2 else None
+
+    def update(self, percent, text):
+        if self.ref:
+            subprocess.run(["qdbus", *self.ref, "Set", "", "value", str(percent)], capture_output=True)
+            subprocess.run(["qdbus", *self.ref, "setLabelText", text], capture_output=True)
+
+    def close(self):
+        if self.ref:
+            subprocess.run(["qdbus", *self.ref, "close"], capture_output=True)
+
+
+def run_json(component, *args):
+    proc = subprocess.run([sys.executable, os.path.join(COMPONENTS, component), *args],
+                          capture_output=True, text=True)
+    try:
+        return json.loads(proc.stdout)
+    except ValueError:
+        return {"status": "ERROR", "error": (proc.stdout + proc.stderr).strip()[-400:]}
+
+
+def scan(path):
+    sys.path.insert(0, os.path.join(COMPONENTS, "apphub"))
+    try:
+        from safety_scanner import AppSafetyScanner
+        return AppSafetyScanner.scan_file(path)
+    except Exception:
+        return {"safe_to_run": True}
+
+
+def offer_native(path):
+    """Installer for an app with a DevOS version (AnyDesk, Zoom...): offer that instead.
+
+    Returns an exit code when handled, None to run the Windows version.
+    """
+    sys.path.insert(0, os.path.join(COMPONENTS, "apphub"))
+    try:
+        import native_alternatives as native
+    except ImportError:
+        return None
+    entry = native.match(path)
+    if not entry:
+        return None
+    app_id = entry["flatpak"]
+    other_label = "Run Android version" if path.lower().endswith((".apk", ".xapk")) else "Run Windows version"
+    if native.is_installed(app_id):
+        popup(f"Opening {entry['name']}...", 4)
+        native.launch(app_id)
+        return 0
+    choice = subprocess.run(
+        ["kdialog", "--title", TITLE, "--yes-label", f"Install DevOS version",
+         "--no-label", other_label, "--yesnocancel",
+         f"{entry['name']} has a DevOS version.\n\n{entry['why']}\n\n"
+         "Install the DevOS version instead? (Recommended)"],
+    ).returncode if shutil.which("kdialog") else 1
+    if choice == 2:      # Cancel
+        return 0
+    if choice != 0:      # Run the Windows version
+        return None
+    busy = Busy(f"Installing {entry['name']}...", steps=100)
+    res = native.install(app_id, progress=busy.update)
+    busy.close()
+    if res.get("status") != "INSTALLED":
+        dialog("--error", f"{entry['name']} could not be installed.\n\n{res.get('error', '')}")
+        return 1
+    popup(f"{entry['name']} is installed. It is in the app menu.", 6)
+    native.launch(app_id)
+    return 0
+
+
+def open_windows(path, name):
+    handled = offer_native(path)
+    if handled is not None:
+        return handled
+    first_time = not os.path.isfile(os.path.expanduser("~/.local/share/winlayer/base/system.reg"))
+    busy = None
+    if first_time:
+        busy = Busy("Preparing Windows support. This happens only once and takes about a minute...")
+    else:
+        popup(f"Starting {name}...", 5)
+    result = run_json("winlayer/prefix_manager.py", "launch", path)
+    if busy:
+        busy.close()
+    if result.get("status") != "LAUNCHED":
+        dialog("--error", f"{name} could not start.\n\n{result.get('error', 'Unknown error')}")
+        return 1
+    return 0
+
+
+def open_android(path, name):
+    # WhatsApp, Telegram, Spotify... have DevOS versions: no Android download.
+    handled = offer_native(path)
+    if handled is not None:
+        return handled
+    sys.path.insert(0, os.path.join(COMPONENTS, "androidlayer"))
+    from waydroid_manager import WaydroidManager
+    mgr = WaydroidManager()
+    if not shutil.which("waydroid"):
+        dialog("--error", "Android support is not installed on this system.")
+        return 1
+    if not mgr.is_initialized():
+        if dialog("--yesno",
+                  "Android apps need a one-time download of the Android system (about 800 MB).\n\n"
+                  "Download it now? You will be asked for your password.") != 0:
+            return 0
+        busy = Busy("Preparing the Android download...", steps=100)
+        res = mgr.init_images(progress=busy.update)
+        busy.close()
+        if res.get("status") != "READY":
+            dialog("--error", res.get("error", "The Android download failed."))
+            return 1
+    busy = Busy(f"Installing {name}...")
+    res = mgr.install_apk(path)
+    busy.close()
+    if res.get("status") != "SUCCESS":
+        dialog("--error", f"{name} could not be installed.\n\n{res.get('error') or res.get('message', '')}")
+        return 1
+    popup(f"{name} is installed. It opens in the Android window and is in the app menu.")
+    return 0
+
+
+def main():
+    if len(sys.argv) < 2:
+        dialog("--sorry", "Choose an .exe, .msi or .apk file.")
+        return 1
+    path = os.path.abspath(sys.argv[1])
+    name = os.path.splitext(os.path.basename(path))[0]
+    ext = os.path.splitext(path)[1].lower()
+
+    report = scan(path)
+    if not report.get("safe_to_run", True):
+        if dialog("--warningyesno",
+                  f"{report.get('ai_summary', 'This file looks unsafe.')}\n\nOpen it anyway?") != 0:
+            return 0
+
+    if ext in (".exe", ".msi", ".bat", ".cmd", ".com"):
+        return open_windows(path, name)
+    if ext in (".apk", ".xapk"):
+        return open_android(path, name)
+
+    # .deb / AppImage and anything else: let App Hub route it.
+    result = run_json("apphub/hub.py", "install", "--skip-safety", path)
+    message = result.get("message") or result.get("error") or result.get("status")
+    dialog("--msgbox", str(message))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

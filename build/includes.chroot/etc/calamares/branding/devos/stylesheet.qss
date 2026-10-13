@@ -1,0 +1,153 @@
+/* DevOS installer theme. Calamares only loads a file named stylesheet.qss;
+   the old devos.qss was never read, so the installer showed stock light Qt. */
+
+QWidget {
+    font-family: "Inter", "Noto Sans", "Liberation Sans", sans-serif;
+    font-size: 14px;
+    color: #e2e8f0;
+    background-color: #0b0f1a;
+    selection-background-color: #2563eb;
+    selection-color: #ffffff;
+}
+
+QLabel { background: transparent; }
+
+/* Page titles inside widget-based steps */
+QLabel#viewTitle, QLabel#pageTitle {
+    font-size: 28px;
+    font-weight: 700;
+    color: #f8fafc;
+}
+
+/* Buttons that live inside pages (Change..., partition actions) */
+QPushButton, QToolButton {
+    background-color: #141b2d;
+    border: 1px solid #26324d;
+    border-radius: 10px;
+    padding: 9px 18px;
+    font-weight: 600;
+    color: #e2e8f0;
+}
+QPushButton:hover, QToolButton:hover { background-color: #1c2740; border-color: #38bdf8; }
+QPushButton:pressed, QToolButton:pressed { background-color: #0f172a; }
+QPushButton:disabled, QToolButton:disabled { color: #475569; border-color: #1e293b; }
+
+/* Text inputs and drop-downs */
+QLineEdit, QComboBox, QSpinBox {
+    background-color: #0f172a;
+    border: 1px solid #2a3550;
+    border-radius: 10px;
+    padding: 9px 12px;
+    color: #f8fafc;
+    min-height: 22px;
+}
+QLineEdit:focus, QComboBox:focus { border-color: #38bdf8; }
+QComboBox::drop-down { border: none; width: 28px; }
+QComboBox QAbstractItemView {
+    background-color: #0f172a;
+    border: 1px solid #2a3550;
+    selection-background-color: #1d4ed8;
+    outline: none;
+}
+
+/* Lists: keyboard layouts, disks, partitions, summary */
+QListView, QTreeView, QTableView {
+    background-color: #0d1322;
+    alternate-background-color: #111a2c;
+    border: 1px solid #1e293b;
+    border-radius: 12px;
+    padding: 4px;
+    outline: none;
+}
+QListView::item, QTreeView::item { padding: 6px 8px; border-radius: 6px; }
+QListView::item:selected, QTreeView::item:selected {
+    background-color: #1d3a63;
+    color: #ffffff;
+}
+QListView::item:hover, QTreeView::item:hover { background-color: #15213a; }
+QHeaderView::section {
+    background-color: #0f172a;
+    color: #94a3b8;
+    border: none;
+    border-bottom: 1px solid #1e293b;
+    padding: 8px;
+    font-weight: 600;
+}
+
+QRadioButton, QCheckBox { spacing: 10px; color: #e2e8f0; background: transparent; }
+
+
+QGroupBox {
+    border: 1px solid #1e293b;
+    border-radius: 14px;
+    margin-top: 16px;
+    padding: 14px;
+    font-weight: 600;
+}
+
+QScrollArea, QAbstractScrollArea, QStackedWidget { background: transparent; border: none; }
+QScrollBar:vertical { background: transparent; width: 10px; margin: 2px; }
+QScrollBar::handle:vertical { background: #334155; border-radius: 4px; min-height: 30px; }
+QScrollBar::add-line, QScrollBar::sub-line { height: 0; }
+
+/* Install progress: the real progress, so make it the visual focus. */
+QProgressBar {
+    background-color: #111827;
+    border: none;
+    border-radius: 9px;
+    min-height: 18px;
+    max-height: 18px;
+    text-align: center;
+    color: #f8fafc;
+    font-weight: 700;
+    font-size: 12px;
+}
+QProgressBar::chunk {
+    border-radius: 9px;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #22d3ee, stop:0.5 #38bdf8, stop:1 #818cf8);
+}
+
+QToolTip {
+    background-color: #111827;
+    color: #e2e8f0;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    padding: 6px;
+}
+
+/* Radio buttons and check boxes: visible on the dark background */
+QRadioButton::indicator, QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+    border: 2px solid #475569;
+    background: #0f172a;
+}
+QRadioButton::indicator { border-radius: 10px; }
+QCheckBox::indicator { border-radius: 5px; }
+QRadioButton::indicator:hover, QCheckBox::indicator:hover { border-color: #38bdf8; }
+QRadioButton::indicator:checked {
+    border-color: #38bdf8;
+    background: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5,
+        stop:0 #38bdf8, stop:0.5 #38bdf8, stop:0.6 #0f172a, stop:1 #0f172a);
+}
+QCheckBox::indicator:checked { border-color: #38bdf8; background: #38bdf8; }
+
+/* Partition bars and their legend ("EFI system", "DevOS", sizes) are drawn
+   with the widget palette; without this the names were dark on dark. */
+PartitionLabelsView, PartitionBarsView, PartitionSplitterWidget {
+    color: #e2e8f0;
+    background: transparent;
+}
+
+/* The partition legend view is a plain QAbstractItemView; give it the
+   light text colour as well so names like "EFI system" are readable. */
+QAbstractItemView { color: #e2e8f0; }
+
+/* Calamares paints partition names in plain black (not from the palette),
+   so the legend gets a light card where black text is readable. */
+PartitionLabelsView {
+    background-color: #e2e8f0;
+    border-radius: 10px;
+    padding: 4px;
+}

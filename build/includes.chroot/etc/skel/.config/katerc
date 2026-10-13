@@ -1,0 +1,20 @@
+[General]
+Show Full Path in Title=false
+Startup Session=new
+
+[MainWindow]
+MenuBar=Disabled
+ToolBarsMovable=Disabled
+
+[Kate Plugins]
+kateprojectplugin=false
+lspclientplugin=false
+katesnippetsplugin=false
+katefiletreeplugin=false
+katexmlcheckplugin=false
+katectagsplugin=false
+compileplugin=false
+katesqlplugin=false
+externaltoolsplugin=false
+katekonsoleplugin=true
+katesearchplugin=true

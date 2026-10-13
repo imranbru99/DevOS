@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=DevOS AI Hands-free
+Comment=Listens for "Hey DevOS" when hands-free is turned on in DevOS AI (exits at once otherwise)
+Exec=/usr/bin/python3 /usr/local/share/devos/components/assistant/listen.py --daemon
+Icon=audio-input-microphone
+Terminal=false
+OnlyShowIn=KDE;
+X-KDE-autostart-phase=2
+X-GNOME-Autostart-enabled=true
+NoDisplay=true

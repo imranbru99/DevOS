@@ -1,0 +1,28 @@
+# Boot the DevOS ISO in a QEMU virtual machine inside Docker Desktop.
+# Screen: http://localhost:8006 (also the "8006" link in Docker Desktop > Containers)
+#
+# Start with tests/docker-vm/run-devos-vm.ps1, which loads KVM first.
+# The 40G virtual disk lives in tests/docker-vm/storage. Calamares installs
+# DevOS onto that disk, never onto your real drives.
+name: devos-test
+services:
+  devos-vm:
+    image: qemux/qemu
+    container_name: devos-vm
+    environment:
+      BOOT_MODE: "${DEVOS_BOOT_MODE:-uefi}"   # uefi or legacy
+      RAM_SIZE: "6G"
+      CPU_CORES: "4"
+      DISK_SIZE: "40G"
+    devices:
+      - /dev/kvm
+      - /dev/net/tun
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "8006:8006"
+    volumes:
+      - ${DEVOS_ISO:-../../out/devos-24.04-amd64.iso}:/boot.iso
+      - ./storage:/storage
+    restart: "no"
+    stop_grace_period: 2m

@@ -1,0 +1,44 @@
+#!/bin/bash
+# Apply CPU and disk settings that match the hardware actually present.
+set -u
+
+for gov_path in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+    [ -e "$gov_path" ] || continue
+    available="$(cat "${gov_path%/*}/scaling_available_governors" 2>/dev/null || true)"
+    if printf '%s' "$available" | grep -qw schedutil; then
+        echo schedutil > "$gov_path" 2>/dev/null || true
+    elif printf '%s' "$available" | grep -qw ondemand; then
+        echo ondemand > "$gov_path" 2>/dev/null || true
+    fi
+done
+
+for pref in /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference; do
+    [ -e "$pref" ] || continue
+    echo balance_performance > "$pref" 2>/dev/null || true
+done
+
+if [ -f /sys/kernel/mm/transparent_hugepage/enabled ]; then
+    echo madvise > /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null || true
+fi
+
+for dev in /sys/block/*; do
+    name="$(basename "$dev")"
+    case "$name" in
+        loop*|ram*|dm-*|sr*|fd*|zram*|nbd*) continue ;;
+    esac
+    sched="$dev/queue/scheduler"
+    [ -f "$sched" ] || continue
+    rot="$(cat "$dev/queue/rotational" 2>/dev/null || echo 1)"
+    if printf '%s' "$name" | grep -q '^nvme'; then
+        echo none > "$sched" 2>/dev/null || echo mq-deadline > "$sched" 2>/dev/null || true
+        echo 128 > "$dev/queue/read_ahead_kb" 2>/dev/null || true
+    elif [ "$rot" = "0" ]; then
+        echo mq-deadline > "$sched" 2>/dev/null || true
+        echo 128 > "$dev/queue/read_ahead_kb" 2>/dev/null || true
+    else
+        echo bfq > "$sched" 2>/dev/null || echo mq-deadline > "$sched" 2>/dev/null || true
+        echo 1024 > "$dev/queue/read_ahead_kb" 2>/dev/null || true
+    fi
+done
+
+exit 0
