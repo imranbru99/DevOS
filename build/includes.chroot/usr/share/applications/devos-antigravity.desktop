@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Antigravity Code Agent
+GenericName=Autonomous AI Developer Agent
+Comment=Next-generation autonomous pair programmer and multi-agent development engine
+Exec=devos-antigravity %F
+Icon=antigravity
+Terminal=false
+Categories=Development;IDE;Utility;
+Keywords=antigravity;agy;agent;ai;coding;copilot;gemini;code;developer;
+StartupNotify=true
+StartupWMClass=Antigravity Code Agent
