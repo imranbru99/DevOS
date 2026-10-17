@@ -20,112 +20,27 @@ fi
 
 chmod -R u+w "${STAGE_DIR}"
 
-# 1. Update grub.cfg in ISO
-echo "==> Writing updated grub.cfg..."
-mkdir -p "${STAGE_DIR}/boot/grub" "${STAGE_DIR}/EFI/BOOT"
+# 1-5. Prepare the boot tree and master the ISO with the shared engine.
+# This script has no chroot, so the library will use host GRUB tools and
+# re-use any signed UEFI binaries already present in the stage.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib-boot-iso.sh"
 
-cat << 'EOF' > "${STAGE_DIR}/boot/grub/grub.cfg"
-set default="0"
-set timeout=5
+echo "==> Preparing real-hardware hybrid boot tree (BIOS+UEFI+Secure Boot)..."
+devos_prepare_boot_tree "${STAGE_DIR}" "" "${TMP_DIR}"
 
-search --no-floppy --set=root --file /casper/vmlinuz
-
-insmod font
-if loadfont /boot/grub/font.pf2 ; then
-    insmod gfxterm
-    set gfxmode=auto
-    terminal_output gfxterm
-fi
-
-set menu_color_normal=white/black
-set menu_color_highlight=black/light-gray
-
-menuentry "Try or Install DevOS (24.04 LTS)" {
-    set gfxpayload=keep
-    search --no-floppy --set=root --file /casper/vmlinuz
-    linux /casper/vmlinuz boot=casper username=devos hostname=devos quiet splash plymouth.theme=devos fsck.mode=skip ---
-    initrd /casper/initrd
-}
-
-menuentry "DevOS (Safe Graphics)" {
-    set gfxpayload=keep
-    search --no-floppy --set=root --file /casper/vmlinuz
-    linux /casper/vmlinuz boot=casper username=devos hostname=devos nomodeset quiet splash plymouth.theme=devos ---
-    initrd /casper/initrd
-}
-
-menuentry "Check Disc for Defects" {
-    search --no-floppy --set=root --file /casper/vmlinuz
-    linux /casper/vmlinuz boot=casper integrity-check quiet splash plymouth.theme=devos ---
-    initrd /casper/initrd
-}
-EOF
-
-cp "${STAGE_DIR}/boot/grub/grub.cfg" "${STAGE_DIR}/EFI/BOOT/grub.cfg"
-
-# 2. Create embedded early config for standalone grub
-cat << 'EOF' > "${TMP_DIR}/early_grub.cfg"
-search --no-floppy --set=root --file /casper/vmlinuz
-set prefix=($root)/boot/grub
-configfile $prefix/grub.cfg
-EOF
-
-# 3. Generate universal standalone BOOTX64.EFI with all FS drivers
-echo "==> Building standalone BOOTX64.EFI with full filesystem support..."
-grub-mkstandalone \
-    --format=x86_64-efi \
-    --output="${TMP_DIR}/BOOTX64.EFI" \
-    --locales="" \
-    --fonts="" \
-    --modules="iso9660 fat ntfs ext2 part_msdos part_gpt normal boot linux search search_fs_file search_fs_uuid search_label configfile font test sleep echo" \
-    "boot/grub/grub.cfg=${TMP_DIR}/early_grub.cfg" || true
-
-# If signed shim and GRUB exist, prioritize them for Secure Boot compatibility
-mkdir -p "${TMP_DIR}/efi_structure/EFI/BOOT"
-if [ -f "${STAGE_DIR}/EFI/BOOT/grubx64.efi" ] && [ -f "${STAGE_DIR}/EFI/BOOT/BOOTX64.EFI" ]; then
-    echo "  Retaining Microsoft-signed shim and GRUB binaries for Secure Boot..."
-    cp "${STAGE_DIR}/EFI/BOOT/BOOTX64.EFI" "${TMP_DIR}/efi_structure/EFI/BOOT/BOOTX64.EFI"
-    cp "${STAGE_DIR}/EFI/BOOT/grubx64.efi" "${TMP_DIR}/efi_structure/EFI/BOOT/grubx64.efi"
-    [ -f "${STAGE_DIR}/EFI/BOOT/mmx64.efi" ] && cp "${STAGE_DIR}/EFI/BOOT/mmx64.efi" "${TMP_DIR}/efi_structure/EFI/BOOT/mmx64.efi"
-else
-    cp "${TMP_DIR}/BOOTX64.EFI" "${STAGE_DIR}/EFI/BOOT/BOOTX64.EFI"
-    cp "${TMP_DIR}/BOOTX64.EFI" "${TMP_DIR}/efi_structure/EFI/BOOT/BOOTX64.EFI"
-fi
-
-# 4. Create efi.img FAT partition image
-echo "==> Creating EFI boot image (efi.img)..."
-cp "${STAGE_DIR}/boot/grub/grub.cfg" "${TMP_DIR}/efi_structure/EFI/BOOT/grub.cfg"
-
-rm -f "${STAGE_DIR}/boot/grub/efi.img"
-dd if=/dev/zero of="${STAGE_DIR}/boot/grub/efi.img" bs=1M count=10 status=none
-mkfs.vfat "${STAGE_DIR}/boot/grub/efi.img" > /dev/null
-mcopy -s -i "${STAGE_DIR}/boot/grub/efi.img" "${TMP_DIR}/efi_structure/EFI" ::
-
-# Remove boot.catalog if present so xorriso can generate a fresh one
-rm -f "${STAGE_DIR}/boot.catalog"
-
-# 5. Rebuild hybrid bootable ISO with xorriso
 echo "==> Mastering new hybrid bootable ISO with xorriso..."
-LOCAL_ISO="/tmp/devos-24.04-amd64.iso"
-rm -f "${LOCAL_ISO}" "${OUTPUT_ISO}"
-xorriso -as mkisofs \
-    -r -V "DEVOS_2404" \
-    -J -joliet-long \
-    -partition_offset 16 \
-    --eltorito-alt-boot \
-    -e boot/grub/efi.img \
-    -no-emul-boot \
-    -isohybrid-gpt-basdat \
-    -output "${LOCAL_ISO}" \
-    "${STAGE_DIR}"
-
-echo "==> Streaming ISO to ${OUTPUT_ISO}..."
-mkdir -p "${DEVOS_OUT}"
-dd if="${LOCAL_ISO}" of="${OUTPUT_ISO}" bs=4M conv=fsync status=progress
-rm -f "${LOCAL_ISO}"
+rm -f "${OUTPUT_ISO}"
+devos_master_iso "${STAGE_DIR}" "${OUTPUT_ISO}"
 
 # 6. Cleanup temp files
 rm -rf "${TMP_DIR}" "${STAGE_DIR}"
+
+# The verifier uses mktemp; do not let it inherit the build's TMPDIR which was
+# deleted above.
+unset TMPDIR
+echo "==> Running hardware-boot verification gate..."
+"${SCRIPT_DIR}/../tests/boot/verify-iso-bootability.sh" "${OUTPUT_ISO}" || exit 1
 
 echo "==> Generating SHA256 checksum..."
 sha256sum "${OUTPUT_ISO}" > "${OUTPUT_ISO}.sha256"

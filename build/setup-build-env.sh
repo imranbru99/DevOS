@@ -34,6 +34,9 @@ apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
     coreutils \
+    file \
+    gdisk \
+    initramfs-tools-core \
     zstd \
     make
 

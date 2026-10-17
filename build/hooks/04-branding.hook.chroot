@@ -20,10 +20,35 @@ root = Path("/usr/share/initramfs-tools/scripts")
 helpers = root / "casper-helpers"
 if helpers.exists():
     helpers.write_text(helpers.read_text().replace('MP_QUIET=""', 'MP_QUIET="-q"'))
-for name in ("casper", "casper-helpers"):
+for name in ("casper", "casper-helpers", "casper-functions"):
     path = root / name
     if path.exists():
         path.write_text(path.read_text().replace('modprobe "${MP_QUIET}"', "modprobe ${MP_QUIET}"))
+
+# Search all initramfs and casper script locations to patch MP_QUIET and overlay module probe
+for base in [Path("/usr/share/initramfs-tools"), Path("/usr/share/casper")]:
+    if not base.exists():
+        continue
+    for p in base.rglob("*"):
+        if p.is_file() and not p.is_symlink():
+            try:
+                txt = p.read_text(encoding="utf-8", errors="ignore")
+                mod = False
+                if 'modprobe "${MP_QUIET}"' in txt:
+                    txt = txt.replace('modprobe "${MP_QUIET}"', "modprobe ${MP_QUIET}")
+                    mod = True
+                if 'MP_QUIET=""' in txt:
+                    txt = txt.replace('MP_QUIET=""', 'MP_QUIET="-q"')
+                    mod = True
+                if 'BUILD_SYSTEM}" = "Ubuntu"' in txt and 'BUILD_SYSTEM}" = "DevOS"' not in txt:
+                    txt = txt.replace('BUILD_SYSTEM}" = "Ubuntu"', 'BUILD_SYSTEM}" = "Ubuntu" ] || [ "${BUILD_SYSTEM}" = "DevOS"')
+                    mod = True
+                if mod:
+                    p.write_text(txt, encoding="utf-8")
+                    print(f"Patched live boot overlay logic in {p}")
+            except Exception:
+                pass
+
 if helpers.exists() and 'MP_QUIET=""' in helpers.read_text():
     sys.exit("live boot would call modprobe with an empty module name")
 PY

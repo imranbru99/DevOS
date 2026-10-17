@@ -34,6 +34,19 @@ python3-pip
 python3-pyqt5
 # Window list for DevOS Optimizer (idle-app suggestions)
 wmctrl
+# QML runtime modules for SDDM Breeze theme & Calamares hardware compatibility
+qml6-module-qtquick
+qml6-module-qtquick-controls
+qml6-module-qtquick-layouts
+qml6-module-qtquick-window
+qml6-module-qtquick-effects
+qml-module-qtquick2
+qml-module-qtquick-controls2
+qml-module-qtquick-layouts
+qml-module-qtgraphicaleffects
+# Ultra-lightweight fallback window manager for real hardware without 3D compositor
+openbox
+mesa-utils
 # Password prompt for Apps (uninstall) and Android setup
 pkexec
 polkit-kde-agent-1
@@ -45,3 +58,4 @@ ffmpegthumbs
 # DevOS AI: media pause/next and reminder notifications
 playerctl
 libnotify-bin
+

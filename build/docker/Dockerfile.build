@@ -21,6 +21,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
     coreutils \
+    cpio \
+    file \
+    initramfs-tools-core \
+    gdisk \
+    fonts-dejavu-core \
     zstd \
     make \
     git \

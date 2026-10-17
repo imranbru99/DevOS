@@ -12,3 +12,7 @@ partitionmanager
 # grub-mkconfig / update-grub for Calamares' grubcfg and bootloader steps.
 # grub-efi-amd64-bin only pulls grub-common, which does not ship them.
 grub2-common
+# Recovery and interactive dialogs for installer
+kdialog
+qml-module-qtquick-templates2
+qml-module-qtquick-shapes

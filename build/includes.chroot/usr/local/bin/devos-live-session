@@ -59,17 +59,49 @@ xhost +si:localuser:root >/dev/null 2>&1 || true
 xhost +local: >/dev/null 2>&1 || true
 xhost + >/dev/null 2>&1 || true
 
+# Start window manager to guarantee proper modal dialogs and window framing on real hardware
+if command -v kwin_x11 >/dev/null 2>&1 && [ -z "$(pgrep -x kwin_x11)" ]; then
+    KWIN_COMPOSE=none kwin_x11 --replace --no-kactivities >/dev/null 2>&1 &
+elif command -v openbox >/dev/null 2>&1 && [ -z "$(pgrep -x openbox)" ]; then
+    openbox >/dev/null 2>&1 &
+fi
+sleep 1
+
+# Hardware GPU check: if Safe Graphics or nomodeset is active, enforce software rendering
+if grep -q -E 'nomodeset|safe-graphics' /proc/cmdline 2>/dev/null; then
+    export LIBGL_ALWAYS_SOFTWARE=1
+    export QT_QUICK_BACKEND=software
+    export QMLSCENE_DEVICE=softwarecontext
+fi
+
 # Run boot_ui.py animated starter. If boot_ui exits or fails on hardware,
 # immediately fall back to devos-install-gui so the screen never stays on an empty pointer.
 if [ -f /usr/local/share/devos/boot_ui.py ]; then
     python3 /usr/local/share/devos/boot_ui.py 2>/tmp/devos-boot-ui.err || true
 fi
 
-# Fallback: if Calamares is not running, launch installer GUI directly
-if ! pgrep -f calamares >/dev/null 2>&1; then
-    exec /usr/local/bin/devos-install-gui
-fi
+# Run installer GUI in a resilient watchdog loop so the session never exits
+# back to SDDM prematurely. Stop once the installer reports completion.
+RESTARTS=0
+MAX_RESTARTS=5
+RESTART_LOG="/tmp/devos-install-restarts"
+: > "$RESTART_LOG"
+while [ "$RESTARTS" -lt "$MAX_RESTARTS" ]; do
+    if [ -f /run/devos-install-completed ]; then
+        echo "Installer completed successfully; leaving session active."
+        # Keep a harmless window manager alive so the user is not dumped to a
+        # blank screen if they declined reboot on the Calamares finished page.
+        while true; do sleep 60; done
+    fi
+    if ! pgrep -f calamares >/dev/null 2>&1; then
+        RESTARTS=$((RESTARTS + 1))
+        echo "$(date): launching devos-install-gui (attempt ${RESTARTS}/${MAX_RESTARTS})" >> "$RESTART_LOG"
+        /usr/local/bin/devos-install-gui || true
+    fi
+    sleep 3
+done
 
-# Keep session process alive while installer is open
-wait
+echo "Calamares failed ${MAX_RESTARTS} times. Starting an emergency shell." >&2
+exec xterm -maximized -T "DevOS Installer Emergency Shell" -e /bin/bash -l
+
 

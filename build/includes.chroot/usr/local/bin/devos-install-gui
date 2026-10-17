@@ -62,20 +62,100 @@ run_calamares() {
 log=/tmp/devos-calamares.log
 : > "$log"
 fails=0
+
 while true; do
     started=$(date +%s)
-    run_calamares "$@" >>"$log" 2>&1 || true
+
+    if [ "$fails" -eq 0 ]; then
+        echo "==> Launching DevOS Installer (Hardware Mode)..." >> "$log"
+        run_calamares "$@" >>"$log" 2>&1 || true
+    elif [ "$fails" -eq 1 ]; then
+        echo "==> Hardware graphics mode exited quickly. Relaunching in Universal Safe Software Mode..." >> "$log"
+        export LIBGL_ALWAYS_SOFTWARE=1
+        export QT_QUICK_BACKEND=software
+        export QMLSCENE_DEVICE=softwarecontext
+        run_calamares -d "$@" >>"$log" 2>&1 || true
+    else
+        echo "==> Launching Calamares in Safe Mode with verbose diagnostics..." >> "$log"
+        export LIBGL_ALWAYS_SOFTWARE=1
+        export QT_QUICK_BACKEND=software
+        export QMLSCENE_DEVICE=softwarecontext
+        xhost +local: >/dev/null 2>&1 || true
+        xhost + >/dev/null 2>&1 || true
+        run_calamares -d "$@" >>"$log" 2>&1 || true
+    fi
+
     ended=$(date +%s)
     duration=$((ended - started))
+
     if [ "$duration" -ge 8 ]; then
         # Calamares ran for at least 8s and exited normally (user finished or closed it)
+        echo "Calamares completed or closed normally." >> "$log"
         break
     fi
+
     fails=$((fails + 1))
     if [ "$fails" -ge 3 ]; then
         echo "Calamares failed to start after $fails attempts. See $log" >>"$log"
-        break
+        
+        # NEVER exit the session! Display recovery interface or interactive terminal.
+        if command -v kdialog >/dev/null 2>&1; then
+            choice=$(kdialog --title "DevOS Installer Recovery" \
+                --menu "The graphical installer encountered a hardware display issue.\nHow would you like to proceed?" \
+                safe "Retry with Safe Graphics (Software Rendering)" \
+                term "Open Terminal / Shell" \
+                part "Open Disk Partition Manager" \
+                logs "View Installer Log" \
+                reboot "Restart Computer" 2>/dev/null || echo "safe")
+            case "$choice" in
+                safe)
+                    fails=1
+                    continue
+                    ;;
+                term)
+                    konsole 2>/dev/null || xterm 2>/dev/null || true
+                    fails=1
+                    continue
+                    ;;
+                part)
+                    partitionmanager 2>/dev/null || gparted 2>/dev/null || true
+                    fails=1
+                    continue
+                    ;;
+                logs)
+                    kdialog --textbox "$log" 800 600 2>/dev/null || true
+                    fails=1
+                    continue
+                    ;;
+                reboot)
+                    systemctl reboot -f 2>/dev/null || reboot
+                    ;;
+                *)
+                    fails=1
+                    continue
+                    ;;
+            esac
+        else
+            # Fallback if kdialog is unavailable: provide interactive diagnostic console
+            konsole -e bash -c '
+echo "=========================================================="
+echo "          DevOS Installer Recovery Console                "
+echo "=========================================================="
+echo "The installer encountered an issue starting on this hardware."
+echo "Last lines from log (/tmp/devos-calamares.log):"
+echo "----------------------------------------------------------"
+tail -n 25 /tmp/devos-calamares.log 2>/dev/null || true
+echo "----------------------------------------------------------"
+echo "Quick Commands:"
+echo "  sudo calamares -d     -> Run installer in debug mode"
+echo "  sudo partitionmanager -> Check 500GB SSD / disks"
+echo "=========================================================="
+exec bash
+' 2>/dev/null || konsole -e bash 2>/dev/null || xterm -e bash 2>/dev/null || sleep 10
+            fails=1
+        fi
     fi
     sleep 2
 done
+
 

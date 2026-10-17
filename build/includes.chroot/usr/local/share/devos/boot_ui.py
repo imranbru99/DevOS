@@ -7,9 +7,19 @@ import sys
 
 os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
 
-from PyQt5.QtCore import Qt, QTimer, QRectF
-from PyQt5.QtGui import QColor, QFont, QLinearGradient, QPainter, QPixmap
-from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QVBoxLayout, QWidget
+try:
+    from PyQt5.QtCore import Qt, QTimer, QRectF
+    from PyQt5.QtGui import QColor, QFont, QLinearGradient, QPainter, QPixmap
+    from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QVBoxLayout, QWidget
+except Exception:
+    try:
+        from PyQt6.QtCore import Qt, QTimer, QRectF
+        from PyQt6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPixmap
+        from PyQt6.QtWidgets import QApplication, QLabel, QPushButton, QVBoxLayout, QWidget
+    except Exception:
+        # If neither is available, exit cleanly so live session jumps straight to installer
+        sys.exit(0)
+
 
 
 LOG = "/tmp/devos-calamares.log"
@@ -187,6 +197,10 @@ class Starter(QWidget):
         env["QT_QPA_PLATFORM"] = "xcb"
         env["QT_QPA_PLATFORMTHEME"] = "kde"
         env["QT_STYLE_OVERRIDE"] = "Fusion"
+        if self.failed:
+            env["LIBGL_ALWAYS_SOFTWARE"] = "1"
+            env["QT_QUICK_BACKEND"] = "software"
+            env["QMLSCENE_DEVICE"] = "softwarecontext"
         if xauthority():
             env["XAUTHORITY"] = xauthority()
         try:
@@ -196,6 +210,8 @@ class Starter(QWidget):
         log = open(LOG, "a", encoding="utf-8", errors="replace")
         if os.geteuid() == 0:
             cmd = ["calamares"]
+            if self.failed:
+                cmd.append("-d")
         else:
             cmd = ["sudo", "-E", "-n", "env"]
             if display():
@@ -204,12 +220,20 @@ class Starter(QWidget):
                 cmd.append("XAUTHORITY=" + xauthority())
             cmd.extend([
                 "QT_QPA_PLATFORM=xcb",
-                # KDE palette (DevOS colours from /etc/xdg/kdeglobals): the
-                # partition legend is drawn with it, not with stylesheet.qss.
                 "QT_QPA_PLATFORMTHEME=kde",
                 "QT_STYLE_OVERRIDE=Fusion",
-                "calamares",
             ])
+            if self.failed:
+                cmd.extend([
+                    "LIBGL_ALWAYS_SOFTWARE=1",
+                    "QT_QUICK_BACKEND=software",
+                    "QMLSCENE_DEVICE=softwarecontext",
+                    "calamares",
+                    "-d",
+                ])
+            else:
+                cmd.append("calamares")
+
         try:
             self.proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, env=env)
         except OSError as exc:

@@ -33,10 +33,31 @@ rm -f \
     /home/devos/.config/autostart/ubuntu-desktop-bootstrap.desktop \
     2>/dev/null || true
 
+# Ensure user 'devos' is in autologin / video groups and has no password lock
+groupadd -f nopasswdlogin 2>/dev/null || true
+groupadd -f autologin 2>/dev/null || true
+if id devos >/dev/null 2>&1; then
+    usermod -a -G nopasswdlogin,autologin,sudo,video,render,input devos 2>/dev/null || true
+    passwd -d devos 2>/dev/null || true
+fi
+
+# Ensure PAM unconditionally permits autologin on live boot so "Login failed" is impossible
+mkdir -p /etc/pam.d
+cat > /etc/pam.d/sddm-autologin << 'EOF'
+#%PAM-1.0
+auth    required        pam_env.so
+auth    required        pam_permit.so
+account required        pam_permit.so
+password required       pam_permit.so
+session required        pam_permit.so
+EOF
+
+
 cat > /etc/sddm.conf.d/zz-devos-install.conf << 'EOF'
 [Autologin]
 User=devos
-Session=devos-install
+# Try the installer first; fall back to Plasma if the installer session dies.
+Session=devos-install,plasma
 Relogin=false
 
 [General]
@@ -50,7 +71,7 @@ EOF
 cat > /etc/sddm.conf << 'EOF'
 [Autologin]
 User=devos
-Session=devos-install
+Session=devos-install,plasma
 Relogin=false
 
 [General]

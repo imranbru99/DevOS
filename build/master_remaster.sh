@@ -62,10 +62,26 @@ if [ "${DEVOS_RESUME:-0}" = "1" ]; then
     chroot "${MNT}" env DEBIAN_FRONTEND=noninteractive apt-get purge -y ubuntu-desktop-bootstrap ubuntu-desktop-installer ubiquity ubiquity-frontend-gtk gnome-initial-setup subiquity subiquity-server curtin >/dev/null 2>&1 || true
     chroot "${MNT}" systemctl mask ubuntu-desktop-bootstrap.service subiquity.service 2>/dev/null || true
 
+    echo "==> Ensuring SDDM & Calamares QML packages and fallback window manager are installed..."
+    echo "nameserver 1.1.1.1" > "${MNT}/etc/resolv.conf"
+    chroot "${MNT}" env DEBIAN_FRONTEND=noninteractive apt-get update -y || true
+    chroot "${MNT}" env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-layouts \
+        qml6-module-qtquick-window qml6-module-qtquick-effects \
+        qml-module-qtquick2 qml-module-qtquick-controls2 qml-module-qtquick-layouts \
+        qml-module-qtgraphicaleffects openbox mesa-utils || true
+
+
     # Wipe stock Ubuntu watermark & bake DevOS Plymouth splash into initrd
     rm -f "${MNT}/usr/share/plymouth/ubuntu-logo.png" 2>/dev/null || true
     if [ -f "${MNT}/usr/share/pixmaps/devos-logo.png" ]; then
         cp -f "${MNT}/usr/share/pixmaps/devos-logo.png" "${MNT}/usr/share/plymouth/ubuntu-logo.png" 2>/dev/null || true
+    fi
+    if [ -f "${DEVOS_SRC}/build/hooks/04-branding.hook.chroot" ]; then
+        cp "${DEVOS_SRC}/build/hooks/04-branding.hook.chroot" "${MNT}/tmp/run_branding.sh"
+        chmod +x "${MNT}/tmp/run_branding.sh"
+        chroot "${MNT}" /tmp/run_branding.sh || true
+        rm -f "${MNT}/tmp/run_branding.sh"
     fi
     if [ -f "${MNT}/usr/local/sbin/devos-apply-branding" ]; then
         chroot "${MNT}" /bin/bash /usr/local/sbin/devos-apply-branding || true
@@ -190,6 +206,7 @@ cat << 'EOF' > "${MNT}/etc/hosts"
 EOF
 
 echo 'devos ALL=(ALL) NOPASSWD:ALL' > "${MNT}/etc/sudoers.d/devos"
+chmod 750 "${MNT}/etc/sudoers.d"
 chmod 0440 "${MNT}/etc/sudoers.d/devos"
 
 if [ -f "${MNT}/usr/local/sbin/devos-apply-branding" ]; then
@@ -283,6 +300,7 @@ rm -f "${STAGE_DIR}/casper/filesystem.squashfs"
 
 mksquashfs "${MNT}" "${STAGE_DIR}/casper/filesystem.squashfs" \
     -comp zstd -Xcompression-level 15 \
+    -b 1048576 -processors 0 \
     -noappend -e "ubuntu-base-*"
 
 du -sk "${MNT}" | awk '{print $1 * 1024}' > "${STAGE_DIR}/casper/filesystem.size"
@@ -299,122 +317,31 @@ fi
 # with DEVOS_RESUME=1; delete it by hand once the ISO is tested.
 umount "${MNT}"
 
-# 8. Setup GRUB Bootloader with username=devos and universal search
-echo "==> Step 8: Configuring GRUB bootloader..."
-mkdir -p "${STAGE_DIR}/boot/grub" "${STAGE_DIR}/EFI/BOOT"
+# 8-11. Prepare the boot tree and master the real-hardware hybrid ISO.
+echo "==> Step 8: Preparing hybrid boot tree (BIOS+UEFI+Secure Boot)..."
+source "${DEVOS_SRC}/build/lib-boot-iso.sh"
 
-cat << 'EOF' > "${STAGE_DIR}/boot/grub/grub.cfg"
-set default="0"
-set timeout=5
-
-search --no-floppy --set=root --file /casper/vmlinuz
-
-insmod font
-if loadfont /boot/grub/font.pf2 ; then
-    insmod gfxterm
-    set gfxmode=auto
-    terminal_output gfxterm
-fi
-
-set menu_color_normal=white/black
-set menu_color_highlight=black/light-gray
-
-menuentry "Try or Install DevOS (24.04 LTS)" {
-    set gfxpayload=keep
-    search --no-floppy --set=root --file /casper/vmlinuz
-    linux /casper/vmlinuz boot=casper username=devos hostname=devos quiet splash plymouth.theme=devos fsck.mode=skip ---
-    initrd /casper/initrd
-}
-
-menuentry "DevOS (Safe Graphics)" {
-    set gfxpayload=keep
-    search --no-floppy --set=root --file /casper/vmlinuz
-    linux /casper/vmlinuz boot=casper username=devos hostname=devos nomodeset quiet splash plymouth.theme=devos ---
-    initrd /casper/initrd
-}
-
-menuentry "Check Disc for Defects" {
-    search --no-floppy --set=root --file /casper/vmlinuz
-    linux /casper/vmlinuz boot=casper integrity-check quiet splash plymouth.theme=devos ---
-    initrd /casper/initrd
-}
-EOF
-
-cp "${STAGE_DIR}/boot/grub/grub.cfg" "${STAGE_DIR}/EFI/BOOT/grub.cfg"
-
-# 9. Build universal standalone BOOTX64.EFI with all FS modules
-echo "==> Step 9: Generating standalone BOOTX64.EFI..."
-cat << 'EOF' > "${TMP_DIR}/early_grub.cfg"
-search --no-floppy --set=root --file /casper/vmlinuz
-set prefix=($root)/boot/grub
-configfile $prefix/grub.cfg
-EOF
-
-grub-mkstandalone \
-    --format=x86_64-efi \
-    --output="${TMP_DIR}/BOOTX64.EFI" \
-    --locales="" \
-    --fonts="" \
-    --modules="iso9660 fat ntfs ext2 part_msdos part_gpt normal boot linux search search_fs_file search_fs_uuid search_label configfile font test sleep echo" \
-    "boot/grub/grub.cfg=${TMP_DIR}/early_grub.cfg"
-
-# The signed Ubuntu GRUB finds the disc by /.disk/info, then reads
-# /boot/grub/grub.cfg. Prefer shim -> signed GRUB; the standalone image is
-# only a fallback for machines with Secure Boot turned off.
-mkdir -p "${STAGE_DIR}/.disk"
-echo "DevOS 24.04 LTS \"Noble\" - amd64" > "${STAGE_DIR}/.disk/info"
-
-mkdir -p "${TMP_DIR}/efi_structure/EFI/BOOT"
+# Put the signed UEFI binaries we already extracted from the rootfs into the
+# stage so the shared library can reuse them.
+mkdir -p "${STAGE_DIR}/EFI/BOOT"
 if [ -f "${TMP_DIR}/shimx64.efi" ] && [ -f "${TMP_DIR}/grubx64.efi" ]; then
-    echo "  Using signed shim + GRUB (Secure Boot ready)"
-    for d in "${STAGE_DIR}/EFI/BOOT" "${TMP_DIR}/efi_structure/EFI/BOOT"; do
-        cp "${TMP_DIR}/shimx64.efi" "$d/BOOTX64.EFI"
-        cp "${TMP_DIR}/grubx64.efi" "$d/grubx64.efi"
-        [ -f "${TMP_DIR}/mmx64.efi" ] && cp "${TMP_DIR}/mmx64.efi" "$d/mmx64.efi"
-    done
-else
-    echo "  WARNING: signed shim/GRUB missing; USB will need Secure Boot disabled" >&2
-    cp "${TMP_DIR}/BOOTX64.EFI" "${STAGE_DIR}/EFI/BOOT/BOOTX64.EFI"
-    cp "${TMP_DIR}/BOOTX64.EFI" "${TMP_DIR}/efi_structure/EFI/BOOT/BOOTX64.EFI"
+    cp -fL "${TMP_DIR}/shimx64.efi" "${STAGE_DIR}/EFI/BOOT/BOOTX64.EFI"
+    cp -fL "${TMP_DIR}/grubx64.efi" "${STAGE_DIR}/EFI/BOOT/grubx64.efi"
+    [ -f "${TMP_DIR}/mmx64.efi" ] && cp -fL "${TMP_DIR}/mmx64.efi" "${STAGE_DIR}/EFI/BOOT/mmx64.efi"
 fi
 
-# 10. Generate efi.img FAT partition
-echo "==> Step 10: Generating efi.img FAT partition..."
-cp "${STAGE_DIR}/boot/grub/grub.cfg" "${TMP_DIR}/efi_structure/EFI/BOOT/grub.cfg"
+devos_prepare_boot_tree "${STAGE_DIR}" "${MNT}" "${TMP_DIR}"
 
-rm -f "${STAGE_DIR}/boot/grub/efi.img"
-dd if=/dev/zero of="${STAGE_DIR}/boot/grub/efi.img" bs=1M count=10 status=none
-mkfs.vfat "${STAGE_DIR}/boot/grub/efi.img" > /dev/null
-mcopy -s -i "${STAGE_DIR}/boot/grub/efi.img" "${TMP_DIR}/efi_structure/EFI" ::
-
-# Remove old boot.catalog if present
-rm -f "${STAGE_DIR}/boot.catalog"
-
-# 11. Master final hybrid bootable ISO with xorriso
-echo "==> Step 11: Assembling final hybrid BIOS+UEFI ISO..."
-LOCAL_ISO="/tmp/devos-24.04-amd64.iso"
-rm -f "${LOCAL_ISO}" "${OUTPUT_ISO}"
-xorriso -as mkisofs \
-    -r -V "DEVOS_2404" \
-    -J -joliet-long \
-    -partition_offset 16 \
-    --eltorito-alt-boot \
-    -e boot/grub/efi.img \
-    -no-emul-boot \
-    -isohybrid-gpt-basdat \
-    -output "${LOCAL_ISO}" \
-    "${STAGE_DIR}"
-
-echo "==> Moving generated ISO to destination ${OUTPUT_ISO}..."
+echo "==> Step 9: Mastering final hybrid ISO with xorriso..."
 rm -f "${OUTPUT_ISO}"
-cat "${LOCAL_ISO}" > "${OUTPUT_ISO}"
-sync
-rm -f "${LOCAL_ISO}"
+devos_master_iso "${STAGE_DIR}" "${OUTPUT_ISO}"
 
-# 12. Cleanup temporary directories
-rm -rf "${TMP_DIR}"
+# 12. Checksum and size reporting
+# The verifier uses mktemp; do not let it inherit the build's TMPDIR.
+unset TMPDIR
+echo "==> Running hardware-boot verification gate..."
+"${DEVOS_SRC}/tests/boot/verify-iso-bootability.sh" "${OUTPUT_ISO}" || exit 1
 
-# 13. Checksum and size reporting
 echo "==> Generating SHA256 checksum..."
 sha256sum "${OUTPUT_ISO}" > "${OUTPUT_ISO}.sha256"
 

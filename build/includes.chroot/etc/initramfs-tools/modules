@@ -1,3 +1,53 @@
 # The installed root filesystem is btrfs. Keep the driver in the initramfs
 # so the disk can mount after the USB is removed.
 btrfs
+overlay
+squashfs
+loop
+
+# Live USB boot essentials. These must be available even if initramfs-tools
+# defaults or the build container's hardware would not include them.
+sd_mod
+sr_mod
+cdrom
+isofs
+ext4
+vfat
+fat
+ntfs3
+
+# USB and NVMe host/storage controllers found on real PCs.
+usb-storage
+uas
+xhci-hcd
+xhci-pci
+xhci-plat-hcd
+ehci-hcd
+ohci-hcd
+uhci-hcd
+ahci
+libahci
+libata
+nvme
+vmd
+
+# Input: needed if the installer must respond to a keyboard before udev
+# finishes setting up userspace modules.
+hid
+usbhid
+hid-generic
+usbkbd
+usbmouse
+i8042
+atkbd
+psmouse
+
+# Network (PXE/live updates are not used, but useful for debug/rescue).
+e1000e
+r8169
+virtio_net
+
+# Virtual disk controllers (VM fallback, qemu-kvm, VirtualBox).
+virtio_blk
+virtio_pci
+virtio_scsi

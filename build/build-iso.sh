@@ -17,7 +17,7 @@ WORK_DIR="${DEVOS_WORK_DIR:-${ROOT_DIR}/build_work}"
 CHROOT_DIR="${WORK_DIR}/chroot"
 ISODIR="${WORK_DIR}/iso"
 
-ZSTD_LEVEL="${DEVOS_ZSTD_LEVEL:-19}"
+ZSTD_LEVEL="${DEVOS_ZSTD_LEVEL:-15}"
 MIRROR="${UBUNTU_MIRROR:-http://archive.ubuntu.com/ubuntu/}"
 
 echo "==========================================================="
@@ -268,197 +268,29 @@ if [ -n "$world_writable" ]; then
 fi
 
 # 9. Create SquashFS with zstd
-echo "==> Step 8: Creating filesystem.squashfs (zstd level ${ZSTD_LEVEL})..."
+# 1 MiB blocks give better sequential throughput during Calamares unpack
+# while zstd level 15 keeps the image under 4 GB without level-19 CPU cost.
+echo "==> Step 8: Creating filesystem.squashfs (zstd level ${ZSTD_LEVEL}, 1M blocks)..."
 rm -f "${ISODIR}/casper/filesystem.squashfs"
 mksquashfs "${CHROOT_DIR}" "${ISODIR}/casper/filesystem.squashfs" \
     -comp zstd -Xcompression-level "${ZSTD_LEVEL}" \
-    -noappend
+    -b 1048576 -processors 0 -noappend
 
 # Generate size and manifest info
 chroot "${CHROOT_DIR}" dpkg-query -W --showformat='${Package} ${Version}\n' > "${ISODIR}/casper/filesystem.manifest"
 printf $(du -sx --block-size=1 "${CHROOT_DIR}" | cut -f1) > "${ISODIR}/casper/filesystem.size"
 
-# 10. Configure GRUB for BIOS and UEFI
-echo "==> Step 9: Setting up GRUB bootloader..."
-mkdir -p "${ISODIR}/boot/grub/x86_64-efi"
+# 10-12. Configure GRUB, build UEFI/BIOS boot files, and master the hybrid ISO.
+# All of this is now handled by the shared lib-boot-iso.sh so every build path
+# (native, Docker, remaster, fast-rebuild) produces the same real-hardware layout.
+echo "==> Step 9: Preparing hybrid boot tree (BIOS+UEFI+Secure Boot)..."
+source "${SCRIPT_DIR}/lib-boot-iso.sh"
+BOOT_TMP="$(mktemp -d)"
+devos_prepare_boot_tree "${ISODIR}" "${CHROOT_DIR}" "${BOOT_TMP}"
 
-cat << 'EOF' > "${ISODIR}/boot/grub/grub.cfg"
-set default="0"
-set timeout_style=hidden
-set timeout=0
-
-insmod part_gpt
-insmod part_msdos
-insmod iso9660
-insmod fat
-insmod ext2
-insmod ntfs
-
-function devos_root {
-    search --no-floppy --set=root --file /casper/vmlinuz
-    if [ -f /casper/vmlinuz ]; then
-        return
-    fi
-    search --no-floppy --set=root --label DEVOS_2404
-}
-
-set menu_color_normal=white/black
-set menu_color_highlight=black/light-gray
-
-menuentry "Install DevOS onto the disk" {
-    set gfxpayload=keep
-    devos_root
-    if [ -f /casper/vmlinuz ]; then
-        linux /casper/vmlinuz boot=casper username=devos hostname=devos quiet splash plymouth.theme=devos fsck.mode=skip ---
-        initrd /casper/initrd
-    else
-        echo "DevOS cannot find /casper/vmlinuz. Write the ISO again in DD mode."
-        sleep 15
-    fi
-}
-
-menuentry "DevOS (Safe Graphics)" {
-    set gfxpayload=keep
-    devos_root
-    if [ -f /casper/vmlinuz ]; then
-        linux /casper/vmlinuz boot=casper username=devos hostname=devos nomodeset quiet splash plymouth.theme=devos ---
-        initrd /casper/initrd
-    else
-        echo "DevOS cannot find /casper/vmlinuz. Write the ISO again in DD mode."
-        sleep 15
-    fi
-}
-
-menuentry "Boot the installed DevOS disk" {
-    insmod part_gpt
-    insmod fat
-    insmod chain
-    search --no-floppy --set=root --file /EFI/DevOS/grubx64.efi
-    if [ -f /EFI/DevOS/grubx64.efi ]; then
-        chainloader /EFI/DevOS/grubx64.efi
-        boot
-    else
-        echo "DevOS is not on a disk yet. Choose Install DevOS onto the disk."
-        sleep 12
-    fi
-}
-
-menuentry "Check Disc for Defects" {
-    devos_root
-    if [ -f /casper/vmlinuz ]; then
-        linux /casper/vmlinuz boot=casper integrity-check quiet splash plymouth.theme=devos ---
-        initrd /casper/initrd
-    fi
-}
-EOF
-
-# 11. Create EFI Boot Image
-# Secure Boot: Microsoft-signed shim loads Canonical's signed GRUB (gcdx64),
-# which finds this disc via /.disk/info and reads /boot/grub/grub.cfg.
-# The kernel is Ubuntu's signed kernel, so the USB can boot with Secure Boot on.
-echo "==> Step 10: Generating EFI boot partition..."
-mkdir -p "${WORK_DIR}/efi_tmp/EFI/BOOT" "${ISODIR}/EFI/BOOT" "${ISODIR}/.disk"
-echo 'DevOS 24.04 LTS "Noble" - amd64' > "${ISODIR}/.disk/info"
-
-SHIM=""
-for f in shimx64.efi.signed.latest shimx64.efi.signed; do
-    if [ -f "${CHROOT_DIR}/usr/lib/shim/$f" ]; then
-        SHIM="${CHROOT_DIR}/usr/lib/shim/$f"
-        break
-    fi
-done
-GCD=""
-for f in gcdx64.efi.signed grubx64.efi.signed; do
-    if [ -f "${CHROOT_DIR}/usr/lib/grub/x86_64-efi-signed/$f" ]; then
-        GCD="${CHROOT_DIR}/usr/lib/grub/x86_64-efi-signed/$f"
-        break
-    fi
-done
-MM=""
-for f in mmx64.efi.signed mmx64.efi; do
-    if [ -f "${CHROOT_DIR}/usr/lib/shim/$f" ]; then
-        MM="${CHROOT_DIR}/usr/lib/shim/$f"
-        break
-    fi
-done
-
-if [ -n "$SHIM" ] && [ -n "$GCD" ]; then
-    echo "  Using signed shim + GRUB (Secure Boot can stay on)"
-    cp -L "$SHIM" "${WORK_DIR}/efi_tmp/EFI/BOOT/BOOTX64.EFI"
-    cp -L "$GCD" "${WORK_DIR}/efi_tmp/EFI/BOOT/grubx64.efi"
-    if [ -n "$MM" ]; then
-        cp -L "$MM" "${WORK_DIR}/efi_tmp/EFI/BOOT/mmx64.efi"
-    fi
-    cp "${ISODIR}/boot/grub/grub.cfg" "${WORK_DIR}/efi_tmp/EFI/BOOT/grub.cfg"
-else
-    echo "  WARNING: signed shim/GRUB missing; USB will need Secure Boot disabled" >&2
-    grub-mkstandalone \
-        --format=x86_64-efi \
-        --output="${WORK_DIR}/efi_tmp/EFI/BOOT/BOOTX64.EFI" \
-        --locales="" \
-        --fonts="" \
-        --modules="iso9660 fat ntfs ext2 part_msdos part_gpt normal boot linux chain search search_fs_file search_fs_uuid search_label configfile font test sleep echo" \
-        "boot/grub/grub.cfg=${ISODIR}/boot/grub/grub.cfg" || true
-fi
-
-# Populate EFI directory in root ISO as well (shim, signed GRUB, MokManager).
-cp -a "${WORK_DIR}/efi_tmp/EFI/BOOT/." "${ISODIR}/EFI/BOOT/"
-cp "${ISODIR}/boot/grub/grub.cfg" "${ISODIR}/EFI/BOOT/grub.cfg"
-
-if [ ! -f "${ISODIR}/EFI/BOOT/BOOTX64.EFI" ]; then
-    echo "ERROR: No UEFI loader was produced." >&2
-    exit 1
-fi
-
-# Create FAT16/FAT12 EFI image
-rm -f "${ISODIR}/boot/grub/efi.img"
-dd if=/dev/zero of="${ISODIR}/boot/grub/efi.img" bs=1M count=10
-mkfs.vfat "${ISODIR}/boot/grub/efi.img"
-mcopy -s -i "${ISODIR}/boot/grub/efi.img" "${WORK_DIR}/efi_tmp/EFI" ::
-
-# Legacy BIOS loader. Without it the ISO only starts on UEFI machines, and a
-# BIOS/CSM PC drops to "No bootable device" before DevOS or the installer.
-echo "==> Step 10b: Generating legacy BIOS El Torito image..."
-GRUB_PC_DIR=/usr/lib/grub/i386-pc
-mkdir -p "${ISODIR}/boot/grub/i386-pc"
-grub-mkstandalone \
-    --format=i386-pc \
-    --output="${WORK_DIR}/core.img" \
-    --install-modules="linux linux16 normal iso9660 biosdisk memdisk search search_fs_file search_label part_msdos part_gpt fat ext2 ntfs chain configfile test sleep echo font gfxterm all_video" \
-    --modules="linux normal iso9660 biosdisk search" \
-    --locales="" \
-    --fonts="" \
-    "boot/grub/grub.cfg=${ISODIR}/boot/grub/grub.cfg"
-cat "${GRUB_PC_DIR}/cdboot.img" "${WORK_DIR}/core.img" > "${ISODIR}/boot/grub/i386-pc/eltorito.img"
-
-# 12. Build Hybrid ISO using xorriso
-# BIOS: El Torito + GRUB hybrid MBR (DVD and USB). UEFI: El Torito EFI image
-# plus an appended ESP partition so firmware also finds it on a dd-written USB.
-echo "==> Step 11: Assembling final hybrid ISO with xorriso..."
-# Write on the Linux build disk, then copy into out/. Streaming xorriso
-# straight onto a Windows or macOS Docker folder fails with
-# "Failed to open device (a pseudo-drive)".
+echo "==> Step 10: Mastering final hybrid ISO with xorriso..."
 mkdir -p "${OUTPUT_DIR}"
-STAGED_ISO="${WORK_DIR}/${ISO_NAME}"
-rm -f "${STAGED_ISO}" "${OUTPUT_ISO}"
-xorriso -as mkisofs \
-    -iso-level 3 \
-    -r -V "DEVOS_2404" \
-    -J -joliet-long \
-    --grub2-mbr "${GRUB_PC_DIR}/boot_hybrid.img" \
-    -partition_offset 16 \
-    --mbr-force-bootable \
-    -append_partition 2 28732ac11ff8d211ba4b00a0c93ec93b "${ISODIR}/boot/grub/efi.img" \
-    -appended_part_as_gpt \
-    -c boot/grub/boot.cat \
-    -b boot/grub/i386-pc/eltorito.img \
-    -no-emul-boot -boot-load-size 4 -boot-info-table --grub2-boot-info \
-    -eltorito-alt-boot \
-    -e '--interval:appended_partition_2:::' \
-    -no-emul-boot \
-    -output "${STAGED_ISO}" \
-    "${ISODIR}"
-cp -f "${STAGED_ISO}" "${OUTPUT_ISO}"
+devos_master_iso "${ISODIR}" "${OUTPUT_ISO}"
 
 # 13. Verify and Report
 echo "==========================================================="
@@ -471,6 +303,13 @@ if [ -f "${OUTPUT_ISO}" ]; then
     echo "Size: ${ISO_HUMAN} (${ISO_BYTES} bytes)"
     sha256sum "${OUTPUT_ISO}" > "${OUTPUT_ISO}.sha256"
     echo "SHA256: $(cat "${OUTPUT_ISO}.sha256")"
+
+    # Hardware-boot gate: refuse to publish an ISO that would not start on a
+    # real PC. The same gate is also a Makefile target for quick CI checks.
+    if [ -x "${ROOT_DIR}/tests/boot/verify-iso-bootability.sh" ]; then
+        echo "==> Running hardware-boot verification gate..."
+        "${ROOT_DIR}/tests/boot/verify-iso-bootability.sh" "${OUTPUT_ISO}" || exit 1
+    fi
 
     # Size check against <= 4 GB constraint
     MAX_BYTES=$((4 * 1024 * 1024 * 1024))
