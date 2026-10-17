@@ -1,0 +1,12 @@
+{
+    "KPlugin": {
+        "Id": "DevOS-FluxStreamsRose",
+        "Name": "Flux Streams Rose",
+        "Authors": [
+            {
+                "Name": "DevOS"
+            }
+        ],
+        "License": "CC-BY-SA-4.0"
+    }
+}

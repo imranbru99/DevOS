@@ -1234,3 +1234,9 @@ body.luxury-dark {
   padding: 8px 16px;
   font-size: 13px;
 }
+
+/* Live USB vs installed PC: hidden until /api/system/status says which one this is. */
+body:not(.is-live) .live-only,
+body:not(.is-installed) .installed-only {
+  display: none !important;
+}

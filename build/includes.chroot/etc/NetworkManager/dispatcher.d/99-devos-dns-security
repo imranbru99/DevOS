@@ -1,0 +1,19 @@
+#!/bin/bash
+# DevOS Security web protection. Runs right after 99-devos-dns (name order)
+# and before 99-devos-familysafe: points each link at Quad9's threat-blocking
+# servers instead of the router / public resolvers 99-devos-dns set. Does
+# nothing when web protection is off, and leaves the link alone when Family
+# Safety is on (its own dispatcher runs next).
+iface="$1"
+action="$2"
+case "$action" in
+    up|dhcp4-change|dhcp6-change|connectivity-change) ;;
+    *) exit 0 ;;
+esac
+[ -n "$iface" ] && [ "$iface" != "none" ] || exit 0
+[ -e /etc/systemd/resolved.conf.d/zy-devos-security.conf ] || exit 0
+[ -e /etc/systemd/resolved.conf.d/zz-devos-familysafe.conf ] && exit 0
+command -v resolvectl >/dev/null 2>&1 || exit 0
+resolvectl dns "$iface" 9.9.9.9#dns.quad9.net 149.112.112.112#dns.quad9.net \
+    2620:fe::fe#dns.quad9.net 2620:fe::9#dns.quad9.net >/dev/null 2>&1 || true
+exit 0

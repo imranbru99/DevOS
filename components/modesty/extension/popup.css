@@ -1,0 +1,14 @@
+:root { color-scheme: light dark; --bg: #fbfaf6; --fg: #1d2b22; --muted: #5d6b62; --accent: #3a5a40; --line: #d9ddd5; }
+@media (prefers-color-scheme: dark) { :root { --bg: #18201b; --fg: #e7ece6; --muted: #a3b0a7; --accent: #8fbf8f; --line: #2f3a33; } }
+body { margin: 0; padding: 14px 16px; width: 270px; background: var(--bg); color: var(--fg); font: 13px/1.4 system-ui, sans-serif; }
+h1 { font-size: 15px; margin: 0 0 10px; }
+.row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.row[hidden] { display: none; }
+select { font: inherit; }
+input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); }
+.lock { background: color-mix(in srgb, var(--accent) 15%, transparent); border-radius: 6px; padding: 6px 8px; margin: 0 0 8px; }
+.counts { display: flex; gap: 12px; margin: 12px 0 6px; }
+.counts div { flex: 1; display: flex; flex-direction: column; }
+.counts strong { font-size: 20px; color: var(--accent); }
+.counts span, .note { color: var(--muted); font-size: 12px; }
+.note { margin: 8px 0 0; }

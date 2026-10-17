@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=DevOS AI extras
+Comment=Downloads photo understanding when it was chosen during install
+Exec=/usr/local/bin/devos-ai-models user-extras
+NoDisplay=true
+X-KDE-autostart-phase=2
+X-GNOME-Autostart-enabled=true

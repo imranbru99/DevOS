@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=DevOS Share
+GenericName=Share my local app online
+Comment=Give an app running on this computer a public link, with no domain or router setup
+Exec=/usr/bin/python3 /usr/local/share/devos/components/share/share.py gui
+Icon=network-workgroup
+Terminal=false
+Categories=Development;Network;
+Keywords=share;tunnel;public;link;localhost;port;dev server;cloudflare;ngrok;expose;qr;
+StartupNotify=false

@@ -1,0 +1,12 @@
+{
+    "KPlugin": {
+        "Id": "DevOS-SignalRidgeEmber",
+        "Name": "Signal Ridge Ember",
+        "Authors": [
+            {
+                "Name": "DevOS"
+            }
+        ],
+        "License": "CC-BY-SA-4.0"
+    }
+}

@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Clipboard
+GenericName=Clipboard history
+Comment=Press Meta+V to pick something you copied and paste it back
+Exec=/usr/bin/python3 /usr/local/share/devos/components/clipboard/clipboard.py
+Icon=edit-paste
+Terminal=false
+StartupNotify=false
+Categories=Utility;
+Keywords=clipboard;paste;history;copy;win+v;
+X-KDE-Shortcuts=Meta+V

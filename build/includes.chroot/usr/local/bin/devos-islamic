@@ -1,0 +1,3 @@
+#!/bin/sh
+# DevOS Islamic launcher (also what pkexec runs for the system-wide text download).
+exec /usr/bin/python3 /usr/local/share/devos/components/islamic/islamic_app.py "$@"

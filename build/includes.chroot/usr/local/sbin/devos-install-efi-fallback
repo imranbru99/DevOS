@@ -20,7 +20,7 @@ mkdir -p "$src" "$esp/EFI/BOOT" "$esp/EFI/ubuntu"
 # Discover root/boot filesystem UUID with fallbacks
 uuid=""
 if command -v grub-probe >/dev/null 2>&1; then
-    uuid="$(grub-probe --target=fs_uuid /boot/grub 2>/dev/null || true)"
+    uuid="$(timeout -k 5 15 grub-probe --target=fs_uuid /boot/grub 2>/dev/null || true)"
 fi
 if [ -z "$uuid" ] && command -v findmnt >/dev/null 2>&1 && command -v blkid >/dev/null 2>&1; then
     src_dev="$(findmnt -n -o SOURCE -T /boot/grub 2>/dev/null || findmnt -n -o SOURCE / 2>/dev/null || true)"
@@ -35,7 +35,7 @@ fi
 # Discover relative path inside the filesystem
 rel=""
 if command -v grub-mkrelpath >/dev/null 2>&1; then
-    rel="$(grub-mkrelpath /boot/grub 2>/dev/null || true)"
+    rel="$(timeout -k 5 15 grub-mkrelpath /boot/grub 2>/dev/null || true)"
 fi
 if [ -z "$rel" ]; then
     fstype="$(findmnt -n -o FSTYPE / 2>/dev/null || true)"

@@ -1,0 +1,3 @@
+#!/bin/bash
+# Emoji panel. Meta+. opens the window.
+exec /usr/bin/python3 /usr/local/share/devos/components/emoji/emoji.py "$@"

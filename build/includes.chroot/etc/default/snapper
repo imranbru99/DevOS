@@ -1,0 +1,2 @@
+# Configurations snapper should manage. DevOS creates "root" for the system disk.
+SNAPPER_CONFIGS="root"

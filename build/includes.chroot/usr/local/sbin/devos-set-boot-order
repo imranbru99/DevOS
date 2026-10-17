@@ -10,7 +10,9 @@ if ! command -v efibootmgr >/dev/null 2>&1; then
     exit 0
 fi
 
-boot="$(efibootmgr 2>/dev/null)"
+# QEMU and some firmware block forever on EFI variables. A hang here is
+# reported as "External command failed to finish."
+boot="$(timeout -k 5 15 efibootmgr 2>/dev/null)" || boot=""
 first="$(printf '%s\n' "$boot" | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*[[:space:]]*DevOS.*/\1/p' | head -n 1)"
 if [ -z "$first" ]; then
     first="$(printf '%s\n' "$boot" | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*[[:space:]]*ubuntu.*/\1/p' | head -n 1)"
@@ -32,6 +34,6 @@ for id in $order; do
 done
 IFS="$old_ifs"
 
-efibootmgr -o "$new" >/dev/null 2>&1
-efibootmgr -n "$first" >/dev/null 2>&1
+timeout -k 5 15 efibootmgr -o "$new" >/dev/null 2>&1 || true
+timeout -k 5 15 efibootmgr -n "$first" >/dev/null 2>&1 || true
 exit 0

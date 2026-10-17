@@ -353,29 +353,60 @@ menuentry "Check Disc for Defects" {
 EOF
 
 # 11. Create EFI Boot Image
+# Secure Boot: Microsoft-signed shim loads Canonical's signed GRUB (gcdx64),
+# which finds this disc via /.disk/info and reads /boot/grub/grub.cfg.
+# The kernel is Ubuntu's signed kernel, so the USB can boot with Secure Boot on.
 echo "==> Step 10: Generating EFI boot partition..."
-mkdir -p "${WORK_DIR}/efi_tmp/EFI/BOOT" "${ISODIR}/EFI/BOOT"
-grub-mkstandalone \
-    --format=x86_64-efi \
-    --output="${WORK_DIR}/efi_tmp/EFI/BOOT/BOOTX64.EFI" \
-    --locales="" \
-    --fonts="" \
-    --modules="iso9660 fat ntfs ext2 part_msdos part_gpt normal boot linux chain search search_fs_file search_fs_uuid search_label configfile font test sleep echo" \
-    "boot/grub/grub.cfg=${ISODIR}/boot/grub/grub.cfg" || true
+mkdir -p "${WORK_DIR}/efi_tmp/EFI/BOOT" "${ISODIR}/EFI/BOOT" "${ISODIR}/.disk"
+echo 'DevOS 24.04 LTS "Noble" - amd64' > "${ISODIR}/.disk/info"
 
-# If grub-mkstandalone output missing, fallback to copying signed EFI binary if available
-if [ ! -f "${WORK_DIR}/efi_tmp/EFI/BOOT/BOOTX64.EFI" ]; then
-    if [ -f "${CHROOT_DIR}/usr/lib/grub/x86_64-efi-signed/grubx64.efi.signed" ]; then
-        cp "${CHROOT_DIR}/usr/lib/grub/x86_64-efi-signed/grubx64.efi.signed" "${WORK_DIR}/efi_tmp/EFI/BOOT/BOOTX64.EFI"
+SHIM=""
+for f in shimx64.efi.signed.latest shimx64.efi.signed; do
+    if [ -f "${CHROOT_DIR}/usr/lib/shim/$f" ]; then
+        SHIM="${CHROOT_DIR}/usr/lib/shim/$f"
+        break
     fi
+done
+GCD=""
+for f in gcdx64.efi.signed grubx64.efi.signed; do
+    if [ -f "${CHROOT_DIR}/usr/lib/grub/x86_64-efi-signed/$f" ]; then
+        GCD="${CHROOT_DIR}/usr/lib/grub/x86_64-efi-signed/$f"
+        break
+    fi
+done
+MM=""
+for f in mmx64.efi.signed mmx64.efi; do
+    if [ -f "${CHROOT_DIR}/usr/lib/shim/$f" ]; then
+        MM="${CHROOT_DIR}/usr/lib/shim/$f"
+        break
+    fi
+done
+
+if [ -n "$SHIM" ] && [ -n "$GCD" ]; then
+    echo "  Using signed shim + GRUB (Secure Boot can stay on)"
+    cp -L "$SHIM" "${WORK_DIR}/efi_tmp/EFI/BOOT/BOOTX64.EFI"
+    cp -L "$GCD" "${WORK_DIR}/efi_tmp/EFI/BOOT/grubx64.efi"
+    if [ -n "$MM" ]; then
+        cp -L "$MM" "${WORK_DIR}/efi_tmp/EFI/BOOT/mmx64.efi"
+    fi
+    cp "${ISODIR}/boot/grub/grub.cfg" "${WORK_DIR}/efi_tmp/EFI/BOOT/grub.cfg"
+else
+    echo "  WARNING: signed shim/GRUB missing; USB will need Secure Boot disabled" >&2
+    grub-mkstandalone \
+        --format=x86_64-efi \
+        --output="${WORK_DIR}/efi_tmp/EFI/BOOT/BOOTX64.EFI" \
+        --locales="" \
+        --fonts="" \
+        --modules="iso9660 fat ntfs ext2 part_msdos part_gpt normal boot linux chain search search_fs_file search_fs_uuid search_label configfile font test sleep echo" \
+        "boot/grub/grub.cfg=${ISODIR}/boot/grub/grub.cfg" || true
 fi
 
-# Populate EFI directory in root ISO as well
-cp "${WORK_DIR}/efi_tmp/EFI/BOOT/BOOTX64.EFI" "${ISODIR}/EFI/BOOT/BOOTX64.EFI"
+# Populate EFI directory in root ISO as well (shim, signed GRUB, MokManager).
+cp -a "${WORK_DIR}/efi_tmp/EFI/BOOT/." "${ISODIR}/EFI/BOOT/"
 cp "${ISODIR}/boot/grub/grub.cfg" "${ISODIR}/EFI/BOOT/grub.cfg"
 
 if [ ! -f "${ISODIR}/EFI/BOOT/BOOTX64.EFI" ]; then
-    echo "ERROR: No UEFI loader was produced (grub-mkstandalone failed)." >&2
+    echo "ERROR: No UEFI loader was produced." >&2
     exit 1
 fi
 
@@ -404,7 +435,12 @@ cat "${GRUB_PC_DIR}/cdboot.img" "${WORK_DIR}/core.img" > "${ISODIR}/boot/grub/i3
 # BIOS: El Torito + GRUB hybrid MBR (DVD and USB). UEFI: El Torito EFI image
 # plus an appended ESP partition so firmware also finds it on a dd-written USB.
 echo "==> Step 11: Assembling final hybrid ISO with xorriso..."
-rm -f "${OUTPUT_ISO}"
+# Write on the Linux build disk, then copy into out/. Streaming xorriso
+# straight onto a Windows or macOS Docker folder fails with
+# "Failed to open device (a pseudo-drive)".
+mkdir -p "${OUTPUT_DIR}"
+STAGED_ISO="${WORK_DIR}/${ISO_NAME}"
+rm -f "${STAGED_ISO}" "${OUTPUT_ISO}"
 xorriso -as mkisofs \
     -iso-level 3 \
     -r -V "DEVOS_2404" \
@@ -420,8 +456,9 @@ xorriso -as mkisofs \
     -eltorito-alt-boot \
     -e '--interval:appended_partition_2:::' \
     -no-emul-boot \
-    -output "${OUTPUT_ISO}" \
+    -output "${STAGED_ISO}" \
     "${ISODIR}"
+cp -f "${STAGED_ISO}" "${OUTPUT_ISO}"
 
 # 13. Verify and Report
 echo "==========================================================="

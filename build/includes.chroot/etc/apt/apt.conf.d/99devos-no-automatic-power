@@ -1,0 +1,6 @@
+// DevOS: security updates may install themselves. The PC restarts only
+// when a person chooses to. This file sorts last, so it wins over
+// 50unattended-upgrades and 52devos-unattended.
+Unattended-Upgrade::Automatic-Reboot "false";
+Unattended-Upgrade::Automatic-Reboot-WithUsers "false";
+Unattended-Upgrade::InstallOnShutdown "false";

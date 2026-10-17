@@ -1,0 +1,17 @@
+{
+  "policies": {
+    "Homepage": {
+      "StartPage": "previous-session"
+    },
+    "Preferences": {
+      "browser.startup.page": {
+        "Value": 3,
+        "Status": "locked"
+      },
+      "browser.sessionstore.resume_from_crash": {
+        "Value": true,
+        "Status": "locked"
+      }
+    }
+  }
+}

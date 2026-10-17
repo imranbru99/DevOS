@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Phone Link
+GenericName=Control this PC from your phone
+Comment=Use your phone's browser to control this PC, send files and copy text
+Exec=python3 /usr/local/share/devos/components/phonelink/phonelink.py gui
+Icon=smartphone
+Terminal=false
+Categories=System;Network;
+Keywords=phone;mobile;remote;android;iphone;qr;pair;kdeconnect;
+StartupNotify=true

@@ -1,0 +1,12 @@
+[Unit]
+Description=DevOS Cloud Backup every 30 minutes
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=30min
+# Catch up after the PC was asleep or off.
+Persistent=true
+Unit=devos-backup.service
+
+[Install]
+WantedBy=timers.target

@@ -1,11 +1,11 @@
 [Desktop Entry]
 Type=Application
-Name=DevOS Installer Welcome
+Name=Install DevOS
 Comment=Automatically launch DevOS installer with disk partition options on live boot
 Exec=/bin/bash /usr/local/bin/devos-install-gui
 Icon=system-software-install
 Terminal=false
 Categories=System;
 StartupNotify=true
-X-KDE-autostart-phase=0
+X-KDE-autostart-phase=2
 X-GNOME-Autostart-enabled=true

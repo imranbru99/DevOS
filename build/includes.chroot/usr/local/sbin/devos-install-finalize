@@ -5,9 +5,41 @@ set -u
 
 export DEBIAN_FRONTEND=noninteractive
 
+# Calamares bind-mounts the live system's /run into this new install.
+# Removing casper runs "systemctl daemon-reload", which then waits on the
+# live system. This step is killed at 5 minutes and the installer says
+# "External command failed to finish." While /run/devos-chroot-install
+# exists, systemctl in this install does nothing. The file is on the live
+# /run, so a reboot of the new system does not keep that behaviour.
+# /run/devos-skip-initramfs does the same for the boot-image rebuild, and
+# only for this script. The initramfs step later does that rebuild once.
+install_wrapper() {
+    bin="$1"
+    real="${bin}.devos-real"
+    flag="$2"
+    if [ -x "$real" ] || [ ! -x "$bin" ]; then
+        return 0
+    fi
+    mv "$bin" "$real"
+    cat > "$bin" << EOF
+#!/bin/sh
+if [ -f "$flag" ]; then
+    exit 0
+fi
+exec "$real" "\$@"
+EOF
+    chmod 755 "$bin"
+}
+install_wrapper /usr/bin/systemctl /run/devos-chroot-install
+install_wrapper /usr/sbin/update-initramfs /run/devos-skip-initramfs
+touch /run/devos-chroot-install /run/devos-skip-initramfs
+
 echo "==> Removing the live-session boot hooks from the installed system"
-dpkg --purge casper >/dev/null 2>&1 || true
-dpkg --purge discover laptop-detect >/dev/null 2>&1 || true
+# --no-triggers: do not rebuild the boot image or run shim/grub from here.
+# timeout: a stuck package script must not use up the whole install step.
+timeout -k 5 60 dpkg --purge --no-triggers --force-depends casper >/dev/null 2>&1 || true
+timeout -k 5 30 dpkg --purge --no-triggers --force-depends discover laptop-detect >/dev/null 2>&1 || true
+echo "==> Live packages removed"
 
 rm -rf \
     /usr/share/initramfs-tools/scripts/casper \
@@ -101,5 +133,8 @@ echo "==> Applying the DevOS system name"
 if [ -f /usr/local/sbin/devos-apply-branding ]; then
     /bin/bash /usr/local/sbin/devos-apply-branding || true
 fi
+
+# The initramfs step, which runs next, must be allowed to rebuild the boot image.
+rm -f /run/devos-skip-initramfs
 
 exit 0

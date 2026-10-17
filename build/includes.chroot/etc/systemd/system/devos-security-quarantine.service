@@ -1,0 +1,7 @@
+[Unit]
+Description=DevOS Security: move detected files into the quarantine
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/devos-security quarantine ingest
+Nice=10

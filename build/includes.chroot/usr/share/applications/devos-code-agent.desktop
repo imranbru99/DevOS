@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Name=DevOS Code Agent
+GenericName=AI coding agent
+Comment=Plan, edit and test code with the AI on this PC. Every change waits for your approval.
+Exec=devos-code-agent %f
+Icon=code-class
+Terminal=false
+Categories=Development;IDE;
+Keywords=ai;agent;code;coding;cursor;copilot;assistant;local;offline;
+StartupNotify=true
+StartupWMClass=DevOS Code Agent
+# Shown only on PCs whose DevOS AI can code (Coding model, or Medium 3B+ chat
+# model, and 8 GB RAM). The login script code-agent/configure_editors.py hides
+# it per user with a NoDisplay=true copy in ~/.local/share/applications,
+# because the models (and so the answer) change after install.

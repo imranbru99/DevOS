@@ -1,0 +1,19 @@
+[Unit]
+Description=DevOS Family Safety (adult-content blocking)
+Documentation=file:///usr/local/share/devos/components/familysafe/familysafe.py
+# Enabled by "devos-familysafe enable", removed by "disable". Loads the
+# nftables table that keeps DNS on the family filter before any network
+# comes up, and puts back generated files if someone deleted them.
+DefaultDependencies=no
+After=local-fs.target
+Before=network-pre.target systemd-resolved.service NetworkManager.service
+Wants=network-pre.target
+ConditionPathExists=/etc/devos/familysafe.conf
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/devos-familysafe apply
+
+[Install]
+WantedBy=multi-user.target

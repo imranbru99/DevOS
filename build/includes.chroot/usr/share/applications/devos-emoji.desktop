@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Emoji
+GenericName=Emoji panel
+Comment=Press Meta+. to search and paste an emoji
+Exec=/usr/bin/python3 /usr/local/share/devos/components/emoji/emoji.py
+Icon=face-smile
+Terminal=false
+StartupNotify=false
+Categories=Utility;
+Keywords=emoji;emoticon;smile;sticker;
+X-KDE-Shortcuts=Meta+.

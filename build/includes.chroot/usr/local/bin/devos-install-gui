@@ -1,14 +1,32 @@
 #!/bin/bash
 # Open the disk installer on the live desktop.
 # Calamares must run as root on X11 or the disk list never appears.
-export DISPLAY="${DISPLAY:-:0}"
-export QT_QPA_PLATFORM=xcb
+# Kill any lingering Ubuntu installer that might conflict or hold locks
+killall -9 ubuntu-desktop-bootstrap subiquity curtin 2>/dev/null || true
+rm -f /etc/xdg/autostart/ubuntu-desktop-bootstrap.desktop 2>/dev/null || true
+
+if [ -z "${DISPLAY:-}" ]; then
+    if [ -e /tmp/.X11-unix/X0 ]; then
+        export DISPLAY=":0"
+    elif [ -e /tmp/.X11-unix/X1 ]; then
+        export DISPLAY=":1"
+    else
+        export DISPLAY=":0"
+    fi
+fi
+
+export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}"
 # DevOS colours (from /etc/xdg/kdeglobals) for parts stylesheet.qss cannot
 # reach, e.g. the partition legend; Fusion keeps the tested layout.
 export QT_QPA_PLATFORMTHEME=kde
 export QT_STYLE_OVERRIDE=Fusion
-if [ -z "${XAUTHORITY:-}" ] && [ -n "${HOME:-}" ] && [ -f "${HOME}/.Xauthority" ]; then
-    export XAUTHORITY="${HOME}/.Xauthority"
+
+if [ -z "${XAUTHORITY:-}" ]; then
+    if [ -n "${XDG_RUNTIME_DIR:-}" ] && compgen -G "${XDG_RUNTIME_DIR}/xauth*" >/dev/null 2>&1; then
+        export XAUTHORITY=$(ls -1 "${XDG_RUNTIME_DIR}/xauth"* 2>/dev/null | head -n 1)
+    elif [ -f "${HOME}/.Xauthority" ]; then
+        export XAUTHORITY="${HOME}/.Xauthority"
+    fi
 fi
 
 if ! grep -q 'branding: devos' /etc/calamares/settings.conf 2>/dev/null; then
@@ -23,16 +41,19 @@ fi
 
 sleep 1
 xhost +si:localuser:root >/dev/null 2>&1 || true
+xhost +local: >/dev/null 2>&1 || true
+xhost + >/dev/null 2>&1 || true
 
 run_calamares() {
     if [ "$(id -u)" -eq 0 ]; then
         calamares "$@"
         return $?
     fi
-    sudo -n \
-        DISPLAY="$DISPLAY" \
+    sudo -E -n \
+        DISPLAY="${DISPLAY:-:0}" \
         XAUTHORITY="${XAUTHORITY:-}" \
-        QT_QPA_PLATFORM=xcb \
+        WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-}" \
+        QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}" \
         QT_QPA_PLATFORMTHEME=kde \
         QT_STYLE_OVERRIDE=Fusion \
         calamares "$@"
@@ -45,13 +66,16 @@ while true; do
     started=$(date +%s)
     run_calamares "$@" >>"$log" 2>&1 || true
     ended=$(date +%s)
-    if [ $((ended - started)) -ge 8 ]; then
-        fails=0
-        continue
+    duration=$((ended - started))
+    if [ "$duration" -ge 8 ]; then
+        # Calamares ran for at least 8s and exited normally (user finished or closed it)
+        break
     fi
     fails=$((fails + 1))
-    if [ "$fails" -ge 4 ] && ! grep -q 'boot=casper' /proc/cmdline; then
+    if [ "$fails" -ge 3 ]; then
+        echo "Calamares failed to start after $fails attempts. See $log" >>"$log"
         break
     fi
     sleep 2
 done
+

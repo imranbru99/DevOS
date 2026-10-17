@@ -1,0 +1,8 @@
+/* DevOS Modesty filter: blur first, un-blur only what the detector cleared.
+   Injected at document_start, before anything is painted. */
+html:not([data-dm-off]) img:not([data-dm="ok"]),
+html:not([data-dm-off]) video:not([data-dm="ok"]),
+html:not([data-dm-off]) [data-dm-bg="pending"],
+html:not([data-dm-off]) [data-dm-bg="blur"] {
+  filter: blur(28px) !important;
+}

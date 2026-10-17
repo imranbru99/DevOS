@@ -1,0 +1,12 @@
+{
+    "KPlugin": {
+        "Id": "DevOS-GlacierSilkRose",
+        "Name": "Glacier Silk Rose",
+        "Authors": [
+            {
+                "Name": "DevOS"
+            }
+        ],
+        "License": "CC-BY-SA-4.0"
+    }
+}

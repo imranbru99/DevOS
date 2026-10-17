@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=DevOS Vault
+GenericName=Encrypted folder
+Comment=Encrypt a folder with a password after install
+Exec=/usr/bin/python3 /usr/local/share/devos/components/settings/vault.py gui
+Icon=folder-locked
+Terminal=false
+StartupNotify=true
+Categories=System;Security;
+Keywords=encrypt;vault;luks;bitlocker;folder;

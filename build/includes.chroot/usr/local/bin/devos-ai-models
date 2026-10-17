@@ -1,0 +1,4 @@
+#!/bin/bash
+# Choose, download and remove DevOS AI models; show or share the local AI API.
+# See components/ai-core/models_cli.py.
+exec /usr/bin/python3 /usr/local/share/devos/components/ai-core/models_cli.py "$@"

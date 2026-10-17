@@ -1,10 +1,11 @@
 [Desktop Entry]
 Type=Application
-Name=DevOS Status
-Comment=Hardware status. The sign-in password is created in the installer.
+Name=DevOS Dashboard
+Comment=Hardware status, disks and PIN setup, in its own DevOS window
 Exec=python3 /usr/local/share/devos/components/dashboard/dashboard_server.py
 Icon=preferences-system
 Terminal=false
 Categories=System;
-Keywords=dashboard;status;devos;
+Keywords=dashboard;status;devos;disk;storage;
 StartupNotify=true
+StartupWMClass=DevOS-dashboard

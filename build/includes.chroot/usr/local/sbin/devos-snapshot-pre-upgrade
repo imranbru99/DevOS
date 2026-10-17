@@ -1,0 +1,6 @@
+#!/bin/bash
+# apt calls this before unpacking packages. stdin is the package list; we do
+# not need it. Failure to snapshot must not stop a security update.
+python3 /usr/local/share/devos/components/settings/snapshot_manager.py create "Before package changes" \
+    >>/var/log/devos-snapshot.log 2>&1 || true
+exit 0

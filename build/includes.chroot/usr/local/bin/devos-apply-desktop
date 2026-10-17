@@ -1,6 +1,6 @@
 #!/bin/bash
 # The first desktop paint is stock Plasma unless this runs.
-# It applies the DevOS theme, icons, and wallpaper once Plasma is up.
+# It applies the DevOS theme, icons, wallpaper, and taskbar once Plasma is up.
 export DISPLAY="${DISPLAY:-:0}"
 mkdir -p "${HOME}/.config"
 # Falkon must not open the KDE Wallet window. That window blocks the whole screen.
@@ -27,11 +27,6 @@ if command -v kwriteconfig5 >/dev/null 2>&1 \
     done
 fi
 
-stamp="${HOME}/.config/devos-ui.stamp"
-if [ -f "${stamp}" ]; then
-    exit 0
-fi
-
 qdbus_bin=""
 for candidate in qdbus qdbus-qt5; do
     if command -v "${candidate}" >/dev/null 2>&1; then
@@ -49,22 +44,27 @@ for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
     sleep 1
 done
 
-if command -v kwriteconfig5 >/dev/null 2>&1; then
-    kwriteconfig5 --file kdeglobals --group General --key ColorScheme DevOS
-    kwriteconfig5 --file kdeglobals --group Icons --key Theme Papirus-Dark
-    kwriteconfig5 --file kdeglobals --group KDE --key widgetStyle kvantum
-    kwriteconfig5 --file kdeglobals --group KDE --key LookAndFeelPackage org.devos.desktop
-    kwriteconfig5 --file plasmarc --group Theme --key name breeze-dark
+stamp="${HOME}/.config/devos-ui.stamp"
+if [ ! -f "${stamp}" ]; then
+    if command -v kwriteconfig5 >/dev/null 2>&1; then
+        kwriteconfig5 --file kdeglobals --group General --key ColorScheme DevOS
+        kwriteconfig5 --file kdeglobals --group Icons --key Theme Papirus-Dark
+        kwriteconfig5 --file kdeglobals --group KDE --key widgetStyle kvantum
+        kwriteconfig5 --file kdeglobals --group KDE --key LookAndFeelPackage org.devos.desktop
+        kwriteconfig5 --file plasmarc --group Theme --key name breeze-dark
+    fi
+    # Do not run lookandfeeltool here: it rebuilds the whole layout and can
+    # leave a desktop with icons but no taskbar. Theme keys above are enough;
+    # apply-ui.js paints the background and creates the panel when missing.
+    touch "${stamp}"
 fi
 
-if command -v lookandfeeltool >/dev/null 2>&1; then
-    lookandfeeltool -a org.devos.desktop >/tmp/devos-ui.log 2>&1 || true
-fi
-
+# Every login: DevOS background, and a taskbar if Plasma omitted it.
 if [ "${ready}" -eq 1 ]; then
+    script="/usr/local/share/devos/apply-ui.js"
+    [ -f "$script" ] || script="/usr/local/share/devos/apply-wallpaper.js"
     "${qdbus_bin}" org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript \
-        "$(cat /usr/local/share/devos/apply-wallpaper.js)" >/dev/null 2>&1 || true
+        "$(cat "$script")" >/dev/null 2>&1 || true
 fi
 
-touch "${stamp}"
 exit 0

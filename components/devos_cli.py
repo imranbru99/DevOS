@@ -9,6 +9,12 @@ Dispatcher for all DevOS subsystems:
   devos win       - WinLayer compatibility manager
   devos android   - Android & Waydroid manager
   devos doctor    - System health, heavy load & storage check
+  devos link      - Phone Link: control this PC from a phone
+  devos share     - Make a local app reachable from the internet
+  devos backup    - Optional Google Drive / OneDrive backup
+  devos models    - Choose DevOS AI models and share the local AI API
+  devos auto      - Local-model automations (commit message, review, explain)
+  devos agents    - One browser per AI agent, as many as this PC can keep smooth
 """
 
 import sys
@@ -38,6 +44,19 @@ def main():
         print("  sound     PipeWire audio and volume controller")
         print("  driver    GPU, Wi-Fi, Bluetooth, and printer drivers")
         print("  disk      Storage devices, MBR/GPT partition tables & formatting")
+        print("  link      Phone Link: control and manage this PC from your phone")
+        print("  share     Make a local app public: devos share start 3000")
+        print("  backup    Optional Google Drive / OneDrive backup of your folders")
+        print("  models    DevOS AI models for this PC, and the local AI API (devos models api)")
+        print("  auto      Local AI automations: commit, review, explain, summarize, hook")
+        print("  agents    One browser per AI agent (devos agents open research --url https://...)")
+        print("  features  Add or remove apps and features (Office, browsers, games…)")
+        print("  restore   btrfs restore points (create, list, rollback)")
+        print("  vault     Encrypt a folder after install")
+        print("  finger    Fingerprint sign-in")
+        print("  domain    Join an Active Directory domain")
+        print("  updates   Security updates and Flatpak updates, after a restore point")
+        print("  task      Task Manager: processes, performance, startup apps, services")
         sys.exit(0)
 
     sub = sys.argv[1]
@@ -62,6 +81,22 @@ def main():
         "driver": hardware_script,
         "disk": disk_script,
         "storage": disk_script,
+        "link": os.path.join(COMPONENTS_DIR, "phonelink", "phonelink.py"),
+        "phone": os.path.join(COMPONENTS_DIR, "phonelink", "phonelink.py"),
+        "share": os.path.join(COMPONENTS_DIR, "share", "share.py"),
+        "backup": os.path.join(COMPONENTS_DIR, "backup", "cloud_backup.py"),
+        "models": os.path.join(COMPONENTS_DIR, "ai-core", "models_cli.py"),
+        "auto": os.path.join(COMPONENTS_DIR, "ai-core", "automate.py"),
+        "agents": os.path.join(COMPONENTS_DIR, "ai-agent", "agent_browser.py"),
+        "features": os.path.join(COMPONENTS_DIR, "features", "features_cli.py"),
+        "restore": os.path.join(COMPONENTS_DIR, "settings", "snapshot_manager.py"),
+        "vault": os.path.join(COMPONENTS_DIR, "settings", "vault.py"),
+        "finger": os.path.join(COMPONENTS_DIR, "settings", "fingerprint.py"),
+        "fingerprint": os.path.join(COMPONENTS_DIR, "settings", "fingerprint.py"),
+        "domain": os.path.join(COMPONENTS_DIR, "settings", "domain.py"),
+        "updates": os.path.join(COMPONENTS_DIR, "security", "updates.py"),
+        "task": os.path.join(COMPONENTS_DIR, "taskman", "taskman.py"),
+        "tasks": os.path.join(COMPONENTS_DIR, "taskman", "taskman.py"),
     }
 
     if sub == "setup" and "--first-boot" not in args:

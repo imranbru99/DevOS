@@ -1,0 +1,4 @@
+// Take a btrfs restore point before package changes, including the daily
+// security upgrade. The helper exits 0 even when the disk is not btrfs, so
+// apt is never blocked by a snapshot.
+DPkg::Pre-Install-Pkgs { "/usr/local/sbin/devos-snapshot-pre-upgrade"; };

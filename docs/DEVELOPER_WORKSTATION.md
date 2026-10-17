@@ -69,6 +69,15 @@ You can also generate and test code directly from the terminal:
 devos code "Create an Eloquent User model with soft deletes and email verification" --framework laravel
 ```
 
+### Local AI API
+Any OpenAI client can use the on-device model at `http://127.0.0.1:11434/v1` (`devos-ai`, `devos-ai-code`, `devos-ai-embed`). The reference is [LOCAL_AI.md](LOCAL_AI.md) and, on a running DevOS PC, `http://127.0.0.1:11434/docs`.
+
+```bash
+devos auto commit     # subject line from the staged diff
+devos auto review     # short review of that diff
+pytest -q 2>&1 | devos auto explain
+```
+
 ---
 
 ## 4. Containers & Virtualization

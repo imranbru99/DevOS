@@ -76,13 +76,15 @@ class WaydroidManager:
 
         return {
             "waydroid_installed": has_waydroid,
-            "session_mode": "multi-window (Wayland native)",
+            "session_mode": "Wayland window (Weston when the desktop is X11)",
             "shared_folder": SHARED_FOLDER,
             "adb_debugging": "enabled" if has_adb else "adb available in dev profile",
-            "stores_included": ["F-Droid", "Aurora Store (Open Source)"],
-            "google_play_bundled": False,  # Strict legal constraint compliance
+            "stores_included": [],
+            "fdroid": "devos android fdroid",
+            "play_services": "devos android setup-play (only before the first Android download)",
+            "google_play_bundled": False,
             "status": "READY" if has_waydroid else "CONTAINER_ENGINE_CONFIGURED",
-            "message": "Waydroid engine ready for on-demand multi-window Android execution."
+            "message": "Android runs in a window after the system image is downloaded."
         }
 
     @staticmethod
@@ -91,7 +93,7 @@ class WaydroidManager:
         return os.path.exists(WAYDROID_IMAGES) or os.path.exists(WAYDROID_CONFIG)
 
     @staticmethod
-    def init_images(progress=None) -> Dict[str, Any]:
+    def init_images(progress=None, argv=None) -> Dict[str, Any]:
         """One-time download of the Android system (~800 MB). Asks for the admin password.
 
         progress(percent, text) is called while waydroid prints its download
@@ -116,11 +118,14 @@ class WaydroidManager:
         # helper switches to software rendering where the GPU cannot be used,
         # otherwise the Android window stayed black).
         helper = "/usr/local/sbin/devos-android-init"
-        if os.path.isfile(helper):
+        if argv:
+            cmd = list(argv)
+        elif os.path.isfile(helper):
             cmd = [helper]
         else:
             cmd = [waydroid, "init"]
-        if os.geteuid() != 0:
+        euid = os.geteuid() if hasattr(os, "geteuid") else 0
+        if euid != 0 and cmd[0] != "pkexec":
             cmd = ["pkexec"] + cmd
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         output = bytearray()
@@ -295,6 +300,35 @@ class WaydroidManager:
             return {"status": "READY", "message": "Android is ready. Open any .apk file to install it."}
         return self.init_images()
 
+    def setup_play(self) -> Dict[str, Any]:
+        """Download the Android image that includes Google Play. Only before first setup."""
+        if self.is_initialized():
+            return {
+                "status": "ALREADY_SET_UP",
+                "message": "Android is already downloaded without Play Services. "
+                           "Remove Android in DevOS Features and run devos android setup-play before opening an APK.",
+            }
+        helper = "/usr/local/sbin/devos-android-init"
+        if not os.path.isfile(helper):
+            return {"status": "NEEDS_ENGINE", "message": "Android setup is not installed on this system."}
+        return self.init_images(argv=[helper, "gapps"])
+
+    def install_fdroid(self) -> Dict[str, Any]:
+        """Download the official F-Droid client and install it into Android."""
+        if not self.is_initialized():
+            return {"status": "NEEDS_SETUP", "message": "Download Android first, then install F-Droid."}
+        dest = os.path.join(os.path.expanduser("~/.local/share/devos"), "F-Droid.apk")
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        try:
+            proc = subprocess.run(
+                ["curl", "-fL", "--retry", "3", "-o", dest, "https://f-droid.org/F-Droid.apk"],
+                capture_output=True, text=True, timeout=300)
+        except (OSError, subprocess.SubprocessError) as exc:
+            return {"status": "FAILED", "error": str(exc)}
+        if proc.returncode != 0 or not os.path.isfile(dest) or os.path.getsize(dest) < 100000:
+            return {"status": "FAILED", "error": (proc.stderr or "F-Droid download did not finish.").strip()[-400:]}
+        return self.install_apk(dest, launch=True)
+
 
 def main():
     parser = argparse.ArgumentParser(description="DevOS Waydroid Android Manager")
@@ -302,6 +336,8 @@ def main():
 
     subparsers.add_parser("status", help="Get Waydroid status")
     subparsers.add_parser("setup", help="Check the Android engine and print the next step")
+    subparsers.add_parser("setup-play", help="Download Android with Google Play (before the first setup)")
+    subparsers.add_parser("fdroid", help="Install the F-Droid app store")
     inst_p = subparsers.add_parser("install", help="Install an APK")
     inst_p.add_argument("apk", help="Path to .apk file")
 
@@ -313,6 +349,10 @@ def main():
         print(json.dumps(res, indent=2))
     elif args.command == "setup":
         print(json.dumps(mgr.setup(), indent=2))
+    elif args.command == "setup-play":
+        print(json.dumps(mgr.setup_play(), indent=2))
+    elif args.command == "fdroid":
+        print(json.dumps(mgr.install_fdroid(), indent=2))
     elif args.command == "status" or not args.command:
         print(json.dumps(mgr.get_status(), indent=2))
 

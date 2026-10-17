@@ -1,0 +1,12 @@
+{
+    "KPlugin": {
+        "Id": "DevOS-NeonHorizonTide",
+        "Name": "Neon Horizon Tide",
+        "Authors": [
+            {
+                "Name": "DevOS"
+            }
+        ],
+        "License": "CC-BY-SA-4.0"
+    }
+}

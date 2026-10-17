@@ -1,0 +1,4 @@
+#!/bin/bash
+# One browser per AI agent. Starts only as many as this PC can keep smooth.
+# See components/ai-agent/agent_browser.py.
+exec /usr/bin/python3 /usr/local/share/devos/components/ai-agent/agent_browser.py "$@"

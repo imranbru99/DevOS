@@ -1,0 +1,12 @@
+{
+    "KPlugin": {
+        "Id": "DevOS-AbyssCausticsTide",
+        "Name": "Abyss Caustics Tide",
+        "Authors": [
+            {
+                "Name": "DevOS"
+            }
+        ],
+        "License": "CC-BY-SA-4.0"
+    }
+}

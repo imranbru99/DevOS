@@ -41,7 +41,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 COMPONENTS = os.path.dirname(HERE)
 APPS_MANAGER_PY = os.path.join(COMPONENTS, "apps", "apps_manager.py")
 OPTIMIZER_PY = os.path.join(COMPONENTS, "optimizer", "optimizer.py")
+SECURITY_PY = os.path.join(COMPONENTS, "security", "security_center.py")
+CLIPBOARD_PY = os.path.join(COMPONENTS, "clipboard", "clipboard.py")
+EMOJI_PY = os.path.join(COMPONENTS, "emoji", "emoji.py")
 NOTEPAD_PY = os.path.join(COMPONENTS, "notepad", "notepad.py")
+APP_RESOLVER_PY = os.path.join(COMPONENTS, "apphub", "app_resolver.py")
 TOOLS_PY = os.path.abspath(__file__)
 PYTHON = "/usr/bin/python3" if os.path.exists("/usr/bin/python3") else (sys.executable or "python3")
 
@@ -117,8 +121,12 @@ class ToolContext:
                  env: Optional[Dict[str, str]] = None,
                  killer: Callable[[int, int], None] = os.kill,
                  uid: Optional[int] = None,
-                 clock: Callable[[], float] = time.monotonic):
+                 clock: Callable[[], float] = time.monotonic,
+                 fetch: Optional[Callable[..., str]] = None):
         self.root = root
+        # reads store pages and the Flathub search for "install <app>"
+        # (None: the real network, with an 8 s timeout)
+        self.fetch = fetch
         self.sleep = sleep
         self.env = dict(os.environ) if env is None else env
         self.killer = killer
@@ -155,6 +163,9 @@ class ToolContext:
         if self._optimizer is not None:
             return self._optimizer
         return load_module_by_path("devos_optimizer", OPTIMIZER_PY)
+
+    def app_resolver(self):
+        return load_module_by_path("devos_app_resolver", APP_RESOLVER_PY)
 
 
 def load_module_by_path(name: str, path: str):
@@ -265,6 +276,7 @@ hello hi hey thanks thank okay ok sir madam bro please kindly devos file report 
 repeat return reply replay recent read ready real rest pages paste post print look looks app list last left line
 link lot lots low son sons song cast case cost clock cloth clear clean copy core corp tab tabs map maps mode
 more move movie movies mean meet meeting mess media type types sure show shop stop stay step text texts
+installed uninstalled installs installing downloaded downloads opened closed
 made mad same safe site size soon sort sent seen seem self fine fire film fill
 last late later loss lose lost lone long note open play
 
@@ -731,8 +743,9 @@ APP_ALIASES = {
     "installed apps": ["devos-apps"],
     "optimizer": ["devos-optimizer"],
     "devos optimizer": ["devos-optimizer"],
-    "task manager": ["org.kde.plasma-systemmonitor", "org.kde.ksysguard"],
-    "system monitor": ["org.kde.plasma-systemmonitor", "org.kde.ksysguard"],
+    "task manager": ["devos-taskman", "org.kde.plasma-systemmonitor", "org.kde.ksysguard"],
+    "taskmgr": ["devos-taskman"],
+    "system monitor": ["devos-taskman", "org.kde.plasma-systemmonitor", "org.kde.ksysguard"],
     "calculator": ["org.kde.kcalc", "kcalc", "org.gnome.Calculator"],
     "dashboard": ["devos-dashboard"],
     "windows apps": ["devos-winlayer", "devos-windows"],
@@ -1121,7 +1134,8 @@ def user_dir(ctx: ToolContext, key: str, default_rel: str) -> str:
 HELP_TEXT = (
     "I'm **DevOS AI**. I run on this PC, so what you type or say stays here. Things I can do:\n"
     "- **Your PC:** “what is my PC config”, “how much RAM”, “disk space”, “battery”\n"
-    "- **Apps:** “how many apps are installed”, “list my Windows apps”, “open Notepad”\n"
+    "- **Apps:** “how many apps are installed”, “list my Windows apps”, “open Notepad”, "
+    "“install Zoom”, “uninstall Spotify” (I ask before I install or remove anything)\n"
     "- **Web:** “go to Chrome and search HP latest laptop”, “play lo-fi on YouTube”, “directions to the airport”\n"
     "- **Notes & typing:** “open Notepad and write: buy milk”, “take a note: call the bank”, “type hello here”\n"
     "- **Reminders:** “remind me in 10 minutes to call mom”, “set a timer for 5 minutes”\n"
@@ -1129,7 +1143,10 @@ HELP_TEXT = (
     "“open the file report.pdf”, “close Chrome”, “play music”, “next song”\n"
     "- **Settings:** “open Wi-Fi settings”, “Bluetooth”, “display”, “printers”\n"
     "- **Quick actions:** volume up/down/mute, brightness, take a screenshot, lock the screen, open Downloads\n"
+    "- **Everyday:** “open clipboard” (Win+V), “open emoji” (Win+.)\n"
     "- **Clean up:** “free up space” shows what can be cleaned (nothing is deleted without you)\n"
+    "- **Problems:** “help me, wifi is not working”, “is my PC safe”, “scan for viruses”, "
+    "“is this link safe” plus the address — I check this PC and do the safe next step\n"
     "- **Files:** attach a PDF, text file or image, then ask “summarize this” or “read the text in this image”\n"
     "- **Voice:** press the microphone, speak, and I'll do it\n"
     "Anything else, just ask."
@@ -1231,7 +1248,14 @@ def route_clause(c: str, ctx: Optional[ToolContext] = None) -> Optional[List[Act
             r"\b(?:who|whom|whose)\b.*\b(?:made|built|build|created|create|develop(?:ed)?|owns?|behind|team)\b"
             r"|\bteam\b.*\b(?:who|whom|whose)\b"
             r"|\b(?:your|the) (?:creator|developer|maker|founder)s?\b"
-            r"|\bsource code\b|\bopen[- ]?source\b|\bportfolio\b", c):
+            r"|\bsource code\b|\bopen[- ]?source\b|\bportfolio\b"
+            # Contact details: the model once invented a LinkedIn URL, so
+            # these get the fixed answer too.
+            r"|\bcontact (?:info|information|details|number|you|him|imran|the team|the developer|team)\b"
+            r"|\breach (?:you|him|imran|the team|the developer)\b"
+            r"|\b(?:your|imran'?s?|team'?s?|developer'?s?) (?:linked ?in|github|e-?mail|phone|number|website|whats ?app)\b"
+            r"|\b(?:linked ?in|github|e-?mail|phone|number|whats ?app)\b.*\b(?:team|developer|creator|imran)\b"
+            r"|\b(?:team|developer|creator|imran)\b.*\b(?:linked ?in|e-?mail|phone|number|whats ?app)\b", c):
         return [Action("about", label="About DevOS")]
 
     # power (always confirmed)
@@ -1244,11 +1268,22 @@ def route_clause(c: str, ctx: Optional[ToolContext] = None) -> Optional[List[Act
     if _has(r"\b(?:go to sleep|sleep mode|suspend|put (?:the |my |this )?(?:pc|computer|laptop) to sleep)\b|^sleep$", c):
         return [Action("power", {"op": "suspend"}, confirm="Put this PC to sleep now?", label="Sleep")]
 
-    m = re.match(r"^(?:uninstall|remove (?:the )?app|delete (?:the )?app|remove the program|uninstall the app)\s+(.+)$", c)
+    m = re.match(r"^(?:please\s+)?(?:uninstall|remove|delete)(?:\s+(?:the|my|this))?"
+                 r"(?:\s+(?:app|program|application|software))?\s+(.+)$", c)
     if m:
-        name = re.sub(r"\b(?:app|application|program)$", "", m.group(1)).strip()
-        return [Action("uninstall", {"name": name}, confirm=f"Uninstall “{name}”?",
-                       label=f"Uninstall {name}")]
+        name = re.sub(r"\b(?:app|application|program|software)$", "", m.group(1)).strip()
+        name = _PLACE_TAIL.sub("", name).strip(" :,.?!-–\"'")
+        name = _APP_TAIL.sub("", name).strip()
+        if name and not re.search(
+                r"\b(?:folder|directory|wallpaper|note|reminder|virus|history|cache|password)\b", name) \
+                and not re.fullmatch(r"(?:my |the |a )?(?:files?|folders?)", name) \
+                and not re.search(r"\.\w{1,5}$", name):
+            return [Action("uninstall", {"name": name}, confirm=f"Uninstall “{name}”?",
+                           label=f"Uninstall {name}")]
+
+    name = install_request(c)
+    if name:
+        return [_install_action(name=name)]
 
     if _has(r"\bscreenshot\b|\bscreen ?capture\b|\bcapture (?:the |my )?screen\b|\bsnap (?:the|my) screen\b|স্ক্রিনশট", c):
         return [Action("screenshot", label="Take a screenshot")]
@@ -1316,6 +1351,21 @@ def route_clause(c: str, ctx: Optional[ToolContext] = None) -> Optional[List[Act
 
     if _has(r"\b(?:what(?:'s| is)? (?:the )?time|time is it|current time|what(?:'s| is)? (?:the )?date|today's date|what day is (?:it|today))\b|কয়টা বাজে", c):
         return [Action("time", label="Tell the time")]
+
+    try:
+        _here = os.path.dirname(os.path.abspath(__file__))
+        if _here not in sys.path:
+            sys.path.insert(0, _here)
+        import solve
+    except Exception:
+        solve = None
+    if solve is not None and solve.wants_solve(c):
+        return [Action("solve", {"text": c}, label="Check this PC and fix what is safe")]
+
+    if _has(r"\b(?:clipboard history|open clipboard|show clipboard|my clipboard)\b", c):
+        return [Action("open_tool", {"tool": "clipboard"}, label="Open clipboard history")]
+    if _has(r"\b(?:emoji panel|emoji picker|open emoji|show emoji)\b", c) or c.strip() in ("emoji", "emojis"):
+        return [Action("open_tool", {"tool": "emoji"}, label="Open emoji")]
 
     m = re.match(r"^(?:open|go to|visit|browse|navigate to|take me to|load)\s+(?:the\s+)?(?:website\s+|site\s+|page\s+)?(\S+?)(?:\s+(?:website|site|page|in chrome|in the browser|on chrome))?$", c)
     if m:
@@ -1697,14 +1747,132 @@ def route_content(raw: str, ctx: Optional[ToolContext] = None) -> Optional[Route
     return None
 
 
-def route(text: str, ctx: Optional[ToolContext] = None) -> RouteResult:
-    """Deterministic intent router. Empty result -> let the model answer."""
+# ---------------------------------------------------------------------------
+# "Install <app>" and store links
+#
+# A Microsoft Store / Google Play / App Store / Flathub link, "install zoom",
+# "how can I install it on my PC" and "can you install this" (after a link or
+# an app name earlier in the chat) all become one install_app action. The
+# answer comes from components/apphub/app_resolver.py, never from the model:
+# the small model used to invent DevOS menu steps for these.
+# ---------------------------------------------------------------------------
+
+_STORE_LINK_RE = re.compile(
+    r"ms-windows-store://\S+"
+    r"|(?:https?://)?(?:www\.)?(?:apps\.microsoft\.com/\S+"
+    r"|microsoft\.com/(?:[a-z]{2}-[a-z]{2}/)?(?:store/(?:apps|p|productid|detail)|p)/\S+"
+    r"|play\.google\.com/store/apps/details\S+"
+    r"|(?:apps|itunes)\.apple\.com/\S*?id\d+\S*"
+    r"|flathub\.org/(?:[a-z]{2}(?:-[a-z]{2,4})?/)?apps/\S+)", re.I)
+_ANY_LINK_RE = re.compile(r"https?://\S+", re.I)
+_INSTALL_WORD = re.compile(r"\b(?:install|installing|installation|download|setup|set up)\b|ইনস্টল|ইন্সটল|ডাউনলোড", re.I)
+_OPEN_ONLY = re.compile(r"^(?:open|go to|visit|browse|navigate to|take me to|load|show(?: me)?)\b")
+_INSTALL_RE = re.compile(
+    r"^(?P<pre>how (?:can|do|should|would|could|to) (?:i |we |you |u )?|how to |where (?:can|do) (?:i|we) |"
+    r"is it possible to |is there a way to |i want to |i need to |want to |need to |wanna |pls |please )?"
+    r"(?P<verb>install|downloads?|get)\b\s*(?P<name>.*?)$")     # typo fixing turns "download" into "downloads"
+_BN_INSTALL_RE = re.compile(r"^(?P<name>.*?)\s*(?:কিভাবে|কীভাবে)?\s*(?:ইনস্টল|ইন্সটল|ডাউনলোড)")
+_PLACE_TAIL = re.compile(r"\s*\b(?:on|in|for|into|onto|to)\s+(?:my |our |this |the |a )?"
+                         r"(?:pc|computer|laptop|devos|system|machine|desktop|linux|ubuntu|windows)\b.*$")
+_APP_TAIL = re.compile(r"\s+(?:app|apps|application|program|software)$")
+_FOLLOW_UP_NAMES = frozenset(("", "this", "it", "that", "this app", "that app", "the app", "this one", "that one",
+                              "them", "these", "those", "this application", "this program", "this software",
+                              "the program", "the software", "এটা", "এটি"))
+_NOT_AN_APP = re.compile(r"\b(?:videos?|songs?|music|movies?|files?|pictures?|pdfs?|images?|documents?|"
+                         r"updates?|drivers?|rid of|ready|started|time|help|wallpapers?|subtitles?|mp3|mp4|"
+                         r"a job|money|better|back|home|out|up|over|in touch|lost|well|sleep|from|"
+                         # developer questions stay with the model: "install python packages with pip"
+                         r"packages?|librar(?:y|ies)|modules?|dependenc(?:y|ies)|extensions?|plugins?|"
+                         r"requirements|pip|npm|apt|sudo|using|via|with)\b")
+
+
+def _store_link(text: str) -> Optional[str]:
+    m = _STORE_LINK_RE.search(text or "")
+    return m.group(0).rstrip(".,;:!?)]}>'\"") if m else None
+
+
+def _any_link(text: str) -> Optional[str]:
+    m = _ANY_LINK_RE.search(text or "")
+    return m.group(0).rstrip(".,;:!?)]}>'\"") if m else None
+
+
+def install_request(t: str) -> Optional[str]:
+    """App name in "install zoom" / "how can i download whatsapp on my pc".
+
+    "" means "this / it" (look back in the chat); None means not an install request.
+    """
+    t = (t or "").strip().rstrip("?.!:, ")
+    m = _INSTALL_RE.match(t)
+    if m:
+        verb, pre, name = m.group("verb"), m.group("pre") or "", m.group("name")
+    else:
+        m = _BN_INSTALL_RE.match(t)
+        if not m:
+            return None
+        verb, pre, name = "install", "", m.group("name")
+    if re.match(r"(?:to|there|here|directions|into|from)\b", name):
+        return None             # "how do i get to dhanmondi lake" is directions
+    name = _PLACE_TAIL.sub("", name).strip(" :,.?!-–\"'")
+    if name in _FOLLOW_UP_NAMES:
+        return ""
+    had_app_word = bool(_APP_TAIL.search(name))
+    name = re.sub(r"^(?:the|a|an|this|that|me|us)\s+", "", name)
+    name = _APP_TAIL.sub("", name).strip()
+    if name in _FOLLOW_UP_NAMES:
+        return ""
+    if _NOT_AN_APP.search(name) or len(name) > 60:
+        return None
+    if verb == "get" and not (pre.startswith(("how", "where", "is")) or had_app_word):
+        return None             # "get the time", "get me a joke"
+    return name
+
+
+def _install_action(name: str = "", link: str = "") -> Action:
+    what = name or ("this app" if link else "the app")
+    return Action("install_app", {"name": name, "link": link}, label=f"Find how to get {what} on DevOS")
+
+
+def route_install(text: str, context: Optional[List[str]] = None) -> Optional[Action]:
+    """install_app for store links, "install <app>" and "install this" follow-ups (see above)."""
+    link = _store_link(text)
+    if not link and _INSTALL_WORD.search(text or ""):
+        link = _any_link(text)
+    rest = text.replace(link, " ") if link else text
+    t = normalize(preprocess(rest))
+    if link:
+        if _OPEN_ONLY.match(t) and not _INSTALL_WORD.search(t):
+            return None         # "open <store link>" just opens the page
+        return _install_action(link=link)
+    name = install_request(t)
+    if name is None:
+        return None
+    if name:
+        return _install_action(name=name)
+    for prev in reversed(list(context or [])[-4:]):
+        found = _store_link(prev) or _any_link(prev)
+        if found:
+            return _install_action(link=found)
+        n = install_request(normalize(preprocess(prev)))
+        if n:
+            return _install_action(name=n)
+    return _install_action()
+
+
+def route(text: str, ctx: Optional[ToolContext] = None, context: Optional[List[str]] = None) -> RouteResult:
+    """Deterministic intent router. Empty result -> let the model answer.
+
+    context: the user's earlier messages in this chat (oldest first), for
+    follow-ups such as "can you install this" after a pasted link.
+    """
     raw = preprocess(text)
     if not raw:
         return RouteResult()
     content = route_content(raw, ctx)
     if content:
         return content
+    inst = route_install(text, context)
+    if inst:
+        return RouteResult([inst])
     t = normalize(raw)
     if not t:
         return RouteResult()
@@ -1734,11 +1902,16 @@ def route(text: str, ctx: Optional[ToolContext] = None) -> RouteResult:
             else:
                 leftovers.append(c)
         if parts and not leftovers:
+            solved = [a for a in parts if a.name == "solve"]
+            if solved:
+                return RouteResult([Action("solve", {"text": t}, label="Check this PC and fix what is safe")])
             return RouteResult(_merge(parts))
         if whole and whole[0].name != "open_app":
             return RouteResult(whole)
         weak_only = all(a.name == "open_app" and not a.args.get("strong") for a in parts)
         if parts and not weak_only:
+            if any(a.name == "solve" for a in parts):
+                return RouteResult([Action("solve", {"text": t}, label="Check this PC and fix what is safe")])
             return RouteResult(_merge(parts), leftover=" and ".join(leftovers))
         if parts:
             return RouteResult()
@@ -1817,6 +1990,14 @@ ABOUT_TEXT = (
     "**DevOS** and **DevOS AI** are made by the DevOS team, led by **Imran Ahmed (Imran Dev)**.\n\n"
     "- Portfolio: https://imrandev.bd/\n"
     "- DevOS is open source: https://github.com/imranbru99/DevOS\n\n"
+    # The only contact details DevOS AI gives (same list as DEVOS_CONTACTS in
+    # components/ai-core/server.py); the model once invented a LinkedIn URL.
+    "**Contact the DevOS team**\n"
+    "- Email: devos@imrandev.bd\n"
+    "- Contact form: https://imrandev.bd/contact\n"
+    "- WhatsApp: https://wa.me/+8801576918420\n"
+    "- GitHub: https://github.com/imranbru99\n"
+    "- LinkedIn: https://linkedin.com/in/imranbru99\n\n"
     "I run entirely on this PC, built on open-source language-model technology and tuned for DevOS."
 )
 
@@ -1834,10 +2015,26 @@ def _x_web_search(a, ctx, dry):
                  "I couldn't open the browser.", [argv], data={"url": url})
 
 
+def _link_verdict(url):
+    """None when the checker cannot be loaded. Never raises."""
+    try:
+        sec = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "security")
+        if sec not in sys.path:
+            sys.path.insert(0, sec)
+        import linkguard
+        return linkguard.inspect_url(url)
+    except Exception:
+        return None
+
+
 def _x_open_url(a, ctx, dry):
     url = normalize_url(str(a.args.get("url", "")))
     if not url:
         return ToolResult("That doesn't look like a web address I can open.", ok=False)
+    verdict = _link_verdict(url)
+    if verdict and verdict.get("level") in ("block", "warn"):
+        return ToolResult("I did not open that address. " + verdict.get("summary", ""),
+                          ok=False, data={"url": url, "linkguard": verdict.get("level")})
     argv = browser_command(str(a.args.get("browser", "default")), url, ctx.which)
     ok = _launch(ctx, argv, dry)
     host = urllib.parse.urlsplit(url).hostname or url
@@ -2011,7 +2208,20 @@ def _x_power(a, ctx, dry):
 
 
 def _x_uninstall(a, ctx, dry):
-    name = str(a.args.get("name", ""))
+    name = str(a.args.get("name", "")).strip()
+    resolver = ctx.app_resolver()
+    feature = None
+    if resolver is not None and name:
+        q = resolver.native.normalize_name(name)
+        feature = resolver.feature_exact(q) or resolver.feature_fuzzy(q)
+    if feature:
+        label = resolver.short_name(feature["name"])
+        py = PYTHON
+        argv = [py, APP_RESOLVER_PY, "--uninstall", "--name", label, "--feature", feature["id"]]
+        ok = _launch(ctx, argv, dry)
+        return _done(ok, f"Removing **{label}**. DevOS may ask for your password. "
+                     "You can install it again later in DevOS Features, or by asking me.",
+                     f"I couldn't start removing {label}.", [argv])
     apps, err = _discover(ctx)
     if apps is None:
         return ToolResult(f"I couldn't read the list of apps ({err}).", ok=False)
@@ -2021,10 +2231,16 @@ def _x_uninstall(a, ctx, dry):
     match, close = match_app(name, entries)
     if match is None:
         hint = f" Did you mean {', '.join(close)}?" if close else ""
-        return ToolResult(f"No installed app called **{name}**.{hint}", ok=False)
+        return ToolResult(f"No installed app called **{name}**.{hint} "
+                          "If it is one of the DevOS apps, open DevOS Features and untick it.", ok=False,
+                          buttons=[("Open DevOS Features", Action("open_app", {"name": "DevOS Features", "strong": True},
+                                                                  label="Open DevOS Features"))])
     app = by_name.get(match.name)
     if getattr(app, "system", False) or not getattr(app, "uninstallable", True):
-        return ToolResult(f"**{match.name}** is part of DevOS and can't be uninstalled.", ok=False)
+        return ToolResult(f"**{match.name}** is part of the desktop. Open DevOS Features to hide it "
+                          "if it is listed there.", ok=False,
+                          buttons=[("Open DevOS Features", Action("open_app", {"name": "DevOS Features", "strong": True},
+                                                                  label="Open DevOS Features"))])
     argv = [sys.executable or "python3", APPS_MANAGER_PY, "--uninstall", match.desktop_id]
     ok = _launch(ctx, argv, dry)
     return _done(ok, f"Opening the uninstaller for **{match.name}** — confirm there to remove it.",
@@ -2040,6 +2256,15 @@ def _x_open_tool(a, ctx, dry):
     elif tool == "apps":
         argv = [py, APPS_MANAGER_PY]
         title = "Apps"
+    elif tool == "security":
+        argv = [py, SECURITY_PY]
+        title = "DevOS Security"
+    elif tool == "clipboard":
+        argv = [py, CLIPBOARD_PY]
+        title = "Clipboard"
+    elif tool == "emoji":
+        argv = [py, EMOJI_PY]
+        title = "Emoji"
     else:
         return ToolResult("Unknown tool.", ok=False)
     ok = _launch(ctx, argv, dry)
@@ -2077,6 +2302,34 @@ def _x_cleanup_scan(a, ctx, dry):
     text += "\n\nNothing has been deleted. Open DevOS Optimizer to review and clean."
     return ToolResult(text, data={"total": total},
                       buttons=[("Open DevOS Optimizer", Action("open_tool", {"tool": "optimizer"}))])
+
+
+def _x_solve(a, ctx, dry):
+    """Check the PC for real and carry out the safe next step. Never raises."""
+    try:
+        _here = os.path.dirname(os.path.abspath(__file__))
+        if _here not in sys.path:
+            sys.path.insert(0, _here)
+        import solve
+        result = solve.answer(str(a.args.get("text") or ""))
+    except Exception as exc:
+        return ToolResult(f"I couldn't finish the check ({exc}). Open DevOS Security.", ok=False,
+                          buttons=[("Open DevOS Security", Action("open_tool", {"tool": "security"}))])
+    buttons = []
+    for spec in result.get("buttons") or []:
+        if spec.get("tool"):
+            buttons.append((spec["label"], Action("open_tool", {"tool": spec["tool"]})))
+        elif spec.get("settings"):
+            buttons.append((spec["label"], Action("open_settings", {
+                "page": spec["settings"], "title": spec.get("title") or "Settings"})))
+    opened = result.get("open")
+    if opened == "network":
+        _x_open_settings(Action("open_settings", {"page": "kcm_networkmanagement", "title": "Wi-Fi & network"}),
+                         ctx, dry)
+    elif opened == "security":
+        _x_open_tool(Action("open_tool", {"tool": "security"}), ctx, dry)
+    return ToolResult(result.get("text") or "I checked this PC.", ok=True, buttons=buttons,
+                      data={"solve": result.get("topic"), "blocked": bool(result.get("blocked"))})
 
 
 def _x_time(a, ctx, dry):
@@ -2583,12 +2836,76 @@ def _x_close_app(a, ctx, dry):
     return ToolResult(f"Closing **{app.name}**. If it has unsaved work it will ask you first.", plan=plan)
 
 
+FLATHUB_SEARCH_PAGE = "https://flathub.org/apps/search?q="
+APP_FINDER_MISSING_TEXT = "Finding apps isn't available on this PC (a DevOS part is missing)."
+_FLATPAK_ID = re.compile(r"^[A-Za-z][\w-]*(?:\.[\w-]+){2,}$")
+
+
+def _x_install_app(a, ctx, dry):
+    resolver = ctx.app_resolver()
+    if resolver is None:
+        return ToolResult(APP_FINDER_MISSING_TEXT, ok=False)
+    res = resolver.resolve(query=str(a.args.get("name") or ""), link=str(a.args.get("link") or ""),
+                           fetch=ctx.fetch)
+    text = resolver.reply_text(res)
+    buttons: List[Tuple[str, Action]] = []
+    opt = res.get("option") or None
+    if opt:
+        oname = str(opt.get("name") or "")
+        if opt.get("preinstalled"):
+            open_name = str(opt.get("builtin") or oname)
+            buttons.append((f"Open {oname}", Action("open_app", {"name": open_name, "strong": True},
+                                                    label=f"Open {oname}")))
+        elif opt.get("feature") or opt.get("flatpak"):
+            size = int(opt.get("size_mb") or 0)
+            about = f" It downloads about {size} MB." if size else " It downloads from the internet."
+            buttons.append((f"Install {oname}", Action(
+                "install_package", {"name": oname, "feature": str(opt.get("feature") or ""),
+                                    "flatpak": str(opt.get("flatpak") or "")},
+                confirm=f"Install {oname}?{about}", label=f"Install {oname}")))
+    if res.get("web"):
+        buttons.append(("Open web version", Action("open_url", {"url": str(res["web"]), "browser": "default"},
+                                                    label="Open the web version")))
+    if res.get("download"):
+        buttons.append(("Open download page", Action("open_url", {"url": str(res["download"]), "browser": "default"},
+                                                      label="Open the download page")))
+    name = str(res.get("name") or "").strip()
+    if name and res.get("known") and not (opt and opt.get("preinstalled")):
+        buttons.append(("Search Flathub", Action("open_url", {"url": FLATHUB_SEARCH_PAGE + urllib.parse.quote(name),
+                                                              "browser": "default"}, label="Search Flathub")))
+    if name and not opt and not res.get("web") and not res.get("store") and res.get("known") \
+            and not res.get("note") and not res.get("why"):
+        q = f"{name} download for Windows"
+        buttons.append(("Find the Windows download", Action(
+            "web_search", {"engine": "google", "query": q, "url": google_search_url(q), "browser": "default"},
+            label="Search for the download")))
+    return ToolResult(text, buttons=buttons, data={"resolution": res})
+
+
+def _x_install_package(a, ctx, dry):
+    name = str(a.args.get("name") or "the app").strip()[:60]
+    feature = str(a.args.get("feature") or "")
+    flatpak = str(a.args.get("flatpak") or "")
+    py = PYTHON
+    if feature and re.fullmatch(r"[a-z0-9_-]{1,40}", feature):
+        argv = [py, APP_RESOLVER_PY, "--install", "--name", name, "--feature", feature]
+    elif _FLATPAK_ID.match(flatpak):
+        argv = [py, APP_RESOLVER_PY, "--install", "--name", name, "--flatpak", flatpak]
+    else:
+        return ToolResult("I can't install that.", ok=False)
+    ok = _launch(ctx, argv, dry)
+    return _done(ok, f"Installing **{name}**. A progress window shows the download, and {name} opens when it's done.",
+                 f"I couldn't start installing {name}.", [argv])
+
+
 _EXECUTORS = {
+    "install_app": _x_install_app, "install_package": _x_install_package,
     "help": _x_help, "about": _x_about, "web_search": _x_web_search, "open_url": _x_open_url, "open_app": _x_open_app,
     "system_info": _x_system_info, "count_apps": _x_count_apps, "list_apps": _x_list_apps,
     "open_settings": _x_open_settings, "open_folder": _x_open_folder, "volume": _x_volume,
     "brightness": _x_brightness, "screenshot": _x_screenshot, "lock": _x_lock, "power": _x_power,
-    "uninstall": _x_uninstall, "open_tool": _x_open_tool, "cleanup_scan": _x_cleanup_scan, "time": _x_time,
+    "uninstall": _x_uninstall, "open_tool": _x_open_tool, "cleanup_scan": _x_cleanup_scan,
+    "solve": _x_solve, "time": _x_time,
     "write_note": _x_write_note, "type_text": _x_type_text, "open_app_and_type": _x_open_app_and_type,
     "compose_email": _x_compose_email, "reminder": _x_reminder, "create_folder": _x_create_folder,
     "open_path": _x_open_path, "media": _x_media, "close_app": _x_close_app,

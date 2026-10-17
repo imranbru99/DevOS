@@ -1,0 +1,3 @@
+#!/bin/bash
+# Clipboard history. Meta+V opens the window.
+exec /usr/bin/python3 /usr/local/share/devos/components/clipboard/clipboard.py "$@"

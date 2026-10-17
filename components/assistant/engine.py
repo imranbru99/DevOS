@@ -47,10 +47,13 @@ MODEL_OFFLINE = ("The DevOS AI service isn't responding. I've asked it to start;
 
 APP_PROMPT = (
     "You are answering inside the DevOS AI app on the user's PC. The app itself (not you) can open apps and "
-    "websites, search Google or YouTube, show this PC's details, count installed apps, change volume and "
+    "websites, search Google or YouTube, show this PC's details, count installed apps, install or remove "
+    "apps after you agree, change volume and "
     "brightness, take screenshots, open settings and read attached files. If the user asks for one of those "
     "and it did not happen, tell them to say it directly, for example “open Chrome and search for ...”. "
-    "Never invent facts about this PC; only use the PC facts given here. Use short Markdown: short paragraphs, "
+    "Problems with this PC (security, a link, Wi-Fi, an error) are checked by the app itself. "
+    "Never invent repair steps or menus. Never invent facts about this PC; only use the PC facts given here. "
+    "Use short Markdown: short paragraphs, "
     "bullet lists, **bold** for key words."
 )
 
@@ -106,13 +109,14 @@ class LocalModel:
             return None
 
     def chat(self, messages: List[Dict[str, str]], on_delta: Optional[Callable[[str], None]] = None,
-             cancel: Optional["StreamHandle"] = None) -> str:
+             cancel: Optional["StreamHandle"] = None, max_tokens: int = 384,
+             temperature: float = 0.3) -> str:
         """The answer text. With on_delta, the reply is streamed (server-sent events) and every new
         piece is passed to on_delta as it arrives; cancel.stop() ends it early (the text so far is
         returned). A server that answers with plain JSON instead of a stream is handled too."""
         stream = on_delta is not None
         body = json.dumps({"model": MODEL_NAME, "messages": messages, "stream": stream,
-                           "max_tokens": 384, "temperature": 0.3}).encode("utf-8")
+                           "max_tokens": int(max_tokens), "temperature": float(temperature)}).encode("utf-8")
         headers = {"Content-Type": "application/json"}
         if stream:
             headers["Accept"] = "text/event-stream"
@@ -563,8 +567,15 @@ class Assistant:
 
     # -- routing ----------------------------------------------------------
 
-    def plan(self, text: str) -> tools.RouteResult:
-        return tools.route(text, self.ctx)
+    def plan(self, text: str, history: Optional[History] = None) -> tools.RouteResult:
+        """Route a request. The chat's earlier user messages let "install this"
+        refer to a link or app named before."""
+        context: List[str] = []
+        if history is not None:
+            context = [str(m.get("text") or "") for m in history.messages if m.get("role") == "user"]
+            if context and context[-1].strip() == (text or "").strip():
+                context = context[:-1]      # the message being answered
+        return tools.route(text, self.ctx, context=context[-4:])
 
     def run_actions(self, actions: List[tools.Action], original: str, leftover: str = "",
                     history: Optional[History] = None, dry_run: bool = False,

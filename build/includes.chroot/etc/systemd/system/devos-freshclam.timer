@@ -1,0 +1,11 @@
+[Unit]
+Description=DevOS Security: update ClamAV signatures every 6 hours (instead of the always-on freshclam daemon)
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=6h
+RandomizedDelaySec=20min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

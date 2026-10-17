@@ -1,0 +1,22 @@
+[Unit]
+Description=Download the DevOS AI model chosen during install
+# Enabled by "devos-ai-models choose" (the installer's DevOS AI page) and
+# disabled again by itself once every chosen model is on disk.
+Wants=network-online.target
+After=network-online.target devos-network.service
+ConditionPathExists=/etc/devos/ai.conf
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/devos-ai-models download
+# Multi-GB downloads: no start timeout, and keep the PC responsive meanwhile.
+TimeoutStartSec=infinity
+Nice=10
+IOSchedulingClass=idle
+# Offline or interrupted: try again in a few minutes (downloads resume).
+Restart=on-failure
+RestartSec=180
+
+[Install]
+WantedBy=multi-user.target

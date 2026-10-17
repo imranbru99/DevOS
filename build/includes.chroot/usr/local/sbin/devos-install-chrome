@@ -8,7 +8,51 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
+# DevOS sends no telemetry: Chrome's first-run dialog had "send usage statistics
+# to Google" and "make Chrome the default browser" ticked. Pre-answer both (the
+# DevOS Browser wrapper is already the default and opens Chrome).
+quiet_first_run() {
+    for f in /opt/google/chrome/initial_preferences /opt/google/chrome/master_preferences; do
+        [ -d /opt/google/chrome ] || return 0
+        cat > "$f" <<'JSON'
+{
+  "distribution": {
+    "skip_first_run_ui": true,
+    "suppress_first_run_default_browser_prompt": true,
+    "make_chrome_default": false,
+    "make_chrome_default_for_user": false,
+    "show_welcome_page": false
+  },
+  "browser": { "check_default_browser": false }
+}
+JSON
+    done
+}
+
+if [ -f /opt/google/chrome/chrome-sandbox ]; then
+    chown root:root /opt/google/chrome/chrome-sandbox
+    chmod 4755 /opt/google/chrome/chrome-sandbox
+fi
+
+# Windows App connects a Cloud PC with window.open(). That becomes a Google
+# Chrome tab unless Chrome was started with the app-window flag. The package
+# launcher is diverted so an update of Chrome does not put the tab behaviour back.
+keep_cloud_pc_in_app() {
+    src=/usr/local/lib/devos/chrome-app-windows
+    bin=/opt/google/chrome/google-chrome
+    real=/opt/google/chrome/google-chrome.devos-real
+    [ -f "$src" ] || return 0
+    [ -e "$bin" ] || [ -e "$real" ] || return 0
+    if [ ! -e "$real" ]; then
+        dpkg-divert --local --rename --divert "$real" --add "$bin"
+    fi
+    install -m 755 "$src" "$bin"
+}
+
+keep_cloud_pc_in_app
+
 if command -v google-chrome-stable >/dev/null 2>&1; then
+    quiet_first_run
     echo "Google Chrome is already installed."
     echo "Bookmarks, passwords, and history stay in each user's ~/.config/google-chrome folder."
     exit 0
@@ -25,6 +69,12 @@ echo "Installing Google Chrome..."
 DEBIAN_FRONTEND=noninteractive apt-get install -y "${deb}" \
     || DEBIAN_FRONTEND=noninteractive apt-get install -fy
 
+quiet_first_run
+if [ -f /opt/google/chrome/chrome-sandbox ]; then
+    chown root:root /opt/google/chrome/chrome-sandbox
+    chmod 4755 /opt/google/chrome/chrome-sandbox
+fi
+keep_cloud_pc_in_app
 echo "Google Chrome is installed."
 echo "Open it from the menu. Your data stays in ~/.config/google-chrome and is kept after restart."
 echo "Install Chrome only after DevOS itself is installed on the hard disk. A live USB session forgets it on shutdown."

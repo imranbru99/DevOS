@@ -1,0 +1,22 @@
+{
+  "type": "object",
+  "properties": {
+    "locked": {
+      "type": "boolean",
+      "description": "Set by DevOS when the filter is enabled system-wide: the user cannot switch it off or make it less strict."
+    },
+    "enabled": {
+      "type": "boolean",
+      "description": "Default on/off state when not locked."
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["women", "people"],
+      "description": "women: blur media showing a face classified as female. people: blur media showing any face."
+    },
+    "femaleThreshold": {
+      "type": "number",
+      "description": "Blur when the probability of a female face is at least this value (0-1, default 0.35)."
+    }
+  }
+}

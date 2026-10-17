@@ -1,6 +1,6 @@
 # DevOS Windows Application Compatibility Guide (`winlayer`)
 
-DevOS runs Windows applications (.exe, .msi, .bat, .lnk) out of the box using an integrated compatibility stack powered by **Wine Staging, Proton-GE, DXVK, and VKD3D-Proton**, managed through **WinLayer**.
+DevOS runs Windows applications (`.exe`, `.msi`, `.bat`) with **Wine** and, when the `dxvk` package is installed, **DXVK** for DirectX 9–11. DirectX 12 uses Wine's **vkd3d**. This is not Proton-GE. Kernel anti-cheat does not run under Wine.
 
 ---
 
@@ -9,9 +9,9 @@ DevOS runs Windows applications (.exe, .msi, .bat, .lnk) out of the box using an
 - **Double-Click Execution**: Double-clicking any `.exe` or `.msi` in Dolphin automatically routes to WinLayer.
 - **Isolated Per-App Prefixes**: Every application receives an isolated wineprefix in `~/.local/share/winlayer/prefixes/<app>`, avoiding dependency conflicts.
 - **Reflink Deduplication**: Prefixes leverage btrfs CoW reflinks, taking **zero extra disk space** for common Windows system libraries.
-- **Graphics Acceleration**:
-  - DirectX 9, 10, 11 $\to$ Vulkan via **DXVK**.
-  - DirectX 12 $\to$ Vulkan via **VKD3D-Proton**.
+- **Graphics**:
+  - DirectX 9, 10, 11 use Vulkan via **DXVK** after the prefix is prepared.
+  - DirectX 12 uses Wine's **vkd3d** (`libvkd3d1`), not VKD3D-Proton.
 - **Desktop Integration**:
   - Real Windows app icons appear in the Start Menu (`~/.local/share/applications/winlayer-*.desktop`).
   - System tray icon support.
@@ -33,9 +33,11 @@ Ratings:
 
 ---
 
-## 3. Windows VM Fallback (QEMU/KVM + VirtIO)
+## 3. Windows VM fallback (QEMU)
 
-For applications Wine cannot run:
-- DevOS integrates **QEMU/KVM + libvirt + VirtIO + RemoteApp seamless mode**.
-- DevOS **does NOT ship Microsoft Windows binaries or ISOs**.
-- Guided Wizard: "Bring your own Windows ISO and license" to deploy a seamless virtual machine with shared folders (`~/DevOS_Shared`).
+For programs Wine cannot run (kernel anti-cheat, some drivers):
+
+- Install **Windows virtual machine** in DevOS Features (`qemu-system-x86`, `ovmf`).
+- DevOS does **not** ship a Windows ISO or licence.
+- `devos win vm create --iso /path/to/Windows.iso` creates a virtual disk and opens Windows in its own window.
+- This is a normal virtual PC, not a seamless RemoteApp desktop.

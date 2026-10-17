@@ -1,0 +1,12 @@
+[Unit]
+Description=DevOS Security: scan a newly mounted USB drive
+ConditionPathExists=/usr/bin/clamscan
+
+[Service]
+Type=oneshot
+# udisks creates the folder a moment before the mount is complete.
+ExecStartPre=/bin/sleep 3
+ExecStart=/usr/local/bin/devos-security av usb-run
+Nice=19
+IOSchedulingClass=idle
+KillMode=process

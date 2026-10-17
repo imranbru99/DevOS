@@ -1,0 +1,15 @@
+[Unit]
+Description=DevOS Cloud Backup soon after files change
+
+[Path]
+# A new download or a saved document starts a backup soon. The backup itself
+# waits until files stop changing for about a minute, so half-downloaded
+# files are never uploaded. Renamed XDG folders are still covered by the timer.
+PathChanged=%h/Downloads
+PathChanged=%h/Documents
+PathChanged=%h/Desktop
+PathChanged=%h/Pictures
+Unit=devos-backup.service
+
+[Install]
+WantedBy=default.target

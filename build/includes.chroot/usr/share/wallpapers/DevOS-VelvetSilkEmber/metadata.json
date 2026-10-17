@@ -1,0 +1,12 @@
+{
+    "KPlugin": {
+        "Id": "DevOS-VelvetSilkEmber",
+        "Name": "Velvet Silk Ember",
+        "Authors": [
+            {
+                "Name": "DevOS"
+            }
+        ],
+        "License": "CC-BY-SA-4.0"
+    }
+}

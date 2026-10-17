@@ -1,17 +1,50 @@
 /**
- * DevOS Luxury Dashboard & Security Orchestrator (2027)
- * Interactive logic for PIN keypad, password strength analyzer, telemetry, and launchpad
+ * DevOS Dashboard
+ * PIN keypad, password strength, real telemetry, storage doctor and launchpad.
+ * Everything shown comes from the local API; unknown values show as "—".
  */
 
 let currentPin = '';
 const MAX_PIN_LEN = 6;
 
+const TAB_IDS = ['overview', 'security', 'subsystems', 'storage', 'firstboot'];
+
 document.addEventListener('DOMContentLoaded', () => {
   initNavigation();
   initClock();
   fetchSystemMetrics();
+  fetchServices();
   setInterval(fetchSystemMetrics, 4000);
+  setInterval(fetchServices, 15000);
+  openTabFromHash();
+  window.addEventListener('hashchange', openTabFromHash);
 });
+
+// devos-dashboard opens straight into a tab with #storage, #security, ...
+function openTabFromHash() {
+  const tab = (location.hash || '').replace('#', '');
+  if (TAB_IDS.includes(tab)) switchTab(tab);
+}
+
+function escapeHtml(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function setText(id, text) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = text;
+}
+
+function setBar(id, percent) {
+  const el = document.getElementById(id);
+  if (el) el.style.width = `${percent == null ? 0 : Math.max(0, Math.min(100, percent))}%`;
+}
+
+function pct(value) {
+  return value == null ? '—' : `${value}%`;
+}
 
 // Navigation & Tab Switching
 function initNavigation() {
@@ -54,40 +87,80 @@ async function fetchSystemMetrics() {
     if (!res.ok) return;
     const data = await res.json();
 
-    // CPU & Silicon
-    const cpuCoreEl = document.getElementById('cpu-core-count');
-    if (cpuCoreEl) cpuCoreEl.textContent = `${data.cpu_cores} Cores • ${data.architecture}`;
+    // Live USB or installed PC: shows/hides installer-only controls.
+    document.body.classList.toggle('is-live', !!data.live);
+    document.body.classList.toggle('is-installed', !data.live);
+    setText('system-status-text', data.badge || data.os_name || 'DevOS');
+    setText('foot-os', data.pretty_name || data.os_name || 'DevOS');
 
-    // AI Tier
-    const aiTierEl = document.getElementById('ai-tier-badge');
-    if (aiTierEl) aiTierEl.textContent = data.tier || 'Standard';
+    // CPU
+    if (data.cpu_model) setText('cpu-model', data.cpu_model);
+    const cores = data.cpu_cores ? `${data.cpu_cores} threads` : '';
+    setText('cpu-core-count', [cores, data.architecture].filter(Boolean).join(' • ') || '—');
+    setText('cpu-percent', pct(data.cpu_percent));
+    setBar('cpu-progress', data.cpu_percent);
+
+    // AI tier
+    setText('ai-tier-badge', data.tier || 'Not detected');
 
     // Memory & zRAM
-    if (data.memory) {
-      const ramText = document.getElementById('ram-usage-text');
-      const ramPercent = document.getElementById('ram-percent');
-      const ramBar = document.getElementById('ram-progress');
-      if (ramText) ramText.textContent = `${(data.memory.used_mb / 1024).toFixed(1)} GB / ${(data.memory.total_mb / 1024).toFixed(1)} GB`;
-      if (ramPercent) ramPercent.textContent = `${data.memory.percent}%`;
-      if (ramBar) ramBar.style.width = `${data.memory.percent}%`;
+    const mem = data.memory || {};
+    if (mem.total_mb != null) {
+      setText('ram-usage-text', `${(mem.used_mb / 1024).toFixed(1)} GB / ${(mem.total_mb / 1024).toFixed(1)} GB`);
+    } else {
+      setText('ram-usage-text', '—');
+    }
+    setText('ram-percent', pct(mem.percent));
+    setBar('ram-progress', mem.percent);
+    if (mem.zram_active) {
+      const bits = [mem.zram_algorithm, mem.zram_ratio ? `${mem.zram_ratio}x` : ''].filter(Boolean);
+      setText('zram-badge', `zRAM on${bits.length ? ` (${bits.join(', ')})` : ''}`);
+    } else {
+      setText('zram-badge', 'zRAM off');
     }
 
-    // Disk
-    if (data.disk) {
-      const diskText = document.getElementById('disk-usage-text');
-      const diskPercent = document.getElementById('disk-percent');
-      const diskBar = document.getElementById('disk-progress');
-      if (diskText) diskText.textContent = `${data.disk.used_gb} GB / ${data.disk.total_gb} GB`;
-      if (diskPercent) diskPercent.textContent = `${data.disk.percent}%`;
-      if (diskBar) diskBar.style.width = `${data.disk.percent}%`;
+    // Root filesystem
+    const disk = data.disk || {};
+    if (disk.total_gb != null) {
+      setText('disk-usage-text', `${disk.used_gb} GB / ${disk.total_gb} GB`);
+    } else {
+      setText('disk-usage-text', '—');
     }
+    setText('disk-percent', pct(disk.percent));
+    setBar('disk-progress', disk.percent);
+    const fs = data.root_fs ? (data.root_fs === 'btrfs' ? 'Btrfs' : data.root_fs) : '';
+    setText('root-fs-label', fs ? `System Root (${fs})` : 'System Root');
+    setText('fs-badge', fs ? `${fs}${data.snapper ? ' + Snapper' : ''}` : '—');
 
-    // Host
-    const hostEl = document.getElementById('foot-host');
-    if (hostEl) hostEl.textContent = `${data.hostname || 'devos'}.local`;
-
+    // Footer
+    setText('foot-host', data.hostname || '');
+    setText('foot-desktop', data.desktop || '');
+    let boot = data.boot_mode === 'uefi' ? 'UEFI' : (data.boot_mode === 'bios' ? 'Legacy BIOS' : '');
+    if (data.boot_mode === 'uefi' && data.secure_boot != null) {
+      boot += data.secure_boot ? ' • Secure Boot on' : ' • Secure Boot off';
+    }
+    setText('foot-boot', boot);
+    setText('foot-sep', data.desktop && boot ? '•' : '');
   } catch (err) {
-    console.debug('Telemetry offline or local simulated mode');
+    console.debug('Dashboard API not reachable', err);
+  }
+}
+
+async function fetchServices() {
+  try {
+    const res = await fetch('/api/services/status');
+    if (!res.ok) return;
+    const svc = (await res.json()).services || {};
+    const show = (id, running, onText, offText) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.textContent = running ? onText : offText;
+      el.classList.toggle('active', !!running);
+    };
+    if (svc.devserver) show('svc-devserver', svc.devserver.running, 'Web server running', 'Web server stopped');
+    if (svc.ai_core) show('svc-ai', svc.ai_core.running, 'Local AI running', 'Local AI not running');
+  } catch (err) {
+    console.debug('Services API not reachable', err);
   }
 }
 
@@ -142,8 +215,7 @@ async function submitPin() {
       showFeedback(fb, result.error || 'Failed to save PIN.', 'error');
     }
   } catch (e) {
-    showFeedback(fb, '✓ PIN stored in secure local configuration.', 'success');
-    clearPin();
+    showFeedback(fb, 'Could not reach DevOS Dashboard. The PIN was not saved.', 'error');
   }
 }
 
@@ -230,7 +302,7 @@ async function submitPassword() {
       showFeedback(fb, result.error || 'Failed to update password.', 'error');
     }
   } catch (e) {
-    showFeedback(fb, '✓ Password configured and synchronized with DevOS user store.', 'success');
+    showFeedback(fb, 'Could not reach DevOS Dashboard. The password was not changed.', 'error');
   }
 }
 
@@ -248,28 +320,37 @@ async function completeFirstBoot() {
       body: JSON.stringify({ locale: lang, keyboard: kb })
     });
     const result = await res.json();
-    showFeedback(fb, '✓ Setup complete! Enjoy your new DevOS workstation.', 'success');
+    if (!result.success) {
+      showFeedback(fb, result.error || 'Could not save the language.', 'error');
+      return;
+    }
+    showFeedback(fb, '✓ Language saved.', 'success');
     setTimeout(() => {
       switchTab('overview');
     }, 1200);
   } catch (e) {
-    showFeedback(fb, '✓ Setup complete! Launching desktop.', 'success');
-    setTimeout(() => {
-      switchTab('overview');
-    }, 1200);
+    showFeedback(fb, 'Could not reach DevOS Dashboard. Nothing was saved.', 'error');
   }
 }
 
 // App Launching
 async function launchApp(actionName) {
   try {
-    await fetch('/api/actions/launch', {
+    const res = await fetch('/api/actions/launch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: actionName })
     });
+    const result = await res.json();
+    if (!result.success) console.warn(result.error || `Could not open ${actionName}`);
   } catch (e) {
-    console.log(`Action requested: ${actionName}`);
+    console.warn(`Could not open ${actionName}`, e);
+  }
+}
+
+function rebootAndEject() {
+  if (confirm('Restart now? Remove the USB stick when the screen goes dark.')) {
+    applyStorageAction('', 'reboot_system');
   }
 }
 
@@ -288,7 +369,7 @@ async function fetchStorageDevices() {
     const res = await fetch('/api/storage/devices');
     if (!res.ok) throw new Error('Failed to fetch storage');
     const data = await res.json();
-    renderStorageDevices(data.devices || [], data.is_uefi);
+    renderStorageDevices(data.devices || [], data.is_uefi, data.error);
   } catch (err) {
     if (container) {
       container.innerHTML = '<div class="glass-card" style="padding: 20px; color: #f43f5e;">Unable to load storage devices. Ensure daemon is running.</div>';
@@ -296,14 +377,14 @@ async function fetchStorageDevices() {
   }
 }
 
-function renderStorageDevices(devices, isUefi) {
+function renderStorageDevices(devices, isUefi, error) {
   // Update firmware banner
   const fwTitle = document.getElementById('firmware-title');
   const fwDesc = document.getElementById('firmware-desc');
   const fwIcon = document.getElementById('firmware-icon');
   if (fwTitle && fwDesc) {
     if (isUefi) {
-      fwTitle.textContent = 'System Boot Mode: Modern UEFI (Secure Boot Supported)';
+      fwTitle.textContent = 'System Boot Mode: UEFI';
       fwDesc.textContent = 'UEFI systems require GPT partition tables and a 512 MB FAT32 EFI partition (/boot/efi).';
       if (fwIcon) fwIcon.textContent = '🛡️';
     } else {
@@ -317,7 +398,8 @@ function renderStorageDevices(devices, isUefi) {
   if (!container) return;
 
   if (!devices || devices.length === 0) {
-    container.innerHTML = '<div class="glass-card" style="padding: 24px; text-align: center;">No physical storage disks detected.</div>';
+    const why = error ? ` (${escapeHtml(error)})` : '';
+    container.innerHTML = `<div class="glass-card" style="padding: 24px; text-align: center;">No storage disks found${why}.</div>`;
     return;
   }
 
@@ -332,11 +414,11 @@ function renderStorageDevices(devices, isUefi) {
           <div class="disk-title-group">
             <div class="disk-icon">🖴</div>
             <div>
-              <div class="disk-name">${disk.device} <span class="disk-size-tag">${disk.size_human}</span></div>
-              <div class="disk-model">${disk.model}</div>
+              <div class="disk-name">${escapeHtml(disk.device)} <span class="disk-size-tag">${escapeHtml(disk.size_human)}</span></div>
+              <div class="disk-model">${escapeHtml(disk.model)}</div>
             </div>
           </div>
-          <span class="pt-badge ${ptBadgeClass}">${disk.partition_table}</span>
+          <span class="pt-badge ${ptBadgeClass}">${escapeHtml(disk.partition_table)}</span>
         </div>
 
         <!-- Partitions List -->
@@ -352,12 +434,13 @@ function renderStorageDevices(devices, isUefi) {
 
     if (disk.partitions && disk.partitions.length > 0) {
       disk.partitions.forEach(p => {
-        const mountOrLabel = p.mountpoint || (p.label ? `Label: ${p.label}` : '<span style="color: #64748b;">[unmounted]</span>');
+        const mountOrLabel = p.mountpoint ? escapeHtml(p.mountpoint)
+          : (p.label ? `Label: ${escapeHtml(p.label)}` : '<span style="color: #64748b;">[unmounted]</span>');
         html += `
           <div class="partition-row">
-            <span class="part-dev">${p.device}</span>
-            <span class="part-size">${p.size_human}</span>
-            <span class="part-fs">${p.fstype}</span>
+            <span class="part-dev">${escapeHtml(p.device)}</span>
+            <span class="part-size">${escapeHtml(p.size_human)}</span>
+            <span class="part-fs">${escapeHtml(p.fstype)}</span>
             <span class="part-mount">${mountOrLabel}</span>
           </div>
         `;
@@ -383,12 +466,12 @@ function renderStorageDevices(devices, isUefi) {
         html += `
           <div class="disk-issue-box ${alertClass}">
             <div class="issue-info">
-              <div class="issue-title">${icon} ${issue.title}</div>
-              <div class="issue-desc">${issue.description}</div>
+              <div class="issue-title">${icon} ${escapeHtml(issue.title)}</div>
+              <div class="issue-desc">${escapeHtml(issue.description)}</div>
             </div>
             ${issue.action_id ? `
-              <button class="btn ${btnClass} btn-sm" onclick="applyStorageAction('${disk.device}', '${issue.action_id}')">
-                ${issue.action_label}
+              <button class="btn ${btnClass} btn-sm" onclick="applyStorageAction('${escapeHtml(disk.device)}', '${escapeHtml(issue.action_id)}')">
+                ${escapeHtml(issue.action_label)}
               </button>
             ` : ''}
           </div>
@@ -407,7 +490,7 @@ function renderStorageDevices(devices, isUefi) {
 
 async function applyStorageAction(device, actionId) {
   const fb = document.getElementById('storage-feedback');
-  showFeedback(fb, `Executing action for ${device}... Please wait.`, 'success');
+  showFeedback(fb, device ? `Working on ${device}... Please wait.` : 'Working... Please wait.', 'success');
 
   try {
     const res = await fetch('/api/storage/action', {

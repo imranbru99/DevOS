@@ -1,0 +1,12 @@
+{
+    "KPlugin": {
+        "Id": "DevOS-ContourGlowRose",
+        "Name": "Contour Glow Rose",
+        "Authors": [
+            {
+                "Name": "DevOS"
+            }
+        ],
+        "License": "CC-BY-SA-4.0"
+    }
+}

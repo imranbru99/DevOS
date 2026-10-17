@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Family Safety
+GenericName=Block adult sites
+Comment=Block adult websites on this PC for every browser and account
+Exec=/usr/bin/python3 /usr/local/share/devos/components/familysafe/familysafe.py gui
+Icon=security-high
+Terminal=false
+Categories=System;Settings;Security;
+Keywords=family;parental;control;children;kids;safe;safesearch;adult;block;filter;
+StartupNotify=false

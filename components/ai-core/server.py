@@ -3,24 +3,395 @@
 DevOS Local AI Inference Server (ai-core)
 Provides an offline OpenAI-compatible HTTP service on 127.0.0.1:11434.
 Zero external dependencies required (uses built-in http.server & json).
+
+Speed is chosen from this PC: prompt processing uses every thread, replies use
+one thread per physical core, and flash attention plus a compact KV cache are
+turned on when this build of the engine accepts them. Docs: GET /docs.
 """
 
 import sys
 import os
+import re
 import time
+import math
 import json
 import uuid
+import html
 from http.server import HTTPServer, ThreadingHTTPServer, BaseHTTPRequestHandler
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional, Tuple
 from hardware_detector import HardwareDetector
+import model_catalog
 
 
 HOST = "127.0.0.1"
 PORT = 11434
+# "devos-ai-models api lan on" opens the API to phones and PCs on the same
+# network (0.0.0.0); those callers must send "Authorization: Bearer <key>".
+API_CONF = "/etc/devos/ai-api.conf"
+API_SETTINGS = {"listen": "local", "key": ""}
+
+
+def read_api_conf(path: str = API_CONF) -> Dict[str, str]:
+    conf = {"listen": "local", "key": ""}
+    try:
+        with open(path, encoding="utf-8") as handle:
+            for line in handle:
+                key, _, value = line.partition("=")
+                if key.strip() in conf:
+                    conf[key.strip()] = value.strip()
+    except OSError:
+        pass
+    # Network mode without a real key would let anyone on the Wi-Fi use the PC's AI.
+    if conf["listen"] != "lan" or len(conf["key"]) < 16:
+        conf["listen"] = "local"
+    return conf
+
+
+def is_loopback(address: str) -> bool:
+    return address in ("::1", "::ffff:127.0.0.1") or address.startswith("127.")
+
+
+def request_allowed(client_ip: str, auth_header: str, conf: Dict[str, str]) -> bool:
+    """Apps on this PC never need a key; anything from the network does."""
+    if is_loopback(client_ip):
+        return True
+    if conf.get("listen") != "lan" or not conf.get("key"):
+        return False
+    import hmac
+    given = (auth_header or "").strip()
+    if given.lower().startswith("bearer "):
+        given = given[7:].strip()
+    return hmac.compare_digest(given.encode(), conf["key"].encode())
+
+
+import threading
+
+
+class EngineBusy(Exception):
+    """Every slot is busy and the waiting line is full (or waited too long)."""
+
+
+class _Slot:
+    """One loaded copy of a model with its own working memory (KV cache).
+
+    Several agents (DevOS AI window, VS Code, Optimizer, scripts using the API)
+    each get a slot, so one long answer no longer makes the others hang. The
+    copies share the model file through the page cache (mmap): a second slot
+    costs only its working memory, not another copy of the weights."""
+
+    def __init__(self, index: int):
+        self.index = index
+        self.llm = None
+        self.kind = "chat"
+        self.load_tried = False
+        self.lock = threading.RLock()
+        self.busy = False
+        self.last_used = time.time()
+
+
+def clamp_tokens(value) -> int:
+    """Callers may ask for longer answers (the code agent writes whole files),
+    within what a local model finishes in reasonable time."""
+    try:
+        return max(16, min(2048, int(value)))
+    except (TypeError, ValueError):
+        return 384
+
+
+def parallel_slots(ram_gb: float, threads: int, configured: int = 0) -> int:
+    """How many questions DevOS AI answers at the same time on this PC.
+
+    Each slot gets its own processor threads; splitting a 4-thread laptop would
+    make every answer slower, so small PCs answer one at a time (the others
+    wait in line, and /health keeps answering)."""
+    if configured > 0:
+        return max(1, min(8, configured))
+    if threads < 6 or ram_gb < 7.5:
+        return 1
+    if threads < 12 or ram_gb < 15.5:
+        return 2
+    return max(2, min(4, threads // 4))
+
+
+def configured_parallel(path: str = "/etc/devos/ai.conf") -> int:
+    value = os.environ.get("DEVOS_AI_PARALLEL", "")
+    try:
+        with open(path, encoding="utf-8") as handle:
+            for line in handle:
+                key, _, val = line.partition("=")
+                if key.strip() == "parallel":
+                    value = val.strip()
+    except OSError:
+        pass
+    try:
+        return int(value)
+    except ValueError:
+        return 0
+
+
+def _int_env(name: str, default: int) -> int:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return default
+
+
+def physical_cores(logical: int) -> int:
+    """Real cores, not hyperthreads. Reply generation is limited by memory
+    bandwidth, so a second thread on the same core usually does not help."""
+    ids = set()
+    base = "/sys/devices/system/cpu"
+    try:
+        for name in os.listdir(base):
+            if len(name) < 4 or not name.startswith("cpu") or not name[3:].isdigit():
+                continue
+            with open(os.path.join(base, name, "topology", "core_id"), encoding="utf-8") as handle:
+                ids.add(int(handle.read().strip()))
+    except (OSError, ValueError):
+        ids = set()
+    if ids:
+        return max(1, min(len(ids), logical))
+    return max(1, logical)
+
+
+def fast_mode(fast: Optional[bool] = None) -> bool:
+    """Compact KV cache and flash attention. DEVOS_AI_FAST=0 keeps the slower,
+    full-precision cache for builds that misbehave with the fast flags."""
+    if fast is not None:
+        return bool(fast)
+    return os.environ.get("DEVOS_AI_FAST", "1").strip().lower() not in ("0", "no", "off", "false")
+
+
+def thread_plan(logical: int, physical: int, parallel: int) -> Tuple[int, int]:
+    """(generation threads, prompt threads) for one slot.
+
+    Prompt processing scales with threads. Token generation does not, past one
+    thread per physical core, and two slots must not each grab every core.
+    """
+    logical = max(1, logical)
+    physical = max(1, min(physical, logical))
+    slots = max(1, parallel)
+    gen = max(1, physical // slots)
+    batch = max(gen, logical // slots)
+    gen = max(1, min(_int_env("DEVOS_AI_THREADS", gen), logical))
+    batch = max(gen, min(_int_env("DEVOS_AI_BATCH_THREADS", batch), logical))
+    return gen, batch
+
+
+def llama_speed_kwargs(kind: str, ram_gb: float, parallel: int, gpu_layers: int,
+                       logical: Optional[int] = None, physical: Optional[int] = None,
+                       fast: Optional[bool] = None) -> Dict[str, Any]:
+    """Arguments for llama.cpp that make this PC answer sooner.
+
+    Chat stays at 2048 tokens of context (a 4 GB laptop cannot spare more).
+    Coding gets 8192. n_batch is how much of a long prompt is read per pass.
+    """
+    logical = logical if logical is not None else (os.cpu_count() or 2)
+    physical = physical if physical is not None else physical_cores(logical)
+    gen, batch = thread_plan(logical, physical, parallel)
+    gpu_layers = max(0, int(gpu_layers))
+    ctx = 8192 if kind == "code" else 2048
+    if kind == "embedding":
+        ctx = 2048
+    n_batch = 1024 if kind == "code" and batch >= 8 and ram_gb >= 8 else 512
+    n_batch = min(n_batch, ctx)
+    kwargs = {
+        "n_ctx": ctx,
+        "n_threads": gen,
+        "n_threads_batch": batch,
+        "n_batch": n_batch,
+        "n_ubatch": min(512, n_batch),
+        "n_gpu_layers": gpu_layers,
+        "use_mmap": True,
+        # Locking a multi-GB file on a 16 GB PC pushes the desktop into swap.
+        "use_mlock": ram_gb >= 32 and gpu_layers == 0,
+        "verbose": False,
+    }
+    if fast_mode(fast):
+        kwargs["flash_attn"] = True
+        if gpu_layers > 0:
+            kwargs["offload_kqv"] = True
+        else:
+            # GGML_TYPE_Q8_0. About half the working memory of f16, and less
+            # memory traffic per token, which is what limits CPU speed.
+            kwargs["type_k"] = 8
+            kwargs["type_v"] = 8
+    return kwargs
+
+
+def _unexpected_keyword(exc: BaseException, keys) -> Optional[str]:
+    match = re.search(r"unexpected keyword argument '(\w+)'", str(exc))
+    if match and match.group(1) in keys and match.group(1) != "model_path":
+        return match.group(1)
+    return None
+
+
+def open_llama(llama_cls, path: str, kwargs: Dict[str, Any]):
+    """Load the model. Drop speed flags this build does not know, and retry
+    on the processor when the GPU backend refuses the file."""
+    attempt = dict(kwargs)
+    attempt["model_path"] = path
+    dropped = []
+    tried_cpu = False
+    tried_plain = False
+    while True:
+        try:
+            return llama_cls(**attempt), dropped
+        except TypeError as exc:
+            key = _unexpected_keyword(exc, attempt)
+            if not key:
+                raise
+            attempt.pop(key, None)
+            dropped.append(key)
+        except Exception as exc:
+            if attempt.get("n_gpu_layers", 0) > 0 and not tried_cpu:
+                tried_cpu = True
+                attempt["n_gpu_layers"] = 0
+                attempt.pop("offload_kqv", None)
+                dropped.append("n_gpu_layers")
+                sys.stderr.write(f"[ai-core] GPU offload failed ({exc}); using the processor.\n")
+                continue
+            fast_keys = [k for k in ("flash_attn", "type_k", "type_v", "use_mlock") if k in attempt]
+            if fast_keys and not tried_plain:
+                tried_plain = True
+                for key in fast_keys:
+                    attempt.pop(key, None)
+                    dropped.append(key)
+                sys.stderr.write(f"[ai-core] fast load failed ({exc}); loading with standard settings.\n")
+                continue
+            raise
+
+
+def call_completion(llm, **kwargs):
+    """create_chat_completion, dropping sampling fields this build does not accept."""
+    while True:
+        try:
+            return llm.create_chat_completion(**kwargs)
+        except TypeError as exc:
+            key = _unexpected_keyword(exc, kwargs)
+            if not key:
+                raise
+            kwargs.pop(key, None)
+
+
+def sampling_kwargs(req: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """OpenAI sampling fields, clamped so a client cannot stall the PC."""
+    req = req or {}
+
+    def fnum(key, default, lo, hi):
+        if req.get(key) is None:
+            return default
+        try:
+            return max(lo, min(hi, float(req[key])))
+        except (TypeError, ValueError):
+            return default
+
+    opts = {"temperature": fnum("temperature", 0.3, 0.0, 2.0)}
+    if req.get("top_p") is not None:
+        opts["top_p"] = fnum("top_p", 0.9, 0.05, 1.0)
+    if req.get("repeat_penalty") is not None:
+        opts["repeat_penalty"] = fnum("repeat_penalty", 1.05, 1.0, 2.0)
+    if req.get("top_k") is not None:
+        try:
+            opts["top_k"] = max(0, min(200, int(req["top_k"])))
+        except (TypeError, ValueError):
+            pass
+    stop = req.get("stop")
+    if isinstance(stop, str) and stop:
+        opts["stop"] = [stop[:200]]
+    elif isinstance(stop, list):
+        opts["stop"] = [str(item)[:200] for item in stop[:8] if item]
+    if req.get("seed") is not None:
+        try:
+            opts["seed"] = int(req["seed"])
+        except (TypeError, ValueError):
+            pass
+    return opts
+
+
+class _CpuBoost:
+    """While a reply is generating, leave powersave so the first tokens are
+    not waiting on a CPU that has been idle. Restored when the last reply ends.
+    Skipped when the governor is not writable (normal for a non-root test)."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._depth = 0
+        self._saved = []
+
+    @staticmethod
+    def _paths():
+        root = "/sys/devices/system/cpu"
+        found = []
+        try:
+            names = os.listdir(root)
+        except OSError:
+            return found
+        for name in names:
+            if not name.startswith("cpu") or not name[3:].isdigit():
+                continue
+            path = os.path.join(root, name, "cpufreq", "scaling_governor")
+            if os.path.isfile(path):
+                found.append(path)
+        return found
+
+    def enter(self):
+        with self._lock:
+            self._depth += 1
+            if self._depth != 1:
+                return
+            saved = []
+            for path in self._paths():
+                try:
+                    with open(path, encoding="utf-8") as handle:
+                        current = handle.read().strip()
+                    if not current or current == "performance":
+                        continue
+                    with open(path, "w", encoding="utf-8") as handle:
+                        handle.write("performance")
+                    saved.append((path, current))
+                except OSError:
+                    continue
+            self._saved = saved
+
+    def leave(self):
+        with self._lock:
+            self._depth = max(0, self._depth - 1)
+            if self._depth != 0:
+                return
+            for path, current in self._saved:
+                try:
+                    with open(path, "w", encoding="utf-8") as handle:
+                        handle.write(current)
+                except OSError:
+                    pass
+            self._saved = []
+
+
+cpu_boost = _CpuBoost()
+
+
+def mem_available_mb() -> int:
+    try:
+        with open("/proc/meminfo", encoding="utf-8") as handle:
+            for line in handle:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) // 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    return 1 << 20
 
 
 class DevOSAIEngine:
     """Inference engine controller with memory governor and mock/llama backend."""
+
+    # Free memory needed before an extra slot loads (its working memory plus
+    # headroom); below that, extra questions wait for a busy slot instead.
+    EXTRA_SLOT_MIN_FREE_MB = 1024
+    EXTRA_SLOT_IDLE_SECONDS = 120
 
     def __init__(self):
         self.tier_info = HardwareDetector.evaluate_tier()
@@ -30,17 +401,138 @@ class DevOSAIEngine:
         self.idle_timeout_seconds = 300
         self.last_activity = time.time()
         self.is_loaded = False
-        self._llm = None
-        self._load_tried = False
         self._model_file = None
         self.tokens_generated = 0
         self.start_time = time.time()
-        # One generation at a time (the server answers health checks in
-        # parallel threads while the model is busy).
-        import threading
-        self._lock = threading.RLock()
+        ram = float(self.tier_info.get("ram_gb") or 4)
+        self.parallel = parallel_slots(ram, os.cpu_count() or 2, configured_parallel())
+        self._slots = [_Slot(i) for i in range(self.parallel)]
+        self._cond = threading.Condition()
+        self._waiting = 0
+        self.max_waiting = 32
+        self.wait_timeout_seconds = 600
 
-    def generate_chat_response(self, messages: List[Dict[str, str]], stream: bool = False) -> Dict[str, Any]:
+    # Slot 0 is the always-first slot; these keep the older single-model
+    # names working for callers and tests.
+    @property
+    def _llm(self):
+        return self._slots[0].llm
+
+    @_llm.setter
+    def _llm(self, value):
+        self._slots[0].llm = value
+
+    @property
+    def _lock(self):
+        return self._slots[0].lock
+
+    @property
+    def _load_tried(self):
+        return self._slots[0].load_tried
+
+    @_load_tried.setter
+    def _load_tried(self, value):
+        self._slots[0].load_tried = value
+
+    @property
+    def _loaded_kind(self):
+        return self._slots[0].kind
+
+    def status(self) -> Dict[str, Any]:
+        return {
+            "parallel": self.parallel,
+            "busy": sum(1 for s in self._slots if s.busy),
+            "loaded": sum(1 for s in self._slots if s.llm is not None),
+            "waiting": self._waiting,
+        }
+
+    # ---------------------------------------------------------- slots
+    def _slot_may_load(self, slot: _Slot) -> bool:
+        if slot.index == 0 or slot.llm is not None:
+            return True
+        return mem_available_mb() >= self.EXTRA_SLOT_MIN_FREE_MB
+
+    def _pick(self, kind: str):
+        free = [s for s in self._slots if not s.busy]
+        for test in (lambda s: s.llm is not None and s.kind == kind,
+                     lambda s: s.llm is None and self._slot_may_load(s),
+                     lambda s: s.llm is not None):
+            for slot in free:
+                if test(slot):
+                    return slot
+        return None
+
+    def _acquire(self, kind: str) -> _Slot:
+        deadline = time.time() + self.wait_timeout_seconds
+        with self._cond:
+            if self._waiting >= self.max_waiting:
+                raise EngineBusy()
+            self._waiting += 1
+            try:
+                while True:
+                    slot = self._pick(kind)
+                    if slot is not None:
+                        slot.busy = True
+                        return slot
+                    left = deadline - time.time()
+                    if left <= 0:
+                        raise EngineBusy()
+                    self._cond.wait(min(left, 5))
+            finally:
+                self._waiting -= 1
+
+    def _release(self, slot: _Slot) -> None:
+        with self._cond:
+            slot.busy = False
+            slot.last_used = time.time()
+            self._cond.notify_all()
+
+    def _gpu_layers(self) -> int:
+        if "DEVOS_GPU_LAYERS" in os.environ:
+            try:
+                return max(0, int(os.environ["DEVOS_GPU_LAYERS"]))
+            except ValueError:
+                return 0
+        backend = (self.tier_info.get("gpu") or {}).get("backend")
+        if backend in ("cuda", "rocm", "vulkan"):
+            try:
+                return max(0, int((self.tier_info.get("models") or {}).get("gpu_layers") or 0))
+            except (TypeError, ValueError):
+                return 0
+        return 0
+
+    def speed_kwargs(self, kind: str = "chat") -> Dict[str, Any]:
+        ram = float(self.tier_info.get("ram_gb") or 4)
+        return llama_speed_kwargs(kind, ram, self.parallel, self._gpu_layers())
+
+    def speed_info(self) -> Dict[str, Any]:
+        """What this PC will use. Safe to call before a model file is loaded."""
+        kw = self.speed_kwargs("chat")
+        code = self.speed_kwargs("code")
+        return {
+            "threads": kw["n_threads"],
+            "prompt_threads": kw["n_threads_batch"],
+            "batch": kw["n_batch"],
+            "context": kw["n_ctx"],
+            "code_context": code["n_ctx"],
+            "code_batch": code["n_batch"],
+            "flash_attention": bool(kw.get("flash_attn")),
+            "kv_cache": "q8_0" if kw.get("type_k") == 8 else "f16",
+            "gpu_layers": kw["n_gpu_layers"],
+            "parallel": self.parallel,
+            "mlock": bool(kw.get("use_mlock")),
+        }
+
+    def _threads_per_slot(self) -> int:
+        return self.speed_info()["threads"]
+
+    @staticmethod
+    def kind_for(model_name: str) -> str:
+        return "code" if "code" in (model_name or "").lower() else "chat"
+
+    def generate_chat_response(self, messages: List[Dict[str, str]], stream: bool = False,
+                               model: str = "devos-ai", max_tokens: int = 384,
+                               options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Answer from the local GGUF when it is installed."""
         self.last_activity = time.time()
         user_prompt = ""
@@ -49,22 +541,31 @@ class DevOSAIEngine:
                 user_prompt = m.get("content", "")
 
         started = time.time()
-        with self._lock:
-            self._ensure_model()
-        if self._llm is not None:
-            reply_content = self._complete(messages)
-        else:
-            reply_content = self._reason(user_prompt)
+        kind = self.kind_for(model)
+        slot = self._acquire(kind)
+        cpu_boost.enter()
+        try:
+            with slot.lock:
+                self._load(slot, kind)
+                if slot.llm is not None:
+                    reply_content, usage = self._complete_on(slot, messages, max_tokens, options)
+                else:
+                    reply_content = self._reason(user_prompt)
+                    usage = {}
+                loaded = slot.llm is not None
+        finally:
+            cpu_boost.leave()
+            self._release(slot)
         elapsed = max(time.time() - started, 0.001)
-        prompt_tokens = len(user_prompt.split()) + 15
-        completion_tokens = len(reply_content.split())
+        prompt_tokens = int(usage.get("prompt_tokens") or (len(user_prompt.split()) + 15))
+        completion_tokens = int(usage.get("completion_tokens") or len(reply_content.split()))
         self.tokens_generated += completion_tokens
 
         return {
             "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
             "object": "chat.completion",
             "created": int(time.time()),
-            "model": self.active_model,
+            "model": "devos-ai-code" if self.kind_for(model) == "code" else self.active_model,
             "choices": [
                 {
                     "index": 0,
@@ -81,7 +582,7 @@ class DevOSAIEngine:
                 "total_tokens": prompt_tokens + completion_tokens,
             },
             "devos_tier": self.tier_info["tier"],
-            "model_loaded": self._llm is not None,
+            "model_loaded": loaded,
             "tokens_per_sec": round(completion_tokens / elapsed, 2),
         }
 
@@ -89,10 +590,55 @@ class DevOSAIEngine:
         """Generates embedding vectors for local RAG."""
         self.last_activity = time.time()
         data = []
+        embed_model_path = self._find_model("embedding")
+        llm_embed = None
+        if embed_model_path:
+            try:
+                from llama_cpp import Llama
+                if not hasattr(self, "_embed_llm") or self._embed_llm is None:
+                    embed_kw = self.speed_kwargs("embedding")
+                    self._embed_llm, _dropped = open_llama(Llama, embed_model_path, {
+                        "embedding": True,
+                        "n_ctx": embed_kw["n_ctx"],
+                        "n_threads": embed_kw["n_threads"],
+                        "n_threads_batch": embed_kw["n_threads_batch"],
+                        "n_batch": embed_kw["n_batch"],
+                        "use_mmap": True,
+                        "verbose": False,
+                    })
+                llm_embed = self._embed_llm
+            except Exception:
+                llm_embed = None
+
         for idx, text in enumerate(inputs):
-            # Deterministic pseudo-embedding vector of 384 dimensions for testing
-            seed = sum(ord(c) for c in text) % 1000
-            vector = [(float((seed + i) % 100) / 100.0) - 0.5 for i in range(384)]
+            vector = None
+            if llm_embed is not None:
+                try:
+                    res = llm_embed.create_embedding(text)
+                    raw_vec = res["data"][0]["embedding"]
+                    if len(raw_vec) >= 384:
+                        vector = raw_vec[:384]
+                    else:
+                        vector = raw_vec + [0.0] * (384 - len(raw_vec))
+                except Exception:
+                    vector = None
+
+            if vector is None:
+                # Semantic n-gram dense feature embedding with unit normalization (384 dims)
+                words = text.lower().split()
+                vec = [0.0] * 384
+                for w in words:
+                    h1 = sum(ord(c) * (31 ** i) for i, c in enumerate(w[:8])) % 384
+                    h2 = sum(ord(c) for c in w) % 384
+                    vec[h1] += 1.0
+                    vec[h2] += 0.5
+                for i in range(len(words) - 1):
+                    bg = words[i] + "_" + words[i + 1]
+                    h_bg = sum(ord(c) * 17 for c in bg) % 384
+                    vec[h_bg] += 1.5
+                mag = math.sqrt(sum(v * v for v in vec)) or 1.0
+                vector = [round(v / mag, 6) for v in vec]
+
             data.append({
                 "object": "embedding",
                 "index": idx,
@@ -134,15 +680,33 @@ class DevOSAIEngine:
             os.path.expanduser("~/.local/share/DevOS/models"),
         ]
 
-    def _find_model(self):
-        names = [
-            "qwen2.5-1.5b-instruct-q4_k_m.gguf",
-            "qwen2.5-0.5b-instruct-q4_k_m.gguf",
-            self.tier_info["models"].get("chat_file", ""),
-        ]
-        # Best model first, in any folder: "Smarter DevOS AI" (1.5B) wins over
-        # the built-in tiny model even when they sit in different folders.
-        for name in names:
+    def _candidate_names(self, kind: str = "chat") -> List[str]:
+        if kind == "embedding":
+            return [
+                self.tier_info["models"].get("embed_file", ""),
+                "nomic-embed-text-v1.5.Q4_K_M.gguf",
+                "bge-m3-q4_k_m.gguf",
+            ]
+        choice = model_catalog.read_choice()
+        if kind == "code":
+            # The coding model when it was downloaded, else the chat model.
+            names = [model_catalog.coder_for(choice["chat"])["file"]]
+            names += [m["file"] for m in model_catalog.CODER_MODELS.values() if m["file"] not in names]
+            return names + self._candidate_names("chat")
+        # The model picked in the installer (or DevOS AI Models) first. Then the
+        # biggest other one on disk that fits in memory, in any folder:
+        # "Smarter DevOS AI" (1.5B) still wins over the built-in tiny model.
+        chosen = model_catalog.chat_model(choice["chat"])
+        names = [chosen["file"]] if chosen else []
+        ram = float(self.tier_info.get("ram_gb") or 0) or 64.0
+        for model in reversed(model_catalog.CHAT_MODELS):
+            if model["file"] not in names and ram + 0.5 >= model["min_ram_gb"]:
+                names.append(model["file"])
+        names.append(self.tier_info["models"].get("chat_file", ""))
+        return names
+
+    def _find_model(self, kind: str = "chat"):
+        for name in self._candidate_names(kind):
             if not name:
                 continue
             for directory in self._model_dirs():
@@ -153,52 +717,76 @@ class DevOSAIEngine:
                     return path
         return None
 
-    def _ensure_model(self):
-        if self._llm is not None or self._load_tried:
+    def _ensure_model(self, kind: str = "chat"):
+        self._load(self._slots[0], kind)
+
+    def _load(self, slot: _Slot, kind: str = "chat"):
+        """Load the model for `kind` into this slot (caller holds slot.lock)."""
+        if kind != slot.kind:
+            # A slot holds one model; switching chat <-> code swaps it.
+            slot.llm = None
+            slot.load_tried = False
+            slot.kind = kind
+        if slot.llm is not None or slot.load_tried:
             return
-        self._load_tried = True
-        path = self._find_model()
+        slot.load_tried = True
+        path = self._find_model(kind)
         if not path:
             return
         try:
             from llama_cpp import Llama
-            threads = max(2, min(8, os.cpu_count() or 2))
-            self._llm = Llama(
-                model_path=path,
-                n_ctx=2048,  # short chats; 4096 doubled the working memory
-                n_threads=threads,
-                n_gpu_layers=0,
-                verbose=False,
-            )
+
+            # Chat stays at 2048 tokens: 4096 doubled the working memory on a
+            # 4 GB laptop. Coding (DevOS Code Agent, VS Code) reads whole files,
+            # so it gets 8192; it is only offered on PCs with 8 GB or more.
+            # use_mmap: slots share one copy of the weights.
+            profile = self.speed_kwargs(kind)
+            slot.llm, dropped = open_llama(Llama, path, profile)
+            if dropped:
+                sys.stderr.write("[ai-core] loaded without: " + ", ".join(dropped) + "\n")
+            self._loaded_speed = dict(profile)
             # Reuse the processed system prompt between questions. It is the
             # same text every time (see devos_identity_prompt), so only the
             # new question has to be read; on a 2-core PC that saved seconds.
             try:
                 from llama_cpp import LlamaRAMCache
-                self._llm.set_cache(LlamaRAMCache(capacity_bytes=64 << 20))
+                slot.llm.set_cache(LlamaRAMCache(capacity_bytes=(128 if kind == "code" else 64) << 20))
             except Exception as exc:
                 sys.stderr.write(f"[ai-core] prompt cache unavailable: {exc}\n")
             self._model_file = path
             self.active_model = "devos-ai"
             self.is_loaded = True
+            if slot.index:
+                sys.stderr.write(f"[ai-core] slot {slot.index} loaded for parallel requests\n")
         except Exception as exc:
             sys.stderr.write(f"[ai-core] model did not load: {exc}\n")
-            self._llm = None
-            self.is_loaded = False
+            slot.llm = None
 
     def unload_if_idle(self) -> bool:
         """Give the model's memory back when nobody has asked anything for a
         while. It held 1.6-2.7 GB for hours, and on a 4 GB laptop that made
         Android and Chrome get killed. The file is memory-mapped, so loading it
-        again on the next question takes about a second."""
-        if self._llm is None or time.time() - self.last_activity < self.idle_timeout_seconds:
-            return False
-        if not self._lock.acquire(blocking=False):
-            return False  # answering right now
-        try:
-            self._llm = None
-            self._load_tried = False
-            self.is_loaded = False
+        again on the next question takes about a second. Extra slots (parallel
+        agents) are freed sooner than the first one."""
+        now = time.time()
+        freed = False
+        for slot in self._slots:
+            if slot.llm is None:
+                continue
+            if slot.index == 0:
+                idle = now - self.last_activity >= self.idle_timeout_seconds
+            else:
+                idle = now - slot.last_used >= min(self.EXTRA_SLOT_IDLE_SECONDS, self.idle_timeout_seconds)
+            if not idle or slot.busy or not slot.lock.acquire(blocking=False):
+                continue  # answering right now
+            try:
+                slot.llm = None
+                slot.load_tried = False
+                freed = True
+            finally:
+                slot.lock.release()
+        if freed:
+            self.is_loaded = any(s.llm is not None for s in self._slots)
             import gc
             gc.collect()
             try:
@@ -206,9 +794,7 @@ class DevOSAIEngine:
                 ctypes.CDLL("libc.so.6").malloc_trim(0)  # hand freed pages back to the system
             except Exception:
                 pass
-            return True
-        finally:
-            self._lock.release()
+        return freed
 
     def idle_watch(self):
         while True:
@@ -247,48 +833,70 @@ class DevOSAIEngine:
         return chat
 
     def _complete(self, messages: List[Dict[str, str]]) -> str:
+        text, _usage = self._complete_on(self._slots[0], messages)
+        return text
+
+    def _complete_on(self, slot: _Slot, messages: List[Dict[str, str]], max_tokens: int = 384,
+                     options: Optional[Dict[str, Any]] = None):
         chat = self._build_chat(messages)
         if not any(item["role"] == "user" for item in chat):
-            return "Ask a question and I will answer from the model on this computer."
+            return "Ask a question and I will answer from the model on this computer.", {}
+        opts = dict(options or {})
+        opts.setdefault("temperature", 0.3)
         try:
-            with self._lock:
-                result = self._llm.create_chat_completion(
+            with slot.lock:
+                result = call_completion(
+                    slot.llm,
                     messages=chat,
-                    max_tokens=384,
-                    temperature=0.3,
+                    max_tokens=clamp_tokens(max_tokens),
+                    **opts,
                 )
             text = result["choices"][0]["message"]["content"]
             text = (text or "").strip()
             # Small models sometimes answer like a transcript ("me: ...").
-            import re as _re
-            text = _re.sub(r"^\s*(?:me|you|user|assistant|ai|bot|devos ai)\s*:\s*", "", text, count=1, flags=_re.I)
+            text = re.sub(r"^\s*(?:me|you|user|assistant|ai|bot|devos ai)\s*:\s*", "", text, count=1, flags=re.I)
+            usage = result.get("usage") or {}
             if text:
-                return text
+                return text, usage
         except Exception as exc:
             sys.stderr.write(f"[ai-core] generation failed: {exc}\n")
-        return "The local model is installed, but it did not produce an answer. Ask again."
+        return "The local model is installed, but it did not produce an answer. Ask again.", {}
 
-    def stream_chat(self, messages: List[Dict[str, str]]):
+    def stream_chat(self, messages: List[Dict[str, str]], model: str = "devos-ai", max_tokens: int = 384,
+                    options: Optional[Dict[str, Any]] = None):
         """Yield the answer in small pieces as the model writes it, so the
         window shows words within a second instead of after the whole reply."""
         self.last_activity = time.time()
-        with self._lock:
-            self._ensure_model()
-        if self._llm is None:
-            user_prompt = next((m.get("content", "") for m in reversed(messages) if m.get("role") == "user"), "")
-            yield self._reason(user_prompt)
+        kind = self.kind_for(model)
+        try:
+            slot = self._acquire(kind)
+        except EngineBusy:
+            yield "DevOS AI is busy answering other apps right now. Please ask again in a moment."
             return
-        chat = self._build_chat(messages)
-        with self._lock:
-            try:
-                for chunk in self._llm.create_chat_completion(messages=chat, max_tokens=384,
-                                                               temperature=0.3, stream=True):
-                    delta = chunk["choices"][0].get("delta", {}).get("content")
-                    if delta:
-                        yield delta
-            except Exception as exc:
-                sys.stderr.write(f"[ai-core] generation failed: {exc}\n")
-                yield "The local model did not produce an answer. Ask again."
+        opts = dict(options or {})
+        opts.setdefault("temperature", 0.3)
+        cpu_boost.enter()
+        try:
+            with slot.lock:
+                self._load(slot, kind)
+                if slot.llm is None:
+                    user_prompt = next((m.get("content", "") for m in reversed(messages)
+                                        if m.get("role") == "user"), "")
+                    yield self._reason(user_prompt)
+                    return
+                chat = self._build_chat(messages)
+                try:
+                    for chunk in call_completion(
+                            slot.llm, messages=chat, max_tokens=clamp_tokens(max_tokens), stream=True, **opts):
+                        delta = chunk["choices"][0].get("delta", {}).get("content")
+                        if delta:
+                            yield delta
+                except Exception as exc:
+                    sys.stderr.write(f"[ai-core] generation failed: {exc}\n")
+                    yield "The local model did not produce an answer. Ask again."
+        finally:
+            cpu_boost.leave()
+            self._release(slot)
 
 
 _PC_FACTS = None
@@ -355,6 +963,15 @@ def _measure_pc_facts() -> str:
     return "; ".join(facts)
 
 
+# The only DevOS team contact details the AI may give; the model once made up
+# a LinkedIn URL. Same list as ABOUT_TEXT in components/assistant/tools.py.
+DEVOS_CONTACTS = (
+    "email devos@imrandev.bd; contact form https://imrandev.bd/contact; "
+    "WhatsApp https://wa.me/+8801576918420; GitHub https://github.com/imranbru99; "
+    "LinkedIn https://linkedin.com/in/imranbru99"
+)
+
+
 def devos_identity_prompt(ram=None, tier=None) -> str:
     """Who the assistant is. Kept truthful: it runs locally on an open model."""
     hardware = ""
@@ -371,6 +988,8 @@ def devos_identity_prompt(ram=None, tier=None) -> str:
         "his portfolio is https://imrandev.bd/ . DevOS is open source: "
         "https://github.com/imranbru99/DevOS . When asked who made you or DevOS, who the DevOS "
         "team is, or where the source code is, give these names and links. "
+        "Contact details of the DevOS team (give exactly these when asked how to contact or reach "
+        "the team or Imran, and never invent any other email, phone, URL or profile): " + DEVOS_CONTACTS + ". "
         "You run entirely on this computer: nothing the user types is sent to the internet. "
         "You are not Claude, ChatGPT, Gemini, Copilot or any other cloud service, and you were not made by "
         "Anthropic, OpenAI, Google, Microsoft or Alibaba; never say you are. "
@@ -378,9 +997,13 @@ def devos_identity_prompt(ram=None, tier=None) -> str:
         "built on open-source language-model technology and tuned for DevOS. "
         "You help with DevOS itself: Windows apps (.exe and .msi files open directly in DevOS, just "
         "double-click them), Android apps (.apk files open in the DevOS Android window after a one-time "
-        "download), installing and uninstalling apps (the Apps window), keeping the PC fast (DevOS "
-        "Optimizer cleans temporary files and points out unused apps), files, Wi-Fi, printers and coding. "
+        "download), installing and uninstalling apps (DevOS AI can do it when you ask, and DevOS Features "
+        "lists every app), keeping the PC fast (DevOS Optimizer cleans temporary files and points out unused apps), "
+        "files, Wi-Fi, printers and coding. "
         "Talk about DevOS, not about the software it is built from. "
+        "Never invent DevOS menus, buttons or step-by-step instructions you are not sure of: to add or "
+        "remove apps, point to DevOS Features (Start menu) or the Apps window, and say plainly when "
+        "something cannot work on DevOS (for example Microsoft Store-only apps). "
         "Answer directly and briefly, in the user's language. Do not greet unless the user greeted you. "
         "Write only your reply: never start with a speaker label such as 'me:', 'AI:' or 'DevOS AI:'."
         + hardware
@@ -388,6 +1011,133 @@ def devos_identity_prompt(ram=None, tier=None) -> str:
 
 
 engine = DevOSAIEngine()
+
+
+PUBLIC_MODELS = [
+    {"id": "devos-ai", "object": "model", "owned_by": "devos",
+     "description": "Chat, writing and help with this PC. Uses the model installed for this computer."},
+    {"id": "devos-ai-code", "object": "model", "owned_by": "devos",
+     "description": "Coding. Uses the coding model when it is installed, otherwise the chat model."},
+    {"id": "devos-ai-embed", "object": "model", "owned_by": "devos",
+     "description": "Embeddings, 384 numbers per text, for search over your own files."},
+]
+
+_DOC_FALLBACK = """# DevOS Local AI
+
+Base URL: http://127.0.0.1:11434/v1
+
+Models: `devos-ai` (chat), `devos-ai-code` (code), `devos-ai-embed` (embeddings).
+
+Endpoints:
+
+- POST /v1/chat/completions
+- POST /v1/completions
+- POST /v1/embeddings
+- GET /v1/models
+- GET /health
+- GET /openapi.json
+
+No API key is required from this PC. The full reference ships as API.md next to this service and as docs/LOCAL_AI.md in the DevOS source tree.
+"""
+
+
+def api_doc_text() -> str:
+    """The local-model reference. Prefers the copy installed with the service."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.environ.get("DEVOS_AI_DOCS", ""),
+        os.path.join(here, "API.md"),
+        "/usr/share/doc/devos/LOCAL_AI.md",
+        os.path.abspath(os.path.join(here, "..", "..", "docs", "LOCAL_AI.md")),
+    ]
+    for path in candidates:
+        if not path or not os.path.isfile(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as handle:
+                text = handle.read().strip()
+        except OSError:
+            continue
+        if text:
+            return text + "\n"
+    return _DOC_FALLBACK
+
+
+def docs_html(markdown: str) -> str:
+    body = html.escape(markdown)
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DevOS Local AI</title>
+<style>
+  body {{ margin: 0; background: #0e141b; color: #e8eef4; font: 16px/1.55 "Segoe UI", sans-serif; }}
+  main {{ max-width: 52rem; margin: 0 auto; padding: 2rem 1.25rem 4rem; }}
+  h1 {{ font-size: 1.6rem; margin: 0 0 0.25rem; }}
+  p.lead {{ color: #9fb0c0; margin-top: 0; }}
+  a {{ color: #8ec8ff; }}
+  pre {{ white-space: pre-wrap; background: #17202a; border-radius: 10px; padding: 1.1rem 1.25rem; }}
+</style>
+</head>
+<body>
+<main>
+  <h1>DevOS Local AI</h1>
+  <p class="lead">On-device model. OpenAI-compatible API at <a href="/v1">/v1</a>.
+  Machine-readable spec: <a href="/openapi.json">openapi.json</a>.</p>
+  <pre>{body}</pre>
+</main>
+</body>
+</html>
+"""
+
+
+def api_index() -> Dict[str, Any]:
+    return {
+        "service": "DevOS AI",
+        "openai": f"http://127.0.0.1:{PORT}/v1",
+        "docs": f"http://127.0.0.1:{PORT}/docs",
+        "openapi": f"http://127.0.0.1:{PORT}/openapi.json",
+        "models": [item["id"] for item in PUBLIC_MODELS],
+        "endpoints": [
+            "/v1/chat/completions",
+            "/v1/completions",
+            "/v1/embeddings",
+            "/v1/models",
+            "/health",
+        ],
+        "speed": engine.speed_info(),
+        "auth": "No key from this PC. Other devices need Authorization: Bearer <key> after `devos models api lan on`.",
+    }
+
+
+def openapi_spec() -> Dict[str, Any]:
+    return {
+        "openapi": "3.0.3",
+        "info": {
+            "title": "DevOS Local AI",
+            "version": "1.0.0",
+            "description": "OpenAI-compatible API for the on-device DevOS AI model. Requests stay on this PC.",
+        },
+        "servers": [{"url": f"http://127.0.0.1:{PORT}"}],
+        "paths": {
+            "/v1/chat/completions": {"post": {"summary": "Chat completion", "operationId": "chat"}},
+            "/v1/completions": {"post": {"summary": "Text completion", "operationId": "complete"}},
+            "/v1/embeddings": {"post": {"summary": "Embeddings", "operationId": "embed"}},
+            "/v1/models": {"get": {"summary": "List models", "operationId": "models"}},
+            "/health": {"get": {"summary": "Health and speed", "operationId": "health"}},
+            "/docs": {"get": {"summary": "Documentation", "operationId": "docs"}},
+        },
+        "components": {
+            "securitySchemes": {
+                "bearer": {
+                    "type": "http",
+                    "scheme": "bearer",
+                    "description": "Required only for callers that are not on this PC.",
+                }
+            }
+        },
+    }
 
 
 class OpenAIHandler(BaseHTTPRequestHandler):
@@ -404,7 +1154,22 @@ class OpenAIHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _send_stream(self, messages):
+    def _route(self) -> str:
+        return self.path.split("?", 1)[0].rstrip("/") or "/"
+
+    def _model_name(self, model: str) -> str:
+        return "devos-ai-code" if engine.kind_for(model) == "code" else engine.active_model
+
+    def _send_bytes(self, status: int, body: str, content_type: str):
+        data = body.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _send_stream(self, messages, model="devos-ai", max_tokens=384, options=None, legacy=False):
         """OpenAI-style server-sent events: one small piece of text per event."""
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
@@ -412,19 +1177,30 @@ class OpenAIHandler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         chat_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+        shown = self._model_name(model)
 
         def event(payload):
             self.wfile.write(b"data: " + json.dumps(payload).encode("utf-8") + b"\n\n")
             self.wfile.flush()
 
         try:
-            for piece in engine.stream_chat(messages):
-                event({"id": chat_id, "object": "chat.completion.chunk", "created": int(time.time()),
-                       "model": engine.active_model,
-                       "choices": [{"index": 0, "delta": {"content": piece}, "finish_reason": None}]})
-            event({"id": chat_id, "object": "chat.completion.chunk", "created": int(time.time()),
-                   "model": engine.active_model,
-                   "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
+            for piece in engine.stream_chat(messages, model, max_tokens, options):
+                if legacy:
+                    choice = {"index": 0, "text": piece, "finish_reason": None}
+                    kind = "text_completion"
+                else:
+                    choice = {"index": 0, "delta": {"content": piece}, "finish_reason": None}
+                    kind = "chat.completion.chunk"
+                event({"id": chat_id, "object": kind, "created": int(time.time()),
+                       "model": shown, "choices": [choice]})
+            if legacy:
+                done = {"index": 0, "text": "", "finish_reason": "stop"}
+                kind = "text_completion"
+            else:
+                done = {"index": 0, "delta": {}, "finish_reason": "stop"}
+                kind = "chat.completion.chunk"
+            event({"id": chat_id, "object": kind, "created": int(time.time()),
+                   "model": shown, "choices": [done]})
             self.wfile.write(b"data: [DONE]\n\n")
             self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
@@ -437,47 +1213,108 @@ class OpenAIHandler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.end_headers()
 
+    def _authorized(self) -> bool:
+        if request_allowed(self.client_address[0], self.headers.get("Authorization", ""), API_SETTINGS):
+            return True
+        self._send_json(401, {"error": {
+            "message": "Send the DevOS AI API key as 'Authorization: Bearer <key>'. "
+                       "Run 'devos-ai-models api' on the DevOS PC to see it.",
+            "type": "invalid_api_key"}})
+        return False
+
     def do_GET(self):
-        if self.path in ("/health", "/v1/health"):
+        path = self._route()
+        # The reference and the discovery document contain no secrets.
+        if path in ("/docs", "/v1/docs"):
+            self._send_bytes(200, docs_html(api_doc_text()), "text/html; charset=utf-8")
+            return
+        if path == "/openapi.json":
+            self._send_json(200, openapi_spec())
+            return
+        if not self._authorized():
+            return
+        if path in ("/", "/v1"):
+            self._send_json(200, api_index())
+            return
+        if path in ("/health", "/v1/health"):
             self._send_json(200, {
                 "status": "healthy",
                 "tier": engine.tier_info["tier"],
                 "active_model": engine.active_model,
-                "uptime_seconds": round(time.time() - engine.start_time, 1)
+                "uptime_seconds": round(time.time() - engine.start_time, 1),
+                "slots": engine.status(),
+                "speed": engine.speed_info(),
+                "docs": f"http://127.0.0.1:{PORT}/docs",
             })
-        elif self.path in ("/v1/models", "/models"):
-            models_list = [
-                {"id": "devos-ai", "object": "model", "owned_by": "devos"},
-                {"id": "devos-ai-code", "object": "model", "owned_by": "devos"},
-                {"id": "devos-ai-embed", "object": "model", "owned_by": "devos"},
-            ]
-            self._send_json(200, {"object": "list", "data": models_list})
+        elif path in ("/v1/models", "/models"):
+            self._send_json(200, {"object": "list", "data": PUBLIC_MODELS})
+        elif path.startswith("/v1/models/") or path.startswith("/models/"):
+            name = path.rsplit("/", 1)[-1]
+            found = next((item for item in PUBLIC_MODELS if item["id"] == name), None)
+            if found:
+                self._send_json(200, found)
+            else:
+                self._send_json(404, {"error": {"message": f"Unknown model '{name}'.", "type": "model_not_found"}})
         else:
             self._send_json(404, {"error": "Endpoint not found"})
 
-    def do_POST(self):
+    def _read_json(self) -> Dict[str, Any]:
         content_len = int(self.headers.get("Content-Length", 0))
         post_body = self.rfile.read(content_len).decode("utf-8") if content_len > 0 else "{}"
         try:
-            req_data = json.loads(post_body)
+            data = json.loads(post_body)
         except Exception:
-            req_data = {}
+            return {}
+        return data if isinstance(data, dict) else {}
 
-        if self.path in ("/v1/chat/completions", "/chat/completions"):
-            messages = req_data.get("messages", [])
-            if req_data.get("stream", False):
-                self._send_stream(messages)
-                return
-            res = engine.generate_chat_response(messages)
-            self._send_json(200, res)
+    def _finish_chat(self, req: Dict[str, Any], legacy: bool = False):
+        if legacy:
+            prompt = req.get("prompt") or ""
+            if isinstance(prompt, list):
+                prompt = "\n".join(str(part) for part in prompt)
+            messages = [{"role": "user", "content": str(prompt)}]
+        else:
+            messages = req.get("messages") or []
+        model = str(req.get("model") or "devos-ai")
+        max_tokens = req.get("max_tokens") or req.get("max_completion_tokens") or 384
+        options = sampling_kwargs(req)
+        if req.get("stream", False):
+            self._send_stream(messages, model, max_tokens, options, legacy=legacy)
+            return
+        try:
+            res = engine.generate_chat_response(messages, model=model, max_tokens=max_tokens, options=options)
+        except EngineBusy:
+            self._send_json(503, {"error": {"message": "DevOS AI is busy with other requests; retry shortly.",
+                                            "type": "server_busy"}})
+            return
+        if legacy:
+            text = res["choices"][0]["message"]["content"]
+            res = {
+                "id": "cmpl-" + res["id"].split("-", 1)[-1],
+                "object": "text_completion",
+                "created": res["created"],
+                "model": res["model"],
+                "choices": [{"text": text, "index": 0, "finish_reason": "stop"}],
+                "usage": res["usage"],
+            }
+        self._send_json(200, res)
 
-        elif self.path in ("/v1/embeddings", "/embeddings"):
+    def do_POST(self):
+        if not self._authorized():
+            return
+        path = self._route()
+        req_data = self._read_json()
+
+        if path in ("/v1/chat/completions", "/chat/completions"):
+            self._finish_chat(req_data)
+        elif path in ("/v1/completions", "/completions"):
+            self._finish_chat(req_data, legacy=True)
+        elif path in ("/v1/embeddings", "/embeddings"):
             inputs = req_data.get("input", [])
             if isinstance(inputs, str):
                 inputs = [inputs]
             res = engine.generate_embeddings(inputs)
             self._send_json(200, res)
-
         else:
             self._send_json(404, {"error": "Endpoint not found"})
 
@@ -487,16 +1324,22 @@ class OpenAIHandler(BaseHTTPRequestHandler):
 
 
 def run_server():
+    API_SETTINGS.update(read_api_conf())
+    host = "0.0.0.0" if API_SETTINGS["listen"] == "lan" else HOST
     # Threads: /health answers at once even while a long reply is generating.
-    server = ThreadingHTTPServer((HOST, PORT), OpenAIHandler)
+    server = ThreadingHTTPServer((host, PORT), OpenAIHandler)
     server.daemon_threads = True
     # Load the model and process the system prompt now, not on the first question.
     import threading
     threading.Thread(target=engine.warm_up, daemon=True).start()
     threading.Thread(target=engine.idle_watch, daemon=True).start()
-    print(f"DevOS AI Core daemon listening on http://{HOST}:{PORT}/v1")
+    print(f"DevOS AI Core daemon listening on http://{host}:{PORT}/v1")
+    print(f"Docs: http://{host}:{PORT}/docs")
     print(f"Hardware tier: {engine.tier_info['tier']}")
     print(f"Active model: {engine.active_model}")
+    speed = engine.speed_info()
+    print(f"Speed: {speed['prompt_threads']} prompt threads, {speed['threads']} reply threads, "
+          f"kv {speed['kv_cache']}, gpu layers {speed['gpu_layers']}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

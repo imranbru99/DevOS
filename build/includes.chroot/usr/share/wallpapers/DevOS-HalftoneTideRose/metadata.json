@@ -1,0 +1,12 @@
+{
+    "KPlugin": {
+        "Id": "DevOS-HalftoneTideRose",
+        "Name": "Halftone Tide Rose",
+        "Authors": [
+            {
+                "Name": "DevOS"
+            }
+        ],
+        "License": "CC-BY-SA-4.0"
+    }
+}

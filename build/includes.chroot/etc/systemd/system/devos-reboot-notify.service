@@ -1,0 +1,6 @@
+[Unit]
+Description=DevOS Security: tell the user a restart finishes security updates
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/devos-security updates notify-reboot

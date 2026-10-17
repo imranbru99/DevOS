@@ -1,0 +1,32 @@
+<!doctype html>
+<!-- Shown by devos-pwa for a few seconds the first time a vendor web app
+     (Windows App, Microsoft 365, Outlook) opens, while Chrome installs it. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Setting up</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0b0f1a; color: #e2e8f0;
+               font: 15px "Inter", "Noto Sans", sans-serif; }
+  .box { height: 100%; display: flex; flex-direction: column; align-items: center;
+         justify-content: center; gap: 14px; text-align: center; padding: 0 24px; }
+  .ring { width: 44px; height: 44px; border-radius: 50%; border: 4px solid #1e293b;
+          border-top-color: #38bdf8; animation: spin 0.9s linear infinite; }
+  h1 { margin: 0; font-size: 19px; color: #f8fafc; font-weight: 600; }
+  p { margin: 0; color: #94a3b8; line-height: 1.4; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="box">
+  <div class="ring"></div>
+  <h1 id="t">Setting up the app…</h1>
+  <p>DevOS is installing it as a normal app with its own window.<br>This happens only once and takes a few seconds.</p>
+</div>
+<script>
+  var name = decodeURIComponent(location.hash.slice(1)) || "the app";
+  document.title = "Setting up " + name;
+  document.getElementById("t").textContent = "Setting up " + name + "…";
+</script>
+</body>
+</html>

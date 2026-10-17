@@ -1,0 +1,12 @@
+{
+    "KPlugin": {
+        "Id": "DevOS-ContourGlowEmber",
+        "Name": "Contour Glow Ember",
+        "Authors": [
+            {
+                "Name": "DevOS"
+            }
+        ],
+        "License": "CC-BY-SA-4.0"
+    }
+}

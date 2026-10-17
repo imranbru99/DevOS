@@ -1,0 +1,40 @@
+#!/bin/bash
+# 05-security.hook.chroot - DevOS Security services (components/security).
+set -euo pipefail
+
+echo "==> Running DevOS 05-security hook..."
+
+# systemctl enable can fail in a chroot: write the links directly.
+want() {  # want <unit> <wants folder>
+    mkdir -p "$2"
+    ln -sfn "/etc/systemd/system/$1" "$2/$1"
+}
+want devos-diskguard.service /etc/systemd/system/multi-user.target.wants
+want devos-security-firstboot.service /etc/systemd/system/multi-user.target.wants
+want devos-security-quarantine.path /etc/systemd/system/multi-user.target.wants
+want devos-reboot-notify.path /etc/systemd/system/multi-user.target.wants
+want devos-no-auto-power.service /etc/systemd/system/sysinit.target.wants
+
+# Per-user units for every account (inotify in the user's own systemd).
+mkdir -p /etc/systemd/user/default.target.wants
+for unit in devos-av-watch.path devos-av-watch-setup.service devos-av-usb.path; do
+    ln -sfn "/etc/systemd/user/${unit}" "/etc/systemd/user/default.target.wants/${unit}"
+done
+
+# ClamAV (when installed): the first boot picks the engine by RAM
+# ("devos-security av setup"), so nothing keeps 1 GB of signatures loaded
+# on a 4 GB PC.
+for unit in clamav-daemon.service clamav-daemon.socket clamav-freshclam.service; do
+    systemctl disable "$unit" >/dev/null 2>&1 || true
+done
+rm -f /etc/systemd/system/multi-user.target.wants/clamav-daemon.service \
+      /etc/systemd/system/multi-user.target.wants/clamav-freshclam.service \
+      /etc/systemd/system/sockets.target.wants/clamav-daemon.socket
+
+chmod 755 /etc/NetworkManager/dispatcher.d/99-devos-dns-security /usr/local/bin/devos-security \
+    /usr/local/sbin/devos-no-auto-power || true
+/usr/local/sbin/devos-no-auto-power || true
+mkdir -p /var/lib/DevOS/quarantine /var/lib/DevOS/security
+chmod 700 /var/lib/DevOS/quarantine
+
+echo "==> DevOS 05-security hook completed."

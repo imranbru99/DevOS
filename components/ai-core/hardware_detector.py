@@ -181,10 +181,22 @@ class HardwareDetector:
 
         catalog = cls.MODEL_CATALOG[assigned_tier]
 
+        # Scan for dedicated NPU silicon (Intel / AMD XDNA / Qualcomm Hexagon)
+        npu_info = {"npu_detected": False, "vendor": "none", "device_model": "None (Using CPU/GPU)"}
+        scheduling_info = {"ambient_chat_target": "GPU / CPU Fallback"}
+        try:
+            from npu_accelerator import NPUAccelerator
+            npu_info = NPUAccelerator.detect_npu()
+            scheduling_info = NPUAccelerator.get_scheduling_recommendation()
+        except Exception:
+            pass
+
         return {
             "tier": assigned_tier,
             "ram_gb": ram_gb,
             "gpu": gpu,
+            "npu": npu_info,
+            "scheduling": scheduling_info,
             "models": catalog,
             "storage_dir": os.environ.get("DEVOS_MODELS_DIR", "/var/lib/DevOS/models"),
             "api_endpoint": "http://127.0.0.1:11434/v1",

@@ -1,0 +1,4 @@
+[BatteryManagement]
+# 1 = sleep. Open programs stay in memory. DevOS keeps swap in RAM, so
+# hibernate has nowhere to store them and would turn the PC off.
+BatteryCriticalAction=1

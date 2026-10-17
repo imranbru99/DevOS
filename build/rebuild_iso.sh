@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-DEVOS_OUT="/mnt/host/c/docker/DevOS/out"
+DEVOS_OUT="${DEVOS_OUT:-/workspace/out}"
 STAGE_DIR="${DEVOS_OUT}/iso_stage"
 OUTPUT_ISO="${DEVOS_OUT}/devos-24.04-amd64.iso"
 TMP_DIR="${DEVOS_OUT}/tmp_build"
@@ -106,7 +106,8 @@ rm -f "${STAGE_DIR}/boot.catalog"
 
 # 5. Rebuild hybrid bootable ISO with xorriso
 echo "==> Mastering new hybrid bootable ISO with xorriso..."
-rm -f "${OUTPUT_ISO}"
+LOCAL_ISO="/tmp/devos-24.04-amd64.iso"
+rm -f "${LOCAL_ISO}" "${OUTPUT_ISO}"
 xorriso -as mkisofs \
     -r -V "DEVOS_2404" \
     -J -joliet-long \
@@ -115,8 +116,13 @@ xorriso -as mkisofs \
     -e boot/grub/efi.img \
     -no-emul-boot \
     -isohybrid-gpt-basdat \
-    -output "${OUTPUT_ISO}" \
+    -output "${LOCAL_ISO}" \
     "${STAGE_DIR}"
+
+echo "==> Streaming ISO to ${OUTPUT_ISO}..."
+mkdir -p "${DEVOS_OUT}"
+dd if="${LOCAL_ISO}" of="${OUTPUT_ISO}" bs=4M conv=fsync status=progress
+rm -f "${LOCAL_ISO}"
 
 # 6. Cleanup temp files
 rm -rf "${TMP_DIR}" "${STAGE_DIR}"

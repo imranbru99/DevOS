@@ -1,0 +1,12 @@
+{
+    "KPlugin": {
+        "Id": "DevOS-PrismLightEmber",
+        "Name": "Prism Light Ember",
+        "Authors": [
+            {
+                "Name": "DevOS"
+            }
+        ],
+        "License": "CC-BY-SA-4.0"
+    }
+}

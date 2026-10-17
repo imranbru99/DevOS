@@ -1,0 +1,18 @@
+[Unit]
+Description=DevOS Disk Guard (finds a program that is filling the disk)
+Documentation=file:///usr/local/share/devos/components/security/diskguard.py
+After=local-fs.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/share/devos/components/security/diskguard.py run
+# One statvfs + /proc read a minute: stay out of the way of everything else.
+Nice=19
+CPUSchedulingPolicy=idle
+IOSchedulingClass=idle
+MemoryMax=96M
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

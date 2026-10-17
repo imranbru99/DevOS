@@ -1,0 +1,12 @@
+{
+    "KPlugin": {
+        "Id": "DevOS-GlassHorizonEmber",
+        "Name": "Glass Horizon Ember",
+        "Authors": [
+            {
+                "Name": "DevOS"
+            }
+        ],
+        "License": "CC-BY-SA-4.0"
+    }
+}

@@ -1,0 +1,12 @@
+{
+    "KPlugin": {
+        "Id": "DevOS-CrystalFacetRose",
+        "Name": "Crystal Facet Rose",
+        "Authors": [
+            {
+                "Name": "DevOS"
+            }
+        ],
+        "License": "CC-BY-SA-4.0"
+    }
+}

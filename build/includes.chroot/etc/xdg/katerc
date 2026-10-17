@@ -1,0 +1,3 @@
+[General]
+# Reopen the documents that were open the last time Kate ran.
+Startup Session=last

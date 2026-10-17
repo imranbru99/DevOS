@@ -113,6 +113,61 @@ if [ -f /etc/grub.d/10_linux ]; then
     sed -i 's/OS="${GRUB_DISTRIBUTOR} GNU\/Linux"/OS="${GRUB_DISTRIBUTOR}"/' /etc/grub.d/10_linux
 fi
 
+# The sign-in theme hides its controls after a minute when the background
+# is a picture, which leaves KDE's stock mountain photo and a pointer.
+# Use the DevOS picture, keep the sign-in controls on screen, and replace
+# every copy of that photo (including the dark-mode set Plasma actually
+# shows) so a fallback cannot bring the mountain back.
+sed -i 's/\r$//' \
+    /usr/share/sddm/themes/breeze/theme.conf \
+    /usr/share/sddm/themes/breeze/theme.conf.user \
+    /etc/sddm.conf.d/*.conf 2>/dev/null || true
+cat > /usr/share/sddm/themes/breeze/theme.conf << 'EOF'
+[General]
+showlogo=shown
+logo=/usr/share/pixmaps/devos-logo.png
+type=image
+color=#070a12
+fontSize=11
+background=/usr/share/wallpapers/DevOS/DevOS-Default.png
+needsFullUserModel=false
+EOF
+cp -f /usr/share/sddm/themes/breeze/theme.conf /usr/share/sddm/themes/breeze/theme.conf.user
+python3 - << 'PY'
+import re
+from pathlib import Path
+
+picture = Path("/usr/share/wallpapers/DevOS/DevOS-Default.png")
+if not picture.is_file():
+    raise SystemExit("DevOS background is missing")
+blob = picture.read_bytes()
+suffixes = {".png", ".jpg", ".jpeg", ".webp"}
+replaced = 0
+root = Path("/usr/share/wallpapers/Next")
+if blob and root.is_dir():
+    for path in root.rglob("*"):
+        if path.is_file() and path.suffix.lower() in suffixes:
+            path.write_bytes(blob)
+            replaced += 1
+print(f"Replaced {replaced} stock wallpaper images")
+
+# The greeter starts a 60s timer that hides the password field and leaves
+# only the background. Stop that timer; the controls stay up.
+main = Path("/usr/share/sddm/themes/breeze/Main.qml")
+if not main.is_file():
+    raise SystemExit("sign-in theme is missing")
+text = main.read_text(encoding="utf-8")
+updated, count = re.subn(
+    r"(id:\s*fadeoutTimer\s*\n\s*)running:\s*true(\s*\n\s*)interval:\s*60000",
+    r"\1running: false\2interval: 86400000",
+    text,
+    count=1,
+)
+if count != 1:
+    raise SystemExit("sign-in theme no longer has the one-minute hide timer")
+main.write_text(updated, encoding="utf-8")
+PY
+
 if command -v update-initramfs >/dev/null 2>&1; then
     update-initramfs -u -k all
 fi

@@ -2,7 +2,7 @@
     "KPackageStructure": "Plasma/LookAndFeel",
     "KPlugin": {
         "Authors": [{ "Name": "DevOS" }],
-        "Category": "Plasma Look And Feel",
+        "Category": "Desktop",
         "Description": "DevOS dark desktop",
         "Id": "org.devos.desktop",
         "Name": "DevOS",

@@ -5,11 +5,10 @@ set -euo pipefail
 echo "==> Running DevOS 02-disable-services hook..."
 
 # 1. Disable / Mask unneeded systemd services
+# cups-browsed and avahi stay enabled so network printers can be found.
+# ModemManager stays masked: it delays boot on PCs with no mobile modem.
 SERVICES_TO_MASK=(
-    "cups-browsed.service"
     "ModemManager.service"
-    "avahi-daemon.service"
-    "avahi-daemon.socket"
     "apport.service"
     "whoopsie.service"
     "motd-news.service"
@@ -54,6 +53,9 @@ systemctl mask systemd-networkd.service systemd-networkd.socket systemd-networkd
 mkdir -p /etc/systemd/system/multi-user.target.wants
 ln -sfn /etc/systemd/system/devos-network.service \
     /etc/systemd/system/multi-user.target.wants/devos-network.service
+# Measures RAM/CPU/disk for the installer's "Choose your DevOS AI" page.
+ln -sfn /etc/systemd/system/devos-ai-hwprobe.service \
+    /etc/systemd/system/multi-user.target.wants/devos-ai-hwprobe.service
 for unit in systemd-resolved.service NetworkManager.service; do
     if [ -f "/usr/lib/systemd/system/${unit}" ]; then
         ln -sfn "/usr/lib/systemd/system/${unit}" \
@@ -69,6 +71,13 @@ rm -f /etc/resolv.conf
 ln -s ../run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
 chmod 755 /etc/NetworkManager/dispatcher.d/99-devos-dns || true
 systemctl enable bluetooth.service || true
+# Older images masked these. Remove the mask so network printers can be found.
+rm -f /etc/systemd/system/avahi-daemon.service \
+    /etc/systemd/system/avahi-daemon.socket \
+    /etc/systemd/system/cups-browsed.service
+systemctl enable cups-browsed.service || true
+systemctl enable avahi-daemon.service || true
+chmod 755 /usr/local/sbin/devos-snapshot-pre-upgrade || true
 systemctl enable devos-rfkill.service || true
 systemctl enable devos-network.service || true
 chmod 600 /etc/NetworkManager/system-connections/devos-ethernet.nmconnection || true
@@ -76,6 +85,7 @@ chmod 600 /etc/netplan/01-network-manager-all.yaml || true
 # SDDM refuses the installer session when this script is not executable.
 chmod 755 \
     /usr/local/bin/devos-live-session \
+    /usr/local/bin/devos-session \
     /usr/local/bin/devos-browser \
     /usr/local/bin/devos-install-gui \
     /usr/local/sbin/devos-bring-up-network \
@@ -91,28 +101,42 @@ devos ALL=(ALL) NOPASSWD:SETENV: ALL
 EOF
 chown root:root /etc/sudoers.d/devos
 chmod 440 /etc/sudoers.d/devos
-chmod 755 /usr/local/bin/dolphin /usr/local/bin/devos-files || true
+chmod 755 /usr/local/bin/dolphin /usr/local/bin/devos-files /usr/local/bin/devos-code-agent \
+    /usr/local/bin/devos-taskman || true
+# App history for Task Manager, for every account.
+mkdir -p /etc/systemd/user/timers.target.wants
+ln -sfn /usr/lib/systemd/user/devos-taskman-history.timer \
+    /etc/systemd/user/timers.target.wants/devos-taskman-history.timer
 
 # 4. Status page stays off the live USB. The installer session is forced first.
 systemctl enable devos-dashboard.service || true
 systemctl enable devos-force-installer.service || true
-mkdir -p /etc/systemd/system/sddm.service.wants
+mkdir -p /etc/systemd/system/sddm.service.wants /etc/systemd/system/multi-user.target.wants
 ln -sfn /etc/systemd/system/devos-force-installer.service \
     /etc/systemd/system/sddm.service.wants/devos-force-installer.service
+ln -sfn /etc/systemd/system/devos-force-installer.service \
+    /etc/systemd/system/multi-user.target.wants/devos-force-installer.service
 
 # 5. Local AI used by DevOS Code. It listens only on this computer.
 systemctl enable devos-ai-core.service || true
 
 # Ubuntu's installer must not be available. DevOS uses Calamares only.
-apt-get purge -y ubuntu-desktop-bootstrap ubuntu-desktop-installer ubiquity ubiquity-frontend-gtk gnome-initial-setup >/dev/null 2>&1 || true
+apt-get purge -y ubuntu-desktop-bootstrap ubuntu-desktop-installer ubiquity ubiquity-frontend-gtk gnome-initial-setup subiquity subiquity-server curtin >/dev/null 2>&1 || true
+systemctl mask ubuntu-desktop-bootstrap.service subiquity.service 2>/dev/null || true
 rm -f \
     /etc/xdg/autostart/ubuntu-desktop-bootstrap.desktop \
     /etc/xdg/autostart/ubiquity.desktop \
-    /etc/xdg/autostart/org.gnome.InitialSetup.desktop
+    /etc/xdg/autostart/org.gnome.InitialSetup.desktop \
+    /usr/share/applications/ubuntu-desktop-bootstrap.desktop \
+    /var/lib/snapd/desktop/applications/ubuntu-desktop-bootstrap.desktop \
+    2>/dev/null || true
 
 # App source for native DevOS versions of Windows apps (AnyDesk, Zoom...).
 # devos-open-app also adds it per user, so a failed download here is fine.
 flatpak remote-add --system --if-not-exists flathub \
     https://dl.flathub.org/repo/flathub.flatpakrepo >/dev/null 2>&1 || true
+# Apps chosen in the installer arrive as Flatpaks after first sign-in. KDE only
+# watches menu folders that exist when the session starts, so create them now.
+mkdir -p /var/lib/flatpak/exports/share/applications /var/lib/flatpak/exports/share/icons
 
 echo "==> DevOS 02-disable-services hook completed."

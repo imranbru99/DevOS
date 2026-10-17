@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=DevOS apps setup notice
+Comment=Tells you when the apps picked during install have finished downloading
+Exec=/usr/bin/python3 /usr/local/share/devos/components/features/first_boot_notice.py
+NoDisplay=true
+X-KDE-autostart-phase=2
+X-GNOME-Autostart-enabled=true

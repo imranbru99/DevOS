@@ -1,6 +1,6 @@
 # DevOS Android Compatibility Guide (`androidlayer`)
 
-DevOS runs Android applications (`.apk`, `.xapk`, `.apks`) at near-native speeds on x86_64 hardware using **Waydroid** running on **KDE Plasma Wayland**.
+DevOS runs Android applications (`.apk`) with **Waydroid**. On the default X11 desktop they open inside a Weston window.
 
 ---
 
@@ -15,9 +15,9 @@ DevOS runs Android applications (`.apk`, `.xapk`, `.apks`) at near-native speeds
 ## 2. Licensing & Legal Compliance
 
 - **No Proprietary Google Bundling**: DevOS uses an open-source AOSP/LineageOS base image. Google Play Services and Google proprietary apps are **never bundled in the ISO**.
-- **Default Open Stores**: **F-Droid** and **Aurora Store** come pre-configured.
-- **User-Initiated Google Services Wizard**: An optional setup wizard allows advanced users to install microG or OpenGApps at their own discretion.
-- **ARM-to-x86 Translation Layer**: Proprietary ARM translation layers (such as libndk/libhoudini) are strictly opt-in and downloaded only after explicit user consent.
+- **F-Droid** is installed when you ask: `devos android fdroid` (after Android itself is downloaded).
+- **Google Play** is optional and only before the first download: `devos android setup-play`. It is not in the ISO. Many Play apps still fail without a matching ARM translator.
+- **ARM-only APKs** may not run. DevOS does not download a proprietary ARM translator.
 
 ---
 

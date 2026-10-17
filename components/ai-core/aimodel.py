@@ -116,8 +116,13 @@ def pull_model(name: str) -> bool:
             print("SHA256 Checksum: VERIFIED (Match)")
             return True
         else:
-            print("Warning: SHA256 checksum mismatch! File may be updated upstream or corrupted.")
-            return True
+            print(f"Error: SHA256 checksum mismatch for '{name}'! Removing corrupted download.", file=sys.stderr)
+            if os.path.exists(dest):
+                try:
+                    os.remove(dest)
+                except OSError:
+                    pass
+            return False
     except Exception as e:
         print(f"\nDownload failed: {e}", file=sys.stderr)
         if os.path.exists(dest):

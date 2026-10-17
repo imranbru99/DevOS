@@ -9,10 +9,13 @@ wine64
 wine32:i386
 winetricks
 
-# Vulkan & DirectX Translation Libraries
+# Vulkan & DirectX translation. DXVK DLLs are copied into each Wine prefix.
 libvulkan1
 mesa-vulkan-drivers
 vulkan-tools
+dxvk
+vkd3d
+libvkd3d1
 
 # Performance & Process Boosters
 gamemode

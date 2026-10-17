@@ -24,6 +24,13 @@ BorderlessMaximizedWindows=false
 TitlebarDoubleClickCommand=Maximize
 FocusPolicy=ClickToFocus
 
+[NightColor]
+Active=true
+Mode=Timings
+EveningBeginFixed=19:00:00
+MorningBeginFixed=06:30:00
+NightTemperature=4500
+
 [org.kde.kdecoration2]
 BorderSize=Normal
 ButtonsOnLeft=M

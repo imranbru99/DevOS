@@ -85,12 +85,7 @@ class HardwareManager:
             except Exception:
                 pass
 
-        # Fallback catalog for preview / testing
-        return [
-            {"ssid": "DevOS-HighSpeed-5G", "signal": "95%", "security": "WPA2/WPA3"},
-            {"ssid": "Studio_Office_WiFi", "signal": "80%", "security": "WPA2"},
-            {"ssid": "Guest_Public", "signal": "60%", "security": "Open"},
-        ]
+        return []
 
     @staticmethod
     def connect_wifi(ssid: str, password: str = "") -> Dict[str, Any]:
@@ -106,9 +101,9 @@ class HardwareManager:
                 return {"status": "ERROR", "error": str(e)}
 
         return {
-            "status": "SIMULATED_SUCCESS",
+            "status": "UNAVAILABLE",
             "ssid": ssid,
-            "message": f"Successfully authenticated and connected to Wi-Fi '{ssid}'."
+            "message": "NetworkManager is not available, so the Wi-Fi network was not joined.",
         }
 
     # -------------------------------------------------------------
@@ -146,13 +141,18 @@ class HardwareManager:
             try:
                 vol_decimal = clamped / 100.0
                 subprocess.run(["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", str(vol_decimal)], check=True)
-            except Exception:
-                pass
+            except Exception as exc:
+                return {"status": "ERROR", "volume_level": clamped, "error": str(exc)}
+            return {
+                "status": "SUCCESS",
+                "volume_level": clamped,
+                "message": f"Master audio volume set to {clamped}%.",
+            }
 
         return {
-            "status": "SUCCESS",
+            "status": "UNAVAILABLE",
             "volume_level": clamped,
-            "message": f"Master audio volume set to {clamped}%."
+            "message": "PipeWire control (wpctl) is not available, so the volume was not changed.",
         }
 
     # -------------------------------------------------------------
@@ -188,11 +188,14 @@ class HardwareManager:
         # 2. Check Driverless Printing Support (IPP-USB)
         ipp_usb_present = os.path.exists("/usr/sbin/ipp-usb") or os.path.exists("/usr/bin/ipp-usb")
 
+        dxvk = os.path.isdir("/usr/lib/dxvk") or os.path.isdir("/usr/share/dxvk")
+        vulkan = "Vulkan via Mesa, DXVK for DirectX 9–11, and vkd3d for DirectX 12." if dxvk else \
+            "Vulkan via Mesa. DXVK is installed with Windows app support."
         return {
             "gpu_hardware": gpu_detected,
             "active_gpu_driver": active_driver,
             "proprietary_recommended": proprietary_recommended,
-            "vulkan_acceleration": "Vulkan 1.3 Enabled (DXVK & VKD3D-Proton Ready)",
+            "vulkan_acceleration": vulkan,
             "sound_open_firmware": "SOF Audio Firmware Installed (firmware-sof-signed)",
             "bluetooth_subsystem": "BlueZ 5.72 + PipeWire LDAC/aptX",
             "driverless_printing": "IPP Everywhere + ipp-usb (Zero Driver Configuration Needed)",
@@ -211,8 +214,8 @@ class HardwareManager:
                 return {"status": "ERROR", "error": str(e)}
 
         return {
-            "status": "SIMULATED_SUCCESS",
-            "message": "Scanned hardware: all proprietary graphics and Wi-Fi modules verified and ready."
+            "status": "UNAVAILABLE",
+            "message": "ubuntu-drivers is not installed, so no proprietary driver was installed.",
         }
 
 

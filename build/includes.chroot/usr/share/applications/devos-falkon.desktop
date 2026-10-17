@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Name=DevOS Browser
+GenericName=Web Browser
+Comment=Built-in browser. Smaller than Chrome and uses the desktop's own web engine
+Exec=/usr/bin/falkon %U
+Icon=falkon
+Terminal=false
+Type=Application
+Categories=Network;WebBrowser;
+MimeType=text/html;application/xhtml+xml;x-scheme-handler/http;x-scheme-handler/https;
+StartupNotify=true

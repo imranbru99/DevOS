@@ -1,12 +1,14 @@
 #!/bin/bash
 # DevOS AI: start the on-device AI service, then open the assistant window.
-# Falls back to the older browser chat page if the window cannot start.
+# If the Qt assistant cannot start, the simple chat page opens in a DevOS app
+# window (devos-webapp), served by the DevOS Dashboard server on 127.0.0.1:7070.
+# Never a browser tab, never an extra port.
 set -u
 
 AI_DIR="/usr/local/share/devos/components/ai-core"
 ASSISTANT="/usr/local/share/devos/components/assistant/assistant.py"
-CHAT_DIR="/usr/local/share/devos/components/dashboard/static"
-PORT=7072
+DASHBOARD="/usr/local/share/devos/components/dashboard/dashboard_server.py"
+PORT=7070
 
 if [ -f "${AI_DIR}/server.py" ]; then
     if ! ss -ltn 2>/dev/null | grep -q ':11434'; then
@@ -19,9 +21,13 @@ if [ -f "${ASSISTANT}" ] && python3 -c 'import PyQt5.QtWidgets' >/dev/null 2>&1;
     exec python3 "${ASSISTANT}" "$@"
 fi
 
-if ! ss -ltn 2>/dev/null | grep -q ":${PORT}"; then
-    python3 -m http.server "${PORT}" --bind 127.0.0.1 --directory "${CHAT_DIR}" >/var/tmp/devos-chat.log 2>&1 &
-    sleep 0.3
+START_CMD="python3 ${DASHBOARD} --no-browser --port ${PORT}"
+if ! ss -ltn 2>/dev/null | grep -q ":${PORT} "; then
+    log="${XDG_RUNTIME_DIR:-/tmp}/devos-dashboard.log"
+    setsid ${START_CMD} >>"${log}" 2>&1 < /dev/null &
+    sleep 0.6
 fi
 
-exec /usr/local/bin/devos-browser "http://127.0.0.1:${PORT}/chat.html"
+exec /usr/local/bin/devos-webapp --app-id chat --title "DevOS AI" --icon preferences-desktop-theme \
+    --desktop-file devos-chat --width 900 --height 760 \
+    --url "http://127.0.0.1:${PORT}/chat.html" --start-cmd "${START_CMD}"

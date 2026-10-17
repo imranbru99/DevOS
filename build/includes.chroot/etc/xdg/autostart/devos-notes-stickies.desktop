@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=DevOS Notes sticky notes
+Comment=Puts back the sticky notes that were on the desktop (exits at once when there are none)
+Exec=/usr/bin/python3 /usr/local/share/devos/components/notes/notes.py --stickies
+Icon=view-pim-notes
+Terminal=false
+OnlyShowIn=KDE;
+X-KDE-autostart-phase=2
+X-GNOME-Autostart-enabled=true
+NoDisplay=true

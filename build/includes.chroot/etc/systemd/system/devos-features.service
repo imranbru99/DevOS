@@ -1,0 +1,21 @@
+[Unit]
+Description=Install the apps chosen in the DevOS installer
+# Enabled by "devos-features installer-plan" when the "Choose your apps" page
+# picked downloads; it disables itself once everything is installed.
+Wants=network-online.target
+After=network-online.target devos-network.service
+ConditionPathExists=/etc/devos/features.conf
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/devos-features apply
+TimeoutStartSec=infinity
+Nice=10
+IOSchedulingClass=idle
+# Offline or a download failed: try again in a few minutes.
+Restart=on-failure
+RestartSec=300
+
+[Install]
+WantedBy=multi-user.target

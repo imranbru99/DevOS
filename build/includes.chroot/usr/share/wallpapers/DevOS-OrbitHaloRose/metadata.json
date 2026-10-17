@@ -1,0 +1,12 @@
+{
+    "KPlugin": {
+        "Id": "DevOS-OrbitHaloRose",
+        "Name": "Orbit Halo Rose",
+        "Authors": [
+            {
+                "Name": "DevOS"
+            }
+        ],
+        "License": "CC-BY-SA-4.0"
+    }
+}

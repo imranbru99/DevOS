@@ -3,7 +3,35 @@
 # until Calamares itself is visible, so the boot never stops on an empty pointer.
 set -u
 
-export DISPLAY="${DISPLAY:-:0}"
+# Kill any Ubuntu bootstrap immediately
+killall -9 ubuntu-desktop-bootstrap subiquity curtin 2>/dev/null || true
+rm -f \
+    /etc/xdg/autostart/ubuntu-desktop-bootstrap.desktop \
+    /etc/xdg/autostart/ubiquity.desktop \
+    /etc/xdg/autostart/org.gnome.InitialSetup.desktop \
+    /usr/share/applications/ubuntu-desktop-bootstrap.desktop \
+    /var/lib/snapd/desktop/applications/ubuntu-desktop-bootstrap.desktop \
+    "${HOME:-/home/devos}/.config/autostart/ubuntu-desktop-bootstrap.desktop" \
+    2>/dev/null || true
+
+if [ -z "${DISPLAY:-}" ]; then
+    if [ -e /tmp/.X11-unix/X0 ]; then
+        export DISPLAY=":0"
+    elif [ -e /tmp/.X11-unix/X1 ]; then
+        export DISPLAY=":1"
+    else
+        export DISPLAY=":0"
+    fi
+fi
+
+if [ -z "${XAUTHORITY:-}" ]; then
+    if [ -n "${XDG_RUNTIME_DIR:-}" ] && compgen -G "${XDG_RUNTIME_DIR}/xauth*" >/dev/null 2>&1; then
+        export XAUTHORITY=$(ls -1 "${XDG_RUNTIME_DIR}/xauth"* 2>/dev/null | head -n 1)
+    elif [ -f "${HOME}/.Xauthority" ]; then
+        export XAUTHORITY="${HOME}/.Xauthority"
+    fi
+fi
+
 export QT_QPA_PLATFORM=xcb
 
 if ! grep -q 'branding: devos' /etc/calamares/settings.conf 2>/dev/null; then
@@ -11,18 +39,19 @@ if ! grep -q 'branding: devos' /etc/calamares/settings.conf 2>/dev/null; then
     exit 1
 fi
 
-rm -f \
-    /etc/xdg/autostart/ubuntu-desktop-bootstrap.desktop \
-    /etc/xdg/autostart/ubiquity.desktop \
-    /etc/xdg/autostart/org.gnome.InitialSetup.desktop \
-    2>/dev/null || true
-
 if command -v xsetroot >/dev/null 2>&1; then
     xsetroot -solid "#070910" >/dev/null 2>&1 || true
     xsetroot -cursor_name left_ptr >/dev/null 2>&1 || true
 fi
+# The X server blanked the screen after 10 minutes while files were copying,
+# so the install looked frozen ("Display output is not active").
+if command -v xset >/dev/null 2>&1; then
+    xset s off -dpms s noblank >/dev/null 2>&1 || true
+fi
 xhost +si:localuser:root >/dev/null 2>&1 || true
 xhost +local: >/dev/null 2>&1 || true
+xhost + >/dev/null 2>&1 || true
 
 # boot_ui.py paints the animated starter and then starts calamares.
 exec python3 /usr/local/share/devos/boot_ui.py
+

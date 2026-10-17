@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Restore points
+GenericName=System restore
+Comment=Create a restore point or roll the system back
+Exec=/usr/bin/python3 /usr/local/share/devos/components/settings/snapshot_manager.py gui
+Icon=backup
+Terminal=false
+StartupNotify=true
+Categories=System;
+Keywords=restore;snapshot;rollback;backup;snapper;

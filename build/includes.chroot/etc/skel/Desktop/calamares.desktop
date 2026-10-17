@@ -1,13 +1,13 @@
 [Desktop Entry]
 Type=Application
 Version=1.0
-Name=Format Disk & Install DevOS
-GenericName=Disk Installer
-Comment=Show every disk, format old storage, then install DevOS
+Name=Install DevOS
+GenericName=System Installer
+Comment=Install DevOS permanently to your SSD or Hard Drive
 Exec=/bin/bash /usr/local/bin/devos-install-gui
 Icon=system-software-install
 Terminal=false
 Categories=Qt;System;
 StartupNotify=true
-Keywords=install;system;partition;format;setup;
+Keywords=install;system;partition;format;setup;ssd;
 X-DevOS-Action=Install

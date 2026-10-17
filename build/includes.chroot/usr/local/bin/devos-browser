@@ -1,5 +1,6 @@
 #!/bin/bash
-# Open Chrome when it is installed. Fall back to Falkon until then.
+# Chrome is optional. Falkon is the built-in browser: it uses the web engine
+# already in the desktop, so it is smaller and opens when Chrome does not.
 # Google picks the search language from the browser, not from the public IP.
 # Ask the network which country this connection is in, then send that language.
 set -u
@@ -33,12 +34,66 @@ search_language() {
     printf '%s\n' "$lang"
 }
 
-if command -v google-chrome-stable >/dev/null 2>&1; then
-    lang=$(search_language)
-    exec google-chrome-stable --accept-lang="$lang" "$@"
+tell() {
+    echo "$1" >&2
+    if command -v kdialog >/dev/null 2>&1; then
+        kdialog --title "Browser" --error "$1" >/dev/null 2>&1 || true
+    fi
+}
+
+# Falkon is the built-in browser. Chrome flags are not passed through.
+open_falkon() {
+    [ -x /usr/bin/falkon ] || return 1
+    falkon_args=()
+    for arg in "$@"; do
+        case "$arg" in
+            --incognito|--private) falkon_args+=(--private-browsing) ;;
+            --accept-lang=*|--disable-gpu) ;;
+            *) falkon_args+=("$arg") ;;
+        esac
+    done
+    exec /usr/bin/falkon "${falkon_args[@]}"
+}
+
+chrome=""
+for bin in /usr/bin/google-chrome-stable /usr/bin/google-chrome /opt/google/chrome/google-chrome; do
+    if [ -x "$bin" ]; then
+        chrome=$bin
+        break
+    fi
+done
+
+if [ -z "$chrome" ]; then
+    open_falkon "$@" || tell "No browser is installed yet. Open Terminal and run: sudo devos-install-chrome"
+    exit 1
 fi
-if command -v falkon >/dev/null 2>&1; then
-    exec falkon "$@"
+
+lang=$(search_language)
+args=(--accept-lang="$lang")
+# A virtual display (the test VM, and some other virtual PCs) makes Chrome's
+# graphics process quit immediately, so the window never appears. Draw in
+# software there. A normal graphics card is left alone, and the sandbox stays on.
+for uevent in /sys/class/drm/card*/device/uevent; do
+    [ -r "$uevent" ] || continue
+    if grep -Eq 'virtio|qxl|bochs|vmwgfx' "$uevent"; then
+        args+=(--disable-gpu)
+        break
+    fi
+done
+
+log=$(mktemp)
+"$chrome" "${args[@]}" "$@" >"$log" 2>&1 &
+pid=$!
+sleep 2
+if kill -0 "$pid" 2>/dev/null; then
+    wait "$pid" || true
+    rm -f "$log"
+    exit 0
 fi
-echo "Chrome is not installed yet. On the installed system, run: sudo devos-install-chrome" >&2
-exit 1
+wait "$pid"
+code=$?
+rm -f "$log"
+if [ "$code" -ne 0 ]; then
+    open_falkon "$@" || tell "Chrome did not open, and the built-in browser is missing."
+fi
+exit "$code"

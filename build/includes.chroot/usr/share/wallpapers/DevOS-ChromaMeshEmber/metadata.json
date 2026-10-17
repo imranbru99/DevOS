@@ -1,0 +1,12 @@
+{
+    "KPlugin": {
+        "Id": "DevOS-ChromaMeshEmber",
+        "Name": "Chroma Mesh Ember",
+        "Authors": [
+            {
+                "Name": "DevOS"
+            }
+        ],
+        "License": "CC-BY-SA-4.0"
+    }
+}

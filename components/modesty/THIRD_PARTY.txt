@@ -1,0 +1,31 @@
+Third-party code and data shipped in components/modesty/extension/
+===================================================================
+
+@vladmandic/face-api 1.7.15  (MIT)
+  npm:       https://www.npmjs.com/package/@vladmandic/face-api/v/1.7.15
+  tarball:   https://registry.npmjs.org/@vladmandic/face-api/-/face-api-1.7.15.tgz
+             integrity sha512-WDMmK3CfNLo8jylWqMoQgf4nIst3M0fzx1dnac96wv/dvMTN4DxC/Pq1DGtduDk1lktCamQ3MIDXFnvrdHTXDw==
+             (checked against the downloaded file; npm publish date 2025-02-05)
+  source:    https://github.com/vladmandic/face-api
+  file list cross-checked with https://data.jsdelivr.com/v1/packages/npm/@vladmandic/face-api@1.7.15?structure=flat
+
+  Vendored files (byte-identical to the npm tarball)          size (bytes)  sha256
+  vendor/face-api/face-api.js    <- dist/face-api.js            1333943  0160f7af3a8c78cece45c7ecc765383bad74becfd438bb787cdd627b2d6f2cf6
+  vendor/face-api/LICENSE        <- LICENSE                        1067  9a3442b79acaf4fbc7c2e07b7e2d8f84af9bb3871bf08a69d80304ab00640e9a
+  models/tiny_face_detector_model-weights_manifest.json            3219  5d1af4849ac48d5b985f4a9b16010c512353ddd6fcc63d50fd0bc9e9e64296e5
+  models/tiny_face_detector_model.bin                            193321  b7503ce7df31039b1c43316a9b865cab6a70dd748cc602d3fa28b551503c3871
+  models/age_gender_model-weights_manifest.json                    8392  74b60bf3ebf981bf4e661e9cca3a185614e10b25d797118b62e2a68d3ff2569f
+  models/age_gender_model.bin                                    429708  49f92bbc0afef2342c4385e4a2b0acb6d7a727c6f0aa539499719a81acf9abaa
+
+  Licence: MIT, Copyright (c) Vladimir Mandic - full text in vendor/face-api/LICENSE.
+  face-api is a fork of justadudewhohacks/face-api.js (MIT, Copyright (c) 2018
+  Vincent Muehler); the model weights come from that project and ship in the
+  same MIT-licensed npm package.
+
+TensorFlow.js 4.22.0  (Apache-2.0) - bundled inside dist/face-api.js
+  (tfjs-core, tfjs-converter, tfjs-backend-cpu, tfjs-backend-webgl; version from
+  dist/tfjs.version.js). https://github.com/tensorflow/tfjs
+  Licence text: https://www.apache.org/licenses/LICENSE-2.0
+
+Not shipped: the test portraits used by tests/modesty-chrome/ are downloaded at
+test time from Wikimedia Commons (public domain); see tests/modesty-chrome/images.txt.

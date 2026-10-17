@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
 Name=DevOS Dashboard
-Comment=Optional status page. Account password is set in the installer, not here.
+Comment=Dashboard server only (no window). Account password is set in the installer, not here.
 Exec=python3 /usr/local/share/devos/components/dashboard/dashboard_server.py --no-browser
 Icon=preferences-system
 Terminal=false

@@ -2,9 +2,10 @@
 """DevOS premium wallpaper generator.
 
 Deterministic (fixed seeds) procedural renderer using only numpy + Pillow.
-Every design is rendered internally at 3840x2160 (a few soft, smooth designs
-are rendered at 1920x1080 and upscaled with LANCZOS), tone-mapped, vignetted,
-film-grain dithered and written as KDE Plasma wallpaper packages:
+20 designs are each saved in four palettes (80 pictures). Every design is
+rendered internally at 3840x2160 (a few soft, smooth designs are rendered at
+1920x1080 and upscaled with LANCZOS), tone-mapped, vignetted, film-grain
+dithered and written as KDE Plasma wallpaper packages:
 
     build/includes.chroot/usr/share/wallpapers/DevOS-<CamelName>/
         metadata.json
@@ -253,8 +254,27 @@ def line_glow(img, d, color, core_w, glow_w, core=1.0, glow=0.3, white=0.0, fade
 # --------------------------------------------------------------------------
 # finishing
 # --------------------------------------------------------------------------
-def finalize(img, rng, vignette=0.35, exposure=1.0, shoulder=0.72):
+def hue_rotate(img, degrees):
+    """Turn the palette while the dark layout stays put."""
+    rad = math.radians(degrees)
+    c, s = math.cos(rad), math.sin(rad)
+    matrix = np.array([
+        [0.213 + c * 0.787 - s * 0.213, 0.715 - c * 0.715 - s * 0.715, 0.072 - c * 0.072 + s * 0.928],
+        [0.213 - c * 0.213 + s * 0.143, 0.715 + c * 0.285 + s * 0.140, 0.072 - c * 0.072 - s * 0.283],
+        [0.213 - c * 0.213 - s * 0.787, 0.715 - c * 0.715 + s * 0.715, 0.072 + c * 0.928 + s * 0.072],
+    ], F32)
+    flat = np.asarray(img, F32).reshape(-1, 3)
+    return (flat @ matrix.T).reshape(img.shape).astype(F32)
+
+
+# Each design is also saved in three further palettes, 80 pictures in all.
+VARIANTS = (("", 0.0), (" Rose", 26.0), (" Tide", -34.0), (" Ember", 52.0))
+
+
+def finalize(img, rng, vignette=0.35, exposure=1.0, shoulder=0.72, hue=0.0):
     H, W = img.shape[:2]
+    if abs(hue) > 0.5:
+        img = hue_rotate(img, hue)
     cv = Canvas(W, H)
     img = img * F32(exposure)
     r = np.sqrt(((cv.x - cv.A / 2) / (cv.A / 2)) ** 2 * 0.75 + ((cv.y - 0.5) / 0.5) ** 2 * 0.75)
@@ -1086,17 +1106,19 @@ def write_package(name, arr, quality):
 
 
 def contact_sheet():
-    tw, th, pad, lab = 300, 169, 16, 30
-    cols, rows = 5, 4
+    names = [name + suffix for name, _, _ in DESIGNS for suffix, _hue in VARIANTS]
+    tw, th, pad, lab = 240, 135, 12, 26
+    cols = 8
+    rows = (len(names) + cols - 1) // cols
     Wt = cols * tw + (cols + 1) * pad
     Ht = rows * (th + lab) + (rows + 1) * pad
     sheet = Image.new("RGB", (Wt, Ht), (5, 7, 13))
     dr = ImageDraw.Draw(sheet)
     try:
-        font = ImageFont.load_default(size=17)
+        font = ImageFont.load_default(size=14)
     except TypeError:
         font = ImageFont.load_default()
-    for k, (name, _, _) in enumerate(DESIGNS):
+    for k, name in enumerate(names):
         jpg = OUT_DIR / ("DevOS-" + camel(name)) / "contents" / "images" / f"{OUT_W}x{OUT_H}.jpg"
         if not jpg.exists():
             continue
@@ -1105,8 +1127,8 @@ def contact_sheet():
         y = pad + r * (th + lab + pad)
         sheet.paste(Image.open(jpg).convert("RGB").resize((tw, th), Image.LANCZOS), (x, y))
         tb = dr.textbbox((0, 0), name, font=font)
-        dr.text((x + (tw - (tb[2] - tb[0])) / 2, y + th + 6), name, fill=(203, 213, 225), font=font)
-    sheet.save(PREVIEW, "JPEG", quality=88, optimize=True)
+        dr.text((x + (tw - (tb[2] - tb[0])) / 2, y + th + 4), name, fill=(203, 213, 225), font=font)
+    sheet.save(PREVIEW, "JPEG", quality=86, optimize=True)
     return PREVIEW
 
 
@@ -1118,21 +1140,25 @@ def main():
     args = ap.parse_args()
     only = {s.strip() for s in args.only.split(",") if s.strip()}
     total = 0
+    n = 0
     for idx, (name, fn, vig) in enumerate(DESIGNS):
-        if only and camel(name) not in only:
-            continue
-        t0 = time.time()
-        rng = np.random.default_rng(2027 + idx * 101)
-        img = fn(rng)
-        arr = finalize(img, np.random.default_rng(9000 + idx), vignette=vig)
-        jpg, shot = write_package(name, arr, args.quality)
-        top, bot, mean = luminance_bands(arr)
-        size = jpg.stat().st_size + shot.stat().st_size
-        total += size
-        flag = "" if (top < 0.25 and bot < 0.25 and jpg.stat().st_size <= 700_000) else "  <-- CHECK"
-        print(f"{name:16s} {time.time() - t0:6.1f}s  jpg {jpg.stat().st_size / 1024:6.0f} KB  "
-              f"lum top {top:.3f} bottom {bot:.3f} mean {mean:.3f}{flag}", flush=True)
-    print(f"total (jpg+thumb) {total / 1e6:.2f} MB")
+        for sidx, (suffix, hue) in enumerate(VARIANTS):
+            full = name + suffix
+            if only and camel(full) not in only and camel(name) not in only:
+                continue
+            t0 = time.time()
+            rng = np.random.default_rng(2027 + idx * 101 + sidx * 997)
+            img = fn(rng)
+            arr = finalize(img, np.random.default_rng(9000 + idx + sidx * 250), vignette=vig, hue=hue)
+            jpg, shot = write_package(full, arr, args.quality)
+            top, bot, mean = luminance_bands(arr)
+            size = jpg.stat().st_size + shot.stat().st_size
+            total += size
+            n += 1
+            flag = "" if (top < 0.25 and bot < 0.25 and jpg.stat().st_size <= 700_000) else "  <-- CHECK"
+            print(f"{full:22s} {time.time() - t0:6.1f}s  jpg {jpg.stat().st_size / 1024:6.0f} KB  "
+                  f"lum top {top:.3f} bottom {bot:.3f} mean {mean:.3f}{flag}", flush=True)
+    print(f"{n} pictures, total (jpg+thumb) {total / 1e6:.2f} MB")
     if not args.no_sheet:
         print("contact sheet:", contact_sheet())
 

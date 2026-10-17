@@ -1,0 +1,22 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Notes
+GenericName=Notes and sticky notes
+Comment=Notebooks, sticky notes on the desktop, voice notes and DevOS AI summaries; saved in Documents
+Exec=/usr/bin/python3 /usr/local/share/devos/components/notes/notes.py
+Icon=view-pim-notes
+Terminal=false
+StartupNotify=true
+StartupWMClass=notes.py
+Categories=Office;Utility;
+Keywords=notes;sticky notes;onenote;memo;to-do;todo;checklist;notebook;markdown;
+Actions=NewNote;NewSticky;
+
+[Desktop Action NewNote]
+Name=New note
+Exec=/usr/bin/python3 /usr/local/share/devos/components/notes/notes.py --new
+
+[Desktop Action NewSticky]
+Name=New sticky note
+Exec=/usr/bin/python3 /usr/local/share/devos/components/notes/notes.py --new-sticky

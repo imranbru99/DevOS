@@ -25,25 +25,26 @@ import os, re
 SRC = "/usr/share/applications"
 DST = "/usr/local/share/applications"
 RENAME = {
-    "org.kde.dolphin": ("Files", "File manager"),
-    "org.kde.konsole": ("Terminal", "Command line"),
-    "org.kde.kate": ("Text Editor", "Advanced text editor"),
-    "org.kde.okular": ("Document Viewer", "PDF and document viewer"),
-    "org.kde.gwenview": ("Photos", "Image viewer"),
-    "org.kde.ark": ("Archive Manager", "Zip and archive tool"),
-    "org.kde.spectacle": ("Screenshot", "Capture the screen"),
-    "org.kde.kcalc": ("Calculator", "Calculator"),
-    "org.kde.plasma-systemmonitor": ("Task Manager", "Running apps and performance"),
-    "org.kde.partitionmanager": ("Disk Partitions", "Partition editor"),
-    "org.kde.plasma.emojier": ("Emoji Picker", "Emoji"),
-    "org.kde.ConfigurePrinter": ("Printers", "Printer settings"),
-    "org.kde.PrintQueue": ("Print Queue", "Print jobs"),
-    "org.kde.kde-add-printer": ("Add Printer", "Add a printer"),
-    "org.kde.bluedevilsendfile": ("Send via Bluetooth", "Bluetooth file transfer"),
-    "org.kde.bluedevilwizard": ("Pair Bluetooth Device", "Bluetooth"),
-    "org.kde.klipper": ("Clipboard", "Clipboard history"),
-    "systemsettings": ("Settings", "System settings"),
-    "org.kde.kfontview": ("Font Viewer", "Fonts"),
+    "org.kde.plasmashell": ("DevOS", "DevOS Desktop", "/usr/share/pixmaps/devos-logo.png"),
+    "org.kde.dolphin": ("Files", "File manager", None),
+    "org.kde.konsole": ("Terminal", "Command line", None),
+    "org.kde.kate": ("Text Editor", "Advanced text editor", None),
+    "org.kde.okular": ("Document Viewer", "PDF and document viewer", None),
+    "org.kde.gwenview": ("Photos", "Image viewer", None),
+    "org.kde.ark": ("Archive Manager", "Zip and archive tool", None),
+    "org.kde.spectacle": ("Screenshot", "Capture the screen", None),
+    "org.kde.kcalc": ("Calculator", "Calculator", None),
+    "org.kde.plasma-systemmonitor": ("System Monitor", "Hardware graphs", None),
+    "org.kde.partitionmanager": ("Disk Partitions", "Partition editor", None),
+    "org.kde.plasma.emojier": ("Emoji Picker", "Emoji", None),
+    "org.kde.ConfigurePrinter": ("Printers", "Printer settings", None),
+    "org.kde.PrintQueue": ("Print Queue", "Print jobs", None),
+    "org.kde.kde-add-printer": ("Add Printer", "Add a printer", None),
+    "org.kde.bluedevilsendfile": ("Send via Bluetooth", "Bluetooth file transfer", None),
+    "org.kde.bluedevilwizard": ("Pair Bluetooth Device", "Bluetooth", None),
+    "org.kde.klipper": ("Clipboard", "Clipboard history", None),
+    "systemsettings": ("Settings", "System settings", None),
+    "org.kde.kfontview": ("Font Viewer", "Fonts", None),
 }
 # Duplicates and tools that only confuse: DevOS has its own entry for these.
 HIDE = [
@@ -57,7 +58,7 @@ HIDE = [
 
 os.makedirs(DST, exist_ok=True)
 
-def rewrite(app_id, name=None, generic=None, hide=False):
+def rewrite(app_id, name=None, generic=None, icon=None, hide=False):
     src = os.path.join(SRC, app_id + ".desktop")
     if not os.path.isfile(src):
         return
@@ -74,16 +75,171 @@ def rewrite(app_id, name=None, generic=None, hide=False):
                 line = f"Name={name}\n"
             elif main and generic and stripped.startswith("GenericName="):
                 line = f"GenericName={generic}\n"
+            elif main and icon and stripped.startswith("Icon="):
+                line = f"Icon={icon}\n"
             out.append(line)
             if main and stripped == "[Desktop Entry]" and hide:
                 out.append("NoDisplay=true\n")
     with open(os.path.join(DST, app_id + ".desktop"), "w", encoding="utf-8") as handle:
         handle.writelines(out)
 
-for app_id, (name, generic) in RENAME.items():
-    rewrite(app_id, name, generic)
+for app_id, (name, generic, icon) in RENAME.items():
+    rewrite(app_id, name, generic, icon=icon)
 for app_id in HIDE:
     rewrite(app_id, hide=True)
+PY
+
+# Every settings page, menu entry and theme name. Package upgrades restore
+# the upstream words; this runs again afterwards and puts DevOS back.
+python3 - << 'PY'
+import json
+import os
+import re
+
+ROOTS = (
+    "/usr/share/applications",
+    "/usr/local/share/applications",
+    "/usr/share/desktop-directories",
+    "/usr/share/kservices5",
+    "/usr/share/kpackage",
+    "/usr/share/plasma",
+    "/usr/share/knsrcfiles",
+    "/usr/share/ksmserver",
+)
+VISIBLE = {"Name", "GenericName", "Comment", "Keywords", "Description", "X-KDE-PluginInfo-Category"}
+JSON_KEYS = {"Name", "Description", "Comment", "Category", "Keywords"}
+DESKTOP_SUFFIXES = (".desktop", ".directory", ".knsrc")
+
+
+def public_brand(text):
+    """Drop upstream names from a label a person can read."""
+    if "KDE Connect" in text or "KDE-Connect" in text:
+        text = text.replace("KDE Connect", "Phone Connect").replace("KDE-Connect", "Phone Connect")
+    text = re.sub(r"Kubuntu", "DevOS", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?<![\w.])Ubuntu\b", "DevOS", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?<![\w.])KDE\s+Plasma\b", "DevOS", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?<![\w.])Plasma\b", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?<![\w.])KDE\b", "", text)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    text = re.sub(r"\(\s*\)", "", text)
+    text = re.sub(r"\s+([,.;:])", r"\1", text)
+    return text.strip(" \t-–—")
+
+
+def brand_desktop(path):
+    changed = False
+    out = []
+    with open(path, encoding="utf-8", errors="replace") as handle:
+        lines = handle.readlines()
+    for line in lines:
+        stripped = line.strip()
+        if "=" in stripped and not stripped.startswith("#") and not (
+            stripped.startswith("[") and stripped.endswith("]")
+        ):
+            key, value = stripped.split("=", 1)
+            base = key.split("[", 1)[0].strip()
+            if base in VISIBLE:
+                branded = public_brand(value)
+                if base == "Name" and not branded:
+                    branded = "DevOS"
+                if branded != value:
+                    newline = "\n" if line.endswith("\n") else ""
+                    line = f"{key}={branded}{newline}"
+                    changed = True
+        out.append(line)
+    if changed:
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.writelines(out)
+
+
+def brand_json(path):
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return
+
+    changed = False
+
+    def walk(node):
+        nonlocal changed
+        if isinstance(node, dict):
+            for key, value in list(node.items()):
+                if key in JSON_KEYS and isinstance(value, str):
+                    branded = public_brand(value)
+                    if key == "Name" and not branded:
+                        branded = "DevOS"
+                    if branded != value:
+                        node[key] = branded
+                        changed = True
+                else:
+                    walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(data)
+    if changed:
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, indent=4, ensure_ascii=False)
+            handle.write("\n")
+
+
+def walk_tree(root):
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [name for name in dirnames if name not in {"locale", "icons", "wallpapers"}]
+        for name in filenames:
+            path = os.path.join(dirpath, name)
+            if name == "metadata.json":
+                brand_json(path)
+            elif name.endswith(DESKTOP_SUFFIXES):
+                brand_desktop(path)
+
+
+for root in ROOTS:
+    if os.path.isdir(root):
+        walk_tree(root)
+
+# About this PC rows are compiled into the settings module. Shorten only
+# those full phrases, and keep a null so the rest of the program is untouched.
+PHRASES = (
+    (b"KDE Plasma Version", b"DevOS"),
+    (b"KDE Frameworks Version", b"Desktop libraries"),
+    (b"KDE Plasma", b"DevOS"),
+    (b"Kubuntu", b"DevOS"),
+)
+
+def patch_phrases(path):
+    try:
+        with open(path, "rb") as handle:
+            data = handle.read()
+    except OSError:
+        return
+    original = data
+    for old, new in PHRASES:
+        if len(new) >= len(old) or old not in data:
+            continue
+        repl = new + b"\0" * (len(old) - len(new))
+        data = data.replace(old, repl)
+    if data != original:
+        with open(path, "wb") as handle:
+            handle.write(data)
+
+lib_roots = ("/usr/lib", "/usr/lib64")
+for lib_root in lib_roots:
+    if not os.path.isdir(lib_root):
+        continue
+    for dirpath, dirnames, filenames in os.walk(lib_root):
+        if any(part in {"firmware", "modules", "python3"} for part in dirpath.split(os.sep)):
+            dirnames[:] = []
+            continue
+        for name in filenames:
+            if not name.endswith(".so"):
+                continue
+            low = name.lower()
+            if "about" not in low and "kinfocenter" not in low and "systemsettings" not in low:
+                continue
+            patch_phrases(os.path.join(dirpath, name))
 PY
 
 mkdir -p /etc/xdg

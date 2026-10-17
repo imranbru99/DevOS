@@ -12,6 +12,7 @@ x11-xserver-utils
 x11-utils
 libxcb-cursor0
 qt6-qpa-plugins
+qtwayland5
 sddm-theme-breeze
 udisks2
 sddm

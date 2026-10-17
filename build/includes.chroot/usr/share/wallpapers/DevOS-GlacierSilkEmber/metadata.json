@@ -1,0 +1,12 @@
+{
+    "KPlugin": {
+        "Id": "DevOS-GlacierSilkEmber",
+        "Name": "Glacier Silk Ember",
+        "Authors": [
+            {
+                "Name": "DevOS"
+            }
+        ],
+        "License": "CC-BY-SA-4.0"
+    }
+}

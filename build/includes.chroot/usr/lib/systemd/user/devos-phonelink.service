@@ -1,0 +1,15 @@
+[Unit]
+Description=DevOS Phone Link (control this PC from your phone's browser)
+Documentation=file:///usr/local/share/devos/components/phonelink/phonelink.py
+After=graphical-session.target network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/share/devos/components/phonelink/phonelink.py serve
+Restart=on-failure
+RestartSec=5
+
+[Install]
+# Opt-in: nothing enables this by default. The Phone Link window runs
+# `systemctl --user enable --now devos-phonelink.service` when the user turns it on.
+WantedBy=default.target

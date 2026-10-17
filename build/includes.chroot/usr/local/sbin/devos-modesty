@@ -1,0 +1,3 @@
+#!/bin/bash
+# DevOS Modesty filter switch: devos-modesty enable [--mode women|people] | disable | status
+exec /usr/bin/python3 /usr/local/share/devos/components/modesty/modesty.py "$@"

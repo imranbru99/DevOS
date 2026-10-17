@@ -36,3 +36,43 @@ _launch=Meta+H\tCtrl+Alt+Space
 [devos-voice.desktop]
 _k_friendly_name=Voice Command
 _launch=Meta+H,none,Voice Command
+
+# DevOS Voice Typing: dictate into the focused app (Win+Alt+H; Win+H stays the voice command)
+[services][devos-voice-typing.desktop]
+_launch=Meta+Alt+H
+
+[devos-voice-typing.desktop]
+_k_friendly_name=Voice Typing
+_launch=Meta+Alt+H,none,Voice Typing
+
+# DevOS AI Actions on the selected text (Win+Alt+A)
+[services][devos-ai-actions.desktop]
+_launch=Meta+Alt+A
+
+[devos-ai-actions.desktop]
+_k_friendly_name=AI Actions
+_launch=Meta+Alt+A,none,AI Actions
+
+# DevOS Task Manager (same keys as Windows)
+[services][devos-taskman.desktop]
+_launch=Ctrl+Shift+Esc
+
+[devos-taskman.desktop]
+_k_friendly_name=Task Manager
+_launch=Ctrl+Shift+Esc,none,Task Manager
+
+# Clipboard history, same keys as Windows
+[services][devos-clipboard.desktop]
+_launch=Meta+V
+
+[devos-clipboard.desktop]
+_k_friendly_name=Clipboard
+_launch=Meta+V,none,Clipboard
+
+# Emoji panel, same keys as Windows
+[services][devos-emoji.desktop]
+_launch=Meta+.
+
+[devos-emoji.desktop]
+_k_friendly_name=Emoji
+_launch=Meta+.,none,Emoji

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=DevOS AI API
+GenericName=Local AI reference
+Comment=Open the DevOS AI model documentation and API address
+Exec=xdg-open http://127.0.0.1:11434/docs
+Icon=applications-science
+Terminal=false
+Categories=Development;Documentation;
+Keywords=ai;api;openai;docs;llm;local;
+StartupNotify=false

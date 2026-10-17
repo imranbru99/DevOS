@@ -167,8 +167,27 @@ def main():
     name = os.path.splitext(os.path.basename(path))[0]
     ext = os.path.splitext(path)[1].lower()
 
+    busy = Busy(f"Checking {name} for viruses...") if ext in (".exe", ".msi", ".apk", ".xapk") else None
     report = scan(path)
-    if not report.get("safe_to_run", True):
+    if busy:
+        busy.close()
+    if report.get("blocked"):
+        # ClamAV found a threat (the file is now in quarantine) or the file is
+        # inside the quarantine. There is no "open anyway" here: restoring it
+        # in DevOS Security is the deliberate way back.
+        if dialog("--warningcontinuecancel",
+                  f"{report.get('ai_summary', 'This file is dangerous.')}
+
+"
+                  "Open DevOS Security to review it?") == 0:
+            subprocess.Popen(["/usr/local/bin/devos-security", "gui", "--page", "quarantine"])
+        return 1
+    if report.get("needs_confirmation"):
+        if dialog("--warningyesno", f"{report.get('ai_summary')}
+
+Open it anyway?") != 0:
+            return 0
+    elif not report.get("safe_to_run", True):
         if dialog("--warningyesno",
                   f"{report.get('ai_summary', 'This file looks unsafe.')}\n\nOpen it anyway?") != 0:
             return 0

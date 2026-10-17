@@ -1,0 +1,12 @@
+{
+    "KPlugin": {
+        "Id": "DevOS-LoneArcTide",
+        "Name": "Lone Arc Tide",
+        "Authors": [
+            {
+                "Name": "DevOS"
+            }
+        ],
+        "License": "CC-BY-SA-4.0"
+    }
+}

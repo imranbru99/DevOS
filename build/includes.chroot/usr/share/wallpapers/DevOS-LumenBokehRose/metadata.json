@@ -1,0 +1,12 @@
+{
+    "KPlugin": {
+        "Id": "DevOS-LumenBokehRose",
+        "Name": "Lumen Bokeh Rose",
+        "Authors": [
+            {
+                "Name": "DevOS"
+            }
+        ],
+        "License": "CC-BY-SA-4.0"
+    }
+}

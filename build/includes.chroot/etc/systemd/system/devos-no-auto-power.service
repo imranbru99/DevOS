@@ -1,0 +1,13 @@
+[Unit]
+Description=DevOS: keep automatic shutdown and restart turned off
+Documentation=file:///usr/local/sbin/devos-no-auto-power
+DefaultDependencies=no
+After=local-fs.target
+Before=upower.service display-manager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/devos-no-auto-power
+
+[Install]
+WantedBy=sysinit.target

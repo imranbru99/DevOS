@@ -1,0 +1,17 @@
+[Unit]
+Description=DevOS Security defaults (first boot) and repair
+Documentation=file:///usr/local/share/devos/components/security/security_center.py
+# First boot of an installed system (and every live boot): web protection,
+# firewall, automatic security updates and the ClamAV engine choice, unless
+# /etc/devos/security.conf says they were set up (or turned off) already.
+# Later boots only put back web-protection files that went missing.
+After=local-fs.target systemd-resolved.service devos-familysafe.service
+Wants=systemd-resolved.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/devos-security boot
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

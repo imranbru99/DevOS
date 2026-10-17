@@ -55,6 +55,15 @@ SnapOnlyWhenOverlapping=false
 TitlebarDoubleClickCommand=Maximize
 WindowSnapZone=10
 
+# Evening warmth, like Windows night light. Daytime colour stays normal.
+# Turn it off in Settings, Display & Monitor, Night Light.
+[NightColor]
+Active=true
+Mode=Timings
+EveningBeginFixed=19:00:00
+MorningBeginFixed=06:30:00
+NightTemperature=4500
+
 [org.kde.kdecoration2]
 BorderSize=Normal
 ButtonsOnLeft=M

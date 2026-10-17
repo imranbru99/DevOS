@@ -1,0 +1,4 @@
+#!/bin/bash
+# Family Safety: system-wide adult-content blocking (root for enable/disable).
+# See components/familysafe/familysafe.py.
+exec /usr/bin/python3 /usr/local/share/devos/components/familysafe/familysafe.py "$@"

@@ -80,22 +80,41 @@ class WinLayerDoctor:
             if ac.encode("ascii") in content:
                 anti_cheat_detected.append(ac)
 
+        dxvk_installed = os.path.isdir("/usr/lib/dxvk") or os.path.isdir("/usr/share/dxvk")
+        native = _native_alternative(file_path)
+
         # 5. Determine compatibility rating
         if anti_cheat_detected:
             rating = "Use VM (Kernel Anti-Cheat Detected)"
             recommendation = (
-                f"Binary contains kernel-level anti-cheat/DRM ({', '.join(anti_cheat_detected)}). "
-                "Kernel anti-cheat cannot run under Wine; launch using DevOS Windows VM Fallback."
+                f"This program includes kernel anti-cheat ({', '.join(anti_cheat_detected)}). "
+                "Wine cannot run it. Start a Windows virtual PC with an ISO you own: "
+                "devos win vm create --iso Windows.iso"
             )
         elif any("d3d" in r["dll"] for r in detected_runtimes):
-            rating = "Works (DirectX / DXVK Accelerated)"
-            recommendation = "Fully supported via Proton-GE + DXVK Vulkan translation layer."
+            rating = "Works (DirectX via DXVK)" if dxvk_installed else "Needs Tweaks (DirectX)"
+            if dxvk_installed:
+                recommendation = (
+                    "DirectX 9, 10 and 11 run through DXVK (Vulkan) in this app's Windows prefix. "
+                    "DirectX 12 uses Wine's vkd3d. Kernel anti-cheat still cannot run."
+                )
+            else:
+                recommendation = (
+                    "This program uses DirectX. The dxvk package (part of Windows apps) turns "
+                    "DirectX 9–11 into Vulkan. Kernel anti-cheat still cannot run."
+                )
         elif any("mscoree" in r["dll"] for r in detected_runtimes):
             rating = "Works (.NET / Mono Supported)"
-            recommendation = "Supported via Wine-Mono or winetricks dotnet48 prefix."
+            recommendation = (
+                "Wine runs many .NET programs. If it does not start, add the runtime with "
+                "devos win tweaks dotnet <exe>."
+            )
         else:
             rating = "Works (Standard Win32/Win64)"
-            recommendation = "Executes out of the box in an isolated WinLayer prefix."
+            recommendation = "Runs in its own Windows prefix. Drivers and kernel anti-cheat will not."
+
+        if native:
+            recommendation += f" A DevOS version of {native.get('name')} is a better fit."
 
         return {
             "file": file_path,
@@ -103,9 +122,25 @@ class WinLayerDoctor:
             "architecture": arch,
             "detected_runtimes": detected_runtimes,
             "anti_cheat_flagged": anti_cheat_detected,
+            "dxvk_installed": dxvk_installed,
+            "native_alternative": native,
             "compatibility_rating": rating,
             "recommendation": recommendation,
         }
+
+
+def _native_alternative(file_path: str):
+    try:
+        hub = os.path.abspath(os.path.join(os.path.dirname(__file__), "../apphub"))
+        if hub not in sys.path:
+            sys.path.insert(0, hub)
+        from native_alternatives import match
+        found = match(file_path)
+        if not found:
+            return None
+        return {"name": found.get("name", ""), "flatpak": found.get("flatpak", "")}
+    except Exception:
+        return None
 
 
 def main():

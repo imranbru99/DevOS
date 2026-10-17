@@ -1,0 +1,12 @@
+{
+    "KPlugin": {
+        "Id": "DevOS-LoneArcEmber",
+        "Name": "Lone Arc Ember",
+        "Authors": [
+            {
+                "Name": "DevOS"
+            }
+        ],
+        "License": "CC-BY-SA-4.0"
+    }
+}

@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Voice Typing
+GenericName=Dictate into any app
+Comment=Speak and DevOS types it into the app you are using, offline, in Bangla or English (Meta+Alt+H)
+Exec=/usr/bin/python3 /usr/local/share/devos/components/voicetype/voicetype.py
+Icon=audio-input-microphone
+Terminal=false
+StartupNotify=false
+Categories=Utility;Accessibility;
+Keywords=voice;typing;dictation;dictate;speech to text;speak;microphone;bangla;bengali;win+h;
+X-KDE-Shortcuts=Meta+Alt+H

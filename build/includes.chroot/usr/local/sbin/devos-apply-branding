@@ -69,6 +69,17 @@ if command -v plymouth-set-default-theme >/dev/null 2>&1; then
     plymouth-set-default-theme devos >/dev/null 2>&1 || true
 fi
 
+# Brand plasma icon with DevOS logo across icon themes
+if [ -f /usr/share/pixmaps/devos-logo.png ]; then
+    for size in 16 22 24 32 48 64 128 256; do
+        dir="/usr/share/icons/hicolor/${size}x${size}/apps"
+        mkdir -p "$dir"
+        cp -f /usr/share/pixmaps/devos-logo.png "${dir}/plasma.png" 2>/dev/null || true
+    done
+    mkdir -p /usr/share/icons/hicolor/scalable/apps
+    cp -f /usr/share/pixmaps/devos-logo.png /usr/share/icons/hicolor/scalable/apps/plasma.png 2>/dev/null || true
+fi
+
 # Desktop names: Files, Terminal, Settings, the "DevOS" session.
 if [ -f /usr/local/sbin/devos-debrand-desktop ]; then
     /bin/bash /usr/local/sbin/devos-debrand-desktop || true

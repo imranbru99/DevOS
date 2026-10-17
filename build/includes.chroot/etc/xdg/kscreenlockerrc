@@ -1,0 +1,8 @@
+[Greeter]
+WallpaperPlugin=org.kde.image
+
+# The lock screen showed Plasma's stock mountain photo; use the DevOS desktop
+# wallpaper so locking looks like the rest of DevOS.
+[Greeter][Wallpaper][org.kde.image][General]
+Image=file:///usr/share/wallpapers/DevOS/DevOS-Default.png
+PreviewImage=file:///usr/share/wallpapers/DevOS/DevOS-Default.png

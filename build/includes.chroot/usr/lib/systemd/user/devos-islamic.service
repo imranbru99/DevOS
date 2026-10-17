@@ -1,0 +1,19 @@
+[Unit]
+Description=DevOS Islamic (prayer time and daily Ayah/Hadith notifications)
+Documentation=file:///usr/share/doc/devos-islamic/SOURCES.txt
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/share/devos/components/islamic/notifier.py
+Restart=on-failure
+RestartSec=10
+# It sleeps between events; keep it out of the way of foreground apps.
+Nice=10
+CPUWeight=20
+
+[Install]
+# Opt-in: nothing enables this by default. "Turn on reminders" in DevOS Islamic
+# (or `devos-islamic enable`) runs `systemctl --user enable --now devos-islamic.service`.
+WantedBy=default.target

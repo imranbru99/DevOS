@@ -85,7 +85,7 @@ class DevOSControlCenter:
     def get_summary(self) -> Dict[str, Any]:
         return {
             "version": "DevOS 24.04 LTS",
-            "desktop": "KDE Plasma 6 (Wayland)",
+            "desktop": "DevOS",
             "settings": self.settings,
         }
 

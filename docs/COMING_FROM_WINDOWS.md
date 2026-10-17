@@ -17,7 +17,7 @@ DevOS is engineered specifically to make developers transitioning from Microsoft
 | **Snap Left / Right** | `Win + Left / Right` | Tiles the current window to the half-screen |
 | **Maximize / Minimize** | `Win + Up / Down` | Maximizes or restores window |
 | **Switch Windows** | `Alt + Tab` | Fluid window switcher |
-| **Task Manager** | `Ctrl + Shift + Esc` | Launches Plasma System Monitor / `btop` |
+| **Task Manager** | `Ctrl + Shift + Esc` | Opens DevOS Task Manager (processes, performance, startup, services) |
 
 ---
 

@@ -1,0 +1,57 @@
+DevOS Islamic - sources of the Quran and Hadith texts
+=====================================================
+
+DevOS does not ship any Quran or Hadith text in the ISO and never generates
+or edits one. When you turn DevOS Islamic on, it downloads these files once,
+pinned to an exact git commit and checked against SHA-256 sums recorded in
+/usr/local/share/devos/components/islamic/content.py. Every card shows the
+reference (Surah:Ayah, or collection + hadith number) and the translator.
+
+Stored in /var/lib/DevOS/islamic (shared by every account; written as root
+through pkexec) or, if administrator approval is declined, in
+~/.local/share/DevOS/islamic for that account only.
+
+Quran - fawazahmed0/quran-api
+  https://github.com/fawazahmed0/quran-api
+  commit 47ca096b0976443ba2eab2e45cdf0fb4096a2610
+  served from https://cdn.jsdelivr.net/gh/fawazahmed0/quran-api@<commit>/
+  Dataset licence: The Unlicense (public domain dedication).
+  Editions used (6236 ayahs each, 114 surahs):
+    ara-quranuthmanihaf  Uthmani script, Hafs - King Fahd Glorious Quran
+                         Printing Complex (qurancomplex.gov.sa), version 13
+    ben-muhiuddinkhan    Bangla - Muhiuddin Khan (via tanzil.net)
+    eng-ummmuhammad      English - Saheeh International (Umm Muhammad)
+                         (via tanzil.net)
+    info.json            surah names
+  Upstream terms: the King Fahd Complex text may be used and shared but must
+  not be altered. Tanzil states its translations are "for non-commercial
+  purposes only"; other use needs the translator's or publisher's permission.
+  DevOS is free software and does not sell these texts; anyone redistributing
+  DevOS commercially with the texts pre-installed must check these terms.
+
+Hadith - fawazahmed0/hadith-api
+  https://github.com/fawazahmed0/hadith-api
+  commit df57907be35291c91ad6a6691180e22ca9920784
+  served from https://cdn.jsdelivr.net/gh/fawazahmed0/hadith-api@<commit>/
+  Dataset licence: The Unlicense (public domain dedication).
+  Editions used:
+    Sahih al-Bukhari  ara-bukhari (Arabic), ben-bukhari (Bangla, translator
+                      not named by the dataset), eng-bukhari (Muhammad Muhsin
+                      Khan) - 7589 entries
+    Sahih Muslim      ara-muslim (Arabic), ben-muslim (Bangla, translator not
+                      named by the dataset), eng-muslim (Abdul Hamid
+                      Siddiqui) - 7563 entries
+  DevOS shows only hadiths present in all three languages with a whole
+  number (7526 from al-Bukhari, 7324 from Muslim). The translations belong
+  to their translators and publishers; they are shown unchanged and credited.
+
+Optional AI reflection
+  The "Explain with DevOS AI" button asks the local model (on this PC) for a
+  short reflection. It is labelled "AI reflection - may contain mistakes; not
+  a religious ruling", is told never to quote or invent verses or hadith, and
+  never replaces the texts above. Ask a qualified scholar for rulings.
+
+Prayer times, Qibla and Hijri date are calculated on this PC (no network):
+  methods Karachi (default), MWL, ISNA, Egypt, Umm al-Qura; Asr Hanafi
+  (default) or Shafi'i; tabular Hijri calendar with a +/-2 day adjustment.
+No adhan recording is included; you can pick your own sound file.

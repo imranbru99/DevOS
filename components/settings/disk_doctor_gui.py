@@ -25,7 +25,7 @@ SYS_PATH = os.path.dirname(os.path.abspath(__file__))
 if SYS_PATH not in sys.path:
     sys.path.insert(0, SYS_PATH)
 
-from disk_manager import DiskManager
+from disk_manager import DiskManager, is_live_system
 
 
 class DiskDoctorWindow(QMainWindow):
@@ -89,7 +89,7 @@ class DiskDoctorWindow(QMainWindow):
         bottom_box = QHBoxLayout()
         installer_btn = QPushButton("🚀 Open Calamares Installer")
         installer_btn.setStyleSheet("background: linear-gradient(135deg, #0284c7, #38bdf8); color: #041018; font-size: 14px;")
-        installer_btn.clicked.connect(lambda: DiskManager.apply_solution("/dev/sda", "launch_installer"))
+        installer_btn.clicked.connect(lambda: DiskManager.apply_solution("", "launch_installer"))
 
         reboot_btn = QPushButton("⏻ Safely Reboot & Eject USB")
         reboot_btn.setStyleSheet("background: #334155; color: #f8fafc;")
@@ -98,6 +98,10 @@ class DiskDoctorWindow(QMainWindow):
         bottom_box.addWidget(installer_btn)
         bottom_box.addStretch()
         bottom_box.addWidget(reboot_btn)
+        # Installer and "eject USB" only make sense on the live USB.
+        if not is_live_system():
+            installer_btn.hide()
+            reboot_btn.hide()
         self.main_layout.addLayout(bottom_box)
 
         self.refresh_disks()
@@ -209,7 +213,7 @@ class DiskDoctorWindow(QMainWindow):
             QMessageBox.Yes | QMessageBox.No
         )
         if confirm == QMessageBox.Yes:
-            DiskManager.apply_solution("/dev/sda", "reboot_system")
+            DiskManager.apply_solution("", "reboot_system")
 
 
 def main():

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Search
+GenericName=Find apps, files and settings
+Comment=Search this computer
+Exec=krunner
+Icon=search
+Terminal=false
+Categories=System;Utility;
+Keywords=search;find;krunner;
+StartupNotify=false

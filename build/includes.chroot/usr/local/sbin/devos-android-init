@@ -71,8 +71,15 @@ print(r["url"], r["id"], r["size"], r["filename"])')
     rm -f "$zip"
 }
 
+# "gapps" downloads the Lineage image that includes Google Play (larger, and
+# still not every Play app). The default stays the open image.
+SYSTEM_JSON=https://ota.waydro.id/system/lineage/waydroid_x86_64/VANILLA.json
+if [ "${1:-}" = "gapps" ]; then
+    SYSTEM_JSON=https://ota.waydro.id/system/lineage/waydroid_x86_64/GAPPS.json
+fi
+
 if [ ! -f "$images/system.img" ]; then
-    fetch_image https://ota.waydro.id/system/lineage/waydroid_x86_64/VANILLA.json system.img || exit 1
+    fetch_image "$SYSTEM_JSON" system.img || exit 1
     fetch_image https://ota.waydro.id/vendor/waydroid_x86_64/MAINLINE.json vendor.img || exit 1
     image_ok || { echo "DevOS: the Android system image is damaged" >&2; exit 1; }
 fi

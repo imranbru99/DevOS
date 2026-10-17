@@ -1,0 +1,16 @@
+[Unit]
+Description=DevOS Cloud Backup (copy Documents, Desktop, Pictures and Downloads to the cloud)
+Documentation=file:///usr/local/share/devos/components/backup/cloud_backup.py
+# Only ever started by devos-backup.timer / devos-backup.path, which stay
+# disabled until the user turns backup on in the Cloud Backup window.
+ConditionPathExists=%h/.config/devos/backup.json
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/share/devos/components/backup/cloud_backup.py run
+# Stay out of the user's way: lowest CPU and disk priority.
+Nice=10
+IOSchedulingClass=idle
+# The run waits up to 15 min for downloads to settle, then uploads.
+TimeoutStartSec=6h

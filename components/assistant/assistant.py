@@ -3112,7 +3112,7 @@ class AssistantWindow(QtWidgets.QWidget):
             self.show_thinking(label)
             self._run(lambda _w: self.assistant.handle_attachments(text, files, hist), on_replies)
             return
-        plan = self.assistant.plan(text)
+        plan = self.assistant.plan(text, hist)
         if plan.actions:
             actions = []
             for a in plan.actions:

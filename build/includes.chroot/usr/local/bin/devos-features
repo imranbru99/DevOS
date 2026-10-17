@@ -1,0 +1,3 @@
+#!/bin/bash
+# Add and remove DevOS apps and features. See components/features/features_cli.py.
+exec /usr/bin/python3 /usr/local/share/devos/components/features/features_cli.py "$@"

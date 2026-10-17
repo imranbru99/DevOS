@@ -1,0 +1,478 @@
+#!/usr/bin/env python3
+"""Bring back the applications that were open before a restart or shutdown.
+
+Plasma reopens KDE applications and the documents they had open. Browsers,
+DevOS Code and other programs keep that work themselves, and this opens
+them again so the same task is on screen.
+
+A live USB (the installer) does nothing: there is no previous task to keep.
+"""
+
+import json
+import os
+import shlex
+import shutil
+import signal
+import subprocess
+import sys
+import time
+
+STATE_NAME = "session.json"
+SAVE_EVERY_S = 20
+RESTORE_DELAY_S = 8
+MAX_APPS = 40
+
+# The desktop itself. These are not tasks a person was doing.
+SKIP_CLASS = {
+    "plasmashell", "kwin", "kwin_x11", "kwin_wayland", "ksmserver", "krunner",
+    "kded", "kded5", "kded6", "ksplash", "ksplashqml", "xembedsniproxy",
+    "gmenudbusmenuproxy", "polkit-kde-authentication-agent-1",
+    "plasma-fallback-session-restore",
+}
+
+# Process names that mean the same application.
+ALIASES = {
+    "google-chrome": ("chrome", "google-chrome", "google-chrome-stable"),
+    "google-chrome-stable": ("chrome", "google-chrome", "google-chrome-stable"),
+    "chrome": ("chrome", "google-chrome", "google-chrome-stable"),
+    "microsoft-edge": ("msedge", "microsoft-edge", "microsoft-edge-stable"),
+    "microsoft-edge-stable": ("msedge", "microsoft-edge", "microsoft-edge-stable"),
+    "msedge": ("msedge", "microsoft-edge"),
+    "brave-browser": ("brave", "brave-browser"),
+    "brave": ("brave", "brave-browser"),
+    "chromium": ("chromium", "chromium-browser"),
+    "chromium-browser": ("chromium", "chromium-browser"),
+    "firefox": ("firefox", "firefox-bin"),
+    "firefox-bin": ("firefox", "firefox-bin"),
+    "code": ("code", "code-oss"),
+    "code-oss": ("code", "code-oss"),
+    "codium": ("codium",),
+}
+
+INTERPRETERS = {
+    "python", "python3", "python3.11", "python3.12", "bash", "sh", "perl", "ruby",
+}
+
+READY = False
+
+
+def state_path():
+    base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    return os.path.join(base, "devos", STATE_NAME)
+
+
+def live_usb():
+    try:
+        with open("/proc/cmdline", encoding="utf-8", errors="replace") as fh:
+            return "boot=casper" in fh.read()
+    except OSError:
+        return False
+
+
+def parse_wmctrl_line(line):
+    """wmctrl -lxp: id desktop pid instance.class title."""
+    parts = (line or "").split(None, 4)
+    if len(parts) < 4:
+        return None
+    try:
+        pid = int(parts[2])
+    except ValueError:
+        return None
+    wm = parts[3]
+    if "." in wm:
+        instance, klass = wm.split(".", 1)
+    else:
+        instance, klass = wm, wm
+    return {
+        "pid": pid,
+        "instance": instance,
+        "klass": klass,
+        "title": parts[4] if len(parts) > 4 else "",
+    }
+
+
+def list_windows():
+    """Open windows, or None when the window list cannot be read."""
+    if not shutil.which("wmctrl"):
+        return None
+    try:
+        proc = subprocess.run(["wmctrl", "-lxp"], capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    windows = []
+    for line in (proc.stdout or "").splitlines():
+        win = parse_wmctrl_line(line)
+        if not win or win["pid"] <= 0:
+            continue
+        if win["instance"].lower() in SKIP_CLASS or win["klass"].lower() in SKIP_CLASS:
+            continue
+        windows.append(win)
+    return windows
+
+
+def desktop_dirs():
+    home = os.path.expanduser("~")
+    extra = os.environ.get("XDG_DATA_HOME") or os.path.join(home, ".local", "share")
+    return [
+        "/usr/share/applications",
+        "/usr/local/share/applications",
+        os.path.join(extra, "applications"),
+    ]
+
+
+def _desktop_entry(path):
+    entry = {}
+    in_entry = False
+    try:
+        fh = open(path, encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    with fh:
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("[") and line.endswith("]"):
+                in_entry = line == "[Desktop Entry]"
+                continue
+            if in_entry and "=" in line:
+                key, value = line.split("=", 1)
+                entry.setdefault(key, value)
+    return entry
+
+
+def _argv(exec_line):
+    try:
+        raw = shlex.split(exec_line or "", posix=True)
+    except ValueError:
+        return []
+    return [part for part in raw if part and not part.startswith("%")]
+
+
+def load_desktops():
+    """desktop id -> app record. Later directories win (the user's own copy)."""
+    found = {}
+    for folder in desktop_dirs():
+        try:
+            names = os.listdir(folder)
+        except OSError:
+            continue
+        for name in names:
+            if not name.endswith(".desktop"):
+                continue
+            path = os.path.join(folder, name)
+            entry = _desktop_entry(path)
+            if not entry or entry.get("Type") != "Application":
+                continue
+            if entry.get("Hidden", "").lower() == "true":
+                continue
+            if entry.get("NoDisplay", "").lower() == "true":
+                continue
+            argv = _argv(entry.get("Exec", ""))
+            if not argv:
+                continue
+            found[name] = {
+                "id": name,
+                "path": path,
+                "argv": argv,
+                "wmclass": entry.get("StartupWMClass", ""),
+                "names": _names(argv),
+                "tokens": _tokens(argv),
+            }
+    return found
+
+
+def _names(argv):
+    """Process names that mean this app is already running.
+
+    An interpreter (python3, bash, …) is shared by many apps, so it is not
+    a name of its own. Those apps are matched by their script path instead.
+    """
+    base = os.path.basename(argv[0]) if argv else ""
+    if not base or base in INTERPRETERS:
+        return []
+    names = set(ALIASES.get(base, ()))
+    names.add(base)
+    return sorted(names)
+
+
+def _tokens(argv):
+    tokens = []
+    for part in argv:
+        base = os.path.basename(part)
+        if base in INTERPRETERS or part.startswith("-"):
+            continue
+        tokens.append(part)
+    return tokens
+
+
+def match_window(win, apps):
+    instance = win["instance"].lower()
+    klass = win["klass"].lower()
+    for app in apps.values():
+        wm = app["wmclass"].lower()
+        if wm and wm in (instance, klass):
+            return app
+    # Command line of the window's process, for apps started by an interpreter.
+    cmdline = _cmdline(win["pid"])
+    exe = _exe_base(win["pid"])
+    for app in apps.values():
+        if exe and exe in app["names"]:
+            return app
+        if cmdline and _cmdline_has(cmdline, app):
+            return app
+    return None
+
+
+def _cmdline(pid):
+    try:
+        with open("/proc/%s/cmdline" % pid, "rb") as fh:
+            return fh.read().replace(b"\x00", b" ").decode("utf-8", "replace")
+    except OSError:
+        return ""
+
+
+def _exe_base(pid):
+    try:
+        return os.path.basename(os.readlink("/proc/%s/exe" % pid))
+    except OSError:
+        return ""
+
+
+def _cmdline_has(cmdline, app):
+    parts = cmdline.lower().split()
+    bases = {os.path.basename(part) for part in parts}
+    for token in app["tokens"]:
+        base = os.path.basename(token).lower()
+        if base in INTERPRETERS or len(base) < 3:
+            continue
+        if token.lower() in parts or base in bases:
+            return True
+    return False
+
+
+def apps_on_screen(windows, apps):
+    chosen = []
+    seen = set()
+    for win in windows or []:
+        app = match_window(win, apps)
+        if not app or app["id"] in seen:
+            continue
+        seen.add(app["id"])
+        chosen.append({
+            "id": app["id"],
+            "path": app["path"],
+            "argv": app["argv"],
+            "wmclass": app["wmclass"],
+            "names": app["names"],
+            "tokens": app["tokens"],
+        })
+        if len(chosen) >= MAX_APPS:
+            break
+    return chosen
+
+
+def read_state():
+    try:
+        with open(state_path(), encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return []
+    apps = data.get("apps") if isinstance(data, dict) else None
+    return apps if isinstance(apps, list) else []
+
+
+def write_state(apps):
+    path = state_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump({"apps": apps}, fh, indent=2)
+        fh.write("\n")
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, path)
+
+
+# For a short while after login, a window may still be opening. Remember the
+# previous list as well, so that slow app is not forgotten.
+GRACE_S = 45
+_seen_since = 0
+
+
+def save():
+    windows = list_windows()
+    if windows is None:
+        return False
+    current = apps_on_screen(windows, load_desktops())
+    if _seen_since and (time.time() - _seen_since) < GRACE_S:
+        have = {app["id"] for app in current}
+        for app in read_state():
+            if isinstance(app, dict) and app.get("id") and app["id"] not in have:
+                current.append(app)
+                have.add(app["id"])
+        current = current[:MAX_APPS]
+    write_state(current)
+    return True
+
+
+def _processes():
+    found = []
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit():
+            continue
+        exe = _exe_base(pid)
+        text = _cmdline(pid)
+        if exe or text:
+            found.append((exe, text.lower()))
+    return found
+
+
+def _script_tokens(app):
+    tokens = []
+    for token in app.get("tokens") or []:
+        base = os.path.basename(token)
+        if base.lower() in INTERPRETERS:
+            continue
+        if "/" in token or base.endswith(".py"):
+            tokens.append(token)
+    return tokens
+
+
+def _already_open(app, windows, processes):
+    wm = (app.get("wmclass") or "").lower()
+    if wm:
+        for win in windows or []:
+            if wm in (win["instance"].lower(), win["klass"].lower()):
+                return True
+    names = set(app.get("names") or [])
+    scripts = [token.lower() for token in _script_tokens(app)]
+    for exe, text in processes:
+        if exe and exe in names:
+            return True
+        if text and any(token in text.split() for token in scripts):
+            return True
+    return False
+
+
+def _launch(app):
+    path = app.get("path") or ""
+    if path and os.path.isfile(path) and shutil.which("gio"):
+        cmd = ["gio", "launch", path]
+    else:
+        cmd = [part for part in (app.get("argv") or []) if part]
+    if not cmd:
+        return
+    try:
+        subprocess.Popen(cmd, cwd=os.path.expanduser("~"), start_new_session=True,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        return
+
+
+def restore():
+    saved = read_state()
+    if not saved:
+        return 0
+    windows = list_windows() or []
+    processes = _processes()
+    opened = 0
+    for app in saved:
+        if not isinstance(app, dict):
+            continue
+        if _already_open(app, windows, processes):
+            continue
+        _launch(app)
+        opened += 1
+        time.sleep(0.4)
+    return opened
+
+
+def watch():
+    global READY, _seen_since
+    if live_usb():
+        return 0
+    # Plasma restores KDE applications during this pause. Saving earlier
+    # would replace the remembered task with an empty desktop.
+    time.sleep(RESTORE_DELAY_S)
+    restore()
+    _seen_since = time.time()
+    READY = True
+    while True:
+        save()
+        time.sleep(SAVE_EVERY_S)
+
+
+def _on_signal(signum, _frame):
+    if READY:
+        try:
+            save()
+        except OSError:
+            pass
+    raise SystemExit(0)
+
+
+def self_test():
+    win = parse_wmctrl_line("0x0100000a  0 4242 google-chrome.Google-chrome  Inbox - Gmail")
+    assert win["pid"] == 4242
+    assert win["instance"] == "google-chrome"
+    assert win["klass"] == "Google-chrome"
+    assert "Gmail" in win["title"]
+    assert parse_wmctrl_line("short") is None
+
+    apps = {
+        "google-chrome.desktop": {
+            "id": "google-chrome.desktop",
+            "path": "/usr/share/applications/google-chrome.desktop",
+            "argv": ["google-chrome-stable"],
+            "wmclass": "Google-chrome",
+            "names": ["chrome", "google-chrome", "google-chrome-stable"],
+            "tokens": ["google-chrome-stable"],
+        },
+        "devos-notepad.desktop": {
+            "id": "devos-notepad.desktop",
+            "path": "/usr/share/applications/devos-notepad.desktop",
+            "argv": ["python3", "/usr/local/share/devos/components/notepad/notepad.py"],
+            "wmclass": "notepad.py",
+            "names": ["python3"],
+            "tokens": ["/usr/local/share/devos/components/notepad/notepad.py"],
+        },
+    }
+    chrome = match_window({"pid": 1, "instance": "google-chrome", "klass": "Google-chrome", "title": ""}, apps)
+    assert chrome["id"] == "google-chrome.desktop"
+    shell = {"pid": 2, "instance": "plasmashell", "klass": "plasmashell", "title": "Desktop"}
+    assert shell["instance"].lower() in SKIP_CLASS
+    argv = _argv("python3 /usr/local/share/devos/components/notepad/notepad.py %F")
+    assert "notepad.py" in argv[-1]
+    assert not any(part.startswith("%") for part in argv)
+    assert _names(argv) == []
+    assert _names(["google-chrome-stable"]) == ["chrome", "google-chrome", "google-chrome-stable"]
+    assert _cmdline_has("/usr/bin/python3 /usr/local/share/devos/components/notepad/notepad.py", apps["devos-notepad.desktop"])
+    assert not _cmdline_has("/usr/bin/python3 /usr/local/bin/something-else.py", apps["devos-notepad.desktop"])
+    print("ok")
+    return 0
+
+
+def main(argv):
+    signal.signal(signal.SIGTERM, _on_signal)
+    signal.signal(signal.SIGINT, _on_signal)
+    cmd = argv[1] if len(argv) > 1 else "watch"
+    if cmd == "self-test":
+        return self_test()
+    if cmd == "save":
+        return 0 if save() or live_usb() else 1
+    if cmd == "restore":
+        if live_usb():
+            return 0
+        restore()
+        return 0
+    if cmd == "watch":
+        return watch()
+    print("usage: devos-session watch|save|restore", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

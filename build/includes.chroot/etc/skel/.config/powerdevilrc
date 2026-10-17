@@ -1,0 +1,3 @@
+[BatteryManagement]
+# 1 = sleep. Open programs stay in memory.
+BatteryCriticalAction=1

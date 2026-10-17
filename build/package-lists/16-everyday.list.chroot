@@ -20,3 +20,8 @@ kde-config-gtk-style
 flatpak
 android-tools-adb
 kdialog
+orca
+kmag
+onboard
+speech-dispatcher
+espeak-ng

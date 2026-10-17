@@ -1,13 +1,13 @@
 #!/bin/bash
 set -euo pipefail
 
-DEVOS_OUT="/mnt/host/c/docker/DevOS/out"
-DEVOS_SRC="/mnt/host/c/docker/DevOS"
+DEVOS_OUT="${DEVOS_OUT:-/mnt/host/c/docker/DevOS/out}"
+DEVOS_SRC="${DEVOS_SRC:-/mnt/host/c/docker/DevOS}"
 STAGE_DIR="${DEVOS_OUT}/iso_stage"
 OUTPUT_ISO="${DEVOS_OUT}/devos-24.04-amd64.iso"
 TMP_DIR="${DEVOS_OUT}/tmp_build"
-IMG="/mnt/host/c/docker/build_rootfs.img"
-MNT="/dev/shm/rootfs"
+IMG="${DEVOS_IMG:-/mnt/host/c/docker/build_rootfs.img}"
+MNT="${DEVOS_MNT:-/mnt/rootfs}"
 
 echo "=========================================================="
 echo "          DevOS Master Remaster & Full Builder 2027       "
@@ -49,9 +49,31 @@ if [ "${DEVOS_RESUME:-0}" = "1" ]; then
     cp -r "${DEVOS_SRC}/components/." "${MNT}/usr/local/share/devos/components/" || true
     chmod 755 "${MNT}/usr/local/sbin/"* 2>/dev/null || true
     chmod 755 "${MNT}/usr/local/bin/"* 2>/dev/null || true
+    chmod 755 "${MNT}/usr/share/xsessions/"*.desktop 2>/dev/null || true
+    chmod 755 "${MNT}/usr/share/wayland-sessions/"*.desktop 2>/dev/null || true
     chmod 755 "${MNT}/etc/skel/Desktop/"*.desktop 2>/dev/null || true
     chmod 755 "${MNT}/etc/xdg/autostart/"*.desktop 2>/dev/null || true
     chmod 644 "${MNT}/usr/share/applications/"*.desktop 2>/dev/null || true
+    # Purge Ubuntu installer autostart and packages
+    mount --bind /dev "${MNT}/dev" 2>/dev/null || true
+    mount --bind /dev/pts "${MNT}/dev/pts" 2>/dev/null || true
+    mount -t proc proc "${MNT}/proc" 2>/dev/null || true
+    mount -t sysfs sysfs "${MNT}/sys" 2>/dev/null || true
+    chroot "${MNT}" env DEBIAN_FRONTEND=noninteractive apt-get purge -y ubuntu-desktop-bootstrap ubuntu-desktop-installer ubiquity ubiquity-frontend-gtk gnome-initial-setup subiquity subiquity-server curtin >/dev/null 2>&1 || true
+    chroot "${MNT}" systemctl mask ubuntu-desktop-bootstrap.service subiquity.service 2>/dev/null || true
+    unmount_vfs
+
+    rm -f \
+        "${MNT}/etc/xdg/autostart/ubuntu-desktop-bootstrap.desktop" \
+        "${MNT}/etc/xdg/autostart/ubiquity.desktop" \
+        "${MNT}/etc/xdg/autostart/org.gnome.InitialSetup.desktop" \
+        "${MNT}/usr/share/applications/ubuntu-desktop-bootstrap.desktop" \
+        "${MNT}/var/lib/snapd/desktop/applications/ubuntu-desktop-bootstrap.desktop" 2>/dev/null || true
+    mkdir -p "${MNT}/etc/systemd/system/sddm.service.wants" "${MNT}/etc/systemd/system/multi-user.target.wants"
+    ln -sfn /etc/systemd/system/devos-force-installer.service \
+        "${MNT}/etc/systemd/system/sddm.service.wants/devos-force-installer.service"
+    ln -sfn /etc/systemd/system/devos-force-installer.service \
+        "${MNT}/etc/systemd/system/multi-user.target.wants/devos-force-installer.service"
     rm -rf "${MNT}/home/devos"
 else
 
@@ -167,11 +189,41 @@ if [ -f "${MNT}/usr/local/sbin/devos-install-chrome" ]; then
     chroot "${MNT}" /bin/bash /usr/local/sbin/devos-install-chrome || true
 fi
 
+# Execute chroot optimization & security hooks
+echo "==> Executing chroot optimization hooks..."
+for hook in "${DEVOS_SRC}/build/hooks/"*.hook.chroot; do
+    if [ -f "$hook" ]; then
+        echo "  Running hook: $(basename "$hook")"
+        cp "$hook" "${MNT}/tmp/run_hook.sh"
+        chmod +x "${MNT}/tmp/run_hook.sh"
+        chroot "${MNT}" /tmp/run_hook.sh || true
+        rm -f "${MNT}/tmp/run_hook.sh"
+    fi
+done
+
 # Desktop icons stay in the skeleton. Do not leave a root-owned /home/devos.
 mkdir -p "${MNT}/etc/skel/Desktop"
 rm -rf "${MNT}/home/devos"
 chmod 755 "${MNT}/etc/skel/Desktop/"*.desktop 2>/dev/null || true
 chmod 755 "${MNT}/etc/xdg/autostart/"*.desktop 2>/dev/null || true
+chmod 755 "${MNT}/usr/local/sbin/"* 2>/dev/null || true
+chmod 755 "${MNT}/usr/local/bin/"* 2>/dev/null || true
+chmod 755 "${MNT}/usr/share/xsessions/"*.desktop 2>/dev/null || true
+chmod 755 "${MNT}/usr/share/wayland-sessions/"*.desktop 2>/dev/null || true
+
+# Eradicate Ubuntu installer autostarts
+rm -f \
+    "${MNT}/etc/xdg/autostart/ubuntu-desktop-bootstrap.desktop" \
+    "${MNT}/etc/xdg/autostart/ubiquity.desktop" \
+    "${MNT}/etc/xdg/autostart/org.gnome.InitialSetup.desktop" \
+    "${MNT}/usr/share/applications/ubuntu-desktop-bootstrap.desktop" \
+    "${MNT}/var/lib/snapd/desktop/applications/ubuntu-desktop-bootstrap.desktop" 2>/dev/null || true
+
+mkdir -p "${MNT}/etc/systemd/system/sddm.service.wants" "${MNT}/etc/systemd/system/multi-user.target.wants"
+ln -sfn /etc/systemd/system/devos-force-installer.service \
+    "${MNT}/etc/systemd/system/sddm.service.wants/devos-force-installer.service"
+ln -sfn /etc/systemd/system/devos-force-installer.service \
+    "${MNT}/etc/systemd/system/multi-user.target.wants/devos-force-installer.service"
 
 # Extract manifest
 echo "==> Generating package manifest..."
@@ -329,7 +381,8 @@ rm -f "${STAGE_DIR}/boot.catalog"
 
 # 11. Master final hybrid bootable ISO with xorriso
 echo "==> Step 11: Assembling final hybrid BIOS+UEFI ISO..."
-rm -f "${OUTPUT_ISO}"
+LOCAL_ISO="/tmp/devos-24.04-amd64.iso"
+rm -f "${LOCAL_ISO}" "${OUTPUT_ISO}"
 xorriso -as mkisofs \
     -r -V "DEVOS_2404" \
     -J -joliet-long \
@@ -338,8 +391,14 @@ xorriso -as mkisofs \
     -e boot/grub/efi.img \
     -no-emul-boot \
     -isohybrid-gpt-basdat \
-    -output "${OUTPUT_ISO}" \
+    -output "${LOCAL_ISO}" \
     "${STAGE_DIR}"
+
+echo "==> Moving generated ISO to destination ${OUTPUT_ISO}..."
+rm -f "${OUTPUT_ISO}"
+cat "${LOCAL_ISO}" > "${OUTPUT_ISO}"
+sync
+rm -f "${LOCAL_ISO}"
 
 # 12. Cleanup temporary directories
 rm -rf "${TMP_DIR}"

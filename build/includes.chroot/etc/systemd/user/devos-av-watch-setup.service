@@ -1,0 +1,11 @@
+[Unit]
+Description=DevOS Security: find this user's download folders
+ConditionPathExists=/usr/bin/clamscan
+Before=devos-av-watch.path
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/devos-security av watch-setup
+
+[Install]
+WantedBy=default.target

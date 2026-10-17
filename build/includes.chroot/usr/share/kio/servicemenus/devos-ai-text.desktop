@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Service
+ServiceTypes=KonqPopupMenu/Plugin
+MimeType=text/plain;text/markdown;
+Actions=SummarizeWithDevOSAI;
+X-KDE-Priority=TopLevel
+
+[Desktop Action SummarizeWithDevOSAI]
+Name=Summarize with DevOS AI
+Icon=tools-wizard
+Exec=/usr/bin/python3 /usr/local/share/devos/components/aiactions/aiactions.py --file %f --action summarize

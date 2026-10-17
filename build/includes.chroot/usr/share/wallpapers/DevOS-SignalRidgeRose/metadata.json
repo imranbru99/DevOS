@@ -1,0 +1,12 @@
+{
+    "KPlugin": {
+        "Id": "DevOS-SignalRidgeRose",
+        "Name": "Signal Ridge Rose",
+        "Authors": [
+            {
+                "Name": "DevOS"
+            }
+        ],
+        "License": "CC-BY-SA-4.0"
+    }
+}

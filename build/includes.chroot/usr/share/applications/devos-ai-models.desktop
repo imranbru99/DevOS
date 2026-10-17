@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=DevOS AI Models
+GenericName=Choose your AI model
+Comment=Pick a bigger or smaller DevOS AI for this PC and share the local AI API
+Exec=/usr/bin/python3 /usr/local/share/devos/components/ai-core/models_gui.py
+Icon=applications-science
+Terminal=false
+Categories=System;Settings;
+Keywords=ai;model;llm;api;openai;qwen;download;
+StartupNotify=false

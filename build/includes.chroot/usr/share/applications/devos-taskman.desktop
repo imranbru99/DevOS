@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Task Manager
+GenericName=Processes and performance
+Comment=See running apps, performance, startup programs and services
+Exec=/usr/local/bin/devos-taskman
+Icon=utilities-system-monitor
+Terminal=false
+Categories=System;Monitor;
+Keywords=task;manager;process;cpu;memory;startup;services;performance;ctrl+shift+esc;
+StartupNotify=true

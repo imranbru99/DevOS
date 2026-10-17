@@ -1,0 +1,13 @@
+[Unit]
+Description=DevOS Security: update ClamAV virus signatures (PCs under 8 GB RAM)
+Documentation=man:freshclam(1)
+ConditionPathExists=/usr/bin/freshclam
+ConditionPathExists=!/etc/cron.d/clamav-freshclam
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/devos-security av update --scheduled
+Nice=19
+IOSchedulingClass=idle

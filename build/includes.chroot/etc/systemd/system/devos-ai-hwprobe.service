@@ -1,0 +1,12 @@
+[Unit]
+Description=Measure this PC for the installer's DevOS AI page
+# Only the live USB has the installer; the probe takes well under a second.
+ConditionPathIsDirectory=/etc/calamares/branding/devos
+Before=display-manager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/devos-ai-hwprobe
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=DevOS Code Agent setup
+Comment=Shows DevOS Code Agent and sets up VS Code agent mode when this PC's AI can code
+Exec=/usr/bin/python3 /usr/local/share/devos/components/code-agent/configure_editors.py --quiet
+Terminal=false
+NoDisplay=true
+X-KDE-autostart-phase=2
+X-GNOME-Autostart-enabled=true

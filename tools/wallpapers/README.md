@@ -1,7 +1,9 @@
 # DevOS wallpapers
 
-`make_wallpapers.py` procedurally renders the 20 DevOS premium wallpapers
-(numpy + Pillow only, fixed seeds, so the output is reproducible).
+`make_wallpapers.py` procedurally renders 80 DevOS premium wallpapers
+(20 designs, each in four palettes). numpy + Pillow only, fixed seeds, so the
+output is reproducible. The desktop shows one and changes to another every
+12 hours.
 
 Each design is rendered at 3840x2160 (a few soft designs at 1920x1080 and
 upscaled), tone-mapped, vignetted, dithered with light film grain and saved as

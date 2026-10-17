@@ -8,7 +8,7 @@ import sys
 os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
 
 from PyQt5.QtCore import Qt, QTimer, QRectF
-from PyQt5.QtGui import QColor, QFont, QLinearGradient, QPainter, QPen
+from PyQt5.QtGui import QColor, QFont, QLinearGradient, QPainter, QPixmap
 from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QVBoxLayout, QWidget
 
 
@@ -21,11 +21,54 @@ PHASES = (
 
 
 def display():
-    return os.environ.get("DISPLAY", ":0")
+    d = os.environ.get("DISPLAY", "")
+    if d:
+        return d
+    if os.path.exists("/tmp/.X11-unix/X0"):
+        return ":0"
+    if os.path.exists("/tmp/.X11-unix/X1"):
+        return ":1"
+    return ":0"
 
 
 def xauthority():
-    return os.environ.get("XAUTHORITY", "")
+    xauth = os.environ.get("XAUTHORITY", "")
+    if xauth and os.path.exists(xauth):
+        return xauth
+    home_xauth = os.path.expanduser("~/.Xauthority")
+    if os.path.exists(home_xauth):
+        return home_xauth
+    runtime_dir = os.environ.get("XDG_RUNTIME_DIR", "")
+    if runtime_dir and os.path.isdir(runtime_dir):
+        try:
+            for fname in os.listdir(runtime_dir):
+                if fname.startswith("xauth"):
+                    full = os.path.join(runtime_dir, fname)
+                    if os.path.isfile(full):
+                        return full
+        except OSError:
+            pass
+    return ""
+
+
+class Bar(QWidget):
+    """Short centered progress line. Its position comes from the layout."""
+
+    def __init__(self, owner):
+        super().__init__()
+        self.owner = owner
+        self.setFixedSize(280, 8)
+
+    def paintEvent(self, _event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor("#1e293b"))
+        painter.drawRoundedRect(QRectF(0, 2, 280, 4), 2, 2)
+        travel = (self.owner.phase * 140) % 220
+        painter.setBrush(QColor("#38bdf8"))
+        painter.drawRoundedRect(QRectF(max(0, travel - 70), 2, 70, 4), 2, 2)
+        painter.end()
 
 
 class Starter(QWidget):
@@ -38,17 +81,38 @@ class Starter(QWidget):
         self.kwin = None
         self.alive_for = 0
         self.failed = False
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        # Override-redirect so the window manager cannot park this window
+        # in a corner. The word then stays in the middle of the screen.
+        self.setWindowFlags(
+            Qt.FramelessWindowHint
+            | Qt.WindowStaysOnTopHint
+            | Qt.X11BypassWindowManagerHint
+        )
         self.setStyleSheet("background: #070910;")
+
+        logo = QLabel()
+        logo.setAlignment(Qt.AlignCenter)
+        logo.setStyleSheet("background: transparent;")
+        pixmap = QPixmap("/usr/share/pixmaps/devos-logo.png")
+        if not pixmap.isNull():
+            logo.setPixmap(pixmap.scaled(132, 132, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+
+        title = QLabel("DevOS")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet(
+            "color: #f8fafc; background: transparent; font-size: 52px; font-weight: 700;"
+        )
 
         self.status = QLabel(PHASES[0])
         self.status.setAlignment(Qt.AlignCenter)
-        self.status.setStyleSheet("color: #7dd3fc; background: transparent; font-size: 22px;")
+        self.status.setStyleSheet("color: #7dd3fc; background: transparent; font-size: 20px;")
 
-        self.detail = QLabel("The installer opens on this screen. The pointer alone is not the installer.")
+        self.detail = QLabel("The installer opens on this screen.")
         self.detail.setAlignment(Qt.AlignCenter)
         self.detail.setWordWrap(True)
         self.detail.setStyleSheet("color: #94a3b8; background: transparent; font-size: 16px;")
+
+        self.bar = Bar(self)
 
         self.log = QLabel("")
         self.log.setAlignment(Qt.AlignLeft | Qt.AlignTop)
@@ -70,17 +134,22 @@ class Starter(QWidget):
         self.retry.clicked.connect(self.launch_installer)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(80, 0, 80, 80)
-        layout.addStretch(3)
-        layout.addSpacing(220)
+        layout.setContentsMargins(48, 0, 48, 0)
+        layout.addStretch(1)
+        layout.addWidget(logo)
+        layout.addSpacing(18)
+        layout.addWidget(title)
+        layout.addSpacing(10)
         layout.addWidget(self.status)
-        layout.addSpacing(8)
+        layout.addSpacing(6)
         layout.addWidget(self.detail)
+        layout.addSpacing(22)
+        layout.addWidget(self.bar, alignment=Qt.AlignHCenter)
         layout.addSpacing(18)
         layout.addWidget(self.log)
         layout.addSpacing(16)
         layout.addWidget(self.retry, alignment=Qt.AlignHCenter)
-        layout.addStretch(2)
+        layout.addStretch(1)
 
         self.clock = QTimer(self)
         self.clock.timeout.connect(self.tick)
@@ -128,17 +197,19 @@ class Starter(QWidget):
         if os.geteuid() == 0:
             cmd = ["calamares"]
         else:
-            cmd = [
-                "sudo", "-n",
-                "DISPLAY=" + display(),
-                "XAUTHORITY=" + xauthority(),
+            cmd = ["sudo", "-E", "-n"]
+            if display():
+                cmd.append("DISPLAY=" + display())
+            if xauthority():
+                cmd.append("XAUTHORITY=" + xauthority())
+            cmd.extend([
                 "QT_QPA_PLATFORM=xcb",
                 # KDE palette (DevOS colours from /etc/xdg/kdeglobals): the
                 # partition legend is drawn with it, not with stylesheet.qss.
                 "QT_QPA_PLATFORMTHEME=kde",
                 "QT_STYLE_OVERRIDE=Fusion",
                 "calamares",
-            ]
+            ])
         try:
             self.proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, env=env)
         except OSError as exc:
@@ -200,52 +271,25 @@ class Starter(QWidget):
             else:
                 QApplication.instance().quit()
         if self.isVisible():
+            self.cover()
             self.update()
+
+    def cover(self):
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            return
+        geo = screen.geometry()
+        if self.geometry() != geo:
+            self.setGeometry(geo)
 
     def paintEvent(self, _event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
         rect = self.rect()
-        shift = (self.phase * 40) % max(rect.width(), 1)
         gradient = QLinearGradient(0, 0, rect.width(), rect.height())
         gradient.setColorAt(0.0, QColor("#070910"))
         gradient.setColorAt(0.55, QColor("#10182c"))
         gradient.setColorAt(1.0, QColor("#160f28"))
         painter.fillRect(rect, gradient)
-
-        painter.setPen(Qt.NoPen)
-        for index, color in enumerate(("#22d3ee", "#818cf8", "#38bdf8")):
-            span = 180 + index * 70
-            x = (shift * (1.2 + index * 0.35) + index * 220) % (rect.width() + span) - span
-            y = rect.height() * (0.28 + index * 0.16)
-            glow = QColor(color)
-            glow.setAlpha(46)
-            painter.setBrush(glow)
-            painter.drawRoundedRect(QRectF(x, y, span, 10), 5, 5)
-
-        painter.setPen(QColor("#38bdf8"))
-        label = QFont("Inter", 14)
-        label.setBold(True)
-        label.setLetterSpacing(QFont.AbsoluteSpacing, 6)
-        painter.setFont(label)
-        painter.drawText(QRectF(0, rect.height() * 0.34, rect.width(), 28), Qt.AlignCenter, "INSTALL")
-
-        word = QFont("Inter", 64)
-        word.setBold(True)
-        painter.setFont(word)
-        painter.setPen(QColor("#f8fafc"))
-        painter.drawText(QRectF(0, rect.height() * 0.34 + 36, rect.width(), 90), Qt.AlignCenter, "DevOS")
-
-        track = QRectF(rect.width() / 2 - 180, rect.height() * 0.34 + 250, 360, 8)
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor("#1e293b"))
-        painter.drawRoundedRect(track, 4, 4)
-        travel = (self.phase * 140) % 280
-        painter.setBrush(QColor("#38bdf8"))
-        painter.drawRoundedRect(QRectF(track.x() + max(0, travel - 90), track.y(), 90, 8), 4, 4)
-        painter.setPen(QPen(QColor(56, 189, 248, 90), 1))
-        painter.setBrush(Qt.NoBrush)
-        painter.drawRoundedRect(track.adjusted(-6, -10, 6, 10), 8, 8)
         painter.end()
 
 
@@ -253,7 +297,8 @@ def main():
     app = QApplication(sys.argv)
     app.setFont(QFont("Inter", 12))
     window = Starter()
-    window.showFullScreen()
+    window.cover()
+    window.show()
     window.raise_()
     return app.exec_()
 

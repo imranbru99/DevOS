@@ -1,0 +1,27 @@
+#!/bin/bash
+# DevOS: a critically low battery puts the PC to sleep.
+# UPower's packaged default is HybridSleep. DevOS has no disk swap, so
+# hibernate is unavailable and UPower would power the PC off. Sleep keeps
+# open documents in memory until a person plugs in and wakes the PC.
+set -euo pipefail
+
+conf=/etc/UPower/UPower.conf
+[ -f "$conf" ] || exit 0
+
+set_key() {
+    local key="$1" value="$2"
+    if grep -qE "^${key}=" "$conf"; then
+        sed -i "s/^${key}=.*/${key}=${value}/" "$conf"
+    else
+        printf '%s=%s\n' "$key" "$value" >> "$conf"
+    fi
+}
+
+before=$(md5sum "$conf")
+set_key AllowRiskyCriticalPowerAction true
+set_key CriticalPowerAction Suspend
+after=$(md5sum "$conf")
+
+if [ "$before" != "$after" ] && command -v systemctl >/dev/null 2>&1; then
+    systemctl try-restart upower.service >/dev/null 2>&1 || true
+fi

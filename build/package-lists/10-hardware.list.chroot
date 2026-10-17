@@ -50,6 +50,10 @@ alsa-utils
 # 7. Printing & Scanning (Driverless IPP Everywhere + Legacy)
 cups
 cups-client
+cups-browsed
 cups-ipp-utils
 ipp-usb
+avahi-daemon
 sane-utils
+fprintd
+libpam-fprintd

@@ -1,0 +1,9 @@
+[Unit]
+Description=Record DevOS Task Manager app history
+Documentation=file:///usr/local/share/devos/components/taskman/taskman.py
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/share/devos/components/taskman/taskman.py --sample
+Nice=19
+IOSchedulingClass=idle

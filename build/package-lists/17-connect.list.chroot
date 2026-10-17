@@ -1,0 +1,30 @@
+# Phone, sharing and cloud backup (all small; features are off until turned on).
+# Phone Link: QR code for pairing, clipboard fallback, native phone app support.
+python3-qrcode
+xclip
+kdeconnect
+# DevOS Share: SSH tunnel (localhost.run) and UPnP for "Direct (my IP)".
+# cloudflared is downloaded on first use, not shipped.
+openssh-client
+miniupnpc
+# Cloud Backup: Google Drive / OneDrive.
+rclone
+xdg-user-dirs
+# DevOS app windows: its own tools open in a native window, not a browser tab.
+# (Qt5 WebEngine itself is already on the ISO through Falkon.)
+python3-pyqt5.qtwebengine
+# Family Safety: blocks DNS/DoH bypass while it is on (off by default).
+nftables
+# Emoji: DevOS apps, websites and chats showed empty boxes for icons.
+fonts-noto-color-emoji
+# DevOS Security: virus scanning (signatures download on first boot), clamd for
+# 8 GB+ PCs, firewall, automatic security updates, sandbox status.
+clamav
+clamav-base
+clamav-freshclam
+clamav-daemon
+clamdscan
+ufw
+plasma-firewall
+unattended-upgrades
+apparmor

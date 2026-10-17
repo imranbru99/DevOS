@@ -1,0 +1,6 @@
+[General]
+# After a restart or shutdown, open the same applications and documents again.
+loginMode=restorePreviousLogout
+# These apps restore their own tabs and files. Listing them here keeps
+# Plasma from opening a second empty copy.
+excludeApps=google-chrome,google-chrome-stable,chrome,firefox,firefox-bin,microsoft-edge,msedge,brave,brave-browser,chromium,chromium-browser,code,codium,code-oss

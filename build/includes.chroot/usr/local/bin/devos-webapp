@@ -1,0 +1,4 @@
+#!/bin/sh
+# DevOS app window: open a DevOS web tool (Dashboard, chat, ...) in its own
+# native window instead of a browser tab. See devos_webapp.py --help.
+exec /usr/bin/python3 /usr/local/share/devos/components/appwindow/devos_webapp.py "$@"

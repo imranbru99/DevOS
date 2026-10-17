@@ -11,4 +11,4 @@ ExecStart=/bin/bash /usr/local/sbin/devos-force-installer-session
 RemainAfterExit=yes
 
 [Install]
-WantedBy=sddm.service
+WantedBy=sddm.service multi-user.target

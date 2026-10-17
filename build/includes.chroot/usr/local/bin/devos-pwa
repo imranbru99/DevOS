@@ -1,0 +1,84 @@
+#!/bin/bash
+# Open a vendor web app (Windows App, Microsoft 365, Outlook...) as a real
+# installed app, like "Install app" in Edge on Windows.
+#
+#   devos-pwa URL ["Name|Other name"] [devos-web-<id>.desktop]
+#
+# DevOS Features lists the URL in Chrome's WebAppInstallForceList policy, so
+# Chrome installs the app itself, with the vendor's icon and its own launcher
+# (~/.local/share/applications/chrome-<app id>-Default.desktop).
+# Connecting a Cloud PC is window.open() of /webclient/ on the same site.
+# That stays inside Windows App only when this launches the installed app
+# (--app-id). A plain --app= window sends the Cloud PC to a Chrome tab.
+# The Chrome launcher itself keeps the new window in the app.
+url="${1:?usage: devos-pwa URL [NAMES] [DESKTOP]}"
+names="${2:-}"
+ours="${3:-}"
+apps="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+# --no-first-run: a fresh profile must not stop on Chrome's welcome screens.
+# DEVOS_PWA_CHROME_FLAGS: extra flags (container tests need --no-sandbox).
+read -ra extra <<< "--no-first-run ${DEVOS_PWA_CHROME_FLAGS:-}"
+
+chrome=""
+for b in google-chrome-stable google-chrome; do
+    command -v "$b" >/dev/null 2>&1 && { chrome="$b"; break; }
+done
+
+installed_id() {
+    [ -n "$names" ] || return 1
+    local f n
+    for f in "$apps"/chrome-*-Default.desktop; do
+        [ -f "$f" ] || continue
+        n="$(sed -n 's/^Name=//p' "$f" | head -n 1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+        n="$(printf '%s' "$n" | tr '[:upper:]' '[:lower:]')"
+        IFS='|' read -ra wanted <<< "$names"
+        for w in "${wanted[@]}"; do
+            w="$(printf '%s' "$w" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr '[:upper:]' '[:lower:]')"
+            if [ -n "$w" ] && [ "$n" = "$w" ]; then
+                basename "$f" | sed -E 's/^chrome-([a-p]{32})-Default\.desktop$/\1/'
+                return 0
+            fi
+        done
+    done
+    return 1
+}
+
+open_app() {
+    # Chrome's own launcher has the real icon: hide the DevOS first-launch
+    # entry for this user so the menu shows the app once.
+    if [ -n "$ours" ] && [ ! -e "$apps/$ours" ]; then
+        mkdir -p "$apps"
+        printf '[Desktop Entry]\nType=Application\nHidden=true\nX-DevOS-Hidden=true\n' > "$apps/$ours"
+        (kbuildsycoca5 >/dev/null 2>&1 &)
+    fi
+    exec "$chrome" "${extra[@]}" --profile-directory=Default --app-id="$1"
+}
+
+if [ -n "$chrome" ]; then
+    if id="$(installed_id)"; then
+        open_app "$id"
+    fi
+    # First launch: Chrome installs policy apps only while it has a real
+    # window open (headless or --no-startup-window never did), which takes
+    # about 6 s. Show a small DevOS "setting up" window meanwhile, then open
+    # the installed app and close the setup window.
+    title="Setting up ${names%%|*}"
+    page="file:///usr/local/share/devos/pwa-setup.html#$(printf '%s' "${names%%|*}" | sed 's/ /%20/g')"
+    "$chrome" "${extra[@]}" --profile-directory=Default --app="$page" --window-size=460,300 >/dev/null 2>&1 &
+    for _ in $(seq 1 60); do
+        sleep 0.5
+        if id="$(installed_id)"; then
+            (sleep 2; command -v wmctrl >/dev/null 2>&1 && wmctrl -c "$title") &
+            open_app "$id"
+        fi
+    done
+    command -v wmctrl >/dev/null 2>&1 && wmctrl -c "$title"
+    exec "$chrome" "${extra[@]}" --app="$url"
+fi
+
+for f in com.google.Chrome com.microsoft.Edge com.brave.Browser org.chromium.Chromium; do
+    if flatpak info "$f" >/dev/null 2>&1; then
+        exec flatpak run "$f" --app="$url"
+    fi
+done
+exec xdg-open "$url"

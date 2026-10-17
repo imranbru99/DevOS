@@ -1,0 +1,5 @@
+#!/bin/bash
+# DevOS Security: virus, web, firewall, updates and disk protection in one
+# window. Root subcommands run through pkexec. See
+# components/security/security_center.py.
+exec /usr/bin/python3 /usr/local/share/devos/components/security/security_center.py "$@"

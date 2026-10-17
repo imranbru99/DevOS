@@ -1,0 +1,11 @@
+[Unit]
+Description=DevOS Security: quarantine requests from user scans
+
+[Path]
+# The per-user watcher cannot write to /var/lib/DevOS/quarantine. It locks the
+# file away in ~/.local/share/devos-security/pending (mode 000) and drops a
+# request here; the service checks it before moving the file.
+PathExistsGlob=/run/devos-security/inbox/*.json
+
+[Install]
+WantedBy=multi-user.target

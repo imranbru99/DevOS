@@ -1,0 +1,3 @@
+*.bin binary
+*.crx binary
+*.pem text eol=lf

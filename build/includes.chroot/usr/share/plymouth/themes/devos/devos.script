@@ -1,38 +1,88 @@
-# Animated DevOS boot splash. Drawn by Plymouth before the desktop exists.
-Window.SetBackgroundTopColor(0.027, 0.035, 0.063);
-Window.SetBackgroundBottomColor(0.055, 0.090, 0.160);
+# DevOS boot splash.
+# The screen size is 0 when this file is first read, and it changes again
+# when the display mode switches. Every frame places the logo and the word
+# from the live size. Measuring once leaves "DevOS" on the left.
+Window.SetBackgroundTopColor(0.027, 0.039, 0.071);
+Window.SetBackgroundBottomColor(0.027, 0.039, 0.071);
 
-title_image = Image.Text("DevOS", 0.973, 0.980, 0.996, 1.0);
-title_sprite = Sprite(title_image);
-title_sprite.SetX(Window.GetWidth() / 2 - title_image.GetWidth() / 2);
-title_sprite.SetY(Window.GetHeight() * 0.40);
-title_sprite.SetZ(30);
+logo.image = Image("logo.png").Scale(148, 148);
+logo.sprite = Sprite(logo.image);
+logo.sprite.SetZ(20);
 
-status_image = Image.Text("Starting the installer", 0.220, 0.741, 0.973, 1.0);
-status_sprite = Sprite(status_image);
-status_sprite.SetX(Window.GetWidth() / 2 - status_image.GetWidth() / 2);
-status_sprite.SetY(Window.GetHeight() * 0.40 + title_image.GetHeight() + 36);
-status_sprite.SetZ(30);
+title.image = Image.Text("DevOS", 0.973, 0.980, 0.996, 1.0, "Ubuntu 32", "center");
+title.sprite = Sprite(title.image);
+title.sprite.SetZ(30);
 
-mark_image = Image.Text("======", 0.220, 0.741, 0.973, 1.0);
-mark_sprite = Sprite(mark_image);
-mark_sprite.SetZ(30);
+status.image = Image.Text("Welcome", 0.490, 0.827, 0.988, 1.0, "Ubuntu 16", "center");
+status.sprite = Sprite(status.image);
+status.sprite.SetZ(30);
 
-track_image = Image.Text("------------------------------", 0.180, 0.220, 0.300, 1.0);
-track_sprite = Sprite(track_image);
-track_x = Window.GetWidth() / 2 - track_image.GetWidth() / 2;
-track_y = Window.GetHeight() * 0.40 + title_image.GetHeight() + 88;
-track_sprite.SetX(track_x);
-track_sprite.SetY(track_y);
-track_sprite.SetZ(20);
+track.image = Image("track.png");
+track.sprite = Sprite(track.image);
+track.sprite.SetZ(15);
+
+thumb.image = Image("thumb.png");
+thumb.sprite = Sprite(thumb.image);
+thumb.sprite.SetZ(16);
 
 boot_progress = 0;
 last_phrase = -1;
 
 fun set_status(text) {
-    image = Image.Text(text, 0.220, 0.741, 0.973, 1.0);
-    status_sprite.SetImage(image);
-    status_sprite.SetX(Window.GetWidth() / 2 - image.GetWidth() / 2);
+    global.status.image = Image.Text(text, 0.490, 0.827, 0.988, 1.0, "Ubuntu 16", "center");
+    status.sprite.SetImage(status.image);
+}
+
+fun place() {
+    screen_w = Window.GetWidth();
+    screen_h = Window.GetHeight();
+    if (screen_w < 64 || screen_h < 64)
+        return;
+
+    logo_w = logo.image.GetWidth();
+    logo_h = logo.image.GetHeight();
+    title_w = title.image.GetWidth();
+    title_h = title.image.GetHeight();
+    status_w = status.image.GetWidth();
+    status_h = status.image.GetHeight();
+    track_w = track.image.GetWidth();
+    thumb_w = thumb.image.GetWidth();
+    if (logo_w < 2) logo_w = 148;
+    if (logo_h < 2) logo_h = 148;
+    if (title_w < 2) title_w = 160;
+    if (title_h < 2) title_h = 40;
+    if (status_w < 2) status_w = 180;
+    if (status_h < 2) status_h = 20;
+    if (track_w < 2) track_w = 280;
+    if (thumb_w < 2) thumb_w = 72;
+
+    block = logo_h + 20 + title_h + 12 + status_h + 22 + 4;
+    top = Window.GetY() + screen_h / 2 - block / 2;
+    mid = Window.GetX() + screen_w / 2;
+
+    logo.sprite.SetX(mid - logo_w / 2);
+    logo.sprite.SetY(top);
+
+    title_y = top + logo_h + 20;
+    title.sprite.SetX(mid - title_w / 2);
+    title.sprite.SetY(title_y);
+
+    status_y = title_y + title_h + 12;
+    status.sprite.SetX(mid - status_w / 2);
+    status.sprite.SetY(status_y);
+
+    track_x = mid - track_w / 2;
+    track_y = status_y + status_h + 22;
+    track.sprite.SetX(track_x);
+    track.sprite.SetY(track_y);
+
+    span = track_w - thumb_w;
+    if (span < 1)
+        span = 1;
+    travel = Math.Int(Plymouth.GetTime() * 80);
+    offset = travel - (Math.Int(travel / span) * span);
+    thumb.sprite.SetX(track_x + offset);
+    thumb.sprite.SetY(track_y);
 }
 
 fun boot_progress_callback(duration, progress) {
@@ -40,33 +90,29 @@ fun boot_progress_callback(duration, progress) {
         progress = 0;
     if (progress > 1)
         progress = 1;
-    boot_progress = progress;
+    global.boot_progress = progress;
 }
 
 fun refresh_callback() {
     now = Plymouth.GetTime();
-    phrase = Math.Int(now / 2.2);
+    phrase = Math.Int(now / 2.4);
     if (phrase != last_phrase) {
-        last_phrase = phrase;
-        step = phrase - (Math.Int(phrase / 3) * 3);
-        if (boot_progress > 0.72)
-            set_status("Opening disk setup");
+        global.last_phrase = phrase;
+        # Friendly words for every boot (live USB and installed PC).
+        # Do not mention the installer here — after install that feels wrong.
+        step = phrase - (Math.Int(phrase / 4) * 4);
+        if (boot_progress > 0.78)
+            set_status("Almost there");
         else if (step == 0)
-            set_status("Starting DevOS");
+            set_status("Welcome");
         else if (step == 1)
-            set_status("Loading the installer");
+            set_status("Starting DevOS");
+        else if (step == 2)
+            set_status("Getting your desktop ready");
         else
-            set_status("Preparing the display");
+            set_status("Just a moment");
     }
-    wave = (Math.Sin(now * 2.2) + 1) / 2;
-    title_sprite.SetOpacity(0.78 + (0.22 * wave));
-    span = track_image.GetWidth() - mark_image.GetWidth();
-    if (span < 1)
-        span = 1;
-    travel = Math.Int(now * 70);
-    offset = travel - (Math.Int(travel / span) * span);
-    mark_sprite.SetX(track_x + offset);
-    mark_sprite.SetY(track_y - 2);
+    place();
 }
 
 Plymouth.SetBootProgressFunction(boot_progress_callback);

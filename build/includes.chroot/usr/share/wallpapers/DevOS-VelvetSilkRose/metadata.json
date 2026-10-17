@@ -1,0 +1,12 @@
+{
+    "KPlugin": {
+        "Id": "DevOS-VelvetSilkRose",
+        "Name": "Velvet Silk Rose",
+        "Authors": [
+            {
+                "Name": "DevOS"
+            }
+        ],
+        "License": "CC-BY-SA-4.0"
+    }
+}

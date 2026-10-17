@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=DevOS Session Restore
+Comment=Open the same applications again after a restart or shutdown
+Exec=/usr/local/bin/devos-session watch
+Icon=system-restart
+Terminal=false
+OnlyShowIn=KDE;
+X-KDE-autostart-phase=2
+X-GNOME-Autostart-enabled=true
+StartupNotify=false
+X-KDE-StartupNotify=false

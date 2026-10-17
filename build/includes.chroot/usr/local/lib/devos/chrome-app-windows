@@ -1,0 +1,40 @@
+#!/bin/bash
+# DEVOS-APP-WINDOWS
+# Connecting a Cloud PC is window.open() inside Windows App. Chrome opens that
+# as a browser tab unless this is on in the Chrome process that is already
+# running, so every launch of Chrome comes through here.
+set -u
+
+here="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+real="$here/google-chrome.devos-real"
+if [ ! -x "$real" ]; then
+    echo "DevOS: Chrome's own launcher is missing ($real)." >&2
+    exit 1
+fi
+
+feature="PwaNavigationCapturing:aux_context_keep_same_container/true"
+args=()
+extra=""
+for a in "$@"; do
+    case "$a" in
+        --enable-features=*)
+            piece="${a#--enable-features=}"
+            if [ -n "$extra" ]; then
+                extra="$extra,$piece"
+            else
+                extra="$piece"
+            fi
+            ;;
+        *)
+            args+=("$a")
+            ;;
+    esac
+done
+if [ -n "$extra" ]; then
+    feature="$feature,$extra"
+fi
+
+if [ "${#args[@]}" -eq 0 ]; then
+    exec "$real" "--enable-features=$feature"
+fi
+exec "$real" "${args[@]}" "--enable-features=$feature"

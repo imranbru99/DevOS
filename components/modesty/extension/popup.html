@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Modesty filter</title>
+<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <h1>Modesty filter</h1>
+  <p id="lock" class="lock" hidden>Locked by DevOS. It stays on; you can only make it stricter.</p>
+  <label class="row" id="enabledRow">
+    <span>Filter on</span>
+    <input type="checkbox" id="enabled">
+  </label>
+  <label class="row">
+    <span>Blur</span>
+    <select id="mode">
+      <option value="women">Women</option>
+      <option value="people">All people</option>
+    </select>
+  </label>
+  <div class="counts">
+    <div><strong id="tabCount">0</strong><span>blurred on this page</span></div>
+    <div><strong id="total">0</strong><span>blurred in total</span></div>
+  </div>
+  <p class="note">Checked on this PC only. No picture leaves your computer.
+     Face detection is not perfect: some pictures can be missed or blurred by mistake.</p>
+  <script src="rules.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

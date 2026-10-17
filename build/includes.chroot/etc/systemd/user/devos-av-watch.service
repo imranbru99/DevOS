@@ -1,0 +1,11 @@
+[Unit]
+Description=DevOS Security: scan new downloads with ClamAV
+ConditionPathExists=/usr/bin/clamscan
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/devos-security av watch-run
+Nice=19
+IOSchedulingClass=idle
+# Keep the "threat removed" notification alive after the scan exits.
+KillMode=process

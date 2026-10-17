@@ -36,7 +36,7 @@ class WinLayerManager:
     def get_prefix_dir(self, app_name: str) -> str:
         return os.path.join(PREFIXES_ROOT, self.sanitize_name(app_name))
 
-    def launch(self, executable_path: str, app_name: str = None) -> Dict[str, Any]:
+    def launch(self, executable_path: str, app_name: str = None, force: bool = False) -> Dict[str, Any]:
         """Runs a Windows executable inside its dedicated prefix with desktop integration."""
         abs_exe = os.path.abspath(os.path.expanduser(executable_path))
         if not os.path.exists(abs_exe):
@@ -46,6 +46,14 @@ class WinLayerManager:
         analysis = WinLayerDoctor.analyze_pe(abs_exe)
         if not analysis.get("is_pe", False):
             return {"status": "ERROR", "error": f"File '{abs_exe}' is not a valid Windows PE binary."}
+        if analysis.get("anti_cheat_flagged") and not force:
+            return {
+                "status": "USE_VM",
+                "compatibility": analysis.get("compatibility_rating"),
+                "recommendation": analysis.get("recommendation"),
+                "native_alternative": analysis.get("native_alternative"),
+                "message": analysis.get("recommendation"),
+            }
 
         # 2. Derive App Name
         base_name = os.path.basename(abs_exe)
@@ -105,8 +113,58 @@ Comment=Windows Application running via DevOS WinLayer
         env["WINEARCH"] = "win64"
         env.setdefault("WINEDEBUG", "-all")
         # No Mono/Gecko download prompts on first start.
-        env.setdefault("WINEDLLOVERRIDES", "mscoree,mshtml=")
+        overrides = ["mscoree,mshtml="]
+        marker = os.path.join(prefix_dir, "devos-graphics.json")
+        if os.path.isfile(marker):
+            try:
+                with open(marker, encoding="utf-8") as handle:
+                    graphics = json.load(handle)
+            except (OSError, ValueError):
+                graphics = {}
+            if graphics.get("dxvk"):
+                overrides.append("d3d9,d3d10core,d3d11,dxgi=n")
+            if graphics.get("vkd3d"):
+                overrides.append("d3d12=n")
+        env["WINEDLLOVERRIDES"] = ";".join(overrides)
         return env
+
+    @staticmethod
+    def dxvk_dirs():
+        pairs = (
+            ("/usr/lib/dxvk/x64", "/usr/lib/dxvk/x32"),
+            ("/usr/share/dxvk/x64", "/usr/share/dxvk/x32"),
+            ("/usr/lib/dxvk", "/usr/lib/dxvk"),
+        )
+        for x64, x32 in pairs:
+            if os.path.isdir(x64):
+                return x64, x32 if os.path.isdir(x32) else ""
+        return "", ""
+
+    def install_graphics(self, prefix_dir: str) -> Dict[str, Any]:
+        """Copy DXVK DLLs into a prefix when the distro package is installed."""
+        system32 = os.path.join(prefix_dir, "drive_c", "windows", "system32")
+        syswow = os.path.join(prefix_dir, "drive_c", "windows", "syswow64")
+        x64, x32 = self.dxvk_dirs()
+        copied = []
+        for source, dest in ((x64, system32), (x32, syswow)):
+            if not source or not os.path.isdir(dest):
+                continue
+            for name in ("d3d11.dll", "d3d10core.dll", "d3d9.dll", "dxgi.dll"):
+                src = os.path.join(source, name)
+                if os.path.isfile(src):
+                    shutil.copy2(src, os.path.join(dest, name))
+                    copied.append(name)
+        marker = {
+            "dxvk": bool(copied),
+            "vkd3d": False,
+            "dlls": sorted(set(copied)),
+        }
+        try:
+            with open(os.path.join(prefix_dir, "devos-graphics.json"), "w", encoding="utf-8") as handle:
+                json.dump(marker, handle)
+        except OSError:
+            pass
+        return marker
 
     @staticmethod
     def is_prepared(prefix_dir: str) -> bool:
@@ -121,8 +179,11 @@ Comment=Windows Application running via DevOS WinLayer
         app; on btrfs the copy is a reflink and costs no space.
         """
         if self.is_prepared(prefix_dir):
+            self.install_graphics(prefix_dir)
             return {"status": "READY"}
         base = BASE_PREFIX
+        if self.is_prepared(base) and not os.path.isfile(os.path.join(base, "devos-graphics.json")):
+            self.install_graphics(base)
         if not self.is_prepared(base):
             os.makedirs(base, exist_ok=True)
             env = self.wine_env(base)
@@ -137,12 +198,15 @@ Comment=Windows Application running via DevOS WinLayer
                 return {"status": "ERROR", "error": f"Windows support could not be prepared: {exc}"}
             if not self.is_prepared(base):
                 return {"status": "ERROR", "error": "Windows support could not be prepared."}
+            self.install_graphics(base)
         if os.path.isdir(prefix_dir) and not os.listdir(prefix_dir):
             os.rmdir(prefix_dir)
         copy = subprocess.run(["cp", "-a", "--reflink=auto", base, prefix_dir],
                               stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
         if copy.returncode != 0:
             return {"status": "ERROR", "error": f"Windows support could not be prepared: {copy.stderr.strip()}"}
+        if not os.path.isfile(os.path.join(prefix_dir, "devos-graphics.json")):
+            self.install_graphics(prefix_dir)
         return {"status": "READY"}
 
     def run_in_wine(self, abs_exe: str, prefix_dir: str, app_id: str) -> Dict[str, Any]:
@@ -174,6 +238,30 @@ Comment=Windows Application running via DevOS WinLayer
             return {"status": "ERROR", "error": f"Could not start Wine: {exc}"}
         return {"status": "STARTED", "pid": proc.pid, "log": log_path}
 
+    def apply_tweaks(self, executable_path: str, kind: str = "dotnet") -> Dict[str, Any]:
+        """Install a Windows runtime into this app's prefix. Needs network for winetricks."""
+        if kind != "dotnet":
+            return {"status": "ERROR", "error": "Only the dotnet tweak is available."}
+        if shutil.which("winetricks") is None:
+            return {"status": "NEEDS_PACKAGE", "message": "winetricks is not installed."}
+        abs_exe = os.path.abspath(os.path.expanduser(executable_path))
+        app_id = os.path.splitext(os.path.basename(abs_exe))[0]
+        prefix_dir = self.get_prefix_dir(app_id)
+        prepared = self.prepare_prefix(prefix_dir)
+        if prepared.get("status") != "READY":
+            return prepared
+        env = self.wine_env(prefix_dir)
+        try:
+            proc = subprocess.run(["winetricks", "-q", "dotnet48"], env=env, capture_output=True,
+                                  text=True, timeout=1800)
+        except (OSError, subprocess.SubprocessError) as exc:
+            return {"status": "FAILED", "error": str(exc)}
+        if proc.returncode != 0:
+            tail = (proc.stderr or proc.stdout or "winetricks failed").strip()[-400:]
+            return {"status": "FAILED", "error": tail}
+        return {"status": "READY", "prefix": prefix_dir,
+                "message": ".NET Framework 4.8 was added to this app's Windows prefix."}
+
     def list_prefixes(self) -> List[Dict[str, Any]]:
         """Lists all existing Windows app prefixes."""
         res = []
@@ -192,8 +280,21 @@ def main():
     launch_p = subparsers.add_parser("launch", help="Launch a Windows binary")
     launch_p.add_argument("binary", help="Path to .exe / .msi")
     launch_p.add_argument("--name", help="Custom application name")
+    launch_p.add_argument("--force", action="store_true",
+                          help="Start anyway when kernel anti-cheat was detected")
 
     subparsers.add_parser("list", help="List all installed Windows prefixes")
+
+    vm_p = subparsers.add_parser("vm", help="Windows virtual PC (bring your own ISO)")
+    vm_p.add_argument("vm_command", nargs="?", default="status", choices=["status", "create", "start"])
+    vm_p.add_argument("--iso", default="")
+    vm_p.add_argument("--disk-gb", type=int, default=64)
+    vm_p.add_argument("--memory", type=int, default=4096)
+    vm_p.add_argument("--no-start", action="store_true")
+
+    tweak_p = subparsers.add_parser("tweaks", help="Add a Windows runtime inside a prefix")
+    tweak_p.add_argument("kind", choices=["dotnet"])
+    tweak_p.add_argument("binary", help="The .exe whose prefix should be updated")
 
     doc_p = subparsers.add_parser("doctor", help="Inspect binary compatibility")
     doc_p.add_argument("binary", help="Path to .exe / .msi")
@@ -202,13 +303,26 @@ def main():
     mgr = WinLayerManager()
 
     if args.command == "launch":
-        res = mgr.launch(args.binary, args.name)
+        res = mgr.launch(args.binary, args.name, force=args.force)
         print(json.dumps(res, indent=2))
     elif args.command == "list":
         print(json.dumps(mgr.list_prefixes(), indent=2))
     elif args.command == "doctor":
         doc = WinLayerDoctor.analyze_pe(args.binary)
         print(json.dumps(doc, indent=2))
+    elif args.command == "tweaks":
+        res = mgr.apply_tweaks(args.binary, args.kind)
+        print(json.dumps(res, indent=2))
+    elif args.command == "vm":
+        from vm_fallback import WindowsVM, status as vm_status
+        vm = WindowsVM()
+        if args.vm_command == "create":
+            res = vm.create(args.iso, args.disk_gb, args.memory, start=not args.no_start)
+        elif args.vm_command == "start":
+            res = vm.start(args.iso, args.memory)
+        else:
+            res = vm_status()
+        print(json.dumps(res, indent=2))
     else:
         parser.print_help()
 

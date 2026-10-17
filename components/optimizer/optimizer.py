@@ -983,6 +983,21 @@ QScrollArea { background: transparent; border: none; }
 """
 
 
+SECURITY_CLI = "/usr/local/bin/devos-security"
+
+
+def open_security():
+    """The DevOS Security window (components/security)."""
+    cmd = [SECURITY_CLI, "gui"] if os.path.exists(SECURITY_CLI) else [
+        sys.executable, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                     "security", "security_center.py"), "gui"]
+    try:
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+    except OSError:
+        pass
+
+
 def run_gui(open_cleanup=False):
     from PyQt5 import QtCore, QtGui, QtWidgets
 
@@ -1087,6 +1102,11 @@ def run_gui(open_cleanup=False):
             self.total_label = QtWidgets.QLabel("")
             self.total_label.setObjectName("total")
             bottom.addWidget(self.total_label, 1)
+            self.security_btn = QtWidgets.QPushButton("Security")
+            self.security_btn.setToolTip("Open DevOS Security (virus, web and disk protection)")
+            self.security_btn.setCursor(QtCore.Qt.PointingHandCursor)
+            self.security_btn.clicked.connect(open_security)
+            bottom.addWidget(self.security_btn)
             self.rescan_btn = QtWidgets.QPushButton("Rescan")
             self.ai_btn = QtWidgets.QPushButton("Ask DevOS AI")
             self.clean_btn = QtWidgets.QPushButton("Clean selected")
@@ -1285,6 +1305,7 @@ def run_gui(open_cleanup=False):
             self.tray.setToolTip(APP_NAME)
             menu = QtWidgets.QMenu()
             menu.addAction("Clean up…", self.open_cleanup)
+            menu.addAction("DevOS Security…", open_security)
             menu.addAction("Pause suggestions for 1 hour", self.pause_hour)
             sub = menu.addMenu("Settings: idle minutes")
             group = QtWidgets.QActionGroup(sub)

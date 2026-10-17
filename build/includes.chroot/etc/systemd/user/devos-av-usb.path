@@ -1,0 +1,11 @@
+[Unit]
+Description=DevOS Security: scan USB drives when they are plugged in
+ConditionPathExists=/usr/bin/clamscan
+
+[Path]
+# udisks mounts drives at /media/<user>/<label>: a new folder there is a new drive.
+PathChanged=/media/%u
+Unit=devos-av-usb.service
+
+[Install]
+WantedBy=default.target

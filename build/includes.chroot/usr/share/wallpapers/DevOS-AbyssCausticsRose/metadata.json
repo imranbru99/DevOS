@@ -1,0 +1,12 @@
+{
+    "KPlugin": {
+        "Id": "DevOS-AbyssCausticsRose",
+        "Name": "Abyss Caustics Rose",
+        "Authors": [
+            {
+                "Name": "DevOS"
+            }
+        ],
+        "License": "CC-BY-SA-4.0"
+    }
+}
