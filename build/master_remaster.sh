@@ -300,7 +300,7 @@ rm -f "${STAGE_DIR}/casper/filesystem.squashfs"
 
 mksquashfs "${MNT}" "${STAGE_DIR}/casper/filesystem.squashfs" \
     -comp zstd -Xcompression-level 15 \
-    -b 1048576 -processors 0 \
+    -b 1048576 -processors "$(nproc)" \
     -noappend -e "ubuntu-base-*"
 
 du -sk "${MNT}" | awk '{print $1 * 1024}' > "${STAGE_DIR}/casper/filesystem.size"

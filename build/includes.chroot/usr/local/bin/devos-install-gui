@@ -60,21 +60,25 @@ run_calamares() {
 }
 
 log=/tmp/devos-calamares.log
-: > "$log"
+echo "==> $(date) installer start, kernel: $(uname -r), cmdline: $(cat /proc/cmdline)" >> "$log"
+# A relaunch after a crash must not repeat the mode that just crashed.
 fails=0
+[ -f /run/devos-installer-safe-mode ] && fails=1
 
 while true; do
     started=$(date +%s)
 
     if [ "$fails" -eq 0 ]; then
         echo "==> Launching DevOS Installer (Hardware Mode)..." >> "$log"
-        run_calamares "$@" >>"$log" 2>&1 || true
+        run_calamares "$@" >>"$log" 2>&1
+        rc=$?
     elif [ "$fails" -eq 1 ]; then
         echo "==> Hardware graphics mode exited quickly. Relaunching in Universal Safe Software Mode..." >> "$log"
         export LIBGL_ALWAYS_SOFTWARE=1
         export QT_QUICK_BACKEND=software
         export QMLSCENE_DEVICE=softwarecontext
-        run_calamares -d "$@" >>"$log" 2>&1 || true
+        run_calamares -d "$@" >>"$log" 2>&1
+        rc=$?
     else
         echo "==> Launching Calamares in Safe Mode with verbose diagnostics..." >> "$log"
         export LIBGL_ALWAYS_SOFTWARE=1
@@ -82,17 +86,21 @@ while true; do
         export QMLSCENE_DEVICE=softwarecontext
         xhost +local: >/dev/null 2>&1 || true
         xhost + >/dev/null 2>&1 || true
-        run_calamares -d "$@" >>"$log" 2>&1 || true
+        run_calamares -d "$@" >>"$log" 2>&1
+        rc=$?
     fi
 
     ended=$(date +%s)
     duration=$((ended - started))
 
-    if [ "$duration" -ge 8 ]; then
-        # Calamares ran for at least 8s and exited normally (user finished or closed it)
-        echo "Calamares completed or closed normally." >> "$log"
+    if [ "$rc" -eq 0 ] || { [ "$duration" -ge 8 ] && [ "$rc" -lt 128 ] && [ "$rc" -ne 139 ]; }; then
+        # Exit code 0, or a long run ended by the user: finished or closed normally.
+        echo "Calamares completed or closed normally (exit $rc)." >> "$log"
         break
     fi
+    # Crash, abort, or a GPU/QML failure: every relaunch from now on is software rendering.
+    echo "Calamares exited with $rc after ${duration}s; switching to safe graphics." >> "$log"
+    touch /run/devos-installer-safe-mode 2>/dev/null || true
 
     fails=$((fails + 1))
     if [ "$fails" -ge 3 ]; then

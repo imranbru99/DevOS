@@ -56,8 +56,9 @@ EOF
 cat > /etc/sddm.conf.d/zz-devos-install.conf << 'EOF'
 [Autologin]
 User=devos
-# Try the installer first; fall back to Plasma if the installer session dies.
-Session=devos-install,plasma
+# One valid session file only. SDDM does not accept a comma list, and an unknown
+# name leaves autologin without a session (blank screen or a bare terminal).
+Session=devos-install.desktop
 Relogin=false
 
 [General]
@@ -71,7 +72,7 @@ EOF
 cat > /etc/sddm.conf << 'EOF'
 [Autologin]
 User=devos
-Session=devos-install,plasma
+Session=devos-install.desktop
 Relogin=false
 
 [General]

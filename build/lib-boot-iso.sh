@@ -36,19 +36,19 @@ _devos_grub_dir() {
     return 1
 }
 
-# Resolve a tool: prefer inside chroot if versions match, otherwise host.
+# Resolve a tool. Callers expand the result unquoted and pass host paths
+# (temp dirs, the ISO stage), which a chroot-wrapped tool cannot see, so use
+# the host tool; the chroot is only a fallback when the host has none.
 _devos_grub_tool() {
     local tool="$1" chroot="${2:-}"
-    local host_ver chroot_ver
-    host_ver="$("$tool" --version 2>/dev/null | head -1 || true)"
-    if [ -n "$chroot" ] && [ -x "${chroot}/usr/bin/${tool}" ]; then
-        chroot_ver="$(chroot "$chroot" "$tool" --version 2>/dev/null | head -1 || true)"
-        if [ -n "$chroot_ver" ] && [ "$host_ver" = "$chroot_ver" ]; then
-            echo "chroot $chroot $tool"
-            return 0
-        fi
+    if command -v "$tool"; then
+        return 0
     fi
-    command -v "$tool" || _devos_die "grub tool '$tool' not found on host or in chroot"
+    if [ -n "$chroot" ] && [ -x "${chroot}/usr/bin/${tool}" ]; then
+        echo "chroot $chroot $tool"
+        return 0
+    fi
+    _devos_die "grub tool '$tool' not found on host or in chroot"
 }
 
 # Copy a Unicode font into the stage so GRUB's gfxterm works on real GPUs.

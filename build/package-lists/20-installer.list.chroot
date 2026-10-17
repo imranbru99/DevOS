@@ -14,5 +14,8 @@ partitionmanager
 grub2-common
 # Recovery and interactive dialogs for installer
 kdialog
+qml-module-qtquick-controls2
+qml-module-qtquick-dialogs
+qml-module-qtquick-layouts
 qml-module-qtquick-templates2
 qml-module-qtquick-shapes

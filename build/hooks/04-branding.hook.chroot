@@ -193,7 +193,8 @@ updated, count = re.subn(
     text,
     count=1,
 )
-if count != 1:
+# A rerun on a reused chroot finds the timer already stopped; that is fine.
+if count != 1 and not re.search(r"id:\s*fadeoutTimer\s*\n\s*running:\s*false", text):
     raise SystemExit("sign-in theme no longer has the one-minute hide timer")
 main.write_text(updated, encoding="utf-8")
 PY

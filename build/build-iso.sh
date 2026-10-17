@@ -274,7 +274,7 @@ echo "==> Step 8: Creating filesystem.squashfs (zstd level ${ZSTD_LEVEL}, 1M blo
 rm -f "${ISODIR}/casper/filesystem.squashfs"
 mksquashfs "${CHROOT_DIR}" "${ISODIR}/casper/filesystem.squashfs" \
     -comp zstd -Xcompression-level "${ZSTD_LEVEL}" \
-    -b 1048576 -processors 0 -noappend
+    -b 1048576 -processors "$(nproc)" -noappend
 
 # Generate size and manifest info
 chroot "${CHROOT_DIR}" dpkg-query -W --showformat='${Package} ${Version}\n' > "${ISODIR}/casper/filesystem.manifest"
