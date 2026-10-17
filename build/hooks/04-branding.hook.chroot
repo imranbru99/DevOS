@@ -36,6 +36,11 @@ rm -rf \
     /usr/share/plymouth/themes/spinner \
     /usr/share/plymouth/themes/ubuntu-text \
     /usr/share/plymouth/themes/bgrt
+# Wipe Ubuntu watermark image and substitute with DevOS logo so any ACPI/BGRT fallback shows DevOS
+rm -f /usr/share/plymouth/ubuntu-logo.png 2>/dev/null || true
+if [ -f /usr/share/pixmaps/devos-logo.png ]; then
+    cp -f /usr/share/pixmaps/devos-logo.png /usr/share/plymouth/ubuntu-logo.png 2>/dev/null || true
+fi
 # A Windows checkout writes ModuleName=script\r. Plymouth then looks for
 # a module named "script" plus a carriage return and skips the splash.
 sed -i 's/\r$//' /usr/share/plymouth/themes/devos/devos.plymouth /usr/share/plymouth/themes/devos/devos.script

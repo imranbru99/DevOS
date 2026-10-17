@@ -33,6 +33,13 @@ if [ -z "${XAUTHORITY:-}" ]; then
 fi
 
 export QT_QPA_PLATFORM=xcb
+export XDG_CURRENT_DESKTOP=KDE
+export DESKTOP_SESSION=plasma
+export QT_QPA_PLATFORMTHEME=kde
+export QT_STYLE_OVERRIDE=Fusion
+
+# Tell Plymouth to exit cleanly so it releases DRM master before graphical apps initialize
+plymouth --quit >/dev/null 2>&1 || true
 
 if ! grep -q 'branding: devos' /etc/calamares/settings.conf 2>/dev/null; then
     echo "DevOS installer configuration is missing. Ubuntu installation was not started." >&2
@@ -52,6 +59,17 @@ xhost +si:localuser:root >/dev/null 2>&1 || true
 xhost +local: >/dev/null 2>&1 || true
 xhost + >/dev/null 2>&1 || true
 
-# boot_ui.py paints the animated starter and then starts calamares.
-exec python3 /usr/local/share/devos/boot_ui.py
+# Run boot_ui.py animated starter. If boot_ui exits or fails on hardware,
+# immediately fall back to devos-install-gui so the screen never stays on an empty pointer.
+if [ -f /usr/local/share/devos/boot_ui.py ]; then
+    python3 /usr/local/share/devos/boot_ui.py 2>/tmp/devos-boot-ui.err || true
+fi
+
+# Fallback: if Calamares is not running, launch installer GUI directly
+if ! pgrep -f calamares >/dev/null 2>&1; then
+    exec /usr/local/bin/devos-install-gui
+fi
+
+# Keep session process alive while installer is open
+wait
 

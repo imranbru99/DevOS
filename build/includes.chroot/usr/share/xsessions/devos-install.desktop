@@ -1,5 +1,6 @@
 [Desktop Entry]
-Type=XSession
+Type=Application
 Exec=/bin/bash /usr/local/bin/devos-live-session
 Name=Install DevOS
 Comment=DevOS disk installation
+

@@ -6,15 +6,20 @@ set -u
 grep -q 'boot=casper' /proc/cmdline || exit 0
 
 mkdir -p /etc/sddm.conf.d /run/devos-hidden-sessions
-# Hide every normal desktop session on this boot only. The installed disk
-# still receives the original files from the image.
+# Hide every normal desktop session on this boot only.
+# Ensure any fallback entry (plasma.desktop, plasmax11.desktop) maps to devos-install.desktop
+# so casper or SDDM autologin can never spawn an empty session on real hardware.
 for session in /usr/share/xsessions/*.desktop /usr/share/wayland-sessions/*.desktop; do
     [ -f "$session" ] || continue
     name=$(basename "$session")
     [ "$name" = "devos-install.desktop" ] && continue
     hidden="/run/devos-hidden-sessions/$name"
     cp -a "$session" "$hidden" 2>/dev/null || true
-    mount --bind /dev/null "$session" 2>/dev/null || rm -f "$session"
+    if [ "$name" = "plasma.desktop" ] || [ "$name" = "plasmax11.desktop" ]; then
+        mount --bind /usr/share/xsessions/devos-install.desktop "$session" 2>/dev/null || cp -f /usr/share/xsessions/devos-install.desktop "$session" 2>/dev/null || true
+    else
+        mount --bind /dev/null "$session" 2>/dev/null || rm -f "$session"
+    fi
 done
 
 # Kill and remove any Ubuntu installer leftovers

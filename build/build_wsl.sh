@@ -198,20 +198,20 @@ set menu_color_highlight=black/light-gray
 menuentry "Try or Install DevOS (24.04 LTS)" {
     set gfxpayload=keep
     search --no-floppy --set=root --file /casper/vmlinuz
-    linux /casper/vmlinuz boot=casper quiet splash fsck.mode=skip ---
+    linux /casper/vmlinuz boot=casper quiet splash plymouth.theme=devos fsck.mode=skip ---
     initrd /casper/initrd
 }
 
 menuentry "DevOS (Safe Graphics)" {
     set gfxpayload=keep
     search --no-floppy --set=root --file /casper/vmlinuz
-    linux /casper/vmlinuz boot=casper nomodeset quiet splash ---
+    linux /casper/vmlinuz boot=casper nomodeset quiet splash plymouth.theme=devos ---
     initrd /casper/initrd
 }
 
 menuentry "Check Disc for Defects" {
     search --no-floppy --set=root --file /casper/vmlinuz
-    linux /casper/vmlinuz boot=casper integrity-check quiet splash ---
+    linux /casper/vmlinuz boot=casper integrity-check quiet splash plymouth.theme=devos ---
     initrd /casper/initrd
 }
 EOF

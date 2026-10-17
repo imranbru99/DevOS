@@ -197,7 +197,7 @@ class Starter(QWidget):
         if os.geteuid() == 0:
             cmd = ["calamares"]
         else:
-            cmd = ["sudo", "-E", "-n"]
+            cmd = ["sudo", "-E", "-n", "env"]
             if display():
                 cmd.append("DISPLAY=" + display())
             if xauthority():
@@ -294,13 +294,18 @@ class Starter(QWidget):
 
 
 def main():
-    app = QApplication(sys.argv)
-    app.setFont(QFont("Inter", 12))
-    window = Starter()
-    window.cover()
-    window.show()
-    window.raise_()
-    return app.exec_()
+    try:
+        app = QApplication(sys.argv)
+        app.setFont(QFont("Inter", 12))
+        window = Starter()
+        window.cover()
+        window.show()
+        window.raise_()
+        return app.exec_()
+    except Exception as exc:
+        sys.stderr.write(f"DevOS starter exception: {exc}\n")
+        sys.stderr.flush()
+        return 1
 
 
 if __name__ == "__main__":
