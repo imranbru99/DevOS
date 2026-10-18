@@ -1,0 +1,7 @@
+#!/bin/bash
+# DevOS Power & Sleep Manager (Windows 11 Fluent Power Settings).
+COMPONENTS_DIR="/usr/local/share/devos/components"
+if [ ! -d "${COMPONENTS_DIR}" ] || [ -d "/home/imran/project/dev-os/components" ]; then
+    COMPONENTS_DIR="/home/imran/project/dev-os/components"
+fi
+exec /usr/bin/python3 "${COMPONENTS_DIR}/power/power_settings.py" "$@"

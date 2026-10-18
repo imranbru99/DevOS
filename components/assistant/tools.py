@@ -46,6 +46,7 @@ CLIPBOARD_PY = os.path.join(COMPONENTS, "clipboard", "clipboard.py")
 EMOJI_PY = os.path.join(COMPONENTS, "emoji", "emoji.py")
 NOTEPAD_PY = os.path.join(COMPONENTS, "notepad", "notepad.py")
 APP_RESOLVER_PY = os.path.join(COMPONENTS, "apphub", "app_resolver.py")
+POWER_PY = os.path.join(COMPONENTS, "power", "power_settings.py")
 TOOLS_PY = os.path.abspath(__file__)
 PYTHON = "/usr/bin/python3" if os.path.exists("/usr/bin/python3") else (sys.executable or "python3")
 
@@ -1082,6 +1083,7 @@ def format_system_info(info: Dict[str, object], topics: List[str]) -> str:
 SETTINGS_PAGES = [
     (r"\b(?:wifi|network|internet|ethernet|hotspot|vpn)\b|ওয়াইফাই|নেটওয়ার্ক", "kcm_networkmanagement", "Wi-Fi & network"),
     (r"\bbluetooth\b|ব্লুটুথ", "kcm_bluetooth", "Bluetooth"),
+    (r"\b(?:power|battery|energy|sleep|screen timeout|sleep time|power on|power off|power settings|turn off screen)\b|বিদ্যুৎ|স্লিপ|পাওয়ার", "devos-power", "Power & sleep"),
     (r"\b(?:display|screen resolution|resolution|monitors?|screen settings|night ?light)\b", "kcm_kscreen", "Display"),
     (r"\b(?:sound|audio|speakers?|headphones?|microphone|mic)\b", "kcm_pulseaudio", "Sound"),
     (r"\bprinters?\b|\bprinting\b|প্রিন্টার", "kcm_printer_manager", "Printers"),
@@ -1089,7 +1091,6 @@ SETTINGS_PAGES = [
     (r"\b(?:mouse)\b", "kcm_mouse", "Mouse"),
     (r"\b(?:touchpad|trackpad)\b", "kcm_touchpad", "Touchpad"),
     (r"\b(?:date|time|clock|timezone|time zone)\b", "kcm_clock", "Date & time"),
-    (r"\b(?:power|battery|energy)\b", "kcm_powerdevilprofilesconfig", "Power"),
     (r"\b(?:users?|accounts?|password)\b", "kcm_users", "Users"),
     (r"\b(?:theme|appearance|dark mode|light mode)\b", "kcm_lookandfeel", "Appearance"),
     (r"\b(?:wallpaper|background)\b", "kcm_wallpaper", "Wallpaper"),
@@ -1097,6 +1098,10 @@ SETTINGS_PAGES = [
 
 
 def settings_command(kcm: str, which: Callable) -> List[str]:
+    if kcm == "devos-power":
+        if which("devos-power"):
+            return ["devos-power"]
+        return [PYTHON, POWER_PY]
     for exe in ("systemsettings5", "systemsettings"):
         if which(exe):
             return [exe, kcm] if kcm else [exe]
@@ -1327,9 +1332,9 @@ def route_clause(c: str, ctx: Optional[ToolContext] = None) -> Optional[List[Act
         return [Action(name, {"platform": platform}, label=("Count" if count_only else "List") + " installed apps")]
 
     page = None
-    if _has(r"\b(?:settings?|setup|set up|configure|preferences|options|control panel)\b|সেটিং", c) or \
+    if _has(r"\b(?:settings?|setup|set up|configure|preferences|options|control panel|timeout|sleep time)\b|সেটিং", c) or \
             _has(r"^(?:connect|pair|turn on|turn off|enable|disable)\b", c) or \
-            _has(r"^" + _OPEN_VERB + r"\s+(?:the\s+)?(?:wifi|bluetooth|network|display|sound|printers?)$", c):
+            _has(r"^" + _OPEN_VERB + r"\s+(?:the\s+)?(?:wifi|bluetooth|network|display|sound|printers?|power)$", c):
         for pattern, kcm, label in SETTINGS_PAGES:
             if _has(pattern, c):
                 page = (kcm, label)

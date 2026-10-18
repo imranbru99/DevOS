@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Power & sleep
+GenericName=Power & sleep settings
+Comment=Screen timeout, sleep time, power mode, shutdown, and restart settings
+Exec=devos-power %U
+Icon=preferences-system-power
+Terminal=false
+Categories=Settings;DesktopSettings;HardwareSettings;
+Keywords=power;sleep;power on;power off;screen timeout;sleep time;turn off screen;battery;energy;standby;suspend;shutdown;restart;performance;
+StartupNotify=true
+StartupWMClass=DevOS Power & Sleep

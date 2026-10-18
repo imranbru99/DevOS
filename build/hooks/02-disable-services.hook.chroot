@@ -103,7 +103,7 @@ chown root:root /etc/sudoers.d/devos
 chmod 440 /etc/sudoers.d/devos
 chmod 755 /usr/local/bin/dolphin /usr/local/bin/devos-files /usr/local/bin/devos-apps \
     /usr/local/bin/devos-ai-code-agent /usr/local/bin/devos-code-agent /usr/local/bin/devos-antigravity \
-    /usr/local/bin/devos-taskman || true
+    /usr/local/bin/devos-taskman /usr/local/bin/devos-power || true
 # App history for Task Manager, for every account.
 mkdir -p /etc/systemd/user/timers.target.wants
 ln -sfn /usr/lib/systemd/user/devos-taskman-history.timer \

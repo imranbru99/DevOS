@@ -58,4 +58,7 @@ ffmpegthumbs
 # DevOS AI: media pause/next and reminder notifications
 playerctl
 libnotify-bin
+# Power management and hardware sleep/battery daemon
+powerdevil
+upower
 

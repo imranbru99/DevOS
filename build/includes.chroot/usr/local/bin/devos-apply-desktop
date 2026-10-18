@@ -74,4 +74,12 @@ for prof in "${HOME}/.local/share/applications"/chrome-*-Profile_*.desktop; do
     fi
 done
 
+# Apply user power configuration and start idle sleep daemon
+if command -v devos-power >/dev/null 2>&1; then
+    devos-power --apply >/dev/null 2>&1 || true
+    if ! pgrep -f "power_settings.py --daemon" >/dev/null 2>&1; then
+        (devos-power --daemon >/dev/null 2>&1 &)
+    fi
+fi
+
 exit 0
