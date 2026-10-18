@@ -12,7 +12,7 @@ Runs at login (/etc/xdg/autostart/devos-code-agent-setup.desktop).
    Anything the person changed or removed stays as they left it, and the
    file is only rewritten when something actually changes.
 
-2. The "DevOS Code Agent" menu entry: /usr/share/applications is shared by
+2. The "DevOS AI Code Agent" menu entry: /usr/share/applications is shared by
    every account and is part of the system image, but whether the agent is
    useful depends on the models on this PC, which change after install (DevOS
    AI Models). So the entry is hidden per user: a copy with NoDisplay=true in
@@ -38,8 +38,8 @@ AGENT_TITLE = "DevOS AI Code (Local)"
 AUTOCOMPLETE_TITLE = "DevOS AI Autocomplete"
 ROLES = ("inlineEdit", "applyCodeBlock")
 
-SYSTEM_DESKTOP = "/usr/share/applications/devos-code-agent.desktop"
-DESKTOP_NAME = "devos-code-agent.desktop"
+SYSTEM_DESKTOP = "/usr/share/applications/devos-ai-code-agent.desktop"
+DESKTOP_NAME = "devos-ai-code-agent.desktop"
 MANAGED_KEY = "X-DevOS-Managed"
 MANAGED_VALUE = "code-agent-gate"
 
@@ -259,7 +259,7 @@ def main(argv=None) -> int:
     if menu:
         refresh_menu()
     if "--quiet" not in (argv if argv is not None else sys.argv[1:]):
-        print(f"DevOS Code Agent: {'available' if capable else 'hidden'} ({reason})"
+        print(f"DevOS AI Code Agent: {'available' if capable else 'hidden'} ({reason})"
               f"{' · Continue updated' if changed else ''}{' · menu updated' if menu else ''}")
     return 0
 

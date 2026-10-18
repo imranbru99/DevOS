@@ -1,20 +1,13 @@
 #!/bin/bash
-# DevOS Code Agent: a coding agent on the local DevOS AI model.
+# DevOS AI Code Agent: a coding agent on the local DevOS AI model.
 #   devos-code-agent [folder]        open the window
 #   devos-code-agent --cli "task"    run in this terminal with y/n approvals
-# See components/code-agent/code_agent.py.
-set -u
-
-DIR="/usr/local/share/devos/components/code-agent"
-AI_DIR="/usr/local/share/devos/components/ai-core"
-
-# Make sure DevOS AI is listening (same as devos-code).
-if [ -f "${AI_DIR}/server.py" ] && ! ss -ltn 2>/dev/null | grep -q ':11434'; then
-    (cd "${AI_DIR}" && python3 server.py >/var/tmp/devos-ai-core.log 2>&1 &)
-    sleep 0.4
+# Redirects to devos-ai-code-agent
+if command -v devos-ai-code-agent >/dev/null 2>&1; then
+    exec devos-ai-code-agent "$@"
 fi
-
-if [ "${1:-}" = "--cli" ]; then
-    exec /usr/bin/python3 "${DIR}/code_agent.py" "$@"
+HERE="$(dirname "$0")"
+if [ -x "${HERE}/devos-ai-code-agent" ]; then
+    exec "${HERE}/devos-ai-code-agent" "$@"
 fi
-exec /usr/bin/python3 "${DIR}/agent_gui.py" "$@"
+exec /usr/local/bin/devos-ai-code-agent "$@"

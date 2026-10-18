@@ -34,10 +34,11 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -131,8 +132,90 @@ def find_link(text: str) -> Optional[str]:
     return link
 
 
+def clean_app_name_from_filename(filename: str) -> str:
+    """Turn 'google-chrome-stable_current_amd64.deb' into 'Google Chrome'."""
+    name = urllib.parse.unquote(filename or "").strip()
+    name = os.path.basename(name)
+    name = re.sub(r"\.(?:deb|appimage|exe|msi|apk|tar\.[a-z0-9]+|zip|gz)$", "", name, flags=re.I)
+    name = re.sub(r"[-_](?:amd64|x86_64|x86|i386|all|linux|ubuntu|debian|current|stable|release|win32|win64|windows|x64|macos|darwin)", "", name, flags=re.I)
+    name = re.sub(r"[-_]?(?:setup|installer|install)$", "", name, flags=re.I)
+    name = re.sub(r"[-_]v?\d+(?:\.\d+)*(?:[-_][a-z0-9.]+)*", "", name, flags=re.I)
+    name = re.sub(r"[-_.]+", " ", name).strip()
+    if not name:
+        name = "App"
+    if name.islower() or (name.isupper() and len(name) > 4):
+        name = name.title()
+    return name
+
+
+def inspect_referral_page(base_url: str, page_html: str) -> Dict[str, Any]:
+    """Scan page HTML for Linux download packages (.deb, .AppImage, Flathub) or Windows (.exe)."""
+    if not page_html:
+        return {}
+    hrefs = re.findall(r'href=[\'"]([^\'"#\s>]+)[\'"]', page_html, re.I)
+    debs = []
+    appimages = []
+    flatpaks = []
+    exes = []
+    for h in hrefs:
+        full_url = urllib.parse.urljoin(base_url, h)
+        low = full_url.lower()
+        if any(low.endswith(ext) for ext in (".asc", ".sig", ".sha256", ".md5", ".txt", ".tar.gz", ".zip")):
+            continue
+        if ".deb" in low:
+            score = 2 if ("amd64" in low or "_all" in low or "x86_64" in low) else 1
+            if "arm64" in low or "armhf" in low or "i386" in low:
+                score = 0
+            if score > 0:
+                debs.append((score, full_url))
+        elif ".appimage" in low:
+            score = 2 if ("x86_64" in low or "amd64" in low) else 1
+            if "arm" in low or "i386" in low:
+                score = 0
+            if score > 0:
+                appimages.append((score, full_url))
+        elif "flathub.org/apps/" in low:
+            m = re.search(r"flathub\.org/apps/(?:details/)?([A-Za-z][\w-]*(?:\.[\w-]+){2,})", low)
+            if m:
+                flatpaks.append(m.group(1))
+        elif low.endswith((".exe", ".msi")):
+            if not any(b in low for b in ("arm64", "arm", "ia64")):
+                exes.append(full_url)
+    if debs:
+        debs.sort(key=lambda x: x[0], reverse=True)
+        return {"kind": "deb", "url": debs[0][1]}
+    if appimages:
+        appimages.sort(key=lambda x: x[0], reverse=True)
+        return {"kind": "appimage", "url": appimages[0][1]}
+    if flatpaks:
+        return {"kind": "flatpak", "flatpak": flatpaks[0]}
+    if exes:
+        return {"kind": "wine", "url": exes[0]}
+    return {}
+
+
+def apt_info(pkg: str) -> Optional[Dict[str, str]]:
+    pkg = (pkg or "").strip().lower()
+    if not re.fullmatch(r"[a-z0-9][a-z0-9+.-]{1,60}", pkg):
+        return None
+    if not shutil.which("apt-cache"):
+        return None
+    try:
+        proc = subprocess.run(["apt-cache", "show", pkg], capture_output=True, text=True, timeout=2)
+        if proc.returncode != 0:
+            return None
+        desc = ""
+        for line in proc.stdout.splitlines():
+            if line.startswith("Description: ") or line.startswith("Description-en: "):
+                desc = line.split(":", 1)[1].strip()
+                break
+        return {"package": pkg, "description": desc or f"System package {pkg}"}
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
 def parse_link(url: str) -> Optional[Dict[str, str]]:
-    """{"store": microsoft|play|apple|flathub|web, "id": ..., "url": ...} or None."""
+    """{"store": microsoft|play|apple|flathub|deb|appimage|wine|apk|github|web, "id": ..., "url": ...} or None."""
     url = (url or "").strip()
     if not url:
         return None
@@ -150,6 +233,22 @@ def parse_link(url: str) -> Optional[Dict[str, str]]:
         return None
     host = (parts.hostname or "").lower()
     segs = [s for s in parts.path.split("/") if s]
+    path_lower = parts.path.lower()
+    if path_lower.endswith(".deb"):
+        filename = os.path.basename(parts.path)
+        return {"store": "deb", "id": filename, "url": url}
+    if path_lower.endswith(".appimage"):
+        filename = os.path.basename(parts.path)
+        return {"store": "appimage", "id": filename, "url": url}
+    if path_lower.endswith((".exe", ".msi")):
+        filename = os.path.basename(parts.path)
+        return {"store": "wine", "id": filename, "url": url}
+    if path_lower.endswith(".apk"):
+        filename = os.path.basename(parts.path)
+        return {"store": "apk", "id": filename, "url": url}
+    if host in ("github.com", "www.github.com"):
+        if len(segs) >= 2:
+            return {"store": "github", "owner": segs[0], "repo": segs[1], "id": segs[1], "url": url}
     if host in ("apps.microsoft.com", "www.microsoft.com", "microsoft.com"):
         pid = next((s for s in reversed(segs) if _MS_ID.match(s)), "")
         if not pid:
@@ -233,6 +332,32 @@ def _store_page_url(link: Dict[str, str]) -> str:
 def name_from_link(link: Dict[str, str], fetch: Fetch) -> Dict[str, object]:
     """{"name": str, "offline": bool, "known": bool}: what app a link is about."""
     store = link["store"]
+    if store in ("deb", "appimage", "wine", "apk"):
+        name = clean_app_name_from_filename(link["id"])
+        return {"name": name, "offline": False, "known": True, "package_type": store}
+    if store == "github":
+        repo_name = clean_app_name_from_filename(link.get("repo", link["id"]))
+        owner = link.get("owner", "")
+        repo = link.get("repo", link["id"])
+        referral = {}
+        try:
+            page_text = fetch(link["url"])
+            referral = inspect_referral_page(link["url"], page_text)
+            if not referral:
+                tags = re.findall(r'href=[\'"](/[^/\'\"]+/[^/\'\"]+/releases/tag/([^\'\"]+))[\'"]', page_text)
+                if tags:
+                    tag_ver = tags[0][1]
+                    expanded_url = f"https://github.com/{owner}/{repo}/releases/expanded_assets/{tag_ver}"
+                    try:
+                        exp_html = fetch(expanded_url)
+                        referral = inspect_referral_page(f"https://github.com/{owner}/{repo}/releases/tag/{tag_ver}", exp_html)
+                    except Exception:
+                        pass
+            return {"name": repo_name, "offline": False, "known": True, "referral": referral}
+        except FetchError as exc:
+            return {"name": repo_name, "offline": exc.offline, "known": not exc.offline, "referral": {}}
+        except Exception:
+            return {"name": repo_name, "offline": False, "known": True, "referral": {}}
     if store == "flathub":
         try:
             data = json.loads(fetch(FLATHUB_APPSTREAM_API + link["id"]))
@@ -258,7 +383,19 @@ def name_from_link(link: Dict[str, str], fetch: Fetch) -> Dict[str, object]:
     if store == "web":
         label = link["id"].split(".")
         label = [p for p in label if p not in ("www", "web", "app", "apps", "download", "get")]
-        return {"name": label[0] if label else link["id"], "offline": offline, "known": bool(label)}
+        default_name = label[0].title() if label else link["id"]
+        referral = {}
+        page_name = None
+        try:
+            page_text = fetch(link["url"])
+            page_name = page_app_name(page_text, "web")
+            referral = inspect_referral_page(link["url"], page_text)
+        except FetchError as exc:
+            return {"name": default_name, "offline": exc.offline, "known": bool(label), "referral": {}}
+        except Exception:
+            pass
+        return {"name": page_name or default_name, "offline": False, "known": bool(page_name or label),
+                "referral": referral}
     return {"name": link["id"], "offline": offline, "known": False}
 
 
@@ -376,7 +513,7 @@ def resolve(query: str = "", link: str = "", fetch: Optional[Fetch] = None) -> D
         res["known"] = False
         return res
     if parsed:
-        res["store"] = parsed["store"] if parsed["store"] != "web" else ""
+        res["store"] = parsed["store"] if parsed["store"] not in ("web", "github") else ""
         got = name_from_link(parsed, fetch)
         res["name"], res["offline"], res["known"] = got["name"], got["offline"], got["known"]
         if parsed["store"] == "flathub":
@@ -387,6 +524,42 @@ def resolve(query: str = "", link: str = "", fetch: Optional[Fetch] = None) -> D
             if f:
                 res["option"] = _option_from_feature(f, None)
                 res["found_by"] = "feature"
+            return res
+        if parsed["store"] == "deb":
+            res["option"] = {"name": got["name"], "kind": "deb", "deb": parsed["url"], "url": parsed["url"],
+                             "size_mb": 0, "why": "Debian package (.deb) ready to install on DevOS."}
+            res["found_by"] = "deb"
+            return res
+        if parsed["store"] == "appimage":
+            res["option"] = {"name": got["name"], "kind": "appimage", "appimage": parsed["url"], "url": parsed["url"],
+                             "size_mb": 0, "why": "Portable Linux AppImage."}
+            res["found_by"] = "appimage"
+            return res
+        if parsed["store"] == "wine":
+            res["option"] = {"name": got["name"], "kind": "wine", "wine": parsed["url"], "url": parsed["url"],
+                             "size_mb": 0, "why": "Windows application (.exe/.msi) running via DevOS WinLayer."}
+            res["found_by"] = "wine"
+            return res
+        ref = got.get("referral") or {}
+        if ref.get("kind") == "deb":
+            res["option"] = {"name": got["name"], "kind": "deb", "deb": ref["url"], "url": ref["url"],
+                             "size_mb": 0, "why": "Debian package (.deb) ready to install on DevOS."}
+            res["found_by"] = "referral"
+            return res
+        if ref.get("kind") == "appimage":
+            res["option"] = {"name": got["name"], "kind": "appimage", "appimage": ref["url"], "url": ref["url"],
+                             "size_mb": 0, "why": "Portable Linux AppImage."}
+            res["found_by"] = "referral"
+            return res
+        if ref.get("kind") == "flatpak":
+            res["option"] = {"name": got["name"], "feature": "", "flatpak": ref["flatpak"],
+                             "size_mb": 0, "why": "Flathub application."}
+            res["found_by"] = "referral"
+            return res
+        if ref.get("kind") == "wine":
+            res["option"] = {"name": got["name"], "kind": "wine", "wine": ref["url"], "url": ref["url"],
+                             "size_mb": 0, "why": "Windows application (.exe/.msi) running via DevOS WinLayer."}
+            res["found_by"] = "referral"
             return res
     name = str(res["name"]).strip()
     if not name:
@@ -438,6 +611,14 @@ def resolve(query: str = "", link: str = "", fetch: Optional[Fetch] = None) -> D
         if f:
             res["option"] = _option_from_feature(f, None)
             res["found_by"] = "feature"
+        return res
+    if not res.get("option"):
+        apt = apt_info(q)
+        if apt:
+            res["option"] = {"name": name, "kind": "apt", "package": apt["package"], "size_mb": 0,
+                             "why": apt["description"]}
+            res["found_by"] = "apt"
+            return res
     return res
 
 
@@ -489,23 +670,42 @@ def reply_text(res: Dict[str, object]) -> str:
     if opt:
         oname = str(opt.get("name") or "")
         why = _sentence(str(opt.get("why") or ""))
+        kind = str(opt.get("kind") or "")
         lead = "The DevOS way: " if store or native.normalize_name(oname) != native.normalize_name(name) else ""
-        if store == "flathub" or res.get("found_by") == "flathub":
+        if kind == "deb" or res.get("found_by") == "deb":
+            detail = f" {why}" if why and not why.lower().startswith("debian package") else ""
+            lines.append(f"**{oname}** has a Debian package (.deb) ready to install on DevOS.{detail}".strip())
+            lines.append(f"Click **Install {oname}** below to download and install it.")
+        elif kind == "appimage" or res.get("found_by") == "appimage":
+            detail = f" {why}" if why and not why.lower().startswith("portable linux appimage") else ""
+            lines.append(f"**{oname}** is available as a portable Linux AppImage.{detail}".strip())
+            lines.append(f"Click **Install {oname}** below to download and add it to your apps.")
+        elif kind == "apt" or res.get("found_by") == "apt":
+            detail = f" {why}" if why and not why.lower().startswith("available in devos") else ""
+            lines.append(f"**{oname}** is available in DevOS system packages (APT).{detail}".strip())
+            lines.append(f"Click **Install {oname}** below to install it.")
+        elif kind == "wine" or res.get("found_by") == "wine":
+            detail = f" {why}" if why and not why.lower().startswith("windows application") else ""
+            lines.append(f"**{oname}** is a Windows application. DevOS can run it directly through WinLayer (Wine).{detail}".strip())
+            lines.append(f"Click **Install {oname}** below to set it up.")
+        elif store == "flathub" or res.get("found_by") == "flathub":
             text = f"**{oname}** is on Flathub, the app store DevOS uses. {why}".strip()
             if store != "flathub" and native.normalize_name(oname) != native.normalize_name(name):
                 text = f"I found **{oname}** on Flathub: {why}".strip()
+            lines.append(text)
         elif opt.get("preinstalled"):
             text = f"{lead}**{oname}** already comes with DevOS. {why}".strip()
+            lines.append(text)
         else:
             text = f"{lead}**{oname}**. {why}".strip() if lead else f"**{oname}** has a DevOS version. {why}".strip()
-        lines.append(text)
-        if web and not vendor_web:
+            lines.append(text)
+        if web and not vendor_web and not kind:
             lines.append("Or use the web version in Chrome — nothing to install.")
         if vendor_web:
             lines.append(f"Click **Install {oname}** below: it appears in the Start menu right away, no download.")
         elif opt.get("preinstalled"):
             lines.append(f"Click **Open {oname}** below.")
-        elif not vendor_web:
+        elif not vendor_web and not kind:
             lines.append(f"Click **Install {oname}** below. DevOS asks you first, then downloads it.")
     elif web:
         why = _sentence(str(res.get("why") or ""))
@@ -598,7 +798,183 @@ def uninstall_main(name: str, feature: str = "", flatpak: str = "") -> int:
     return 0
 
 
-def install_main(name: str, feature: str = "", flatpak: str = "") -> int:
+def download_file(url: str, dest_path: str, progress_cb: Optional[Callable[[int, str], None]] = None) -> bool:
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            total_str = resp.headers.get("Content-Length")
+            total = int(total_str) if total_str and total_str.isdigit() else 0
+            downloaded = 0
+            chunk_size = 64 * 1024
+            os.makedirs(os.path.dirname(os.path.abspath(dest_path)), exist_ok=True)
+            with open(dest_path, "wb") as fh:
+                while True:
+                    chunk = resp.read(chunk_size)
+                    if not chunk:
+                        break
+                    fh.write(chunk)
+                    downloaded += len(chunk)
+                    if progress_cb:
+                        if total > 0:
+                            pct = min(99, int((downloaded / total) * 100))
+                            mb_down = round(downloaded / 1048576, 1)
+                            mb_tot = round(total / 1048576, 1)
+                            progress_cb(pct, f"Downloading… {mb_down} / {mb_tot} MB")
+                        else:
+                            mb_down = round(downloaded / 1048576, 1)
+                            progress_cb(50, f"Downloading… {mb_down} MB")
+            return True
+    except Exception as exc:
+        sys.stderr.write(f"[app_resolver] download failed: {exc}\n")
+        if os.path.exists(dest_path):
+            try:
+                os.remove(dest_path)
+            except OSError:
+                pass
+        return False
+
+
+def install_deb(name: str, target: str) -> int:
+    busy = _Progress(f"Installing {name}…", 100)
+    deb_path = target
+    temp_dir = None
+    try:
+        if target.startswith(("http://", "https://")):
+            temp_dir = tempfile.mkdtemp(prefix="devos-deb-")
+            filename = os.path.basename(urllib.parse.urlsplit(target).path) or f"{name}.deb"
+            deb_path = os.path.join(temp_dir, filename)
+            busy.update(10, f"Downloading {name}…")
+            ok = download_file(target, deb_path, progress_cb=busy.update)
+            if not ok or not os.path.exists(deb_path):
+                busy.close()
+                _kdialog("--error", f"Could not download {name}. Check the link and try again.")
+                return 1
+        busy.update(85, f"Installing {name}…")
+        code = subprocess.run(["pkexec", "apt-get", "install", "-y", "--allow-downgrades", os.path.abspath(deb_path)]).returncode
+        busy.close()
+        if code != 0:
+            _kdialog("--error", f"{name} could not be installed.")
+            return 1
+        _kdialog("--passivepopup", f"{name} is installed. It is in the app menu.", "6")
+        return 0
+    finally:
+        if temp_dir and os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def install_appimage(name: str, target: str) -> int:
+    busy = _Progress(f"Setting up {name}…", 100)
+    bin_dir = os.path.expanduser("~/.local/bin")
+    os.makedirs(bin_dir, exist_ok=True)
+    slug = re.sub(r"[^\w.-]+", "_", name.lower()).strip("_") or "app"
+    dest_path = os.path.join(bin_dir, f"{slug}.AppImage")
+    try:
+        if target.startswith(("http://", "https://")):
+            busy.update(10, f"Downloading {name}…")
+            ok = download_file(target, dest_path, progress_cb=busy.update)
+            if not ok:
+                busy.close()
+                _kdialog("--error", f"Could not download {name}. Check the link and try again.")
+                return 1
+        else:
+            shutil.copy2(target, dest_path)
+        os.chmod(dest_path, 0o755)
+        busy.update(90, f"Creating menu shortcut for {name}…")
+        app_dir = os.path.expanduser("~/.local/share/applications")
+        os.makedirs(app_dir, exist_ok=True)
+        desktop_file = os.path.join(app_dir, f"appimage-{slug}.desktop")
+        with open(desktop_file, "w", encoding="utf-8") as f:
+            f.write(f"[Desktop Entry]\nType=Application\nName={name}\nExec=\"{dest_path}\" %U\nTerminal=false\nCategories=Utility;Application;\nComment={name} (AppImage)\n")
+        if shutil.which("update-desktop-database"):
+            subprocess.run(["update-desktop-database", app_dir], capture_output=True)
+        busy.close()
+        _kdialog("--passivepopup", f"{name} is installed. It is in the app menu.", "6")
+        try:
+            subprocess.Popen([dest_path], start_new_session=True)
+        except Exception:
+            pass
+        return 0
+    except Exception as exc:
+        busy.close()
+        _kdialog("--error", f"Could not install {name}: {exc}")
+        return 1
+
+
+def install_apt(name: str, package: str) -> int:
+    busy = _Progress(f"Installing {name}…", 0)
+    code = subprocess.run(["pkexec", "apt-get", "install", "-y", package]).returncode
+    busy.close()
+    if code != 0:
+        _kdialog("--error", f"{name} could not be installed from APT.")
+        return 1
+    _kdialog("--passivepopup", f"{name} is installed. It is in the app menu.", "6")
+    return 0
+
+
+def install_wine(name: str, target: str) -> int:
+    busy = _Progress(f"Setting up {name}…", 100)
+    downloads_dir = os.path.expanduser("~/Downloads")
+    os.makedirs(downloads_dir, exist_ok=True)
+    filename = os.path.basename(urllib.parse.urlsplit(target).path) or f"{name}.exe"
+    exe_path = os.path.join(downloads_dir, filename)
+    try:
+        if target.startswith(("http://", "https://")):
+            busy.update(10, f"Downloading {name}…")
+            ok = download_file(target, exe_path, progress_cb=busy.update)
+            if not ok:
+                busy.close()
+                _kdialog("--error", f"Could not download {name}. Check the link and try again.")
+                return 1
+        else:
+            exe_path = target
+        busy.close()
+        _kdialog("--passivepopup", f"Starting {name} with WinLayer…", "4")
+        devos_cli = shutil.which("devos")
+        if devos_cli:
+            subprocess.Popen([devos_cli, "win", exe_path], start_new_session=True)
+        elif shutil.which("wine"):
+            subprocess.Popen(["wine", exe_path], start_new_session=True)
+        else:
+            _kdialog("--error", "WinLayer (Wine) is not installed on this PC.")
+            return 1
+        return 0
+    except Exception as exc:
+        busy.close()
+        _kdialog("--error", f"Could not launch {name}: {exc}")
+        return 1
+
+
+def install_url(name: str, url: str) -> int:
+    res = resolve(link=url)
+    opt = res.get("option") or {}
+    kind = opt.get("kind") or ""
+    oname = opt.get("name") or name
+    if kind == "deb":
+        return install_deb(oname, str(opt.get("deb") or opt.get("url") or url))
+    if kind == "appimage":
+        return install_appimage(oname, str(opt.get("appimage") or opt.get("url") or url))
+    if kind == "wine":
+        return install_wine(oname, str(opt.get("wine") or opt.get("url") or url))
+    if opt.get("flatpak"):
+        return install_main(oname, flatpak=str(opt["flatpak"]))
+    if opt.get("feature"):
+        return install_main(oname, feature=str(opt["feature"]))
+    _kdialog("--error", f"Could not find an installable package for {url}")
+    return 1
+
+
+def install_main(name: str, feature: str = "", flatpak: str = "", deb: str = "",
+                 appimage: str = "", apt: str = "", wine: str = "", url: str = "") -> int:
+    if deb:
+        return install_deb(name or "app", deb)
+    if appimage:
+        return install_appimage(name or "app", appimage)
+    if apt:
+        return install_apt(name or apt, apt)
+    if wine:
+        return install_wine(name or "app", wine)
+    if url:
+        return install_url(name, url)
     if feature:
         if catalog is not None and _feature(feature) is None:
             _kdialog("--error", f"{name} is not in DevOS Features.")
@@ -640,11 +1016,18 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--name", default="")
     p.add_argument("--feature", default="")
     p.add_argument("--flatpak", default="")
+    p.add_argument("--deb", default="")
+    p.add_argument("--appimage", default="")
+    p.add_argument("--apt", default="")
+    p.add_argument("--wine", default="")
+    p.add_argument("--url", default="")
     ns = p.parse_args(argv)
     if ns.uninstall:
         return uninstall_main(ns.name or ns.feature or ns.flatpak, ns.feature, ns.flatpak)
     if ns.install:
-        return install_main(ns.name or ns.feature or ns.flatpak, ns.feature, ns.flatpak)
+        return install_main(ns.name or ns.feature or ns.flatpak or ns.deb or ns.appimage or ns.apt or ns.wine,
+                            feature=ns.feature, flatpak=ns.flatpak, deb=ns.deb, appimage=ns.appimage,
+                            apt=ns.apt, wine=ns.wine, url=ns.url)
     text = " ".join(ns.query)
     link = find_link(text)
     res = resolve(query="" if link else text, link=link or "")

@@ -14,7 +14,7 @@ application/x-bat=devos-winlayer.desktop
 application/vnd.android.package-archive=devos-apphub.desktop
 application/vnd.debian.binary-package=devos-apphub.desktop
 application/vnd.appimage=devos-apphub.desktop
-inode/directory=org.kde.dolphin.desktop
+inode/directory=devos-thispc.desktop;org.kde.dolphin.desktop;
 
 [Added Associations]
 application/x-msdownload=devos-winlayer.desktop;

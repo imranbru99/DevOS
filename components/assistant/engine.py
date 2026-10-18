@@ -616,7 +616,7 @@ class Assistant:
     def chat(self, text: str, history: Optional[History] = None,
              on_delta: Optional[Callable[[str], None]] = None, cancel: Optional[StreamHandle] = None) -> Reply:
         """on_delta(piece) gets the answer as it is written (streaming); cancel.stop() ends it early."""
-        system = APP_PROMPT + ("\n" + self.pc_facts() if self.pc_facts() else "")
+        system = APP_PROMPT
         messages = [{"role": "system", "content": system}]
         if history is not None:
             past = history.for_model()

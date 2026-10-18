@@ -82,6 +82,60 @@ class TestAppHubAndLayers(unittest.TestCase):
         doc = WinLayerDoctor.analyze_pe(text_file)
         self.assertFalse(doc["is_pe"])
 
+    def test_06_package_link_parsing(self):
+        import app_resolver
+        deb = app_resolver.parse_link("https://example.com/downloads/cool-tool_amd64.deb")
+        self.assertIsNotNone(deb)
+        self.assertEqual(deb["store"], "deb")
+        self.assertEqual(deb["id"], "cool-tool_amd64.deb")
+
+        appimage = app_resolver.parse_link("https://example.com/apps/SuperApp-1.0.0.AppImage")
+        self.assertIsNotNone(appimage)
+        self.assertEqual(appimage["store"], "appimage")
+
+        gh = app_resolver.parse_link("https://github.com/my-org/my-project/releases")
+        self.assertIsNotNone(gh)
+        self.assertEqual(gh["store"], "github")
+        self.assertEqual(gh["repo"], "my-project")
+
+    def test_07_clean_app_name(self):
+        import app_resolver
+        self.assertEqual(app_resolver.clean_app_name_from_filename("google-chrome-stable_current_amd64.deb"), "Google Chrome")
+        self.assertEqual(app_resolver.clean_app_name_from_filename("Obsidian-1.5.8.AppImage"), "Obsidian")
+        self.assertEqual(app_resolver.clean_app_name_from_filename("fastfetch-linux-amd64.deb"), "Fastfetch")
+        self.assertEqual(app_resolver.clean_app_name_from_filename("ZoomInstaller.exe"), "Zoom")
+
+    def test_08_referral_page_inspection(self):
+        import app_resolver
+        html = """
+        <html><body>
+          <a href="/release/v1/app_arm64.deb">arm64 deb</a>
+          <a href="/release/v1/app_amd64.deb">amd64 deb</a>
+          <a href="/release/v1/app.AppImage">appimage</a>
+        </body></html>
+        """
+        ref = app_resolver.inspect_referral_page("https://example.com/downloads", html)
+        self.assertEqual(ref.get("kind"), "deb")
+        self.assertEqual(ref.get("url"), "https://example.com/release/v1/app_amd64.deb")
+
+    def test_09_direct_package_resolution(self):
+        import app_resolver
+        res = app_resolver.resolve(link="https://example.com/packages/my-editor_1.0_amd64.deb")
+        self.assertTrue(res["known"])
+        self.assertEqual(res["option"]["kind"], "deb")
+        reply = app_resolver.reply_text(res)
+        self.assertIn("My Editor", reply)
+        self.assertIn("Debian package (.deb)", reply)
+        self.assertIn("Install My Editor", reply)
+
+    def test_10_ai_server_thread_plan(self):
+        SYS_PATH_AI = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../components/ai-core"))
+        sys.path.insert(0, SYS_PATH_AI)
+        import server
+        gen, batch = server.thread_plan(20, 14, 4)
+        self.assertGreaterEqual(gen, 6)
+        self.assertGreaterEqual(batch, 16)
+
 
 if __name__ == "__main__":
     unittest.main()

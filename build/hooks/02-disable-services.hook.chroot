@@ -101,7 +101,8 @@ devos ALL=(ALL) NOPASSWD:SETENV: ALL
 EOF
 chown root:root /etc/sudoers.d/devos
 chmod 440 /etc/sudoers.d/devos
-chmod 755 /usr/local/bin/dolphin /usr/local/bin/devos-files /usr/local/bin/devos-code-agent \
+chmod 755 /usr/local/bin/dolphin /usr/local/bin/devos-files /usr/local/bin/devos-ai-code-agent \
+    /usr/local/bin/devos-code-agent /usr/local/bin/devos-antigravity \
     /usr/local/bin/devos-taskman || true
 # App history for Task Manager, for every account.
 mkdir -p /etc/systemd/user/timers.target.wants

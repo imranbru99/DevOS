@@ -147,7 +147,7 @@ Shut down, restart and uninstall always ask for confirmation first.
 - **Never lose text:** every tab (including unsaved *Untitled* ones) is saved automatically and restored after a crash, a forced close or a power cut.
 
 ### 7. For developers & AI Engineers
-- **Antigravity Code Agent**: Autonomous pair programming and development agent with repo planning, interactive diff reviews, and multi-agent workflows (`devos-antigravity` or desktop shortcut).
+- **DevOS AI Code Agent**: Autonomous pair programming and development agent with repo planning, interactive diff reviews, and multi-agent workflows (`devos-ai-code-agent` or desktop shortcut).
 - **Local AI Code Agent & Engine**: Hardware-accelerated local inference API listening at `http://127.0.0.1:11434/v1` (OpenAI & Ollama compatible). Zero telemetry, 0 token costs, 100% offline. Pre-wired into VS Code via Continue (Ctrl+L).
 - **Windows 11 Fluent Task Manager**: Modernized system performance and resource monitor (`Ctrl + Shift + Esc`) with anti-aliased gradient utilization curves, clean KPI cards, friendly network interface mapping (`Ethernet`, `Wi-Fi`, `Virtual Bridge`), and colored status badges.
 - **Self-Hosting Day-by-Day OS Development**: Develop and customize DevOS directly while using it as your daily operating system. Native Python/Qt components live directly under `/usr/local/share/devos/components/` — edit code in VS Code, hit Save, and your changes take effect instantly. Backed by automatic Btrfs/Snapper instant rollback snapshots.
@@ -306,7 +306,7 @@ Shut down, restart and uninstall always ask for confirmation first.
 | Emoji panel | Win+. Search smile, love, food or `bd` |
 | DevOS Notes | Notebooks, sticky notes, voice notes, AI summarize / to-do / translate |
 | Notepad | Tabs, and unsaved text survives a crash or power cut |
-| DevOS Code Agent | Cursor-style agent on the local model. 8 GB RAM and a Medium or Coding model |
+| DevOS AI Code Agent | Cursor-style agent on the local model. 8 GB RAM and a Medium or Coding model |
 | AI agent browsers | One Chrome profile per agent, only as many as this PC can keep smooth |
 | Coding automations | `devos auto commit`, `review`, `explain`, `summarize`, `hook` |
 | DevOS Optimizer | Close idle memory-heavy apps; clean temp files, caches and the Recycle Bin |
@@ -365,7 +365,7 @@ Shut down, restart and uninstall always ask for confirmation first.
 - **AI on any text (Win+Alt+A)** — select text anywhere → rewrite, fix grammar, shorten, translate, summarize, reply.
 - **Clipboard history (Win+V)** — the copies you already made, one click to paste one back into the app you were using.
 - **Emoji panel (Win+.)** — search “love”, “laugh”, “food” or “bd” and it pastes the emoji. Say “open emoji” to DevOS AI.
-- **DevOS Code Agent** — a Cursor-style coding agent on the local model: plans, reads code, shows every change as a diff to accept, asks before running commands. Appears only on PCs with 8 GB+ RAM and a Medium+ or Coding AI model.
+- **DevOS AI Code Agent** — a Cursor-style coding agent on the local model: plans, reads code, shows every change as a diff to accept, asks before running commands. Appears only on PCs with 8 GB+ RAM and a Medium+ or Coding AI model.
 - **Install anything:** paste a Microsoft Store, Google Play, App Store or Flathub link (or say "install Zoom") and DevOS AI finds the DevOS version, the web version, or tells you honestly when an app can't run on DevOS.
 - DevOS's own tools (Dashboard, Storage Doctor…) open in their **own DevOS windows**, not browser tabs.
 

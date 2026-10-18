@@ -34,7 +34,7 @@ def main():
         print("  dashboard Open Luxury System Dashboard & PIN/Security Hub")
         print("  setup     Launch Interactive First-Boot Configuration Wizard")
         print("  app       Manage Windows, Linux, and Android applications")
-        print("  code      Local AI code assistant and repository generator")
+        print("  code      DevOS AI Code Agent: local coding assistant and autonomous agent")
         print("  serve     Local developer server manager (Caddy, PHP, DB, Redis)")
         print("  ai        System assistant with safe tool calling")
         print("  win       WinLayer prefix manager and compatibility doctor")
@@ -71,6 +71,8 @@ def main():
         "setup": dashboard_script,
         "app": os.path.join(COMPONENTS_DIR, "apphub", "hub.py"),
         "code": os.path.join(COMPONENTS_DIR, "code-agent", "code_agent.py"),
+        "code-agent": os.path.join(COMPONENTS_DIR, "code-agent", "code_agent.py"),
+        "agent": os.path.join(COMPONENTS_DIR, "code-agent", "code_agent.py"),
         "serve": os.path.join(COMPONENTS_DIR, "devserver", "server_manager.py"),
         "ai": os.path.join(COMPONENTS_DIR, "ai-agent", "agent.py"),
         "win": os.path.join(COMPONENTS_DIR, "winlayer", "prefix_manager.py"),

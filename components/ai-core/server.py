@@ -24,7 +24,7 @@ import model_catalog
 
 
 HOST = "127.0.0.1"
-PORT = 11434
+PORT = int(os.environ.get("DEVOS_AI_PORT") or 11434)
 # "devos-ai-models api lan on" opens the API to phones and PCs on the same
 # network (0.0.0.0); those callers must send "Authorization: Bearer <key>".
 API_CONF = "/etc/devos/ai-api.conf"
@@ -129,6 +129,22 @@ def configured_parallel(path: str = "/etc/devos/ai.conf") -> int:
         return 0
 
 
+def configured_idle_timeout(path: str = "/etc/devos/ai.conf") -> int:
+    value = os.environ.get("DEVOS_AI_IDLE_TIMEOUT", "")
+    try:
+        with open(path, encoding="utf-8") as handle:
+            for line in handle:
+                key, _, val = line.partition("=")
+                if key.strip() in ("idle_timeout", "timeout"):
+                    value = val.strip()
+    except OSError:
+        pass
+    try:
+        return int(value)
+    except ValueError:
+        return 0
+
+
 def _int_env(name: str, default: int) -> int:
     raw = os.environ.get(name, "").strip()
     if not raw:
@@ -174,8 +190,13 @@ def thread_plan(logical: int, physical: int, parallel: int) -> Tuple[int, int]:
     logical = max(1, logical)
     physical = max(1, min(physical, logical))
     slots = max(1, parallel)
-    gen = max(1, physical // slots)
-    batch = max(gen, logical // slots)
+    if slots <= 1:
+        gen = min(8, physical)
+    else:
+        # Scale generation threads across performance cores without starvation
+        gen = min(8, max(4, physical // max(1, slots // 2)))
+    # Batch / prompt evaluation is matrix-heavy and scales very well with threads
+    batch = max(gen, min(16, logical))
     gen = max(1, min(_int_env("DEVOS_AI_THREADS", gen), logical))
     batch = max(gen, min(_int_env("DEVOS_AI_BATCH_THREADS", batch), logical))
     return gen, batch
@@ -196,7 +217,7 @@ def llama_speed_kwargs(kind: str, ram_gb: float, parallel: int, gpu_layers: int,
     ctx = 8192 if kind == "code" else 2048
     if kind == "embedding":
         ctx = 2048
-    n_batch = 1024 if kind == "code" and batch >= 8 and ram_gb >= 8 else 512
+    n_batch = 1024 if batch >= 8 and ram_gb >= 8 else 512
     n_batch = min(n_batch, ctx)
     kwargs = {
         "n_ctx": ctx,
@@ -398,13 +419,21 @@ class DevOSAIEngine:
         # Public name in the API (/health, /v1/models, replies). The real file
         # is kept in _model_file; users and apps only ever see "devos-ai".
         self.active_model = "devos-ai"
-        self.idle_timeout_seconds = 300
+        ram = float(self.tier_info.get("ram_gb") or 4)
+        conf_timeout = configured_idle_timeout()
+        if conf_timeout > 0:
+            self.idle_timeout_seconds = conf_timeout
+        elif ram >= 15.5:
+            self.idle_timeout_seconds = 3600  # 1 hour on 16GB+ RAM
+        elif ram >= 7.5:
+            self.idle_timeout_seconds = 1800  # 30 min on 8GB+ RAM
+        else:
+            self.idle_timeout_seconds = 300   # 5 min on small memory (<8GB) systems
         self.last_activity = time.time()
         self.is_loaded = False
         self._model_file = None
         self.tokens_generated = 0
         self.start_time = time.time()
-        ram = float(self.tier_info.get("ram_gb") or 4)
         self.parallel = parallel_slots(ram, os.cpu_count() or 2, configured_parallel())
         self._slots = [_Slot(i) for i in range(self.parallel)]
         self._cond = threading.Condition()

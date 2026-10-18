@@ -1,0 +1,11 @@
+[SddmGreeterTheme]
+Name=DevOS Modern
+Description=Modern glassmorphism login screen for DevOS
+Author=DevOS Team
+Copyright=(c) 2026 DevOS Team
+License=GPL-3.0
+Type=sddm-theme
+Version=1.0
+MainScript=Main.qml
+ConfigFile=theme.conf
+TranslationsDirectory=translations

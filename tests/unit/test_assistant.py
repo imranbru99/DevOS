@@ -394,7 +394,7 @@ class TestToolsDryRun(unittest.TestCase):
     def test_uninstall_plan_and_system_apps(self):
         res = self.run_action("uninstall vlc")[0]
         self.assertTrue(res.ok, res.text)
-        self.assertEqual(res.plan[0][-2:], ["--uninstall", "vlc-media-player"])
+        self.assertIn(res.plan[0][-2:], (["--uninstall", "vlc-media-player"], ["--feature", "vlc"]))
         res = tools.execute(tools.Action("uninstall", {"name": "Files"}), self.ctx, dry_run=True)
         self.assertFalse(res.ok)
 

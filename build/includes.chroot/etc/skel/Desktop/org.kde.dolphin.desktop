@@ -2,7 +2,7 @@
 Name=This PC
 GenericName=Files
 Comment=Drives and free space, like This PC
-Exec=python3 /usr/local/bin/devos-files
+Exec=python3 /usr/local/bin/devos-files %U
 Icon=computer
 Type=Application
 Terminal=false

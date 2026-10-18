@@ -355,9 +355,9 @@ FEATURES += [
     F("emoji", "devos", "Emoji panel (Win+.)", "Press Win+. and search smile, love, food or bd. "
       "The one you pick is pasted into the app you were using.", 1, win="Emoji panel (Win+.)",
       presets=ESSENTIAL, builtin={"desktop": ["devos-emoji.desktop"]}),
-    F("codeagent", "devos", "DevOS Code Agent", "A Cursor-style AI coding agent on your own PC. Appears when a "
+    F("codeagent", "devos", "DevOS AI Code Agent", "A Cursor-style AI coding agent on your own PC. Appears when a "
       "Medium+ or Coding AI model is installed.", 1, win="GitHub Copilot", presets=EVERYONE, min_ram_gb=8,
-      builtin={"desktop": ["devos-code-agent.desktop"]}),
+      builtin={"desktop": ["devos-ai-code-agent.desktop", "devos-code-agent.desktop"]}),
     F("phonelink", "devos", "Phone Link", "Control the PC from your phone's browser: files, clipboard, "
       "volume, screen and DevOS AI.", 1, win="Phone Link", presets=EVERYONE,
       builtin={"desktop": ["devos-phonelink.desktop"]}),

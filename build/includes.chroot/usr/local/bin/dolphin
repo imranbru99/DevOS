@@ -1,13 +1,4 @@
 #!/bin/bash
-# Opening Files with no folder shows This PC. A folder still opens in Dolphin.
-if [ "$#" -eq 0 ]; then
-    exec python3 /usr/local/bin/devos-files
-fi
-if [ "$#" -eq 1 ]; then
-    case "$1" in
-        ""|computer:|computer:/)
-            exec python3 /usr/local/bin/devos-files
-            ;;
-    esac
-fi
-exec /usr/bin/dolphin "$@"
+# DevOS File Explorer (Windows Explorer Behavior)
+# Opens This PC or any specified folder in Windows File Explorer.
+exec python3 /usr/local/bin/devos-files "$@"

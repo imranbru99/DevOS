@@ -29,16 +29,23 @@ cp -f /devos/build/includes.chroot/usr/local/bin/devos-taskman /mnt/root/usr/loc
 chmod 755 /mnt/root/usr/local/bin/devos-taskman
 cp -f /devos/build/includes.chroot/usr/share/applications/devos-taskman.desktop /mnt/root/usr/share/applications/devos-taskman.desktop
 
-echo "==> Installing Antigravity Code Agent application..."
-cp -f /devos/build/includes.chroot/usr/local/bin/devos-antigravity /mnt/root/usr/local/bin/devos-antigravity
-chmod 755 /mnt/root/usr/local/bin/devos-antigravity
-cp -f /devos/build/includes.chroot/usr/share/applications/devos-antigravity.desktop /mnt/root/usr/share/applications/devos-antigravity.desktop
-if [ -f /devos/build/includes.chroot/usr/share/pixmaps/antigravity.png ]; then
-    cp -f /devos/build/includes.chroot/usr/share/pixmaps/antigravity.png /mnt/root/usr/share/pixmaps/antigravity.png
+echo "==> Installing DevOS AI Code Agent application..."
+cp -f /devos/build/includes.chroot/usr/local/bin/devos-ai-code-agent /mnt/root/usr/local/bin/devos-ai-code-agent
+chmod 755 /mnt/root/usr/local/bin/devos-ai-code-agent
+cp -f /devos/build/includes.chroot/usr/local/bin/devos-antigravity /mnt/root/usr/local/bin/devos-antigravity 2>/dev/null || true
+chmod 755 /mnt/root/usr/local/bin/devos-antigravity 2>/dev/null || true
+cp -f /devos/build/includes.chroot/usr/local/bin/devos-code-agent /mnt/root/usr/local/bin/devos-code-agent 2>/dev/null || true
+chmod 755 /mnt/root/usr/local/bin/devos-code-agent 2>/dev/null || true
+cp -f /devos/build/includes.chroot/usr/share/applications/devos-ai-code-agent.desktop /mnt/root/usr/share/applications/devos-ai-code-agent.desktop
+rm -f /mnt/root/usr/share/applications/devos-antigravity.desktop
+if [ -f /devos/build/includes.chroot/usr/share/pixmaps/devos-ai-code-agent.png ]; then
+    cp -f /devos/build/includes.chroot/usr/share/pixmaps/devos-ai-code-agent.png /mnt/root/usr/share/pixmaps/devos-ai-code-agent.png
+    cp -f /devos/build/includes.chroot/usr/share/pixmaps/devos-ai-code-agent.png /mnt/root/usr/share/pixmaps/antigravity.png 2>/dev/null || true
     for size in 16 22 24 32 48 64 128 256; do
         dir="/mnt/root/usr/share/icons/hicolor/${size}x${size}/apps"
         mkdir -p "$dir"
-        cp -f /devos/build/includes.chroot/usr/share/pixmaps/antigravity.png "${dir}/antigravity.png" 2>/dev/null || true
+        cp -f /devos/build/includes.chroot/usr/share/pixmaps/devos-ai-code-agent.png "${dir}/devos-ai-code-agent.png" 2>/dev/null || true
+        cp -f /devos/build/includes.chroot/usr/share/pixmaps/devos-ai-code-agent.png "${dir}/antigravity.png" 2>/dev/null || true
     done
 fi
 
@@ -66,6 +73,7 @@ chroot /mnt/root /bin/bash /usr/local/sbin/devos-debrand-desktop || true
 for home_user in /mnt/root/home/*; do
     if [ -d "$home_user/.local/share/applications" ]; then
         cp -f /mnt/root/usr/share/applications/devos-taskman.desktop "$home_user/.local/share/applications/" 2>/dev/null || true
+        rm -f "$home_user/.local/share/applications/devos-antigravity.desktop" 2>/dev/null || true
     fi
     rm -rf "$home_user/.cache/ksycoca6"* "$home_user/.cache/krunner"* 2>/dev/null || true
 done

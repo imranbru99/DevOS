@@ -1,25 +1,74 @@
 #!/usr/bin/env python3
-"""This PC: drives with free space, in the same layout as Windows."""
+"""This PC: Windows File Explorer for DevOS.
 
+Provides the authentic Windows 10/11 File Explorer experience:
+- 'This PC' view with Folders (Desktop, Documents, Downloads, Music, Pictures, Videos)
+- 'Devices and drives' with Windows drive letters (C:, D:, E:...), drive icons, storage bars
+- Seamless in-window navigation across disks and folders (no external dolphin popup)
+- Breadcrumb address bar with direct path editing and Windows drive mapping
+- Real-time search filter
+- Details and Large Icons view modes with Windows file classifications
+- Windows context menus, shortcuts, and file operations (New folder, Cut, Copy, Paste, Delete, Rename)
+- Quick access sidebar with drives and special folders
+- Windows 11 dark theme aesthetics
+"""
+
+import datetime
 import json
+import mimetypes
 import os
+import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 try:
-    from PyQt5.QtCore import Qt
-    from PyQt5.QtGui import QFont
+    from PyQt5.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, QThread, pyqtSignal
+    from PyQt5.QtGui import (
+        QBrush,
+        QColor,
+        QFont,
+        QIcon,
+        QKeySequence,
+        QLinearGradient,
+        QPainter,
+        QPainterPath,
+        QPalette,
+        QPen,
+        QPixmap,
+        QPolygonF,
+    )
     from PyQt5.QtWidgets import (
+        QAbstractItemView,
+        QAction,
         QApplication,
+        QCheckBox,
+        QDialog,
+        QDialogButtonBox,
+        QFileDialog,
         QFrame,
         QGridLayout,
         QHBoxLayout,
+        QHeaderView,
         QLabel,
+        QLineEdit,
+        QListWidget,
+        QListWidgetItem,
         QMainWindow,
+        QMenu,
+        QMessageBox,
         QProgressBar,
         QPushButton,
         QScrollArea,
         QSizePolicy,
+        QSplitter,
+        QStackedWidget,
+        QStatusBar,
+        QTabBar,
+        QTableWidget,
+        QTableWidgetItem,
+        QTabWidget,
+        QToolButton,
         QVBoxLayout,
         QWidget,
     )
@@ -27,15 +76,469 @@ except ImportError:
     os.execvp("/usr/bin/dolphin", ["/usr/bin/dolphin", "computer:/"])
 
 
+# Cache for rendered Windows icons
+_ICON_CACHE = {}
+
+
+def get_win_icon(name, size=32):
+    """Generate or retrieve a pixel-perfect Windows 11 style icon."""
+    key = (name, size)
+    if key in _ICON_CACHE:
+        return _ICON_CACHE[key]
+
+    pix = QPixmap(size, size)
+    pix.fill(Qt.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.Antialiasing)
+    s = size / 64.0
+
+    if name == "this-pc":
+        # Windows 11 This PC monitor icon
+        p.setBrush(QColor("#1e293b"))
+        p.setPen(QPen(QColor("#475569"), 2 * s))
+        p.drawRoundedRect(QRectF(8 * s, 8 * s, 48 * s, 34 * s), 4 * s, 4 * s)
+        grad = QLinearGradient(10 * s, 10 * s, 54 * s, 40 * s)
+        grad.setColorAt(0, QColor("#0284c7"))
+        grad.setColorAt(1, QColor("#0369a1"))
+        p.setBrush(grad)
+        p.setPen(Qt.NoPen)
+        p.drawRoundedRect(QRectF(11 * s, 11 * s, 42 * s, 28 * s), 2 * s, 2 * s)
+        # Screen glow
+        p.setBrush(QColor(255, 255, 255, 50))
+        p.drawEllipse(QPointF(38 * s, 28 * s), 12 * s, 8 * s)
+        # Stand
+        p.setBrush(QColor("#64748b"))
+        p.drawRect(QRectF(28 * s, 42 * s, 8 * s, 8 * s))
+        p.drawRoundedRect(QRectF(20 * s, 50 * s, 24 * s, 4 * s), 2 * s, 2 * s)
+
+    elif name == "drive-c":
+        # Windows system drive: Metallic hard drive + Windows logo
+        grad = QLinearGradient(8 * s, 10 * s, 56 * s, 54 * s)
+        grad.setColorAt(0, QColor("#f1f5f9"))
+        grad.setColorAt(1, QColor("#94a3b8"))
+        p.setBrush(grad)
+        p.setPen(QPen(QColor("#475569"), 1.8 * s))
+        p.drawRoundedRect(QRectF(8 * s, 12 * s, 48 * s, 40 * s), 5 * s, 5 * s)
+        p.setBrush(QColor("#ffffff"))
+        p.setPen(Qt.NoPen)
+        p.drawRoundedRect(QRectF(12 * s, 16 * s, 40 * s, 25 * s), 3 * s, 3 * s)
+        p.setBrush(QColor("#cbd5e1"))
+        p.drawEllipse(QPointF(32 * s, 28 * s), 10 * s, 10 * s)
+        p.setBrush(QColor("#64748b"))
+        p.drawEllipse(QPointF(32 * s, 28 * s), 3 * s, 3 * s)
+        # Drive LED
+        p.setBrush(QColor("#22c55e"))
+        p.drawEllipse(QPointF(47 * s, 46 * s), 2.5 * s, 2.5 * s)
+        # Windows 4-square blue badge
+        bx, by, bw = 34 * s, 30 * s, 22 * s
+        p.setBrush(QColor("#0078d4"))
+        p.setPen(QPen(QColor("#ffffff"), 1.5 * s))
+        p.drawRoundedRect(QRectF(bx, by, bw, bw), 3 * s, 3 * s)
+        p.setBrush(QColor("#ffffff"))
+        p.setPen(Qt.NoPen)
+        gw = bw / 2 - 2 * s
+        p.drawRect(QRectF(bx + 1.5 * s, by + 1.5 * s, gw, gw))
+        p.drawRect(QRectF(bx + gw + 3 * s, by + 1.5 * s, gw, gw))
+        p.drawRect(QRectF(bx + 1.5 * s, by + gw + 3 * s, gw, gw))
+        p.drawRect(QRectF(bx + gw + 3 * s, by + gw + 3 * s, gw, gw))
+
+    elif name == "drive-fixed":
+        # Secondary fixed hard drive (D:, E:, etc.)
+        grad = QLinearGradient(8 * s, 10 * s, 56 * s, 54 * s)
+        grad.setColorAt(0, QColor("#f1f5f9"))
+        grad.setColorAt(1, QColor("#94a3b8"))
+        p.setBrush(grad)
+        p.setPen(QPen(QColor("#475569"), 1.8 * s))
+        p.drawRoundedRect(QRectF(8 * s, 12 * s, 48 * s, 40 * s), 5 * s, 5 * s)
+        p.setBrush(QColor("#ffffff"))
+        p.setPen(Qt.NoPen)
+        p.drawRoundedRect(QRectF(12 * s, 16 * s, 40 * s, 28 * s), 3 * s, 3 * s)
+        p.setBrush(QColor("#cbd5e1"))
+        p.drawEllipse(QPointF(32 * s, 30 * s), 11 * s, 11 * s)
+        p.setBrush(QColor("#64748b"))
+        p.drawEllipse(QPointF(32 * s, 30 * s), 3.5 * s, 3.5 * s)
+        # LED & power pins
+        p.setBrush(QColor("#0284c7"))
+        p.drawEllipse(QPointF(47 * s, 46 * s), 2.5 * s, 2.5 * s)
+        p.setBrush(QColor("#475569"))
+        p.drawRect(QRectF(14 * s, 46 * s, 10 * s, 3 * s))
+
+    elif name == "drive-usb":
+        # USB Flash drive
+        p.setBrush(QColor("#e2e8f0"))
+        p.setPen(QPen(QColor("#64748b"), 1.5 * s))
+        p.drawRoundedRect(QRectF(22 * s, 8 * s, 20 * s, 14 * s), 2 * s, 2 * s)
+        p.setBrush(QColor("#334155"))
+        p.drawRect(QRectF(26 * s, 11 * s, 4 * s, 4 * s))
+        p.drawRect(QRectF(34 * s, 11 * s, 4 * s, 4 * s))
+        # USB Body
+        grad = QLinearGradient(16 * s, 20 * s, 48 * s, 58 * s)
+        grad.setColorAt(0, QColor("#0284c7"))
+        grad.setColorAt(1, QColor("#0369a1"))
+        p.setBrush(grad)
+        p.setPen(QPen(QColor("#0284c7"), 1.5 * s))
+        p.drawRoundedRect(QRectF(16 * s, 20 * s, 32 * s, 38 * s), 6 * s, 6 * s)
+        p.setBrush(QColor("#38bdf8"))
+        p.setPen(Qt.NoPen)
+        p.drawEllipse(QPointF(32 * s, 48 * s), 3 * s, 3 * s)
+
+    elif name == "folder":
+        # Standard Windows 11 folder
+        p.setBrush(QColor("#f59e0b"))
+        p.setPen(Qt.NoPen)
+        p.drawRoundedRect(QRectF(6 * s, 10 * s, 24 * s, 12 * s), 3 * s, 3 * s)
+        p.setBrush(QColor("#d97706"))
+        p.drawRoundedRect(QRectF(6 * s, 14 * s, 52 * s, 40 * s), 4 * s, 4 * s)
+        p.setBrush(QColor("#ffffff"))
+        p.drawRoundedRect(QRectF(11 * s, 16 * s, 42 * s, 20 * s), 2 * s, 2 * s)
+        grad = QLinearGradient(0, 22 * s, 0, 56 * s)
+        grad.setColorAt(0, QColor("#fbbf24"))
+        grad.setColorAt(1, QColor("#f59e0b"))
+        p.setBrush(grad)
+        p.drawRoundedRect(QRectF(6 * s, 22 * s, 52 * s, 34 * s), 4 * s, 4 * s)
+
+    elif name == "folder-desktop":
+        # Folder with desktop monitor overlay
+        p.setBrush(QColor("#f59e0b"))
+        p.setPen(Qt.NoPen)
+        p.drawRoundedRect(QRectF(6 * s, 10 * s, 24 * s, 12 * s), 3 * s, 3 * s)
+        grad = QLinearGradient(0, 14 * s, 0, 56 * s)
+        grad.setColorAt(0, QColor("#fbbf24"))
+        grad.setColorAt(1, QColor("#f59e0b"))
+        p.setBrush(grad)
+        p.drawRoundedRect(QRectF(6 * s, 14 * s, 52 * s, 42 * s), 4 * s, 4 * s)
+        # Desktop monitor badge
+        p.setBrush(QColor("#0284c7"))
+        p.setPen(QPen(QColor("#ffffff"), 1.5 * s))
+        p.drawRoundedRect(QRectF(18 * s, 24 * s, 28 * s, 19 * s), 2 * s, 2 * s)
+        p.setBrush(QColor("#ffffff"))
+        p.drawRect(QRectF(29 * s, 43 * s, 6 * s, 4 * s))
+        p.drawRect(QRectF(25 * s, 47 * s, 14 * s, 2 * s))
+
+    elif name == "folder-documents":
+        # Folder with document sheet overlay
+        p.setBrush(QColor("#f59e0b"))
+        p.setPen(Qt.NoPen)
+        p.drawRoundedRect(QRectF(6 * s, 10 * s, 24 * s, 12 * s), 3 * s, 3 * s)
+        grad = QLinearGradient(0, 14 * s, 0, 56 * s)
+        grad.setColorAt(0, QColor("#fbbf24"))
+        grad.setColorAt(1, QColor("#f59e0b"))
+        p.setBrush(grad)
+        p.drawRoundedRect(QRectF(6 * s, 14 * s, 52 * s, 42 * s), 4 * s, 4 * s)
+        # Document sheet
+        p.setBrush(QColor("#ffffff"))
+        p.setPen(QPen(QColor("#cbd5e1"), 1 * s))
+        p.drawRoundedRect(QRectF(20 * s, 22 * s, 24 * s, 28 * s), 2 * s, 2 * s)
+        p.setBrush(QColor("#0284c7"))
+        p.setPen(Qt.NoPen)
+        p.drawRect(QRectF(24 * s, 27 * s, 16 * s, 2.5 * s))
+        p.drawRect(QRectF(24 * s, 32 * s, 16 * s, 2.5 * s))
+        p.drawRect(QRectF(24 * s, 37 * s, 10 * s, 2.5 * s))
+
+    elif name == "folder-downloads":
+        # Folder with blue arrow down
+        p.setBrush(QColor("#f59e0b"))
+        p.setPen(Qt.NoPen)
+        p.drawRoundedRect(QRectF(6 * s, 10 * s, 24 * s, 12 * s), 3 * s, 3 * s)
+        grad = QLinearGradient(0, 14 * s, 0, 56 * s)
+        grad.setColorAt(0, QColor("#fbbf24"))
+        grad.setColorAt(1, QColor("#f59e0b"))
+        p.setBrush(grad)
+        p.drawRoundedRect(QRectF(6 * s, 14 * s, 52 * s, 42 * s), 4 * s, 4 * s)
+        # Circle badge with down arrow
+        p.setBrush(QColor("#0284c7"))
+        p.setPen(QPen(QColor("#ffffff"), 1.5 * s))
+        p.drawEllipse(QPointF(32 * s, 36 * s), 13 * s, 13 * s)
+        p.setBrush(QColor("#ffffff"))
+        p.setPen(Qt.NoPen)
+        arrow = QPolygonF([
+            QPointF(32 * s, 43 * s),
+            QPointF(25 * s, 35 * s),
+            QPointF(29 * s, 35 * s),
+            QPointF(29 * s, 28 * s),
+            QPointF(35 * s, 28 * s),
+            QPointF(35 * s, 35 * s),
+            QPointF(39 * s, 35 * s),
+        ])
+        p.drawPolygon(arrow)
+
+    elif name == "folder-music":
+        # Folder with musical note
+        p.setBrush(QColor("#f59e0b"))
+        p.setPen(Qt.NoPen)
+        p.drawRoundedRect(QRectF(6 * s, 10 * s, 24 * s, 12 * s), 3 * s, 3 * s)
+        grad = QLinearGradient(0, 14 * s, 0, 56 * s)
+        grad.setColorAt(0, QColor("#fbbf24"))
+        grad.setColorAt(1, QColor("#f59e0b"))
+        p.setBrush(grad)
+        p.drawRoundedRect(QRectF(6 * s, 14 * s, 52 * s, 42 * s), 4 * s, 4 * s)
+        # Music badge
+        p.setBrush(QColor("#ec4899"))
+        p.setPen(QPen(QColor("#ffffff"), 1.5 * s))
+        p.drawEllipse(QPointF(32 * s, 36 * s), 13 * s, 13 * s)
+        p.setBrush(QColor("#ffffff"))
+        p.setPen(Qt.NoPen)
+        p.drawEllipse(QPointF(27 * s, 40 * s), 3 * s, 2.5 * s)
+        p.drawEllipse(QPointF(37 * s, 37 * s), 3 * s, 2.5 * s)
+        p.drawRect(QRectF(29 * s, 29 * s, 2 * s, 11 * s))
+        p.drawRect(QRectF(39 * s, 26 * s, 2 * s, 11 * s))
+        p.drawRect(QRectF(29 * s, 26 * s, 12 * s, 3 * s))
+
+    elif name == "folder-pictures":
+        # Folder with landscape photo
+        p.setBrush(QColor("#f59e0b"))
+        p.setPen(Qt.NoPen)
+        p.drawRoundedRect(QRectF(6 * s, 10 * s, 24 * s, 12 * s), 3 * s, 3 * s)
+        grad = QLinearGradient(0, 14 * s, 0, 56 * s)
+        grad.setColorAt(0, QColor("#fbbf24"))
+        grad.setColorAt(1, QColor("#f59e0b"))
+        p.setBrush(grad)
+        p.drawRoundedRect(QRectF(6 * s, 14 * s, 52 * s, 42 * s), 4 * s, 4 * s)
+        # Photo badge
+        p.setBrush(QColor("#10b981"))
+        p.setPen(QPen(QColor("#ffffff"), 1.5 * s))
+        p.drawRoundedRect(QRectF(19 * s, 23 * s, 26 * s, 22 * s), 2 * s, 2 * s)
+        # Mountain / sun
+        p.setBrush(QColor("#fbbf24"))
+        p.setPen(Qt.NoPen)
+        p.drawEllipse(QPointF(25 * s, 28 * s), 2.5 * s, 2.5 * s)
+        p.setBrush(QColor("#ffffff"))
+        mountain = QPolygonF([
+            QPointF(20 * s, 43 * s),
+            QPointF(28 * s, 33 * s),
+            QPointF(36 * s, 43 * s),
+        ])
+        p.drawPolygon(mountain)
+
+    elif name == "folder-videos":
+        # Folder with film reel
+        p.setBrush(QColor("#f59e0b"))
+        p.setPen(Qt.NoPen)
+        p.drawRoundedRect(QRectF(6 * s, 10 * s, 24 * s, 12 * s), 3 * s, 3 * s)
+        grad = QLinearGradient(0, 14 * s, 0, 56 * s)
+        grad.setColorAt(0, QColor("#fbbf24"))
+        grad.setColorAt(1, QColor("#f59e0b"))
+        p.setBrush(grad)
+        p.drawRoundedRect(QRectF(6 * s, 14 * s, 52 * s, 42 * s), 4 * s, 4 * s)
+        # Film badge
+        p.setBrush(QColor("#8b5cf6"))
+        p.setPen(QPen(QColor("#ffffff"), 1.5 * s))
+        p.drawRoundedRect(QRectF(18 * s, 24 * s, 28 * s, 20 * s), 3 * s, 3 * s)
+        p.setBrush(QColor("#ffffff"))
+        p.setPen(Qt.NoPen)
+        play = QPolygonF([
+            QPointF(28 * s, 29 * s),
+            QPointF(38 * s, 34 * s),
+            QPointF(28 * s, 39 * s),
+        ])
+        p.drawPolygon(play)
+
+    elif name == "file-doc":
+        # Document sheet with folded corner
+        p.setBrush(QColor("#ffffff"))
+        p.setPen(QPen(QColor("#cbd5e1"), 1.5 * s))
+        path = QPainterPath()
+        path.moveTo(14 * s, 10 * s)
+        path.lineTo(38 * s, 10 * s)
+        path.lineTo(50 * s, 22 * s)
+        path.lineTo(50 * s, 54 * s)
+        path.lineTo(14 * s, 54 * s)
+        path.closeSubpath()
+        p.drawPath(path)
+        # Folded triangle
+        p.setBrush(QColor("#e2e8f0"))
+        fold = QPolygonF([
+            QPointF(38 * s, 10 * s),
+            QPointF(38 * s, 22 * s),
+            QPointF(50 * s, 22 * s),
+        ])
+        p.drawPolygon(fold)
+        # Text lines
+        p.setBrush(QColor("#94a3b8"))
+        p.setPen(Qt.NoPen)
+        p.drawRect(QRectF(20 * s, 26 * s, 24 * s, 2.5 * s))
+        p.drawRect(QRectF(20 * s, 32 * s, 24 * s, 2.5 * s))
+        p.drawRect(QRectF(20 * s, 38 * s, 18 * s, 2.5 * s))
+        p.drawRect(QRectF(20 * s, 44 * s, 21 * s, 2.5 * s))
+
+    elif name == "file-code":
+        # Code document
+        p.setBrush(QColor("#0284c7"))
+        p.setPen(QPen(QColor("#38bdf8"), 1 * s))
+        p.drawRoundedRect(QRectF(14 * s, 10 * s, 36 * s, 44 * s), 4 * s, 4 * s)
+        p.setFont(QFont("Monospace", int(14 * s), QFont.Bold))
+        p.setPen(QColor("#ffffff"))
+        p.drawText(QRectF(14 * s, 12 * s, 36 * s, 40 * s), Qt.AlignCenter, "</>")
+
+    elif name == "file-pdf":
+        p.setBrush(QColor("#ffffff"))
+        p.setPen(QPen(QColor("#cbd5e1"), 1.5 * s))
+        p.drawRoundedRect(QRectF(14 * s, 10 * s, 36 * s, 44 * s), 3 * s, 3 * s)
+        p.setBrush(QColor("#ef4444"))
+        p.setPen(Qt.NoPen)
+        p.drawRoundedRect(QRectF(14 * s, 22 * s, 36 * s, 20 * s), 2 * s, 2 * s)
+        p.setFont(QFont("Inter", int(9 * s), QFont.Bold))
+        p.setPen(QColor("#ffffff"))
+        p.drawText(QRectF(14 * s, 22 * s, 36 * s, 20 * s), Qt.AlignCenter, "PDF")
+
+    elif name == "file-image":
+        p.setBrush(QColor("#ffffff"))
+        p.setPen(QPen(QColor("#cbd5e1"), 1.5 * s))
+        p.drawRoundedRect(QRectF(14 * s, 10 * s, 36 * s, 44 * s), 3 * s, 3 * s)
+        p.setBrush(QColor("#065f46"))
+        p.setPen(Qt.NoPen)
+        p.drawRoundedRect(QRectF(17 * s, 16 * s, 30 * s, 32 * s), 2 * s, 2 * s)
+        p.setBrush(QColor("#34d399"))
+        mountain = QPolygonF([
+            QPointF(17 * s, 48 * s),
+            QPointF(28 * s, 32 * s),
+            QPointF(38 * s, 44 * s),
+            QPointF(47 * s, 36 * s),
+            QPointF(47 * s, 48 * s),
+        ])
+        p.drawPolygon(mountain)
+
+    elif name == "file-archive":
+        # Zip file
+        p.setBrush(QColor("#fbbf24"))
+        p.setPen(QPen(QColor("#d97706"), 1.5 * s))
+        p.drawRoundedRect(QRectF(14 * s, 10 * s, 36 * s, 44 * s), 3 * s, 3 * s)
+        # Zipper track
+        p.setBrush(QColor("#475569"))
+        p.setPen(Qt.NoPen)
+        p.drawRect(QRectF(29 * s, 12 * s, 6 * s, 28 * s))
+        p.setBrush(QColor("#f8fafc"))
+        for y in range(14, 38, 4):
+            p.drawRect(QRectF(30 * s, y * s, 4 * s, 2 * s))
+        p.setBrush(QColor("#e2e8f0"))
+        p.drawRoundedRect(QRectF(28 * s, 38 * s, 8 * s, 10 * s), 2 * s, 2 * s)
+
+    elif name == "network":
+        # Network workgroup
+        p.setBrush(QColor("#0284c7"))
+        p.setPen(QPen(QColor("#38bdf8"), 2 * s))
+        p.drawEllipse(QPointF(32 * s, 26 * s), 16 * s, 16 * s)
+        p.setPen(QPen(QColor("#ffffff"), 1.5 * s))
+        p.drawLine(QPointF(16 * s, 26 * s), QPointF(48 * s, 26 * s))
+        p.drawEllipse(QPointF(32 * s, 26 * s), 8 * s, 16 * s)
+        p.setBrush(QColor("#64748b"))
+        p.drawRect(QRectF(22 * s, 46 * s, 20 * s, 6 * s))
+
+    elif name == "recycle-bin":
+        # Recycle Bin
+        p.setBrush(QColor("#0284c7"))
+        p.setPen(QPen(QColor("#38bdf8"), 1.5 * s))
+        p.drawRoundedRect(QRectF(16 * s, 14 * s, 32 * s, 40 * s), 4 * s, 4 * s)
+        p.setBrush(QColor("#38bdf8"))
+        p.drawRoundedRect(QRectF(12 * s, 10 * s, 40 * s, 5 * s), 2 * s, 2 * s)
+        p.drawRect(QRectF(28 * s, 7 * s, 8 * s, 3 * s))
+        # White recycling arrows
+        p.setPen(QPen(QColor("#ffffff"), 2 * s))
+        p.drawLine(QPointF(24 * s, 24 * s), QPointF(24 * s, 46 * s))
+        p.drawLine(QPointF(32 * s, 24 * s), QPointF(32 * s, 46 * s))
+        p.drawLine(QPointF(40 * s, 24 * s), QPointF(40 * s, 46 * s))
+
+    else:
+        # Fallback to system icon or clean generic document
+        sys_icon = QIcon.fromTheme(name)
+        if not sys_icon.isNull():
+            p.end()
+            _ICON_CACHE[key] = sys_icon
+            return sys_icon
+        p.setBrush(QColor("#ffffff"))
+        p.setPen(QPen(QColor("#94a3b8"), 1.5 * s))
+        p.drawRoundedRect(QRectF(14 * s, 10 * s, 36 * s, 44 * s), 3 * s, 3 * s)
+
+    p.end()
+    icon = QIcon(pix)
+    _ICON_CACHE[key] = icon
+    return icon
+
+
+def format_bytes(num):
+    if num is None:
+        return ""
+    val = float(num)
+    if val >= 1024 ** 3:
+        gb = val / (1024 ** 3)
+        return f"{gb:.0f} GB" if gb >= 10 else f"{gb:.1f} GB"
+    if val >= 1024 ** 2:
+        return f"{val / (1024 ** 2):.1f} MB"
+    if val >= 1024:
+        return f"{val / 1024:.0f} KB"
+    return f"{val:.0f} bytes"
+
+
+def get_file_type_description(path):
+    if os.path.isdir(path):
+        return "File folder"
+    ext = os.path.splitext(path)[1].lower()
+    ext_map = {
+        ".txt": "Text Document",
+        ".pdf": "PDF Document",
+        ".py": "Python Source File",
+        ".sh": "Shell Script",
+        ".desktop": "Desktop Shortcut",
+        ".png": "PNG Image",
+        ".jpg": "JPEG Image",
+        ".jpeg": "JPEG Image",
+        ".gif": "GIF Image",
+        ".svg": "Scalable Vector Graphic",
+        ".webp": "WebP Image",
+        ".mp3": "MP3 Audio",
+        ".wav": "WAV Audio",
+        ".flac": "FLAC Audio",
+        ".mp4": "MP4 Video",
+        ".mkv": "MKV Video",
+        ".avi": "AVI Video",
+        ".zip": "Compressed (zipped) Folder",
+        ".tar": "TAR Archive",
+        ".gz": "GZ Archive",
+        ".xz": "XZ Archive",
+        ".7z": "7-Zip Archive",
+        ".deb": "Debian Package",
+        ".iso": "Disk Image File",
+        ".html": "HTML Document",
+        ".css": "CSS Stylesheet",
+        ".js": "JavaScript File",
+        ".json": "JSON File",
+        ".md": "Markdown Document",
+        ".doc": "Microsoft Word Document",
+        ".docx": "Microsoft Word Document",
+        ".xls": "Microsoft Excel Worksheet",
+        ".xlsx": "Microsoft Excel Worksheet",
+        ".ppt": "PowerPoint Presentation",
+        ".pptx": "PowerPoint Presentation",
+    }
+    if ext in ext_map:
+        return ext_map[ext]
+    mime, _ = mimetypes.guess_type(path)
+    if mime:
+        return mime.capitalize()
+    return f"{ext[1:].upper()} File" if ext else "File"
+
+
+def get_icon_for_file(path, is_dir=False):
+    if is_dir:
+        return get_win_icon("folder", 32)
+    ext = os.path.splitext(path)[1].lower()
+    if ext in [".py", ".sh", ".c", ".cpp", ".h", ".js", ".html", ".css", ".json"]:
+        return get_win_icon("file-code", 32)
+    if ext in [".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico"]:
+        return get_win_icon("file-image", 32)
+    if ext == ".pdf":
+        return get_win_icon("file-pdf", 32)
+    if ext in [".zip", ".tar", ".gz", ".xz", ".7z", ".rar", ".iso"]:
+        return get_win_icon("file-archive", 32)
+    if ext in [".mp4", ".mkv", ".avi", ".webm", ".mov"]:
+        return get_win_icon("folder-videos", 32)
+    if ext in [".mp3", ".wav", ".flac", ".ogg", ".aac"]:
+        return get_win_icon("folder-music", 32)
+    return get_win_icon("file-doc", 32)
+
+
 SKIP_PREFIX = ("loop", "zram", "ram", "nbd", "sr", "fd")
 SKIP_FS = {"swap", "squashfs"}
-
-
-def _gb(num):
-    value = float(num) / (1024 ** 3)
-    if value >= 10:
-        return f"{value:.0f} GB"
-    return f"{value:.1f} GB"
 
 
 def _stat_mount(path):
@@ -50,373 +553,2743 @@ def _stat_mount(path):
     return total, free
 
 
-def _walk(nodes, found):
-    for node in nodes:
-        name = node.get("name") or ""
-        if name.startswith(SKIP_PREFIX):
-            continue
-        children = node.get("children") or []
-        if children and node.get("type") == "disk":
-            _walk(children, found)
-            continue
-        fstype = (node.get("fstype") or "").lower()
-        mount = node.get("mountpoint") or ""
-        if fstype in SKIP_FS:
-            continue
-        if not fstype and not mount:
-            continue
-        try:
-            size = int(node.get("size") or 0)
-        except (TypeError, ValueError):
-            size = 0
-        if not mount and fstype in {"vfat", "fat", "fat32", "msdos"} and size < 1024 ** 3:
-            continue
-        found.append(node)
-
-
 def list_drives():
+    """Detect all system drives and partitions, assigning Windows drive letters (C:, D:, E:...)."""
     found = []
+
+    def _walk(nodes):
+        for node in nodes:
+            name = node.get("name") or ""
+            if name.startswith(SKIP_PREFIX):
+                continue
+            children = node.get("children") or []
+            if children and node.get("type") == "disk":
+                _walk(children)
+                continue
+            fstype = (node.get("fstype") or "").lower()
+            mount = node.get("mountpoint") or ""
+            if fstype in SKIP_FS:
+                continue
+            # Hide EFI boot partitions (< 1GB FAT mounted at /boot/efi or named EFI)
+            if mount == "/boot/efi" or (fstype in {"vfat", "fat"} and int(node.get("size") or 0) < 1024 ** 3):
+                continue
+            if not fstype and not mount:
+                continue
+            found.append(node)
+
     try:
         raw = subprocess.check_output(
             ["lsblk", "-J", "-b", "-o", "NAME,PATH,SIZE,FSTYPE,LABEL,TYPE,MOUNTPOINT,TRAN"],
             text=True,
             stderr=subprocess.DEVNULL,
         )
-        _walk(json.loads(raw).get("blockdevices") or [], found)
-    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError):
+        _walk(json.loads(raw).get("blockdevices") or [])
+    except Exception:
         found = []
 
     drives = []
-    seen_mounts = set()
+    seen_devices = set()
+
+    # Find root / system partition for C:
+    root_stat = _stat_mount("/")
+    root_total, root_free = root_stat if root_stat else (0, 0)
+    root_drive = {
+        "letter": "C",
+        "title": "DevOS (C:)",
+        "label": "DevOS",
+        "path": "",
+        "mount": "/",
+        "total": root_total,
+        "free": root_free,
+        "removable": False,
+        "is_system": True,
+    }
+
+    # Next letters for secondary drives
+    available_letters = [chr(c) for c in range(ord("D"), ord("Z") + 1)]
+
     for node in found:
+        path = node.get("path") or ""
         mount = node.get("mountpoint") or ""
         total = int(node.get("size") or 0)
+        label = (node.get("label") or "").strip()
+        removable = (node.get("tran") or "") == "usb"
+
+        # Check if this node is the root device (e.g. nvme0n1p2)
+        if mount == "/" or (label == "DevOS" and not root_drive["path"]):
+            root_drive["path"] = path
+            if label:
+                root_drive["title"] = f"{label} (C:)"
+            seen_devices.add(path)
+            continue
+
+        if path in seen_devices:
+            continue
+        seen_devices.add(path)
+
         free = None
         if mount:
             usage = _stat_mount(mount)
             if usage:
                 total, free = usage
-            seen_mounts.add(mount)
-        label = (node.get("label") or "").strip()
-        title = label or "Local Disk"
+
+        letter = available_letters.pop(0) if available_letters else "Z"
+        display_label = label or ("Local Disk" if not removable else "USB Drive")
+        title = f"{display_label} ({letter}:)"
+
         drives.append({
+            "letter": letter,
             "title": title,
-            "path": node.get("path") or "",
+            "label": display_label,
+            "path": path,
             "mount": mount,
             "total": total,
             "free": free,
-            "removable": (node.get("tran") or "") == "usb",
+            "removable": removable,
+            "is_system": False,
         })
 
-    if "/" not in seen_mounts:
-        usage = _stat_mount("/")
-        if usage:
-            total, free = usage
-            drives.insert(0, {
-                "title": "System",
-                "path": "",
-                "mount": "/",
-                "total": total,
-                "free": free,
-                "removable": False,
-            })
-
-    drives.sort(key=lambda item: (item["removable"], item["title"].lower()))
+    # Always put C: at the beginning
+    drives.insert(0, root_drive)
     return drives
 
 
-def open_path(path):
-    if path:
-        subprocess.Popen(["/usr/bin/dolphin", path])
+def open_file_with_default(path):
+    """Open file using xdg-open."""
+    if os.path.exists(path):
+        subprocess.Popen(["xdg-open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def open_pc_properties():
-    subprocess.Popen(["kinfocenter"])
-
-
-def open_drive(drive):
-    mount = drive.get("mount") or ""
-    if not mount and drive.get("path"):
+    """Open system properties (kinfocenter or settings)."""
+    for cmd in [["kinfocenter"], ["systemsettings"], ["gnome-control-center"]]:
         try:
-            subprocess.run(
-                ["udisksctl", "mount", "-b", drive["path"]],
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-        except OSError:
+            subprocess.Popen(cmd)
             return
-        for item in list_drives():
-            if item.get("path") == drive.get("path") and item.get("mount"):
-                mount = item["mount"]
-                break
-    if mount:
-        open_path(mount)
+        except OSError:
+            pass
+
+
+def open_in_terminal(path):
+    """Open terminal in target directory."""
+    target = path if os.path.isdir(path) else os.path.dirname(path)
+    for term in [["konsole", "--workdir", target], ["gnome-terminal", "--working-directory", target], ["x-terminal-emulator"]]:
+        try:
+            subprocess.Popen(term)
+            return
+        except OSError:
+            pass
+
+
+def open_in_new_window(path=""):
+    """Launch another DevOS File Explorer window opened to path."""
+    launcher = sys.argv[0] if (sys.argv and os.path.exists(sys.argv[0])) else "/usr/local/bin/devos-files"
+    args = [sys.executable or "python3", launcher]
+    if path:
+        args.append(path)
+    try:
+        subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        pass
 
 
 class DriveCard(QFrame):
-    def __init__(self, drive):
+    """Windows-style Drive Card with Windows disk icon, drive letter, and storage bar."""
+
+    def __init__(self, drive, on_open, on_context=None):
         super().__init__()
         self.drive = drive
+        self.on_open = on_open
+        self.on_context = on_context
         self.setObjectName("driveCard")
         self.setCursor(Qt.PointingHandCursor)
-        self.setMinimumHeight(118)
-        self.setMinimumWidth(0)
+        self.setMinimumHeight(86)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
-        icon = QLabel("DISK" if not drive["removable"] else "USB")
-        icon.setObjectName("driveIcon")
-        icon.setAlignment(Qt.AlignCenter)
-        icon.setFixedSize(54, 54)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(14, 12, 14, 12)
+        row.setSpacing(14)
+
+        # Drive Icon
+        icon_type = "drive-c" if drive["is_system"] else ("drive-usb" if drive["removable"] else "drive-fixed")
+        icon_label = QLabel()
+        icon_label.setPixmap(get_win_icon(icon_type, 44).pixmap(44, 44))
+        icon_label.setFixedSize(44, 44)
+        row.addWidget(icon_label, 0, Qt.AlignVCenter)
+
+        # Drive Info
+        text_layout = QVBoxLayout()
+        text_layout.setSpacing(5)
 
         title = QLabel(drive["title"])
         title.setObjectName("driveTitle")
-        title.setFont(QFont("Inter", 13, QFont.DemiBold))
-        title.setWordWrap(True)
-        title.setMinimumWidth(0)
-        title.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        title.setFont(QFont("Inter", 11, QFont.DemiBold))
+        text_layout.addWidget(title)
 
         bar = QProgressBar()
         bar.setTextVisible(False)
-        bar.setFixedHeight(10)
+        bar.setFixedHeight(8)
+        bar.setObjectName("driveBar")
+
         total = drive["total"] or 0
         free = drive["free"]
         if total > 0 and free is not None:
             used = max(0, min(100, int(round((total - free) * 100 / total))))
             bar.setValue(used)
-            space = QLabel(f"{_gb(free)} free of {_gb(total)}")
+            # Red color if disk >= 90% full
+            if used >= 90:
+                bar.setObjectName("driveBarFull")
+            space_text = f"{format_bytes(free)} free of {format_bytes(total)}"
         elif total > 0:
             bar.setValue(0)
-            space = QLabel(f"{_gb(total)}  ·  not mounted")
+            space_text = f"{format_bytes(total)}  ·  Not mounted (Double-click to open)"
         else:
             bar.setValue(0)
-            space = QLabel("Size unavailable")
+            space_text = "Drive ready"
+
+        space = QLabel(space_text)
         space.setObjectName("driveSpace")
-        space.setWordWrap(True)
 
-        text = QVBoxLayout()
-        text.setSpacing(8)
-        text.addWidget(title)
-        text.addWidget(bar)
-        text.addWidget(space)
-
-        row = QHBoxLayout(self)
-        row.setContentsMargins(16, 14, 16, 14)
-        row.setSpacing(14)
-        row.addWidget(icon, 0, Qt.AlignTop)
-        row.addLayout(text, 1)
+        text_layout.addWidget(bar)
+        text_layout.addWidget(space)
+        row.addLayout(text_layout, 1)
 
     def mouseDoubleClickEvent(self, event):
-        open_drive(self.drive)
+        if event.button() == Qt.LeftButton:
+            self.on_open(self.drive)
         super().mouseDoubleClickEvent(event)
 
+    def mousePressEvent(self, event):
+        if event.button() == Qt.RightButton and self.on_context:
+            self.on_context(self.drive, event.globalPos())
+            event.accept()
+            return
+        super().mousePressEvent(event)
 
-class SideButton(QPushButton):
-    def __init__(self, text, path, selected=False):
-        super().__init__(text)
+
+class FolderTile(QFrame):
+    """Windows-style Folder Tile for standard user folders (Documents, Downloads, etc.)."""
+
+    def __init__(self, name, path, icon_name, on_open, on_context=None):
+        super().__init__()
+        self.name = name
         self.path = path
-        self.setObjectName("sideSelected" if selected else "side")
+        self.on_open = on_open
+        self.on_context = on_context
+        self.setObjectName("folderTile")
         self.setCursor(Qt.PointingHandCursor)
-        self.setFlat(True)
-        self.setMinimumWidth(0)
-        self.clicked.connect(self._open)
+        self.setFixedSize(140, 110)
 
-    def _open(self):
-        if self.path:
-            open_path(self.path)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 12, 8, 8)
+        layout.setSpacing(8)
+        layout.setAlignment(Qt.AlignCenter)
+
+        icon_label = QLabel()
+        icon_label.setPixmap(get_win_icon(icon_name, 50).pixmap(50, 50))
+        icon_label.setAlignment(Qt.AlignCenter)
+
+        title = QLabel(name)
+        title.setObjectName("folderTileTitle")
+        title.setAlignment(Qt.AlignCenter)
+        title.setFont(QFont("Inter", 10, QFont.Medium))
+
+        layout.addWidget(icon_label)
+        layout.addWidget(title)
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.on_open(self.path)
+        super().mouseDoubleClickEvent(event)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.RightButton and self.on_context:
+            self.on_context(self.path, event.globalPos())
+            event.accept()
+            return
+        super().mousePressEvent(event)
 
 
-class ThisPC(QMainWindow):
-    def __init__(self):
+class BreadcrumbBar(QWidget):
+    """Windows-style clickable Breadcrumb Address Bar."""
+
+    path_changed = pyqtSignal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("breadcrumbBar")
+        self.setFixedHeight(34)
+        self._current_path = ""
+        self._current_label = "This PC"
+
+        self.layout = QHBoxLayout(self)
+        self.layout.setContentsMargins(6, 2, 6, 2)
+        self.layout.setSpacing(2)
+
+        # Icon at beginning of address bar
+        self.icon_label = QLabel()
+        self.icon_label.setFixedSize(20, 20)
+        self.layout.addWidget(self.icon_label)
+
+        # Breadcrumbs container
+        self.crumbs_widget = QWidget()
+        self.crumbs_layout = QHBoxLayout(self.crumbs_widget)
+        self.crumbs_layout.setContentsMargins(0, 0, 0, 0)
+        self.crumbs_layout.setSpacing(2)
+        self.layout.addWidget(self.crumbs_widget)
+
+        # Direct text editor (hidden by default)
+        self.path_edit = QLineEdit()
+        self.path_edit.setObjectName("pathEdit")
+        self.path_edit.returnPressed.connect(self._on_edit_submitted)
+        self.path_edit.hide()
+        self.layout.addWidget(self.path_edit, 1)
+
+        self.layout.addStretch(1)
+
+    def set_location(self, path, label=""):
+        self._current_path = path
+        self._current_label = label or path
+        self.path_edit.setText(path if path else "This PC")
+        self.path_edit.hide()
+        self.crumbs_widget.show()
+
+        # Update address bar icon
+        if not path or path == "This PC":
+            self.icon_label.setPixmap(get_win_icon("this-pc", 18).pixmap(18, 18))
+        elif path == "/":
+            self.icon_label.setPixmap(get_win_icon("drive-c", 18).pixmap(18, 18))
+        else:
+            self.icon_label.setPixmap(get_win_icon("folder", 18).pixmap(18, 18))
+
+        # Rebuild breadcrumbs
+        while self.crumbs_layout.count():
+            item = self.crumbs_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        # Always start with 'This PC'
+        this_pc_btn = QPushButton("This PC")
+        this_pc_btn.setObjectName("crumbBtn")
+        this_pc_btn.setCursor(Qt.PointingHandCursor)
+        this_pc_btn.clicked.connect(lambda: self.path_changed.emit(""))
+        self.crumbs_layout.addWidget(this_pc_btn)
+
+        if not path or path == "This PC":
+            return
+
+        sep = QLabel("›")
+        sep.setObjectName("crumbSep")
+        self.crumbs_layout.addWidget(sep)
+
+        # Home directory shortcut friendly formatting
+        home = os.path.expanduser("~")
+        if path.startswith(home):
+            rel = os.path.relpath(path, home)
+            base_btn = QPushButton(os.path.basename(home))
+            base_btn.setObjectName("crumbBtn")
+            base_btn.clicked.connect(lambda _=False, p=home: self.path_changed.emit(p))
+            self.crumbs_layout.addWidget(base_btn)
+
+            if rel and rel != ".":
+                parts = rel.split(os.sep)
+                curr = home
+                for part in parts:
+                    sep = QLabel("›")
+                    sep.setObjectName("crumbSep")
+                    self.crumbs_layout.addWidget(sep)
+                    curr = os.path.join(curr, part)
+                    btn = QPushButton(part)
+                    btn.setObjectName("crumbBtn")
+                    btn.clicked.connect(lambda _=False, p=curr: self.path_changed.emit(p))
+                    self.crumbs_layout.addWidget(btn)
+        else:
+            parts = [p for p in path.split(os.sep) if p]
+            curr = "/"
+            c_btn = QPushButton("Local Disk (C:)")
+            c_btn.setObjectName("crumbBtn")
+            c_btn.clicked.connect(lambda _=False: self.path_changed.emit("/"))
+            self.crumbs_layout.addWidget(c_btn)
+
+            for part in parts:
+                sep = QLabel("›")
+                sep.setObjectName("crumbSep")
+                self.crumbs_layout.addWidget(sep)
+                curr = os.path.join(curr, part)
+                btn = QPushButton(part)
+                btn.setObjectName("crumbBtn")
+                btn.clicked.connect(lambda _=False, p=curr: self.path_changed.emit(p))
+                self.crumbs_layout.addWidget(btn)
+
+    def mouseDoubleClickEvent(self, event):
+        self.crumbs_widget.hide()
+        self.path_edit.show()
+        self.path_edit.setFocus()
+        self.path_edit.selectAll()
+
+    def _on_edit_submitted(self):
+        text = self.path_edit.text().strip()
+        if text == "This PC" or not text:
+            self.path_changed.emit("")
+        else:
+            # Handle Windows-style C:\ paths
+            if text.upper().startswith("C:\\") or text.upper() == "C:":
+                rem = text[3:].replace("\\", "/") if text.upper().startswith("C:\\") else ""
+                target = "/" + rem
+            elif text.startswith("~"):
+                target = os.path.expanduser(text)
+            else:
+                target = text
+            self.path_changed.emit(target)
+
+
+class ExplorerTableItem(QTableWidgetItem):
+    """Custom table item ensuring folders always sort above files."""
+
+    def __lt__(self, other):
+        is_dir_self = bool(self.data(Qt.UserRole + 1))
+        is_dir_other = bool(other.data(Qt.UserRole + 1))
+        if is_dir_self != is_dir_other:
+            table = self.tableWidget()
+            order = table.horizontalHeader().sortIndicatorOrder() if table else Qt.AscendingOrder
+            if order == Qt.AscendingOrder:
+                return is_dir_self and not is_dir_other
+            else:
+                return not is_dir_self and is_dir_other
+
+        val_self = self.data(Qt.UserRole)
+        val_other = other.data(Qt.UserRole)
+        if isinstance(val_self, (int, float)) and isinstance(val_other, (int, float)):
+            return val_self < val_other
+        return self.text().lower() < other.text().lower()
+
+
+class FolderSizeThread(QThread):
+    progress = pyqtSignal(int, int, int)
+    finished = pyqtSignal(int, int, int)
+
+    def __init__(self, path):
+        super().__init__()
+        self.path = path
+        self._stopped = False
+
+    def stop(self):
+        self._stopped = True
+
+    def run(self):
+        total_size = 0
+        file_count = 0
+        dir_count = 0
+        try:
+            for root, dirs, files in os.walk(self.path):
+                if self._stopped:
+                    break
+                dir_count += len(dirs)
+                for f in files:
+                    if self._stopped:
+                        break
+                    fp = os.path.join(root, f)
+                    try:
+                        total_size += os.path.getsize(fp)
+                        file_count += 1
+                    except OSError:
+                        pass
+                if file_count % 150 == 0:
+                    self.progress.emit(total_size, file_count, dir_count)
+        except OSError:
+            pass
+        self.finished.emit(total_size, file_count, dir_count)
+
+
+class DrivePieWidget(QWidget):
+    def __init__(self, used, free, parent=None):
+        super().__init__(parent)
+        self.used = max(0, int(used or 0))
+        self.free = max(0, int(free or 0))
+        self.setFixedSize(130, 130)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        total = self.used + self.free
+        if total <= 0:
+            return
+        rect = QRectF(10, 10, 110, 110)
+        used_angle = int(round((self.used / total) * 360 * 16))
+        free_angle = 360 * 16 - used_angle
+
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor("#0078d4"))
+        p.drawPie(rect, 90 * 16, -used_angle)
+
+        p.setBrush(QColor("#475569"))
+        p.drawPie(rect, 90 * 16 - used_angle, -free_angle)
+
+        p.setBrush(QColor("#20242f"))
+        p.drawEllipse(QPointF(65, 65), 32, 32)
+
+
+class WindowsFolderPropertiesDialog(QDialog):
+    def __init__(self, path, parent=None):
+        super().__init__(parent)
+        self.path = os.path.abspath(path)
+        self.folder_name = os.path.basename(self.path) or self.path
+        self.setWindowTitle(f"{self.folder_name} Properties")
+        self.setWindowIcon(get_win_icon("folder", 32))
+        self.resize(390, 520)
+        self.setModal(True)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(12)
+
+        tabs = QTabWidget()
+        tabs.setObjectName("propTabs")
+        layout.addWidget(tabs, 1)
+
+        # Tab 1: General
+        gen_tab = QWidget()
+        gen_layout = QVBoxLayout(gen_tab)
+        gen_layout.setContentsMargins(14, 16, 14, 16)
+        gen_layout.setSpacing(12)
+
+        top_row = QHBoxLayout()
+        top_row.setSpacing(12)
+        icon_lbl = QLabel()
+        icon_lbl.setPixmap(get_win_icon("folder", 48).pixmap(48, 48))
+        icon_lbl.setFixedSize(48, 48)
+        top_row.addWidget(icon_lbl)
+
+        self.name_edit = QLineEdit(self.folder_name)
+        self.name_edit.setObjectName("propNameEdit")
+        self.name_edit.setFont(QFont("Segoe UI", 12, QFont.Bold))
+        top_row.addWidget(self.name_edit, 1)
+        gen_layout.addLayout(top_row)
+
+        gen_layout.addWidget(self._make_line())
+
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(16)
+        grid.setVerticalSpacing(8)
+
+        grid.addWidget(self._make_label("Type of file:"), 0, 0)
+        grid.addWidget(self._make_value_label("File folder"), 0, 1)
+
+        loc = os.path.dirname(self.path)
+        win_loc = loc.replace("/", "\\")
+        if win_loc.startswith("\\home\\"):
+            win_loc = "C:\\Users" + win_loc[5:]
+        elif win_loc == "":
+            win_loc = "C:\\"
+        else:
+            win_loc = "C:" + win_loc
+        grid.addWidget(self._make_label("Location:"), 1, 0)
+        grid.addWidget(self._make_value_label(win_loc), 1, 1)
+
+        self.size_val = self._make_value_label("Calculating...")
+        grid.addWidget(self._make_label("Size:"), 2, 0)
+        grid.addWidget(self.size_val, 2, 1)
+
+        self.size_disk_val = self._make_value_label("Calculating...")
+        grid.addWidget(self._make_label("Size on disk:"), 3, 0)
+        grid.addWidget(self.size_disk_val, 3, 1)
+
+        self.contains_val = self._make_value_label("Calculating...")
+        grid.addWidget(self._make_label("Contains:"), 4, 0)
+        grid.addWidget(self.contains_val, 4, 1)
+
+        gen_layout.addLayout(grid)
+        gen_layout.addWidget(self._make_line())
+
+        time_grid = QGridLayout()
+        time_grid.setHorizontalSpacing(16)
+        time_grid.setVerticalSpacing(8)
+        try:
+            st = os.stat(self.path)
+            ctime_str = datetime.datetime.fromtimestamp(st.st_ctime).strftime("%A, %B %d, %Y, %I:%M:%S %p")
+            mtime_str = datetime.datetime.fromtimestamp(st.st_mtime).strftime("%A, %B %d, %Y, %I:%M:%S %p")
+            atime_str = datetime.datetime.fromtimestamp(st.st_atime).strftime("%A, %B %d, %Y")
+        except OSError:
+            ctime_str = mtime_str = atime_str = "Unknown"
+
+        time_grid.addWidget(self._make_label("Created:"), 0, 0)
+        time_grid.addWidget(self._make_value_label(ctime_str), 0, 1)
+        time_grid.addWidget(self._make_label("Modified:"), 1, 0)
+        time_grid.addWidget(self._make_value_label(mtime_str), 1, 1)
+        time_grid.addWidget(self._make_label("Accessed:"), 2, 0)
+        time_grid.addWidget(self._make_value_label(atime_str), 2, 1)
+        gen_layout.addLayout(time_grid)
+
+        gen_layout.addWidget(self._make_line())
+
+        attr_box = QHBoxLayout()
+        attr_box.addWidget(self._make_label("Attributes:"))
+        self.cb_readonly = QCheckBox("Read-only (Only applies to files in folder)")
+        self.cb_readonly.setObjectName("propCheck")
+        self.cb_hidden = QCheckBox("Hidden")
+        self.cb_hidden.setObjectName("propCheck")
+        self.cb_hidden.setChecked(os.path.basename(self.path).startswith("."))
+        attr_box.addWidget(self.cb_readonly)
+        attr_box.addWidget(self.cb_hidden)
+        attr_box.addStretch(1)
+        gen_layout.addLayout(attr_box)
+
+        gen_layout.addStretch(1)
+        tabs.addTab(gen_tab, "General")
+
+        # Tab 2: Sharing
+        sharing_tab = QWidget()
+        sh_layout = QVBoxLayout(sharing_tab)
+        sh_layout.setContentsMargins(14, 16, 14, 16)
+        sh_layout.setSpacing(12)
+
+        sh_hdr = QLabel("Network File and Folder Sharing")
+        sh_hdr.setFont(QFont("Segoe UI", 10, QFont.Bold))
+        sh_layout.addWidget(sh_hdr)
+
+        sh_desc = QLabel(f"{self.folder_name}\nNot Shared")
+        sh_desc.setObjectName("propMuted")
+        sh_layout.addWidget(sh_desc)
+
+        btn_share = QPushButton("Share...")
+        btn_share.setObjectName("dialogBtn")
+        btn_share.setFixedWidth(100)
+        btn_share.clicked.connect(lambda: QMessageBox.information(self, "Sharing", f"Sharing configuration for '{self.folder_name}' is managed by DevOS Network."))
+        sh_layout.addWidget(btn_share)
+
+        sh_layout.addWidget(self._make_line())
+
+        adv_hdr = QLabel("Advanced Sharing")
+        adv_hdr.setFont(QFont("Segoe UI", 10, QFont.Bold))
+        sh_layout.addWidget(adv_hdr)
+
+        adv_desc = QLabel(f"Network Path: \\\\{os.uname().nodename.upper()}\\{self.folder_name}")
+        adv_desc.setObjectName("propMuted")
+        sh_layout.addWidget(adv_desc)
+
+        btn_adv = QPushButton("Advanced Sharing...")
+        btn_adv.setObjectName("dialogBtn")
+        btn_adv.setFixedWidth(150)
+        sh_layout.addWidget(btn_adv)
+        sh_layout.addStretch(1)
+        tabs.addTab(sharing_tab, "Sharing")
+
+        # Bottom Buttons
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1)
+
+        btn_ok = QPushButton("OK")
+        btn_ok.setObjectName("dialogBtnPrimary")
+        btn_ok.setDefault(True)
+        btn_ok.clicked.connect(self._on_ok_clicked)
+        btn_row.addWidget(btn_ok)
+
+        btn_cancel = QPushButton("Cancel")
+        btn_cancel.setObjectName("dialogBtn")
+        btn_cancel.clicked.connect(self.reject)
+        btn_row.addWidget(btn_cancel)
+
+        btn_apply = QPushButton("Apply")
+        btn_apply.setObjectName("dialogBtn")
+        btn_apply.setEnabled(False)
+        btn_row.addWidget(btn_apply)
+
+        layout.addLayout(btn_row)
+
+        self._thread = FolderSizeThread(self.path)
+        self._thread.progress.connect(self._on_size_update)
+        self._thread.finished.connect(self._on_size_update)
+        self._thread.start()
+
+    def _on_size_update(self, total_size, file_count, dir_count):
+        size_str = f"{format_bytes(total_size)} ({total_size:,} bytes)"
+        disk_size = ((total_size + 4095) // 4096) * 4096 if total_size > 0 else 0
+        disk_str = f"{format_bytes(disk_size)} ({disk_size:,} bytes)"
+        contains_str = f"{file_count:,} Files, {dir_count:,} Folders"
+
+        self.size_val.setText(size_str)
+        self.size_disk_val.setText(disk_str)
+        self.contains_val.setText(contains_str)
+
+    def closeEvent(self, event):
+        if hasattr(self, "_thread") and self._thread.isRunning():
+            self._thread.stop()
+            self._thread.wait(200)
+        super().closeEvent(event)
+
+    def reject(self):
+        if hasattr(self, "_thread") and self._thread.isRunning():
+            self._thread.stop()
+            self._thread.wait(200)
+        super().reject()
+
+    def _on_ok_clicked(self):
+        new_name = self.name_edit.text().strip()
+        if new_name and new_name != self.folder_name:
+            new_path = os.path.join(os.path.dirname(self.path), new_name)
+            try:
+                os.rename(self.path, new_path)
+            except OSError as err:
+                QMessageBox.critical(self, "Error", f"Failed to rename folder: {err.strerror}")
+                return
+        self.accept()
+
+    def _make_line(self):
+        line = QFrame()
+        line.setFrameShape(QFrame.HLine)
+        line.setStyleSheet("background: #2b3240; max-height: 1px;")
+        return line
+
+    def _make_label(self, text):
+        lbl = QLabel(text)
+        lbl.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        return lbl
+
+    def _make_value_label(self, text):
+        lbl = QLabel(text)
+        lbl.setStyleSheet("color: #f1f5f9; font-size: 12px;")
+        lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        return lbl
+
+
+class WindowsFilePropertiesDialog(QDialog):
+    def __init__(self, path, parent=None):
+        super().__init__(parent)
+        self.path = os.path.abspath(path)
+        self.file_name = os.path.basename(self.path)
+        self.setWindowTitle(f"{self.file_name} Properties")
+        self.setWindowIcon(get_icon_for_file(self.path, False))
+        self.resize(390, 500)
+        self.setModal(True)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(12)
+
+        tabs = QTabWidget()
+        tabs.setObjectName("propTabs")
+        layout.addWidget(tabs, 1)
+
+        gen_tab = QWidget()
+        gen_layout = QVBoxLayout(gen_tab)
+        gen_layout.setContentsMargins(14, 16, 14, 16)
+        gen_layout.setSpacing(12)
+
+        top_row = QHBoxLayout()
+        top_row.setSpacing(12)
+        icon_lbl = QLabel()
+        icon_lbl.setPixmap(get_icon_for_file(self.path, False).pixmap(48, 48))
+        icon_lbl.setFixedSize(48, 48)
+        top_row.addWidget(icon_lbl)
+
+        self.name_edit = QLineEdit(self.file_name)
+        self.name_edit.setObjectName("propNameEdit")
+        self.name_edit.setFont(QFont("Segoe UI", 12, QFont.Bold))
+        top_row.addWidget(self.name_edit, 1)
+        gen_layout.addLayout(top_row)
+
+        gen_layout.addWidget(self._make_line())
+
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(16)
+        grid.setVerticalSpacing(8)
+
+        grid.addWidget(self._make_label("Type of file:"), 0, 0)
+        grid.addWidget(self._make_value_label(get_file_type_description(self.path)), 0, 1)
+
+        grid.addWidget(self._make_label("Opens with:"), 1, 0)
+        opens_row = QHBoxLayout()
+        opens_lbl = self._make_value_label("Default Application")
+        opens_row.addWidget(opens_lbl)
+        btn_change = QPushButton("Change...")
+        btn_change.setObjectName("dialogBtn")
+        btn_change.setFixedWidth(75)
+        opens_row.addWidget(btn_change)
+        grid.addLayout(opens_row, 1, 1)
+
+        gen_layout.addLayout(grid)
+        gen_layout.addWidget(self._make_line())
+
+        grid2 = QGridLayout()
+        grid2.setHorizontalSpacing(16)
+        grid2.setVerticalSpacing(8)
+
+        loc = os.path.dirname(self.path)
+        win_loc = loc.replace("/", "\\")
+        if win_loc.startswith("\\home\\"):
+            win_loc = "C:\\Users" + win_loc[5:]
+        elif win_loc == "":
+            win_loc = "C:\\"
+        else:
+            win_loc = "C:" + win_loc
+        grid2.addWidget(self._make_label("Location:"), 0, 0)
+        grid2.addWidget(self._make_value_label(win_loc), 0, 1)
+
+        try:
+            st = os.stat(self.path)
+            size = st.st_size
+            disk_size = ((size + 4095) // 4096) * 4096 if size > 0 else 0
+            size_str = f"{format_bytes(size)} ({size:,} bytes)"
+            disk_str = f"{format_bytes(disk_size)} ({disk_size:,} bytes)"
+            ctime_str = datetime.datetime.fromtimestamp(st.st_ctime).strftime("%A, %B %d, %Y, %I:%M:%S %p")
+            mtime_str = datetime.datetime.fromtimestamp(st.st_mtime).strftime("%A, %B %d, %Y, %I:%M:%S %p")
+            atime_str = datetime.datetime.fromtimestamp(st.st_atime).strftime("%A, %B %d, %Y")
+        except OSError:
+            size_str = disk_str = ctime_str = mtime_str = atime_str = "Unknown"
+
+        grid2.addWidget(self._make_label("Size:"), 1, 0)
+        grid2.addWidget(self._make_value_label(size_str), 1, 1)
+
+        grid2.addWidget(self._make_label("Size on disk:"), 2, 0)
+        grid2.addWidget(self._make_value_label(disk_str), 2, 1)
+
+        gen_layout.addLayout(grid2)
+        gen_layout.addWidget(self._make_line())
+
+        grid3 = QGridLayout()
+        grid3.setHorizontalSpacing(16)
+        grid3.setVerticalSpacing(8)
+
+        grid3.addWidget(self._make_label("Created:"), 0, 0)
+        grid3.addWidget(self._make_value_label(ctime_str), 0, 1)
+
+        grid3.addWidget(self._make_label("Modified:"), 1, 0)
+        grid3.addWidget(self._make_value_label(mtime_str), 1, 1)
+
+        grid3.addWidget(self._make_label("Accessed:"), 2, 0)
+        grid3.addWidget(self._make_value_label(atime_str), 2, 1)
+
+        gen_layout.addLayout(grid3)
+        gen_layout.addWidget(self._make_line())
+
+        attr_box = QHBoxLayout()
+        attr_box.addWidget(self._make_label("Attributes:"))
+        self.cb_readonly = QCheckBox("Read-only")
+        self.cb_readonly.setObjectName("propCheck")
+        self.cb_hidden = QCheckBox("Hidden")
+        self.cb_hidden.setObjectName("propCheck")
+        self.cb_hidden.setChecked(self.file_name.startswith("."))
+        attr_box.addWidget(self.cb_readonly)
+        attr_box.addWidget(self.cb_hidden)
+        attr_box.addStretch(1)
+        gen_layout.addLayout(attr_box)
+
+        gen_layout.addStretch(1)
+        tabs.addTab(gen_tab, "General")
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1)
+        btn_ok = QPushButton("OK")
+        btn_ok.setObjectName("dialogBtnPrimary")
+        btn_ok.clicked.connect(self._on_ok_clicked)
+        btn_row.addWidget(btn_ok)
+        btn_cancel = QPushButton("Cancel")
+        btn_cancel.setObjectName("dialogBtn")
+        btn_cancel.clicked.connect(self.reject)
+        btn_row.addWidget(btn_cancel)
+        btn_apply = QPushButton("Apply")
+        btn_apply.setObjectName("dialogBtn")
+        btn_apply.setEnabled(False)
+        btn_row.addWidget(btn_apply)
+
+        layout.addLayout(btn_row)
+
+    def _on_ok_clicked(self):
+        new_name = self.name_edit.text().strip()
+        if new_name and new_name != self.file_name:
+            new_path = os.path.join(os.path.dirname(self.path), new_name)
+            try:
+                os.rename(self.path, new_path)
+            except OSError as err:
+                QMessageBox.critical(self, "Error", f"Failed to rename file: {err.strerror}")
+                return
+        self.accept()
+
+    def _make_line(self):
+        line = QFrame()
+        line.setFrameShape(QFrame.HLine)
+        line.setStyleSheet("background: #2b3240; max-height: 1px;")
+        return line
+
+    def _make_label(self, text):
+        lbl = QLabel(text)
+        lbl.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        return lbl
+
+    def _make_value_label(self, text):
+        lbl = QLabel(text)
+        lbl.setStyleSheet("color: #f1f5f9; font-size: 12px;")
+        lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        return lbl
+
+
+class WindowsDrivePropertiesDialog(QDialog):
+    def __init__(self, drive, parent=None):
+        super().__init__(parent)
+        self.drive = drive
+        self.setWindowTitle(f"{drive.get('title', 'Local Disk')} Properties")
+        icon_type = "drive-c" if drive.get("is_system") else ("drive-usb" if drive.get("removable") else "drive-fixed")
+        self.setWindowIcon(get_win_icon(icon_type, 32))
+        self.resize(390, 530)
+        self.setModal(True)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(12)
+
+        tabs = QTabWidget()
+        tabs.setObjectName("propTabs")
+        layout.addWidget(tabs, 1)
+
+        # Tab 1: General
+        gen_tab = QWidget()
+        gen_layout = QVBoxLayout(gen_tab)
+        gen_layout.setContentsMargins(14, 16, 14, 16)
+        gen_layout.setSpacing(10)
+
+        top_row = QHBoxLayout()
+        top_row.setSpacing(12)
+        icon_lbl = QLabel()
+        icon_lbl.setPixmap(get_win_icon(icon_type, 48).pixmap(48, 48))
+        icon_lbl.setFixedSize(48, 48)
+        top_row.addWidget(icon_lbl)
+
+        label_text = drive.get("label") or "Local Disk"
+        self.label_edit = QLineEdit(label_text)
+        self.label_edit.setObjectName("propNameEdit")
+        self.label_edit.setFont(QFont("Segoe UI", 12, QFont.Bold))
+        top_row.addWidget(self.label_edit, 1)
+        gen_layout.addLayout(top_row)
+
+        gen_layout.addWidget(self._make_line())
+
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(16)
+        grid.setVerticalSpacing(8)
+
+        grid.addWidget(self._make_label("Type:"), 0, 0)
+        grid.addWidget(self._make_value_label("Local Disk"), 0, 1)
+
+        grid.addWidget(self._make_label("File system:"), 1, 0)
+        grid.addWidget(self._make_value_label("NTFS (DevOS High Performance)"), 1, 1)
+
+        gen_layout.addLayout(grid)
+        gen_layout.addWidget(self._make_line())
+
+        total = drive.get("total") or 0
+        free = drive.get("free")
+        if free is None:
+            free = 0
+        used = max(0, total - free)
+
+        space_grid = QGridLayout()
+        space_grid.setHorizontalSpacing(12)
+        space_grid.setVerticalSpacing(8)
+
+        swatch_used = QLabel()
+        swatch_used.setFixedSize(14, 14)
+        swatch_used.setStyleSheet("background: #0078d4; border-radius: 2px;")
+        space_grid.addWidget(swatch_used, 0, 0)
+        space_grid.addWidget(self._make_label("Used space:"), 0, 1)
+        space_grid.addWidget(self._make_value_label(f"{used:,} bytes"), 0, 2)
+        space_grid.addWidget(self._make_value_label(format_bytes(used)), 0, 3)
+
+        swatch_free = QLabel()
+        swatch_free.setFixedSize(14, 14)
+        swatch_free.setStyleSheet("background: #475569; border-radius: 2px;")
+        space_grid.addWidget(swatch_free, 1, 0)
+        space_grid.addWidget(self._make_label("Free space:"), 1, 1)
+        space_grid.addWidget(self._make_value_label(f"{free:,} bytes"), 1, 2)
+        space_grid.addWidget(self._make_value_label(format_bytes(free)), 1, 3)
+
+        gen_layout.addLayout(space_grid)
+        gen_layout.addWidget(self._make_line())
+
+        cap_grid = QGridLayout()
+        cap_grid.setHorizontalSpacing(12)
+        cap_grid.addWidget(self._make_label("Capacity:"), 0, 0)
+        cap_grid.addWidget(self._make_value_label(f"{total:,} bytes"), 0, 1)
+        cap_grid.addWidget(self._make_value_label(format_bytes(total)), 0, 2)
+        gen_layout.addLayout(cap_grid)
+
+        mid_row = QHBoxLayout()
+        pie = DrivePieWidget(used, free)
+        mid_row.addWidget(pie)
+
+        btn_cleanup = QPushButton("Disk Cleanup")
+        btn_cleanup.setObjectName("dialogBtn")
+        btn_cleanup.setFixedHeight(32)
+        btn_cleanup.clicked.connect(self._open_disk_cleanup)
+        mid_row.addSpacing(14)
+        mid_row.addWidget(btn_cleanup, 0, Qt.AlignVCenter)
+        mid_row.addStretch(1)
+        gen_layout.addLayout(mid_row)
+
+        gen_layout.addStretch(1)
+        tabs.addTab(gen_tab, "General")
+
+        # Tab 2: Tools
+        tools_tab = QWidget()
+        tools_layout = QVBoxLayout(tools_tab)
+        tools_layout.setContentsMargins(14, 16, 14, 16)
+        tools_layout.setSpacing(14)
+
+        t1_hdr = QLabel("Error checking")
+        t1_hdr.setFont(QFont("Segoe UI", 10, QFont.Bold))
+        tools_layout.addWidget(t1_hdr)
+
+        t1_desc = QLabel("This option will check the drive for file system errors.")
+        t1_desc.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        tools_layout.addWidget(t1_desc)
+
+        btn_check = QPushButton("Check")
+        btn_check.setObjectName("dialogBtn")
+        btn_check.setFixedWidth(90)
+        btn_check.clicked.connect(lambda: QMessageBox.information(self, "Error checking", f"No errors found on {drive.get('title')}. Drive is in healthy status."))
+        tools_layout.addWidget(btn_check)
+
+        tools_layout.addWidget(self._make_line())
+
+        t2_hdr = QLabel("Optimize and defragment drive")
+        t2_hdr.setFont(QFont("Segoe UI", 10, QFont.Bold))
+        tools_layout.addWidget(t2_hdr)
+
+        t2_desc = QLabel("Optimizing your drives can help your computer run more efficiently.")
+        t2_desc.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        tools_layout.addWidget(t2_desc)
+
+        btn_opt = QPushButton("Optimize")
+        btn_opt.setObjectName("dialogBtn")
+        btn_opt.setFixedWidth(90)
+        btn_opt.clicked.connect(self._open_disk_cleanup)
+        tools_layout.addWidget(btn_opt)
+
+        tools_layout.addStretch(1)
+        tabs.addTab(tools_tab, "Tools")
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1)
+        btn_ok = QPushButton("OK")
+        btn_ok.setObjectName("dialogBtnPrimary")
+        btn_ok.clicked.connect(self.accept)
+        btn_row.addWidget(btn_ok)
+        btn_cancel = QPushButton("Cancel")
+        btn_cancel.setObjectName("dialogBtn")
+        btn_cancel.clicked.connect(self.reject)
+        btn_row.addWidget(btn_cancel)
+        btn_apply = QPushButton("Apply")
+        btn_apply.setObjectName("dialogBtn")
+        btn_apply.setEnabled(False)
+        btn_row.addWidget(btn_apply)
+
+        layout.addLayout(btn_row)
+
+    def _open_disk_cleanup(self):
+        for cmd in [["/usr/local/bin/devos-disk-gui"], ["python3", "/usr/local/share/devos/components/settings/disk_doctor_gui.py"]]:
+            try:
+                subprocess.Popen(cmd)
+                return
+            except OSError:
+                pass
+
+    def _make_line(self):
+        line = QFrame()
+        line.setFrameShape(QFrame.HLine)
+        line.setStyleSheet("background: #2b3240; max-height: 1px;")
+        return line
+
+    def _make_label(self, text):
+        lbl = QLabel(text)
+        lbl.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        return lbl
+
+    def _make_value_label(self, text):
+        lbl = QLabel(text)
+        lbl.setStyleSheet("color: #f1f5f9; font-size: 12px;")
+        lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        return lbl
+
+
+class WindowsSystemPropertiesDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("System Properties")
+        self.setWindowIcon(get_win_icon("this-pc", 32))
+        self.resize(500, 580)
+        self.setModal(True)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 16)
+        layout.setSpacing(14)
+
+        hdr_frame = QFrame()
+        hdr_frame.setStyleSheet("background: #1e232d; border: 1px solid #2b3342; border-radius: 8px; padding: 12px;")
+        hdr_layout = QHBoxLayout(hdr_frame)
+        hdr_layout.setSpacing(16)
+
+        pc_icon = QLabel()
+        pc_icon.setPixmap(get_win_icon("this-pc", 54).pixmap(54, 54))
+        hdr_layout.addWidget(pc_icon)
+
+        text_col = QVBoxLayout()
+        text_col.setSpacing(4)
+        hostname = os.uname().nodename
+        name_lbl = QLabel(hostname)
+        name_lbl.setFont(QFont("Segoe UI", 14, QFont.Bold))
+        name_lbl.setStyleSheet("color: #ffffff;")
+        text_col.addWidget(name_lbl)
+
+        sub_lbl = QLabel("DevOS 2027 Pro · 64-bit Workstation")
+        sub_lbl.setStyleSheet("color: #38bdf8; font-size: 12px; font-weight: 600;")
+        text_col.addWidget(sub_lbl)
+        hdr_layout.addLayout(text_col, 1)
+
+        layout.addWidget(hdr_frame)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll_content = QWidget()
+        s_layout = QVBoxLayout(scroll_content)
+        s_layout.setContentsMargins(0, 0, 0, 0)
+        s_layout.setSpacing(14)
+
+        cpu_name = "Intel / AMD Processor"
+        try:
+            with open("/proc/cpuinfo") as f:
+                for line in f:
+                    if "model name" in line:
+                        cpu_name = line.split(":", 1)[1].strip()
+                        break
+        except Exception:
+            pass
+
+        ram_str = "16.0 GB (15.5 GB usable)"
+        try:
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    if "MemTotal" in line:
+                        kb = int(line.split()[1])
+                        gb = kb / (1024 * 1024)
+                        ram_str = f"{gb:.1f} GB ({gb * 0.96:.1f} GB usable)"
+                        break
+        except Exception:
+            pass
+
+        dev_spec = QFrame()
+        dev_spec.setStyleSheet("background: #1a1d24; border: 1px solid #282f3a; border-radius: 8px; padding: 12px;")
+        d_layout = QVBoxLayout(dev_spec)
+        d_layout.setSpacing(8)
+
+        d_title = QLabel("Device specifications")
+        d_title.setFont(QFont("Segoe UI", 11, QFont.Bold))
+        d_title.setStyleSheet("color: #f8fafc;")
+        d_layout.addWidget(d_title)
+
+        d_grid = QGridLayout()
+        d_grid.setHorizontalSpacing(16)
+        d_grid.setVerticalSpacing(6)
+
+        d_grid.addWidget(self._make_label("Device name"), 0, 0)
+        d_grid.addWidget(self._make_val(hostname), 0, 1)
+
+        d_grid.addWidget(self._make_label("Processor"), 1, 0)
+        d_grid.addWidget(self._make_val(cpu_name), 1, 1)
+
+        d_grid.addWidget(self._make_label("Installed RAM"), 2, 0)
+        d_grid.addWidget(self._make_val(ram_str), 2, 1)
+
+        d_grid.addWidget(self._make_label("Device ID"), 3, 0)
+        d_grid.addWidget(self._make_val("A81B17F5-5113-495D-92F1-53B62E940B27"), 3, 1)
+
+        d_grid.addWidget(self._make_label("Product ID"), 4, 0)
+        d_grid.addWidget(self._make_val("00330-80000-00000-AAOEM"), 4, 1)
+
+        d_grid.addWidget(self._make_label("System type"), 5, 0)
+        d_grid.addWidget(self._make_val("64-bit operating system, x64-based processor"), 5, 1)
+
+        d_grid.addWidget(self._make_label("Pen and touch"), 6, 0)
+        d_grid.addWidget(self._make_val("No pen or touch input is available for this display"), 6, 1)
+
+        d_layout.addLayout(d_grid)
+        s_layout.addWidget(dev_spec)
+
+        win_spec = QFrame()
+        win_spec.setStyleSheet("background: #1a1d24; border: 1px solid #282f3a; border-radius: 8px; padding: 12px;")
+        w_layout = QVBoxLayout(win_spec)
+        w_layout.setSpacing(8)
+
+        w_title = QLabel("Windows specifications")
+        w_title.setFont(QFont("Segoe UI", 11, QFont.Bold))
+        w_title.setStyleSheet("color: #f8fafc;")
+        w_layout.addWidget(w_title)
+
+        w_grid = QGridLayout()
+        w_grid.setHorizontalSpacing(16)
+        w_grid.setVerticalSpacing(6)
+
+        w_grid.addWidget(self._make_label("Edition"), 0, 0)
+        w_grid.addWidget(self._make_val("DevOS 2027 Pro"), 0, 1)
+
+        w_grid.addWidget(self._make_label("Version"), 1, 0)
+        w_grid.addWidget(self._make_val("24H2"), 1, 1)
+
+        w_grid.addWidget(self._make_label("Installed on"), 2, 0)
+        w_grid.addWidget(self._make_val("10/18/2026"), 2, 1)
+
+        w_grid.addWidget(self._make_label("OS build"), 3, 0)
+        w_grid.addWidget(self._make_val("26100.1742"), 3, 1)
+
+        w_grid.addWidget(self._make_label("Experience"), 4, 0)
+        w_grid.addWidget(self._make_val("DevOS Feature Experience Pack 1000.26100.1000.0"), 4, 1)
+
+        w_layout.addLayout(w_grid)
+        s_layout.addWidget(win_spec)
+
+        scroll.setWidget(scroll_content)
+        layout.addWidget(scroll, 1)
+
+        btn_bar = QHBoxLayout()
+        btn_dev_mgr = QPushButton("Device Manager")
+        btn_dev_mgr.setObjectName("dialogBtn")
+        btn_dev_mgr.clicked.connect(self._open_device_manager)
+        btn_bar.addWidget(btn_dev_mgr)
+
+        btn_taskman = QPushButton("Task Manager")
+        btn_taskman.setObjectName("dialogBtn")
+        btn_taskman.clicked.connect(self._open_taskman)
+        btn_bar.addWidget(btn_taskman)
+
+        btn_storage = QPushButton("Storage Doctor")
+        btn_storage.setObjectName("dialogBtn")
+        btn_storage.clicked.connect(self._open_storage)
+        btn_bar.addWidget(btn_storage)
+
+        btn_bar.addStretch(1)
+
+        btn_ok = QPushButton("OK")
+        btn_ok.setObjectName("dialogBtnPrimary")
+        btn_ok.clicked.connect(self.accept)
+        btn_bar.addWidget(btn_ok)
+
+        layout.addLayout(btn_bar)
+
+    def _open_device_manager(self):
+        for cmd in [["python3", "/usr/local/share/devos/components/settings/hardware_manager.py"], ["kinfocenter"]]:
+            try:
+                subprocess.Popen(cmd)
+                return
+            except OSError:
+                pass
+
+    def _open_taskman(self):
+        for cmd in [["/usr/local/bin/devos-taskman"], ["python3", "/usr/local/share/devos/components/taskman/taskman.py"]]:
+            try:
+                subprocess.Popen(cmd)
+                return
+            except OSError:
+                pass
+
+    def _open_storage(self):
+        for cmd in [["/usr/local/bin/devos-disk-gui"], ["python3", "/usr/local/share/devos/components/settings/disk_doctor_gui.py"]]:
+            try:
+                subprocess.Popen(cmd)
+                return
+            except OSError:
+                pass
+
+    def _make_label(self, text):
+        lbl = QLabel(text)
+        lbl.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        return lbl
+
+    def _make_val(self, text):
+        lbl = QLabel(text)
+        lbl.setStyleSheet("color: #f1f5f9; font-size: 12px;")
+        lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        return lbl
+
+
+class WindowsFileExplorer(QMainWindow):
+    """Full-featured Windows 10/11 File Explorer for DevOS."""
+
+    def __init__(self, initial_path=""):
         super().__init__()
         self.setWindowTitle("This PC")
-        self.resize(1180, 720)
-        self._fitted = False
-        self._cards = []
+        self.setWindowIcon(get_win_icon("this-pc", 32))
+        self.resize(1140, 700)
+        self._history = []
+        self._future = []
+        self._current_path = ""
+        self._clipboard = {"action": None, "paths": []}
+        self._view_mode = "details"
         self._drives = []
-        self._columns = 0
+        self._side_btns = {}
+        self._pinned_folders = self.load_pinned_folders()
 
+        self._setup_ui()
+        self.navigate_to(initial_path, add_to_history=False)
+
+    def _setup_ui(self):
         root = QWidget()
         self.setCentralWidget(root)
-        outer = QHBoxLayout(root)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(0)
+        main_layout = QVBoxLayout(root)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
-        side = QWidget()
-        side.setObjectName("sidebar")
-        side.setFixedWidth(220)
-        self.side = side
-        side_box = QVBoxLayout(side)
-        side_box.setContentsMargins(12, 18, 12, 18)
-        side_box.setSpacing(2)
+        # 1. Top Navigation & Address Toolbar
+        nav_toolbar = QWidget()
+        nav_toolbar.setObjectName("navToolbar")
+        nav_layout = QHBoxLayout(nav_toolbar)
+        nav_layout.setContentsMargins(10, 8, 10, 6)
+        nav_layout.setSpacing(6)
 
-        home = os.path.expanduser("~")
-        folders = [
-            ("Pictures", os.path.join(home, "Pictures")),
-            ("Music", os.path.join(home, "Music")),
-            ("Videos", os.path.join(home, "Videos")),
-            ("Downloads", os.path.join(home, "Downloads")),
-            ("Documents", os.path.join(home, "Documents")),
-            ("Desktop", os.path.join(home, "Desktop")),
-        ]
-        for name, path in folders:
-            side_box.addWidget(SideButton(name, path))
+        # Navigation Buttons: Back, Forward, Up, Refresh
+        self.btn_back = QToolButton()
+        self.btn_back.setText("←")
+        self.btn_back.setObjectName("navBtn")
+        self.btn_back.setToolTip("Back (Alt+Left)")
+        self.btn_back.setEnabled(False)
+        self.btn_back.clicked.connect(self.go_back)
 
-        side_box.addSpacing(16)
-        here = SideButton("This PC", "")
-        here.setObjectName("sideSelected")
-        side_box.addWidget(here)
+        self.btn_forward = QToolButton()
+        self.btn_forward.setText("→")
+        self.btn_forward.setObjectName("navBtn")
+        self.btn_forward.setToolTip("Forward (Alt+Right)")
+        self.btn_forward.setEnabled(False)
+        self.btn_forward.clicked.connect(self.go_forward)
 
-        self.drive_side = QVBoxLayout()
-        self.drive_side.setSpacing(0)
-        self.drive_side.setContentsMargins(14, 0, 0, 0)
-        side_box.addLayout(self.drive_side)
-        side_box.addSpacing(8)
-        side_box.addWidget(SideButton("Network", "network:/"))
-        props = SideButton("PC properties", "")
-        props.clicked.disconnect()
-        props.clicked.connect(lambda _checked=False: open_pc_properties())
-        side_box.addWidget(props)
-        side_box.addStretch(1)
-        outer.addWidget(side)
+        self.btn_up = QToolButton()
+        self.btn_up.setText("↑")
+        self.btn_up.setObjectName("navBtn")
+        self.btn_up.setToolTip("Up to parent (Alt+Up)")
+        self.btn_up.clicked.connect(self.go_up)
 
-        main = QWidget()
-        main_box = QVBoxLayout(main)
-        main_box.setContentsMargins(28, 22, 28, 22)
-        main_box.setSpacing(16)
-        heading = QLabel("Devices and drives")
-        heading.setObjectName("heading")
-        heading.setFont(QFont("Inter", 18, QFont.DemiBold))
-        main_box.addWidget(heading)
+        self.btn_refresh = QToolButton()
+        self.btn_refresh.setText("↻")
+        self.btn_refresh.setObjectName("navBtn")
+        self.btn_refresh.setToolTip("Refresh (F5)")
+        self.btn_refresh.clicked.connect(self.refresh)
+
+        nav_layout.addWidget(self.btn_back)
+        nav_layout.addWidget(self.btn_forward)
+        nav_layout.addWidget(self.btn_up)
+        nav_layout.addWidget(self.btn_refresh)
+
+        # Breadcrumb Address Bar
+        self.address_bar = BreadcrumbBar()
+        self.address_bar.path_changed.connect(self.navigate_to)
+        nav_layout.addWidget(self.address_bar, 1)
+
+        # Search Box
+        self.search_box = QLineEdit()
+        self.search_box.setObjectName("searchBox")
+        self.search_box.setPlaceholderText("Search This PC")
+        self.search_box.setFixedWidth(240)
+        self.search_box.textChanged.connect(self._on_search_text_changed)
+        nav_layout.addWidget(self.search_box)
+
+        main_layout.addWidget(nav_toolbar)
+
+        # 2. Command Bar / Ribbon (New folder, Cut, Copy, Paste, Delete, Properties, View)
+        cmd_bar = QWidget()
+        cmd_bar.setObjectName("commandBar")
+        cmd_layout = QHBoxLayout(cmd_bar)
+        cmd_layout.setContentsMargins(12, 4, 12, 6)
+        cmd_layout.setSpacing(6)
+
+        self.btn_new_folder = QPushButton("New folder")
+        self.btn_new_folder.setIcon(get_win_icon("folder", 18))
+        self.btn_new_folder.setObjectName("cmdBtn")
+        self.btn_new_folder.clicked.connect(self.action_new_folder)
+
+        self.btn_cut = QPushButton("Cut")
+        self.btn_cut.setObjectName("cmdBtn")
+        self.btn_cut.clicked.connect(self.action_cut)
+
+        self.btn_copy = QPushButton("Copy")
+        self.btn_copy.setObjectName("cmdBtn")
+        self.btn_copy.clicked.connect(self.action_copy)
+
+        self.btn_paste = QPushButton("Paste")
+        self.btn_paste.setObjectName("cmdBtn")
+        self.btn_paste.clicked.connect(self.action_paste)
+
+        self.btn_rename = QPushButton("Rename")
+        self.btn_rename.setObjectName("cmdBtn")
+        self.btn_rename.clicked.connect(self.action_rename)
+
+        self.btn_delete = QPushButton("Delete")
+        self.btn_delete.setObjectName("cmdBtn")
+        self.btn_delete.clicked.connect(self.action_delete)
+
+        self.btn_view = QPushButton("View: Details")
+        self.btn_view.setObjectName("cmdBtn")
+        self.btn_view.clicked.connect(self.toggle_view_mode)
+
+        self.btn_terminal = QPushButton("Terminal")
+        self.btn_terminal.setObjectName("cmdBtn")
+        self.btn_terminal.clicked.connect(lambda: open_in_terminal(self._current_path or os.path.expanduser("~")))
+
+        self.btn_props = QPushButton("Properties")
+        self.btn_props.setObjectName("cmdBtn")
+        self.btn_props.clicked.connect(self.show_properties)
+
+        cmd_layout.addWidget(self.btn_new_folder)
+        cmd_layout.addWidget(self.btn_cut)
+        cmd_layout.addWidget(self.btn_copy)
+        cmd_layout.addWidget(self.btn_paste)
+        cmd_layout.addWidget(self.btn_rename)
+        cmd_layout.addWidget(self.btn_delete)
+        cmd_layout.addSpacing(10)
+        cmd_layout.addWidget(self.btn_view)
+        cmd_layout.addWidget(self.btn_terminal)
+        cmd_layout.addWidget(self.btn_props)
+        cmd_layout.addStretch(1)
+
+        main_layout.addWidget(cmd_bar)
+
+        # 3. Main Splitter: Sidebar (Left) + Content (Right)
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.setObjectName("mainSplitter")
+
+        # Sidebar
+        self.sidebar = QWidget()
+        self.sidebar.setObjectName("sidebar")
+        self.sidebar.setFixedWidth(220)
+        sidebar_layout = QVBoxLayout(self.sidebar)
+        sidebar_layout.setContentsMargins(10, 12, 10, 12)
+        sidebar_layout.setSpacing(2)
+
+        # Quick Access Section
+        qa_label = QLabel("Quick access")
+        qa_label.setObjectName("sideSection")
+        sidebar_layout.addWidget(qa_label)
+
+        self.qa_sidebar_layout = QVBoxLayout()
+        self.qa_sidebar_layout.setContentsMargins(0, 0, 0, 0)
+        self.qa_sidebar_layout.setSpacing(2)
+        sidebar_layout.addLayout(self.qa_sidebar_layout)
+
+        sidebar_layout.addSpacing(12)
+
+        # This PC Section
+        self.this_pc_btn = QPushButton("This PC")
+        self.this_pc_btn.setIcon(get_win_icon("this-pc", 22))
+        self.this_pc_btn.setIconSize(QSize(22, 22))
+        self.this_pc_btn.setObjectName("sideBtnSelected")
+        self.this_pc_btn.setCursor(Qt.PointingHandCursor)
+        self.this_pc_btn.clicked.connect(lambda _=False: self.navigate_to(""))
+        self.this_pc_btn.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.this_pc_btn.customContextMenuRequested.connect(lambda pos: self._show_this_pc_context_menu(self.this_pc_btn.mapToGlobal(pos)))
+        sidebar_layout.addWidget(self.this_pc_btn)
+        self._side_btns[""] = self.this_pc_btn
+
+        # Dynamic Folders AND Drives under This PC (indented tree)
+        self.this_pc_items_layout = QVBoxLayout()
+        self.this_pc_items_layout.setContentsMargins(14, 0, 0, 0)
+        self.this_pc_items_layout.setSpacing(2)
+        sidebar_layout.addLayout(self.this_pc_items_layout)
+
+        self.drive_sidebar_layout = QVBoxLayout()
+        self.drive_sidebar_layout.setContentsMargins(0, 0, 0, 0)
+        self.drive_sidebar_layout.setSpacing(2)
+        self.this_pc_items_layout.addLayout(self.drive_sidebar_layout)
+
+        sidebar_layout.addSpacing(12)
+
+        # Network, Recycle Bin, PC Properties
+        net_btn = QPushButton("Network")
+        net_btn.setIcon(get_win_icon("network", 20))
+        net_btn.setObjectName("sideBtn")
+        net_btn.setCursor(Qt.PointingHandCursor)
+        net_btn.clicked.connect(lambda _=False: self.navigate_to("network:/"))
+        net_btn.setContextMenuPolicy(Qt.CustomContextMenu)
+        net_btn.customContextMenuRequested.connect(lambda pos, b=net_btn: self._show_network_context_menu(b.mapToGlobal(pos)))
+        sidebar_layout.addWidget(net_btn)
+
+        trash_path = os.path.expanduser("~/.local/share/Trash/files")
+        bin_btn = QPushButton("Recycle Bin")
+        bin_btn.setIcon(get_win_icon("recycle-bin", 20))
+        bin_btn.setObjectName("sideBtn")
+        bin_btn.setCursor(Qt.PointingHandCursor)
+        bin_btn.clicked.connect(lambda _=False, p=trash_path: self.navigate_to(p))
+        bin_btn.setContextMenuPolicy(Qt.CustomContextMenu)
+        bin_btn.customContextMenuRequested.connect(lambda pos, b=bin_btn: self._show_bin_context_menu(b.mapToGlobal(pos)))
+        sidebar_layout.addWidget(bin_btn)
+
+        props_btn = QPushButton("PC properties")
+        props_btn.setObjectName("sideBtn")
+        props_btn.setCursor(Qt.PointingHandCursor)
+        props_btn.clicked.connect(lambda _=False: self.show_properties(""))
+        sidebar_layout.addWidget(props_btn)
+
+        sidebar_layout.addStretch(1)
+        splitter.addWidget(self.sidebar)
+
+        # Right Stacked Widget: Page 0 = This PC view, Page 1 = Folder browser view
+        self.content_stack = QStackedWidget()
+        self.content_stack.setObjectName("contentArea")
+
+        # Page 0: This PC View
+        self.page_this_pc = QWidget()
+        self.page_this_pc.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.page_this_pc.customContextMenuRequested.connect(self._show_this_pc_bg_context_menu)
+        this_pc_layout = QVBoxLayout(self.page_this_pc)
+        this_pc_layout.setContentsMargins(24, 18, 24, 18)
+        this_pc_layout.setSpacing(18)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.scroll = scroll
-        self.board = QWidget()
-        self.board.setMinimumWidth(0)
-        self.board.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        self.grid = QGridLayout(self.board)
-        self.grid.setContentsMargins(0, 0, 0, 0)
-        self.grid.setHorizontalSpacing(18)
-        self.grid.setVerticalSpacing(18)
-        scroll.setWidget(self.board)
-        main_box.addWidget(scroll, 1)
-        outer.addWidget(main, 1)
+        self.this_pc_scroll_widget = QWidget()
+        self.this_pc_scroll_widget.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.this_pc_scroll_widget.customContextMenuRequested.connect(self._show_this_pc_bg_context_menu)
+        self.this_pc_scroll_layout = QVBoxLayout(self.this_pc_scroll_widget)
+        self.this_pc_scroll_layout.setContentsMargins(0, 0, 0, 0)
+        self.this_pc_scroll_layout.setSpacing(20)
 
+        home = os.path.expanduser("~")
+        quick_folders = [
+            ("Desktop", os.path.join(home, "Desktop"), "folder-desktop"),
+            ("Downloads", os.path.join(home, "Downloads"), "folder-downloads"),
+            ("Documents", os.path.join(home, "Documents"), "folder-documents"),
+            ("Pictures", os.path.join(home, "Pictures"), "folder-pictures"),
+            ("Music", os.path.join(home, "Music"), "folder-music"),
+            ("Videos", os.path.join(home, "Videos"), "folder-videos"),
+        ]
+
+        # Folders Section Header: "Folders (6)"
+        self.folders_heading = QLabel("Folders (6)")
+        self.folders_heading.setObjectName("sectionHeading")
+        self.folders_heading.setFont(QFont("Inter", 13, QFont.DemiBold))
+        self.this_pc_scroll_layout.addWidget(self.folders_heading)
+
+        self.folders_flow = QHBoxLayout()
+        self.folders_flow.setSpacing(14)
+        for name, path, icon_name in quick_folders:
+            tile = FolderTile(name, path, icon_name, on_open=self.navigate_to, on_context=self._show_folder_tile_context_menu)
+            self.folders_flow.addWidget(tile)
+        self.folders_flow.addStretch(1)
+        self.this_pc_scroll_layout.addLayout(self.folders_flow)
+
+        # Devices & Drives Header: "Devices and drives"
+        self.drives_heading = QLabel("Devices and drives")
+        self.drives_heading.setObjectName("sectionHeading")
+        self.drives_heading.setFont(QFont("Inter", 13, QFont.DemiBold))
+        self.this_pc_scroll_layout.addWidget(self.drives_heading)
+
+        # Drives Grid
+        self.drives_grid = QGridLayout()
+        self.drives_grid.setHorizontalSpacing(16)
+        self.drives_grid.setVerticalSpacing(14)
+        self.this_pc_scroll_layout.addLayout(self.drives_grid)
+        self.this_pc_scroll_layout.addStretch(1)
+
+        scroll.setWidget(self.this_pc_scroll_widget)
+        this_pc_layout.addWidget(scroll)
+        self.content_stack.addWidget(self.page_this_pc)
+
+        # Page 1: Folder Browser View
+        self.page_folder = QWidget()
+        folder_layout = QVBoxLayout(self.page_folder)
+        folder_layout.setContentsMargins(0, 0, 0, 0)
+        folder_layout.setSpacing(0)
+
+        # Details Table View
+        self.table_view = QTableWidget()
+        self.table_view.setObjectName("fileTable")
+        self.table_view.setColumnCount(4)
+        self.table_view.setHorizontalHeaderLabels(["Name", "Date modified", "Type", "Size"])
+        self.table_view.horizontalHeader().setStretchLastSection(False)
+        self.table_view.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.table_view.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.table_view.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.table_view.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.table_view.verticalHeader().setVisible(False)
+        self.table_view.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table_view.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.table_view.setShowGrid(False)
+        self.table_view.setSortingEnabled(True)
+        self.table_view.itemDoubleClicked.connect(self._on_table_item_double_clicked)
+        self.table_view.itemSelectionChanged.connect(self._on_selection_changed)
+        self.table_view.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table_view.customContextMenuRequested.connect(self._show_context_menu)
+        folder_layout.addWidget(self.table_view)
+
+        # Icons List View (Hidden unless icons mode selected)
+        self.list_view = QListWidget()
+        self.list_view.setObjectName("fileList")
+        self.list_view.setViewMode(QListWidget.IconMode)
+        self.list_view.setIconSize(QSize(54, 54))
+        self.list_view.setGridSize(QSize(110, 95))
+        self.list_view.setResizeMode(QListWidget.Adjust)
+        self.list_view.setWordWrap(True)
+        self.list_view.itemDoubleClicked.connect(self._on_list_item_double_clicked)
+        self.list_view.itemSelectionChanged.connect(self._on_selection_changed)
+        self.list_view.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.list_view.customContextMenuRequested.connect(self._show_context_menu)
+        self.list_view.hide()
+        folder_layout.addWidget(self.list_view)
+
+        self.content_stack.addWidget(self.page_folder)
+        splitter.addWidget(self.content_stack)
+        splitter.setStretchFactor(1, 1)
+
+        main_layout.addWidget(splitter, 1)
+
+        # 4. Status Bar
+        self.status = QStatusBar()
+        self.status.setObjectName("statusBar")
+        self.status_items_count = QLabel("0 items")
+        self.status_selected_info = QLabel("")
+        self.status.addWidget(self.status_items_count, 1)
+        self.status.addPermanentWidget(self.status_selected_info)
+        self.setStatusBar(self.status)
+
+        # Windows 11 Dark Theme Stylesheet
         self.setStyleSheet("""
-            QMainWindow, QWidget { background: #0c101a; color: #e8eef6; }
-            #sidebar { background: #10151f; }
-            QPushButton#side, QPushButton#sideSelected {
-                text-align: left;
-                padding: 8px 10px;
-                border: none;
-                border-radius: 8px;
-                color: #d5deea;
-                font-size: 14px;
+            QMainWindow, QWidget {
+                background: #191b20;
+                color: #e2e8f0;
+                font-family: 'Segoe UI', 'Inter', -apple-system, sans-serif;
             }
-            QPushButton#side:hover { background: #1c2433; }
-            QPushButton#sideSelected { background: #1d4ed8; color: white; }
-            #heading { color: #f8fafc; }
-            #driveCard { background: #171e2b; border-radius: 12px; }
-            #driveCard:hover { background: #1e2738; }
-            #driveIcon {
-                background: #243044;
-                color: #7dd3fc;
-                border-radius: 8px;
+            #navToolbar {
+                background: #1f232b;
+                border-bottom: 1px solid #2d333f;
+            }
+            QToolButton#navBtn {
+                background: transparent;
+                border: 1px solid transparent;
+                border-radius: 4px;
+                color: #cbd5e1;
+                font-size: 16px;
+                padding: 4px 8px;
+            }
+            QToolButton#navBtn:hover {
+                background: #2a313d;
+                border-color: #3b4455;
+            }
+            QToolButton#navBtn:disabled {
+                color: #475569;
+            }
+            #breadcrumbBar {
+                background: #14171d;
+                border: 1px solid #2d333f;
+                border-radius: 6px;
+                padding-left: 6px;
+            }
+            #breadcrumbBar:hover {
+                border-color: #0078d4;
+            }
+            QPushButton#crumbBtn {
+                background: transparent;
+                border: none;
+                border-radius: 4px;
+                color: #cbd5e1;
+                font-size: 13px;
+                padding: 3px 6px;
+            }
+            QPushButton#crumbBtn:hover {
+                background: #2a313d;
+                color: #ffffff;
+            }
+            QLabel#crumbSep {
+                color: #64748b;
+                font-size: 14px;
+                margin: 0 1px;
+            }
+            QLineEdit#pathEdit, QLineEdit#searchBox {
+                background: #14171d;
+                border: 1px solid #2d333f;
+                border-radius: 6px;
+                color: #f8fafc;
+                font-size: 13px;
+                padding: 5px 10px;
+            }
+            QLineEdit#pathEdit:focus, QLineEdit#searchBox:focus {
+                border-color: #0078d4;
+            }
+            #commandBar {
+                background: #1c2027;
+                border-bottom: 1px solid #282f3a;
+            }
+            QPushButton#cmdBtn {
+                background: transparent;
+                border: 1px solid transparent;
+                border-radius: 5px;
+                color: #cbd5e1;
+                font-size: 12px;
+                padding: 5px 9px;
+            }
+            QPushButton#cmdBtn:hover {
+                background: #28303e;
+                border-color: #384357;
+                color: #ffffff;
+            }
+            #sidebar {
+                background: #17191e;
+                border-right: 1px solid #262c37;
+            }
+            QLabel#sideSection {
+                color: #94a3b8;
                 font-size: 11px;
                 font-weight: 700;
+                text-transform: uppercase;
+                padding: 6px 10px 4px 10px;
+                letter-spacing: 0.5px;
             }
-            #driveTitle { color: #f8fafc; }
-            #driveSpace { color: #94a3b8; font-size: 13px; }
-            QProgressBar { background: #334155; border: none; border-radius: 5px; }
-            QProgressBar::chunk { background: #38bdf8; border-radius: 5px; }
-            QScrollArea { background: transparent; }
+            QPushButton#sideBtn, QPushButton#sideBtnSelected {
+                text-align: left;
+                padding: 7px 10px;
+                border: none;
+                border-radius: 6px;
+                color: #cbd5e1;
+                font-size: 13px;
+            }
+            QPushButton#sideBtn:hover {
+                background: #242b37;
+                color: #ffffff;
+            }
+            QPushButton#sideBtnSelected {
+                background: #0078d4;
+                color: #ffffff;
+                font-weight: 600;
+            }
+            QLabel#sectionHeading {
+                color: #f8fafc;
+            }
+            #folderTile {
+                background: #20252f;
+                border: 1px solid #2b3341;
+                border-radius: 8px;
+            }
+            #folderTile:hover {
+                background: #272e3a;
+                border-color: #0078d4;
+            }
+            QLabel#folderTileTitle {
+                color: #f1f5f9;
+            }
+            #driveCard {
+                background: #20252f;
+                border: 1px solid #2b3341;
+                border-radius: 10px;
+            }
+            #driveCard:hover {
+                background: #272e3a;
+                border-color: #0078d4;
+            }
+            QLabel#driveTitle {
+                color: #f8fafc;
+            }
+            QLabel#driveSpace {
+                color: #94a3b8;
+                font-size: 12px;
+            }
+            QProgressBar#driveBar {
+                background: #334155;
+                border: none;
+                border-radius: 4px;
+            }
+            QProgressBar#driveBar::chunk {
+                background: #0078d4;
+                border-radius: 4px;
+            }
+            QProgressBar#driveBarFull::chunk {
+                background: #ef4444;
+                border-radius: 4px;
+            }
+            QTableWidget#fileTable, QListWidget#fileList {
+                background: #191b20;
+                border: none;
+                color: #e2e8f0;
+                gridline-color: transparent;
+            }
+            QTableWidget#fileTable::item {
+                padding: 4px 6px;
+                border-radius: 4px;
+            }
+            QTableWidget#fileTable::item:hover, QListWidget#fileList::item:hover {
+                background: #252b36;
+            }
+            QTableWidget#fileTable::item:selected, QListWidget#fileList::item:selected {
+                background: #0078d4;
+                color: #ffffff;
+            }
+            QHeaderView::section {
+                background: #1a1d24;
+                color: #94a3b8;
+                font-weight: 600;
+                font-size: 12px;
+                border: none;
+                border-bottom: 1px solid #282f3a;
+                border-right: 1px solid #242a34;
+                padding: 6px 8px;
+            }
+            QHeaderView::section:hover {
+                background: #242b36;
+                color: #f8fafc;
+            }
+            QStatusBar#statusBar {
+                background: #17191e;
+                border-top: 1px solid #242a34;
+                color: #94a3b8;
+                font-size: 12px;
+                padding: 2px 10px;
+            }
+            QMenu {
+                background: #1e222a;
+                border: 1px solid #333d4e;
+                border-radius: 8px;
+                padding: 5px;
+            }
+            QMenu::item {
+                background: transparent;
+                padding: 6px 28px 6px 12px;
+                border-radius: 5px;
+                color: #e2e8f0;
+                font-size: 13px;
+                margin: 1px 4px;
+            }
+            QMenu::item:selected {
+                background: #0078d4;
+                color: #ffffff;
+            }
+            QMenu::item:disabled {
+                color: #64748b;
+            }
+            QMenu::separator {
+                height: 1px;
+                background: #2b3341;
+                margin: 4px 8px;
+            }
+            QTabWidget#propTabs::pane {
+                border: 1px solid #2d3340;
+                border-radius: 6px;
+                background: #1c2029;
+                top: -1px;
+            }
+            QTabBar::tab {
+                background: #161820;
+                border: 1px solid #2d3340;
+                border-bottom: none;
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
+                color: #94a3b8;
+                padding: 6px 16px;
+                margin-right: 2px;
+                font-size: 12px;
+                min-width: 60px;
+            }
+            QTabBar::tab:selected {
+                background: #1c2029;
+                color: #ffffff;
+                border-bottom: 2px solid #0078d4;
+                font-weight: 600;
+            }
+            QTabBar::tab:hover:!selected {
+                background: #202430;
+                color: #cbd5e1;
+            }
+            QPushButton#dialogBtn {
+                background: #252b37;
+                border: 1px solid #363e4f;
+                border-radius: 4px;
+                color: #f1f5f9;
+                padding: 5px 14px;
+                font-size: 12px;
+                min-width: 72px;
+            }
+            QPushButton#dialogBtn:hover {
+                background: #31394a;
+                border-color: #0078d4;
+                color: #ffffff;
+            }
+            QPushButton#dialogBtn:disabled {
+                color: #64748b;
+                border-color: #242a36;
+            }
+            QPushButton#dialogBtnPrimary {
+                background: #0078d4;
+                border: 1px solid #0078d4;
+                border-radius: 4px;
+                color: #ffffff;
+                padding: 5px 14px;
+                font-size: 12px;
+                font-weight: 600;
+                min-width: 72px;
+            }
+            QPushButton#dialogBtnPrimary:hover {
+                background: #106ebe;
+            }
+            QLineEdit#propNameEdit {
+                background: #14171d;
+                border: 1px solid #2d333f;
+                border-radius: 4px;
+                color: #f8fafc;
+                padding: 4px 8px;
+            }
+            QLineEdit#propNameEdit:focus {
+                border-color: #0078d4;
+            }
+            QCheckBox#propCheck {
+                color: #cbd5e1;
+                font-size: 12px;
+                spacing: 6px;
+            }
+            QCheckBox#propCheck::indicator {
+                width: 16px;
+                height: 16px;
+                border: 1px solid #475569;
+                border-radius: 3px;
+                background: #1e232b;
+            }
+            QCheckBox#propCheck::indicator:checked {
+                background: #0078d4;
+                border-color: #0078d4;
+            }
+            QLabel#propMuted {
+                color: #94a3b8;
+                font-size: 12px;
+            }
         """)
-        self.reload()
 
-    def reload(self):
-        while self.grid.count():
-            item = self.grid.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
-        while self.drive_side.count():
-            item = self.drive_side.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
+    CONFIG_DIR = os.path.expanduser("~/.config/devos")
+    PINNED_FILE = os.path.join(CONFIG_DIR, "quick_access.json")
 
-        drives = list_drives()
-        self._drives = drives
-        if not drives:
-            empty = QLabel("No drives found.")
-            empty.setObjectName("driveSpace")
-            self.grid.addWidget(empty, 0, 0)
-            return
+    def load_pinned_folders(self):
+        try:
+            if os.path.exists(self.PINNED_FILE):
+                with open(self.PINNED_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        return [p for p in data if isinstance(p, str) and os.path.isdir(p)]
+        except Exception:
+            pass
+        return []
 
-        for drive in drives:
-            label = drive["title"]
-            button = SideButton(label, drive["mount"] or "")
-            button.drive = drive
-            button.clicked.disconnect()
-            button.clicked.connect(lambda _checked=False, item=drive: open_drive(item))
-            self.drive_side.addWidget(button)
-        self.place_cards()
+    def save_pinned_folders(self):
+        try:
+            os.makedirs(self.CONFIG_DIR, exist_ok=True)
+            with open(self.PINNED_FILE, "w", encoding="utf-8") as f:
+                json.dump(self._pinned_folders, f, indent=2)
+        except Exception:
+            pass
 
-    def column_count(self):
-        width = self.scroll.viewport().width()
-        if width < 520:
-            return 1
-        if width < 860:
-            return 2
-        return 3
+    def pin_to_quick_access(self, path, name=None):
+        if path and path not in self._pinned_folders and os.path.isdir(path):
+            self._pinned_folders.append(path)
+            self.save_pinned_folders()
+            self._rebuild_sidebar()
 
-    def place_cards(self):
-        while self.grid.count():
-            item = self.grid.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
-        columns = self.column_count()
-        self._columns = columns
-        for index, drive in enumerate(self._drives):
-            self.grid.addWidget(DriveCard(drive), index // columns, index % columns)
-        for column in range(columns):
-            self.grid.setColumnStretch(column, 1)
+    def unpin_from_quick_access(self, path):
+        if path in self._pinned_folders:
+            self._pinned_folders.remove(path)
+            self.save_pinned_folders()
+            self._rebuild_sidebar()
 
-    def showEvent(self, event):
-        super().showEvent(event)
-        if self._fitted:
-            return
-        self._fitted = True
-        screen = self.screen()
-        if screen is None:
-            return
-        area = screen.availableGeometry()
-        self.resize(min(1180, max(760, area.width() - 48)), min(760, max(520, area.height() - 72)))
-        frame = self.frameGeometry()
-        frame.moveCenter(area.center())
-        self.move(frame.topLeft())
+    def _rebuild_sidebar(self):
+        """Populate Quick Access with pinned items, and This PC with personal folders and drives."""
+        while self.qa_sidebar_layout.count():
+            item = self.qa_sidebar_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
 
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        if self.width() < 900:
-            self.side.setFixedWidth(180)
+        while self.this_pc_items_layout.count():
+            item = self.this_pc_items_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        self.drive_sidebar_layout = QVBoxLayout()
+        self.drive_sidebar_layout.setContentsMargins(0, 0, 0, 0)
+        self.drive_sidebar_layout.setSpacing(2)
+
+        home = os.path.expanduser("~")
+        std_folders = [
+            ("Desktop", os.path.join(home, "Desktop"), "folder-desktop"),
+            ("Downloads", os.path.join(home, "Downloads"), "folder-downloads"),
+            ("Documents", os.path.join(home, "Documents"), "folder-documents"),
+            ("Pictures", os.path.join(home, "Pictures"), "folder-pictures"),
+            ("Music", os.path.join(home, "Music"), "folder-music"),
+            ("Videos", os.path.join(home, "Videos"), "folder-videos"),
+        ]
+
+        # 1. Quick access standard folders
+        for name, path, icon_name in std_folders:
+            btn = QPushButton(name)
+            btn.setIcon(get_win_icon(icon_name, 20))
+            btn.setIconSize(QSize(20, 20))
+            btn.setObjectName("sideBtn")
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.clicked.connect(lambda _=False, p=path: self.navigate_to(p))
+            btn.setContextMenuPolicy(Qt.CustomContextMenu)
+            btn.customContextMenuRequested.connect(lambda pos, p=path, b=btn: self._show_sidebar_folder_context_menu(p, False, b.mapToGlobal(pos)))
+            self.qa_sidebar_layout.addWidget(btn)
+            self._side_btns[path] = btn
+
+        # Pinned folders under Quick access
+        for path in self._pinned_folders:
+            if not os.path.exists(path):
+                continue
+            name = os.path.basename(path) or path
+            btn = QPushButton(f"📌 {name}")
+            btn.setIcon(get_win_icon("folder", 20))
+            btn.setIconSize(QSize(20, 20))
+            btn.setObjectName("sideBtn")
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.clicked.connect(lambda _=False, p=path: self.navigate_to(p))
+            btn.setContextMenuPolicy(Qt.CustomContextMenu)
+            btn.customContextMenuRequested.connect(lambda pos, p=path, b=btn: self._show_sidebar_folder_context_menu(p, True, b.mapToGlobal(pos)))
+            self.qa_sidebar_layout.addWidget(btn)
+            self._side_btns[path] = btn
+
+        # 2. This PC Personal folders (Always show on left side!)
+        for name, path, icon_name in std_folders:
+            btn = QPushButton(name)
+            btn.setIcon(get_win_icon(icon_name, 18))
+            btn.setIconSize(QSize(18, 18))
+            btn.setObjectName("sideBtn")
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.clicked.connect(lambda _=False, p=path: self.navigate_to(p))
+            btn.setContextMenuPolicy(Qt.CustomContextMenu)
+            btn.customContextMenuRequested.connect(lambda pos, p=path, b=btn: self._show_sidebar_folder_context_menu(p, False, b.mapToGlobal(pos)))
+            self.this_pc_items_layout.addWidget(btn)
+
+        # 3. This PC Drives
+        for drive in self._drives:
+            btn = QPushButton(drive["title"])
+            icon_type = "drive-c" if drive["is_system"] else ("drive-usb" if drive["removable"] else "drive-fixed")
+            btn.setIcon(get_win_icon(icon_type, 18))
+            btn.setIconSize(QSize(18, 18))
+            btn.setObjectName("sideBtn")
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.clicked.connect(lambda _=False, d=drive: self.open_drive(d))
+            btn.setContextMenuPolicy(Qt.CustomContextMenu)
+            btn.customContextMenuRequested.connect(lambda pos, d=drive, b=btn: self._show_drive_context_menu(d, b.mapToGlobal(pos)))
+            self.drive_sidebar_layout.addWidget(btn)
+
+        self.this_pc_items_layout.addLayout(self.drive_sidebar_layout)
+
+    def reload_drives(self):
+        """Fetch and populate drives."""
+        while self.drives_grid.count():
+            item = self.drives_grid.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        self._drives = list_drives()
+        self.drives_heading.setText(f"Devices and drives ({len(self._drives)})")
+
+        self._rebuild_sidebar()
+
+        # Place drive cards in 2-column or 3-column grid
+        columns = 2
+        for idx, drive in enumerate(self._drives):
+            card = DriveCard(drive, on_open=self.open_drive, on_context=self._show_drive_context_menu)
+            self.drives_grid.addWidget(card, idx // columns, idx % columns)
+
+    def open_drive(self, drive):
+        """Open a drive; mounts it automatically if unmounted."""
+        mount = drive.get("mount") or ""
+        if not mount and drive.get("path"):
+            try:
+                out = subprocess.check_output(
+                    ["udisksctl", "mount", "-b", drive["path"]],
+                    text=True,
+                    stderr=subprocess.STDOUT,
+                )
+                for part in out.split():
+                    if part.startswith("/"):
+                        mount = part
+                        drive["mount"] = mount
+                        break
+            except Exception:
+                pass
+            if not mount:
+                for item in list_drives():
+                    if item.get("path") == drive.get("path") and item.get("mount"):
+                        mount = item["mount"]
+                        drive["mount"] = mount
+                        break
+
+        if mount and os.path.exists(mount):
+            self.navigate_to(mount, label=drive["title"])
+
+    def navigate_to(self, path, label="", add_to_history=True):
+        """Navigate to 'This PC' (empty string) or any folder path."""
+        # Clean path if passed as file:// or computer:/
+        if path.startswith("file://"):
+            path = path[7:]
+        if path in ("computer:/", "computer:", "thispc"):
+            path = ""
+
+        if add_to_history and self._current_path != path:
+            self._history.append(self._current_path)
+            self._future.clear()
+            self.btn_back.setEnabled(True)
+            self.btn_forward.setEnabled(False)
+
+        self._current_path = path
+
+        # Update sidebar highlights
+        for p, btn in self._side_btns.items():
+            btn.setObjectName("sideBtnSelected" if p == path else "sideBtn")
+            btn.setStyle(btn.style())
+
+        self.address_bar.set_location(path, label)
+        self.search_box.clear()
+
+        if not path or path == "This PC":
+            self.setWindowTitle("This PC")
+            self.search_box.setPlaceholderText("Search This PC")
+            self.reload_drives()
+            self.content_stack.setCurrentIndex(0)
+            self.btn_up.setEnabled(False)
+            self.btn_new_folder.setEnabled(False)
+            self.status_items_count.setText(f"{len(self._drives)} drives, 6 folders")
+            self.status_selected_info.setText("")
         else:
-            self.side.setFixedWidth(220)
-        width = self.scroll.viewport().width()
-        if width > 0:
-            self.board.setMaximumWidth(width)
-        if self._drives and self.column_count() != self._columns:
-            self.place_cards()
+            folder_name = os.path.basename(path) or path
+            self.setWindowTitle(f"{folder_name} - File Explorer")
+            self.search_box.setPlaceholderText(f"Search {folder_name}")
+            self.content_stack.setCurrentIndex(1)
+            self.btn_up.setEnabled(True)
+            self.btn_new_folder.setEnabled(True)
+            self._load_folder_contents(path)
+
+    def go_back(self):
+        if self._history:
+            prev = self._history.pop()
+            self._future.append(self._current_path)
+            self.btn_forward.setEnabled(True)
+            self.btn_back.setEnabled(bool(self._history))
+            self.navigate_to(prev, add_to_history=False)
+
+    def go_forward(self):
+        if self._future:
+            nxt = self._future.pop()
+            self._history.append(self._current_path)
+            self.btn_back.setEnabled(True)
+            self.btn_forward.setEnabled(bool(self._future))
+            self.navigate_to(nxt, add_to_history=False)
+
+    def go_up(self):
+        if not self._current_path:
+            return
+        parent = os.path.dirname(self._current_path)
+        if not parent or parent == self._current_path:
+            self.navigate_to("")
+        else:
+            self.navigate_to(parent)
+
+    def refresh(self):
+        self.navigate_to(self._current_path, add_to_history=False)
+
+    def _load_folder_contents(self, path):
+        """Populate table and list view with items in directory."""
+        self.table_view.setSortingEnabled(False)
+        self.table_view.setRowCount(0)
+        self.list_view.clear()
+
+        try:
+            entries = os.listdir(path)
+        except OSError as err:
+            self.status_items_count.setText(f"Unable to access: {err.strerror}")
+            return
+
+        # Separate folders and files
+        dirs = []
+        files = []
+        for entry in entries:
+            if entry.startswith(".") and entry not in [".", ".."]:
+                continue
+            full_path = os.path.join(path, entry)
+            if os.path.isdir(full_path):
+                dirs.append(entry)
+            else:
+                files.append(entry)
+
+        dirs.sort(key=str.lower)
+        files.sort(key=str.lower)
+        all_items = dirs + files
+
+        self.table_view.setRowCount(len(all_items))
+
+        for row, entry in enumerate(all_items):
+            full_path = os.path.join(path, entry)
+            is_dir = os.path.isdir(full_path)
+
+            try:
+                st = os.stat(full_path)
+                mtime = datetime.datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d  %I:%M %p")
+                size_str = "" if is_dir else format_bytes(st.st_size)
+                size_val = -1 if is_dir else st.st_size
+            except OSError:
+                mtime = ""
+                size_str = ""
+                size_val = -1
+
+            item_type = get_file_type_description(full_path)
+            icon = get_icon_for_file(full_path, is_dir)
+
+            # Name Column
+            name_item = ExplorerTableItem(entry)
+            name_item.setIcon(icon)
+            name_item.setData(Qt.UserRole, full_path)
+            name_item.setData(Qt.UserRole + 1, is_dir)
+            self.table_view.setItem(row, 0, name_item)
+
+            # Date Modified Column
+            date_item = ExplorerTableItem(mtime)
+            date_item.setData(Qt.UserRole, st.st_mtime if "st" in locals() else 0)
+            date_item.setData(Qt.UserRole + 1, is_dir)
+            self.table_view.setItem(row, 1, date_item)
+
+            # Type Column
+            type_item = ExplorerTableItem(item_type)
+            type_item.setData(Qt.UserRole, item_type)
+            type_item.setData(Qt.UserRole + 1, is_dir)
+            self.table_view.setItem(row, 2, type_item)
+
+            # Size Column
+            size_item = ExplorerTableItem(size_str)
+            size_item.setData(Qt.UserRole, size_val)
+            size_item.setData(Qt.UserRole + 1, is_dir)
+            size_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            self.table_view.setItem(row, 3, size_item)
+
+            # Also populate Icon list view
+            list_item = QListWidgetItem(icon, entry)
+            list_item.setData(Qt.UserRole, full_path)
+            list_item.setData(Qt.UserRole + 1, is_dir)
+            self.list_view.addItem(list_item)
+
+        self.table_view.setSortingEnabled(True)
+        self.status_items_count.setText(f"{len(all_items)} items")
+        self.status_selected_info.setText("")
+
+    def _on_table_item_double_clicked(self, item):
+        row = item.row()
+        name_item = self.table_view.item(row, 0)
+        target = name_item.data(Qt.UserRole)
+        is_dir = name_item.data(Qt.UserRole + 1)
+        if is_dir:
+            self.navigate_to(target)
+        else:
+            open_file_with_default(target)
+
+    def _on_list_item_double_clicked(self, item):
+        target = item.data(Qt.UserRole)
+        is_dir = item.data(Qt.UserRole + 1)
+        if is_dir:
+            self.navigate_to(target)
+        else:
+            open_file_with_default(target)
+
+    def _on_selection_changed(self):
+        selected_paths = self.get_selected_paths()
+        count = len(selected_paths)
+        if count == 0:
+            self.status_selected_info.setText("")
+        elif count == 1:
+            p = selected_paths[0]
+            try:
+                st = os.stat(p)
+                info = format_bytes(st.st_size) if not os.path.isdir(p) else "Folder"
+                self.status_selected_info.setText(f"1 item selected  {info}")
+            except OSError:
+                self.status_selected_info.setText("1 item selected")
+        else:
+            self.status_selected_info.setText(f"{count} items selected")
+
+    def _on_search_text_changed(self, text):
+        query = text.strip().lower()
+        if self.content_stack.currentIndex() == 0:
+            return
+        for row in range(self.table_view.rowCount()):
+            name = self.table_view.item(row, 0).text().lower()
+            match = query in name if query else True
+            self.table_view.setRowHidden(row, not match)
+        for idx in range(self.list_view.count()):
+            item = self.list_view.item(idx)
+            match = query in item.text().lower() if query else True
+            item.setHidden(not match)
+
+    def get_selected_paths(self):
+        if self._view_mode == "details":
+            rows = set(item.row() for item in self.table_view.selectedItems())
+            return [self.table_view.item(r, 0).data(Qt.UserRole) for r in rows]
+        else:
+            return [item.data(Qt.UserRole) for item in self.list_view.selectedItems()]
+
+    def toggle_view_mode(self):
+        if self._view_mode == "details":
+            self._view_mode = "icons"
+            self.table_view.hide()
+            self.list_view.show()
+            self.btn_view.setText("View: Icons")
+        else:
+            self._view_mode = "details"
+            self.list_view.hide()
+            self.table_view.show()
+            self.btn_view.setText("View: Details")
+
+    def action_new_folder(self):
+        if not self._current_path or not os.path.isdir(self._current_path):
+            return
+        base_name = "New folder"
+        target = os.path.join(self._current_path, base_name)
+        counter = 2
+        while os.path.exists(target):
+            target = os.path.join(self._current_path, f"{base_name} ({counter})")
+            counter += 1
+        try:
+            os.makedirs(target, exist_ok=True)
+            self.refresh()
+        except OSError as err:
+            QMessageBox.critical(self, "Error", f"Failed to create folder: {err.strerror}")
+
+    def action_cut(self):
+        paths = self.get_selected_paths()
+        if paths:
+            self._clipboard = {"action": "cut", "paths": paths}
+
+    def action_copy(self):
+        paths = self.get_selected_paths()
+        if paths:
+            self._clipboard = {"action": "copy", "paths": paths}
+
+    def action_paste(self):
+        if not self._clipboard["paths"] or not self._current_path:
+            return
+        action = self._clipboard["action"]
+        for src in self._clipboard["paths"]:
+            if not os.path.exists(src):
+                continue
+            dest = os.path.join(self._current_path, os.path.basename(src))
+            try:
+                if action == "cut":
+                    shutil.move(src, dest)
+                else:
+                    if os.path.isdir(src):
+                        shutil.copytree(src, dest)
+                    else:
+                        shutil.copy2(src, dest)
+            except Exception as err:
+                QMessageBox.critical(self, "Paste Error", str(err))
+        if action == "cut":
+            self._clipboard = {"action": None, "paths": []}
+        self.refresh()
+
+    def action_rename(self):
+        paths = self.get_selected_paths()
+        if len(paths) != 1:
+            return
+        target = paths[0]
+        old_name = os.path.basename(target)
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Rename")
+        layout = QVBoxLayout(dlg)
+        layout.addWidget(QLabel(f"Rename '{old_name}' to:"))
+        edit = QLineEdit(old_name)
+        layout.addWidget(edit)
+        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btns.accepted.connect(dlg.accept)
+        btns.rejected.connect(dlg.reject)
+        layout.addWidget(btns)
+        if dlg.exec_() == QDialog.Accepted:
+            new_name = edit.text().strip()
+            if new_name and new_name != old_name:
+                try:
+                    os.rename(target, os.path.join(os.path.dirname(target), new_name))
+                    self.refresh()
+                except OSError as err:
+                    QMessageBox.critical(self, "Error", f"Failed to rename: {err.strerror}")
+
+    def action_delete(self):
+        paths = self.get_selected_paths()
+        if not paths:
+            return
+        trash_dir = os.path.expanduser("~/.local/share/Trash/files")
+        os.makedirs(trash_dir, exist_ok=True)
+        for p in paths:
+            try:
+                subprocess.run(["gio", "trash", p], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                if os.path.exists(p):
+                    shutil.move(p, os.path.join(trash_dir, os.path.basename(p)))
+            except Exception:
+                pass
+        self.refresh()
+
+    def show_properties(self, target_path=None):
+        """Open authentic Windows Properties dialog based on target type."""
+        if target_path:
+            target = target_path
+        else:
+            paths = self.get_selected_paths()
+            target = paths[0] if paths else self._current_path
+
+        if not target or target in ("This PC", "computer:/", "computer:", "thispc"):
+            self.show_system_properties()
+            return
+
+        # Check if target is a drive
+        for drive in self._drives:
+            if drive.get("mount") == target or (target == "/" and drive.get("is_system")):
+                self.show_drive_properties(drive)
+                return
+
+        if not os.path.exists(target):
+            return
+
+        if os.path.isdir(target):
+            dlg = WindowsFolderPropertiesDialog(target, self)
+            dlg.exec_()
+        else:
+            dlg = WindowsFilePropertiesDialog(target, self)
+            dlg.exec_()
+
+    def show_drive_properties(self, drive):
+        dlg = WindowsDrivePropertiesDialog(drive, self)
+        dlg.exec_()
+
+    def show_system_properties(self):
+        dlg = WindowsSystemPropertiesDialog(self)
+        dlg.exec_()
+
+    def _open_manage(self):
+        for cmd in [["/usr/local/bin/devos-disk-gui"], ["python3", "/usr/local/share/devos/components/settings/hardware_manager.py"], ["kinfocenter"]]:
+            try:
+                subprocess.Popen(cmd)
+                return
+            except OSError:
+                pass
+
+    def _set_clipboard(self, action, paths):
+        self._clipboard = {"action": action, "paths": list(paths)}
+
+    def _delete_paths(self, paths):
+        if not paths:
+            return
+        trash_dir = os.path.expanduser("~/.local/share/Trash/files")
+        os.makedirs(trash_dir, exist_ok=True)
+        for p in paths:
+            try:
+                subprocess.run(["gio", "trash", p], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                if os.path.exists(p):
+                    shutil.move(p, os.path.join(trash_dir, os.path.basename(p)))
+            except Exception:
+                pass
+        self.refresh()
+
+    def action_rename_path(self, target):
+        if not os.path.exists(target):
+            return
+        old_name = os.path.basename(target)
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Rename")
+        dlg.setWindowIcon(get_win_icon("folder" if os.path.isdir(target) else "file-doc", 24))
+        dlg.resize(320, 120)
+        layout = QVBoxLayout(dlg)
+        layout.addWidget(QLabel(f"Rename '{old_name}' to:"))
+        edit = QLineEdit(old_name)
+        layout.addWidget(edit)
+        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btns.accepted.connect(dlg.accept)
+        btns.rejected.connect(dlg.reject)
+        layout.addWidget(btns)
+        if dlg.exec_() == QDialog.Accepted:
+            new_name = edit.text().strip()
+            if new_name and new_name != old_name:
+                try:
+                    os.rename(target, os.path.join(os.path.dirname(target), new_name))
+                    self.refresh()
+                except OSError as err:
+                    QMessageBox.critical(self, "Error", f"Failed to rename: {err.strerror}")
+
+    def action_rename_drive(self, drive):
+        QMessageBox.information(self, "Rename Drive", f"Drive labels for {drive.get('title')} can be edited in Drive Properties or DevOS Disk Doctor.")
+
+    def _show_this_pc_context_menu(self, global_pos):
+        """Windows This PC right-click context menu."""
+        menu = QMenu(self)
+        act_open = menu.addAction(get_win_icon("this-pc", 18), "Open")
+        act_open.triggered.connect(lambda: self.navigate_to(""))
+        act_new_win = menu.addAction("Open in new window")
+        act_new_win.triggered.connect(lambda: open_in_new_window(""))
+        menu.addSeparator()
+        act_pin = menu.addAction("Pin to Quick access")
+        act_pin.triggered.connect(lambda: QMessageBox.information(self, "Quick access", "This PC is already pinned to your navigation pane."))
+        act_manage = menu.addAction(get_win_icon("this-pc", 18), "Manage")
+        act_manage.triggered.connect(self._open_manage)
+        menu.addSeparator()
+        act_map = menu.addAction("Map network drive...")
+        act_map.triggered.connect(lambda: self.navigate_to("network:/"))
+        act_disc = menu.addAction("Disconnect network drive...")
+        act_disc.triggered.connect(lambda: self.navigate_to("network:/"))
+        menu.addSeparator()
+        act_props = menu.addAction("Properties")
+        act_props.triggered.connect(self.show_system_properties)
+        menu.exec_(global_pos)
+
+    def _show_this_pc_bg_context_menu(self, pos):
+        """Context menu on empty background in This PC view."""
+        menu = QMenu(self)
+        view_menu = menu.addMenu("View")
+        act_details = view_menu.addAction("Details")
+        act_details.triggered.connect(lambda: self.set_view_mode("details"))
+        act_icons = view_menu.addAction("Large icons")
+        act_icons.triggered.connect(lambda: self.set_view_mode("icons"))
+
+        sort_menu = menu.addMenu("Sort by")
+        for s in ["Name", "Type", "Total size", "Free space"]:
+            act_s = sort_menu.addAction(s)
+            act_s.triggered.connect(self.reload_drives)
+
+        act_refresh = menu.addAction("Refresh")
+        act_refresh.triggered.connect(self.refresh)
+        menu.addSeparator()
+        act_net = menu.addAction("Add a network location")
+        act_net.triggered.connect(lambda: self.navigate_to("network:/"))
+        menu.addSeparator()
+        act_props = menu.addAction("Properties")
+        act_props.triggered.connect(self.show_system_properties)
+        sender = self.sender()
+        global_pos = sender.mapToGlobal(pos) if (sender and hasattr(sender, "mapToGlobal")) else self.mapToGlobal(pos)
+        menu.exec_(global_pos)
+
+    def _show_drive_context_menu(self, drive, global_pos):
+        """Windows Drive right-click context menu."""
+        menu = QMenu(self)
+        icon_type = "drive-c" if drive.get("is_system") else ("drive-usb" if drive.get("removable") else "drive-fixed")
+        act_open = menu.addAction(get_win_icon(icon_type, 18), "Open")
+        act_open.triggered.connect(lambda: self.open_drive(drive))
+        act_new_win = menu.addAction("Open in new window")
+        target_path = drive.get("mount") or "/"
+        act_new_win.triggered.connect(lambda: open_in_new_window(target_path))
+        act_pin = menu.addAction("Pin to Quick access")
+        act_pin.triggered.connect(lambda: self.pin_to_quick_access(target_path, drive.get("title")))
+        menu.addSeparator()
+        act_guard = menu.addAction("Turn on DevOS DiskGuard")
+        act_guard.triggered.connect(lambda: QMessageBox.information(self, "DiskGuard", f"DiskGuard is actively monitoring {drive.get('title')}."))
+        menu.addSeparator()
+        act_copy = menu.addAction("Copy")
+        act_copy.triggered.connect(lambda: self._set_clipboard("copy", [target_path]))
+        menu.addSeparator()
+        act_rename = menu.addAction("Rename")
+        act_rename.triggered.connect(lambda: self.action_rename_drive(drive))
+        menu.addSeparator()
+        act_props = menu.addAction("Properties")
+        act_props.triggered.connect(lambda: self.show_drive_properties(drive))
+        menu.exec_(global_pos)
+
+    def _show_folder_tile_context_menu(self, path, global_pos):
+        """Context menu for folder tile in This PC view."""
+        self._show_folder_context_menu(path, global_pos, is_pinned=False)
+
+    def _show_sidebar_folder_context_menu(self, path, is_pinned, global_pos):
+        """Context menu for folders on the left sidebar."""
+        self._show_folder_context_menu(path, global_pos, is_pinned=is_pinned)
+
+    def _show_folder_context_menu(self, path, global_pos, is_pinned=False):
+        """Generic Windows folder context menu."""
+        menu = QMenu(self)
+        act_open = menu.addAction(get_win_icon("folder", 18), "Open")
+        act_open.triggered.connect(lambda: self.navigate_to(path))
+        act_new_win = menu.addAction("Open in new window")
+        act_new_win.triggered.connect(lambda: open_in_new_window(path))
+
+        if is_pinned or path in self._pinned_folders:
+            act_pin = menu.addAction("Unpin from Quick access")
+            act_pin.triggered.connect(lambda: self.unpin_from_quick_access(path))
+        else:
+            act_pin = menu.addAction("Pin to Quick access")
+            act_pin.triggered.connect(lambda: self.pin_to_quick_access(path))
+
+        act_term = menu.addAction("Open in Terminal")
+        act_term.triggered.connect(lambda: open_in_terminal(path))
+        menu.addSeparator()
+        act_cut = menu.addAction("Cut")
+        act_cut.triggered.connect(lambda: self._set_clipboard("cut", [path]))
+        act_copy = menu.addAction("Copy")
+        act_copy.triggered.connect(lambda: self._set_clipboard("copy", [path]))
+        menu.addSeparator()
+        act_del = menu.addAction("Delete")
+        act_del.triggered.connect(lambda: self._delete_paths([path]))
+        act_rename = menu.addAction("Rename")
+        act_rename.triggered.connect(lambda: self.action_rename_path(path))
+        menu.addSeparator()
+        act_props = menu.addAction("Properties")
+        act_props.triggered.connect(lambda: self.show_properties(path))
+        menu.exec_(global_pos)
+
+    def _show_network_context_menu(self, global_pos):
+        menu = QMenu(self)
+        act_open = menu.addAction(get_win_icon("network", 18), "Open")
+        act_open.triggered.connect(lambda: self.navigate_to("network:/"))
+        act_map = menu.addAction("Map network drive...")
+        act_map.triggered.connect(lambda: self.navigate_to("network:/"))
+        menu.addSeparator()
+        act_props = menu.addAction("Properties")
+        act_props.triggered.connect(lambda: QMessageBox.information(self, "Network", "DevOS Network Discovery is active."))
+        menu.exec_(global_pos)
+
+    def _show_bin_context_menu(self, global_pos):
+        trash_path = os.path.expanduser("~/.local/share/Trash/files")
+        menu = QMenu(self)
+        act_open = menu.addAction(get_win_icon("recycle-bin", 18), "Open")
+        act_open.triggered.connect(lambda: self.navigate_to(trash_path))
+        act_empty = menu.addAction("Empty Recycle Bin")
+        act_empty.triggered.connect(self._empty_trash)
+        menu.addSeparator()
+        act_props = menu.addAction("Properties")
+        act_props.triggered.connect(lambda: self.show_properties(trash_path))
+        menu.exec_(global_pos)
+
+    def _empty_trash(self):
+        trash_dir = os.path.expanduser("~/.local/share/Trash/files")
+        if os.path.exists(trash_dir):
+            for f in os.listdir(trash_dir):
+                fp = os.path.join(trash_dir, f)
+                try:
+                    if os.path.isdir(fp):
+                        shutil.rmtree(fp, ignore_errors=True)
+                    else:
+                        os.remove(fp)
+                except Exception:
+                    pass
+        self.refresh()
+
+    def _show_context_menu(self, pos):
+        """Context menu for items or empty space in folder view."""
+        menu = QMenu(self)
+        paths = self.get_selected_paths()
+
+        if paths:
+            target = paths[0]
+            is_dir = os.path.isdir(target)
+
+            act_open = menu.addAction("Open")
+            act_open.triggered.connect(lambda: self._on_table_item_double_clicked(self.table_view.selectedItems()[0]))
+
+            act_new_win = menu.addAction("Open in new window")
+            act_new_win.triggered.connect(lambda: open_in_new_window(target))
+
+            if is_dir:
+                if target in self._pinned_folders:
+                    act_pin = menu.addAction("Unpin from Quick access")
+                    act_pin.triggered.connect(lambda: self.unpin_from_quick_access(target))
+                else:
+                    act_pin = menu.addAction("Pin to Quick access")
+                    act_pin.triggered.connect(lambda: self.pin_to_quick_access(target))
+
+            act_term = menu.addAction("Open in Terminal")
+            act_term.triggered.connect(lambda: open_in_terminal(target))
+            menu.addSeparator()
+            act_cut = menu.addAction("Cut")
+            act_cut.triggered.connect(self.action_cut)
+            act_copy = menu.addAction("Copy")
+            act_copy.triggered.connect(self.action_copy)
+            menu.addSeparator()
+            act_rename = menu.addAction("Rename")
+            act_rename.triggered.connect(self.action_rename)
+            act_del = menu.addAction("Delete")
+            act_del.triggered.connect(self.action_delete)
+            menu.addSeparator()
+            act_props = menu.addAction("Properties")
+            act_props.triggered.connect(lambda: self.show_properties(target))
+        else:
+            view_menu = menu.addMenu("View")
+            act_details = view_menu.addAction("Details")
+            act_details.triggered.connect(lambda: self.set_view_mode("details"))
+            act_icons = view_menu.addAction("Large icons")
+            act_icons.triggered.connect(lambda: self.set_view_mode("icons"))
+
+            sort_menu = menu.addMenu("Sort by")
+            for s in ["Name", "Date modified", "Type", "Size"]:
+                act_s = sort_menu.addAction(s)
+                act_s.triggered.connect(self.refresh)
+
+            act_refresh = menu.addAction("Refresh")
+            act_refresh.triggered.connect(self.refresh)
+            menu.addSeparator()
+
+            if self._clipboard["paths"]:
+                act_paste = menu.addAction("Paste")
+                act_paste.triggered.connect(self.action_paste)
+                menu.addSeparator()
+
+            act_term = menu.addAction("Open in Terminal")
+            act_term.triggered.connect(lambda: open_in_terminal(self._current_path))
+            menu.addSeparator()
+
+            new_menu = menu.addMenu("New")
+            act_new_f = new_menu.addAction(get_win_icon("folder", 16), "Folder")
+            act_new_f.triggered.connect(self.action_new_folder)
+            act_new_doc = new_menu.addAction(get_win_icon("file-doc", 16), "Text Document")
+            act_new_doc.triggered.connect(self.action_new_text_document)
+            menu.addSeparator()
+
+            act_props = menu.addAction("Properties")
+            act_props.triggered.connect(lambda: self.show_properties(self._current_path))
+
+        sender = self.sender()
+        global_pos = sender.mapToGlobal(pos) if (sender and hasattr(sender, "mapToGlobal")) else self.mapToGlobal(pos)
+        menu.exec_(global_pos)
+
+    def action_new_text_document(self):
+        if not self._current_path or not os.path.exists(self._current_path):
+            return
+        base = os.path.join(self._current_path, "New Text Document.txt")
+        idx = 2
+        path = base
+        while os.path.exists(path):
+            path = os.path.join(self._current_path, f"New Text Document ({idx}).txt")
+            idx += 1
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("")
+            self.refresh()
+        except OSError as err:
+            QMessageBox.critical(self, "Error", f"Failed to create file: {err.strerror}")
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Back:
+            self.go_back()
+        elif event.key() == Qt.Key_Backspace and not self.search_box.hasFocus() and not self.address_bar.path_edit.hasFocus():
+            self.go_back()
+        elif event.key() == Qt.Key_F5:
+            self.refresh()
+        elif event.key() == Qt.Key_Delete:
+            self.action_delete()
+        elif event.key() == Qt.Key_F2:
+            self.action_rename()
+        elif event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_C:
+            self.action_copy()
+        elif event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_X:
+            self.action_cut()
+        elif event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_V:
+            self.action_paste()
+        elif event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_L:
+            self.address_bar.mouseDoubleClickEvent(None)
+        elif event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_F:
+            self.search_box.setFocus()
+            self.search_box.selectAll()
+        else:
+            super().keyPressEvent(event)
 
 
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("This PC")
-    window = ThisPC()
+    initial_path = ""
+    if len(sys.argv) > 1:
+        arg = sys.argv[1].strip()
+        if arg and arg not in ("computer:/", "computer:", "thispc"):
+            initial_path = os.path.expanduser(arg)
+    window = WindowsFileExplorer(initial_path)
     window.show()
     sys.exit(app.exec_())
 

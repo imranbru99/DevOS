@@ -5,6 +5,7 @@ casper
 systemd
 systemd-sysv
 systemd-oomd
+systemd-timesyncd
 udev
 dbus
 sudo

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-DevOS Code Agent window: chat with a coding agent that runs on the local DevOS
+DevOS AI Code Agent window: chat with a coding agent that runs on the local DevOS
 AI model, watch its plan, and accept or reject every file change and command.
 
 The agent (code_agent.CodeAgent) runs in a worker thread. When it needs an
@@ -254,7 +254,7 @@ class GatePanel(QtWidgets.QWidget):
 class AgentWindow(QtWidgets.QMainWindow):
     def __init__(self, folder: str = "", capable=None, llm=None):
         super().__init__()
-        self.setWindowTitle("DevOS Code Agent")
+        self.setWindowTitle("DevOS AI Code Agent")
         self.resize(1320, 840)
         self.setStyleSheet(STYLE)
         self.folder = os.path.abspath(folder) if folder else ""
@@ -303,7 +303,7 @@ class AgentWindow(QtWidgets.QMainWindow):
         row.addWidget(mark)
         names = QtWidgets.QVBoxLayout()
         names.setSpacing(0)
-        title = QtWidgets.QLabel("DevOS Code Agent")
+        title = QtWidgets.QLabel("DevOS AI Code Agent")
         title.setObjectName("title")
         self.path_label = QtWidgets.QLabel("No folder open")
         self.path_label.setObjectName("path")
@@ -494,7 +494,7 @@ class AgentWindow(QtWidgets.QMainWindow):
             else:
                 parts.append('<table width="100%" cellspacing="0" cellpadding="4" style="margin:6px 0;"><tr>'
                              f'<td style="color:{TEXT};"><span style="color:{ACCENT}; font-weight:600;">'
-                             f'DevOS Code Agent</span>{message_html(text) or "<p>&hellip;</p>"}</td></tr></table>')
+                             f'DevOS AI Code Agent</span>{message_html(text) or "<p>&hellip;</p>"}</td></tr></table>')
         bar = self.chat.verticalScrollBar()
         at_bottom = bar.value() >= bar.maximum() - 40
         self.chat.setHtml("".join(parts))
@@ -641,7 +641,7 @@ class AgentWindow(QtWidgets.QMainWindow):
 
     def _update_status(self):
         if not getattr(self, "capable", True):
-            self.status.setText("DevOS Code Agent is waiting for a coding-capable DevOS AI model.")
+            self.status.setText("DevOS AI Code Agent is waiting for a coding-capable DevOS AI model.")
             return
         rg = "ripgrep search" if shutil.which("rg") else "built-in search"
         self.status.setText(
@@ -658,8 +658,8 @@ class AgentWindow(QtWidgets.QMainWindow):
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([sys.argv[0]])
-    app.setApplicationName("DevOS Code Agent")
-    app.setDesktopFileName("devos-code-agent")
+    app.setApplicationName("DevOS AI Code Agent")
+    app.setDesktopFileName("devos-ai-code-agent")
     folder = next((a for a in argv if not a.startswith("-")), "")
     if folder and not os.path.isdir(folder):
         folder = os.path.dirname(os.path.abspath(folder)) if os.path.exists(folder) else ""

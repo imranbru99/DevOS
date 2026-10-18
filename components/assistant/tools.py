@@ -1832,9 +1832,17 @@ def _install_action(name: str = "", link: str = "") -> Action:
     return Action("install_app", {"name": name, "link": link}, label=f"Find how to get {what} on DevOS")
 
 
+_PACKAGE_LINK_RE = re.compile(
+    r"https?://\S+(?:\.(?:deb|appimage|exe|msi|apk)|/releases(?:/\S*)?)(?:[?#]\S*)?", re.I)
+
+
 def route_install(text: str, context: Optional[List[str]] = None) -> Optional[Action]:
     """install_app for store links, "install <app>" and "install this" follow-ups (see above)."""
     link = _store_link(text)
+    if not link:
+        pkg_m = _PACKAGE_LINK_RE.search(text or "")
+        if pkg_m:
+            link = pkg_m.group(0).rstrip(".,;:!?)]}>'\"")
     if not link and _INSTALL_WORD.search(text or ""):
         link = _any_link(text)
     rest = text.replace(link, " ") if link else text
@@ -2856,6 +2864,26 @@ def _x_install_app(a, ctx, dry):
             open_name = str(opt.get("builtin") or oname)
             buttons.append((f"Open {oname}", Action("open_app", {"name": open_name, "strong": True},
                                                     label=f"Open {oname}")))
+        elif opt.get("kind") == "deb" or opt.get("deb"):
+            target_deb = str(opt.get("deb") or opt.get("url") or "")
+            buttons.append((f"Install {oname}", Action(
+                "install_package", {"name": oname, "deb": target_deb},
+                confirm=f"Install {oname} (.deb package)?", label=f"Install {oname}")))
+        elif opt.get("kind") == "appimage" or opt.get("appimage"):
+            target_appimage = str(opt.get("appimage") or opt.get("url") or "")
+            buttons.append((f"Install {oname}", Action(
+                "install_package", {"name": oname, "appimage": target_appimage},
+                confirm=f"Download and setup {oname} (AppImage)?", label=f"Install {oname}")))
+        elif opt.get("kind") == "apt" or opt.get("apt"):
+            target_apt = str(opt.get("package") or opt.get("apt") or "")
+            buttons.append((f"Install {oname}", Action(
+                "install_package", {"name": oname, "apt": target_apt},
+                confirm=f"Install {oname} with system package manager?", label=f"Install {oname}")))
+        elif opt.get("kind") == "wine" or opt.get("wine"):
+            target_wine = str(opt.get("wine") or opt.get("url") or "")
+            buttons.append((f"Install {oname}", Action(
+                "install_package", {"name": oname, "wine": target_wine},
+                confirm=f"Install {oname} with DevOS WinLayer?", label=f"Install {oname}")))
         elif opt.get("feature") or opt.get("flatpak"):
             size = int(opt.get("size_mb") or 0)
             about = f" It downloads about {size} MB." if size else " It downloads from the internet."
@@ -2886,11 +2914,26 @@ def _x_install_package(a, ctx, dry):
     name = str(a.args.get("name") or "the app").strip()[:60]
     feature = str(a.args.get("feature") or "")
     flatpak = str(a.args.get("flatpak") or "")
+    deb = str(a.args.get("deb") or "")
+    appimage = str(a.args.get("appimage") or "")
+    apt = str(a.args.get("apt") or "")
+    wine = str(a.args.get("wine") or "")
+    url = str(a.args.get("url") or "")
     py = PYTHON
     if feature and re.fullmatch(r"[a-z0-9_-]{1,40}", feature):
         argv = [py, APP_RESOLVER_PY, "--install", "--name", name, "--feature", feature]
     elif _FLATPAK_ID.match(flatpak):
         argv = [py, APP_RESOLVER_PY, "--install", "--name", name, "--flatpak", flatpak]
+    elif deb:
+        argv = [py, APP_RESOLVER_PY, "--install", "--name", name, "--deb", deb]
+    elif appimage:
+        argv = [py, APP_RESOLVER_PY, "--install", "--name", name, "--appimage", appimage]
+    elif apt and re.fullmatch(r"[a-z0-9][a-z0-9+.-]{1,60}", apt):
+        argv = [py, APP_RESOLVER_PY, "--install", "--name", name, "--apt", apt]
+    elif wine:
+        argv = [py, APP_RESOLVER_PY, "--install", "--name", name, "--wine", wine]
+    elif url:
+        argv = [py, APP_RESOLVER_PY, "--install", "--name", name, "--url", url]
     else:
         return ToolResult("I can't install that.", ok=False)
     ok = _launch(ctx, argv, dry)

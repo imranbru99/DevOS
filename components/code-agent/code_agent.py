@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-DevOS Code Agent: a coding agent that runs only on the local DevOS AI model
+DevOS AI Code Agent: a coding agent that runs only on the local DevOS AI model
 (http://127.0.0.1:11434/v1, model "devos-ai-code"). Nothing leaves the PC.
 
 The agent works inside one project folder. It can list, read and search
@@ -21,8 +21,8 @@ commas or raw newlines, Qwen's <tool_call> tags, tool names like "readFile",
 a missing closing fence).
 
 Usage:
-    devos-code-agent [folder]            the window (agent_gui.py)
-    devos-code-agent --cli "task"        in the terminal, with y/n approvals
+    devos-ai-code-agent [folder]         the window (agent_gui.py)
+    devos-ai-code-agent --cli "task"     in the terminal, with y/n approvals
     code_agent.py "prompt" [--framework] the original one-shot JSON answer
 """
 
@@ -297,7 +297,7 @@ class Workspace:
         new = not os.path.exists(path)
         with open(path, "a", encoding="utf-8") as handle:
             if new:
-                handle.write("# DevOS Code Agent notes\n\nWhat the agent did and learned in this project. "
+                handle.write("# DevOS AI Code Agent notes\n\nWhat the agent did and learned in this project. "
                              "Edit freely; the agent reads this at the start of every task.\n\n")
             handle.write(line.rstrip() + "\n")
 
@@ -652,7 +652,7 @@ class LocalLLM:
         try:
             resp = urllib.request.urlopen(req, timeout=self.timeout)
         except (urllib.error.URLError, OSError) as exc:
-            raise AgentError("DevOS AI is not answering on this PC. Open DevOS Code Agent again "
+            raise AgentError("DevOS AI is not answering on this PC. Open DevOS AI Code Agent again "
                              f"(it starts DevOS AI) or run devos-ai. ({exc})")
         with resp:
             if "event-stream" not in (resp.headers.get("Content-Type") or ""):
@@ -692,7 +692,7 @@ def read_sse(lines, on_token=None, should_stop=None) -> str:
 
 # ===================================================================== agent
 
-SYSTEM_PROMPT = """You are DevOS Code Agent, a careful coding agent working in the user's project folder.
+SYSTEM_PROMPT = """You are DevOS AI Code Agent, a careful coding agent working in the user's project folder.
 First write a short numbered plan (1-5 steps). Then use ONE tool per reply and stop; you get the result in the next message.
 Write a tool call exactly like this:
 ```tool read_file
@@ -956,7 +956,7 @@ class DevOSCodeAgent:
         skill_instruction = self.FRAMEWORK_SKILLS.get(framework, "Write clean, tested, idiomatic code.")
         repo_files = self.generate_repo_map(max_files=15)
         system_prompt = (
-            f"You are the DevOS Local Code Agent. {skill_instruction}\n"
+            f"You are the DevOS Local AI Code Agent. {skill_instruction}\n"
             f"Repository files: {', '.join(repo_files[:10])}\n"
             "Return concise, production-ready code with explanations."
         )
@@ -975,7 +975,7 @@ class DevOSCodeAgent:
             # Offline fallback response if daemon is not running during direct script test
             return {
                 "status": "OFFLINE_FALLBACK",
-                "reply": f"// [DevOS Local Code Agent - Framework: {framework or 'generic'}]\n"
+                "reply": f"// [DevOS Local AI Code Agent - Framework: {framework or 'generic'}]\n"
                          f"// Code generation request: '{prompt}'\n"
                          f"// Indexed {len(repo_files)} repository files.\n",
                 "repo_files_indexed": len(repo_files),
@@ -1056,7 +1056,7 @@ def run_cli(task: str, folder: str, auto_edits: bool = False, auto_reads: bool =
     except ToolError as exc:
         print(exc, file=sys.stderr)
         return 2
-    print(_color(f"DevOS Code Agent · Local · {CODE_MODEL} · {workspace.root}", "1;36"))
+    print(_color(f"DevOS AI Code Agent · Local · {CODE_MODEL} · {workspace.root}", "1;36"))
     agent = CodeAgent(workspace, LocalLLM(), cli_approver(),
                       ApprovalPolicy(auto_reads=auto_reads, auto_edits=auto_edits),
                       on_event=cli_events, max_steps=max_steps)
@@ -1072,11 +1072,11 @@ def run_cli(task: str, folder: str, auto_edits: bool = False, auto_reads: bool =
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="DevOS Code Agent: a coding agent on the local DevOS AI")
+    parser = argparse.ArgumentParser(description="DevOS AI Code Agent: a coding agent on the local DevOS AI")
     parser.add_argument("prompt", nargs="?", help="one-shot coding prompt (original JSON answer), "
                                                   "or a folder with --gui")
     parser.add_argument("--cli", metavar="TASK", help="run the agent in this terminal with y/n approvals")
-    parser.add_argument("--gui", action="store_true", help="open the DevOS Code Agent window")
+    parser.add_argument("--gui", action="store_true", help="open the DevOS AI Code Agent window")
     parser.add_argument("--framework", default="laravel", choices=["laravel", "filament", "nextjs", "python"])
     parser.add_argument("--dir", default=None, help="project folder (default: current folder)")
     parser.add_argument("--auto-edits", action="store_true", help="apply file changes without asking")

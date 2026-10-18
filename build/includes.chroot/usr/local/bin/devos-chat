@@ -5,13 +5,22 @@
 # Never a browser tab, never an extra port.
 set -u
 
-AI_DIR="/usr/local/share/devos/components/ai-core"
-ASSISTANT="/usr/local/share/devos/components/assistant/assistant.py"
-DASHBOARD="/usr/local/share/devos/components/dashboard/dashboard_server.py"
+COMPONENTS_DIR="/usr/local/share/devos/components"
+if [ ! -d "${COMPONENTS_DIR}" ] && [ -d "/home/imran/project/dev-os/components" ]; then
+    COMPONENTS_DIR="/home/imran/project/dev-os/components"
+fi
+
+AI_DIR="${COMPONENTS_DIR}/ai-core"
+ASSISTANT="${COMPONENTS_DIR}/assistant/assistant.py"
+DASHBOARD="${COMPONENTS_DIR}/dashboard/dashboard_server.py"
 PORT=7070
 
+if ss -ltn 2>/dev/null | grep -q ':11435'; then
+    export DEVOS_AI_URL="${DEVOS_AI_URL:-http://127.0.0.1:11435}"
+fi
+
 if [ -f "${AI_DIR}/server.py" ]; then
-    if ! ss -ltn 2>/dev/null | grep -q ':11434'; then
+    if ! ss -ltn 2>/dev/null | grep -qE ':(11434|11435)'; then
         (cd "${AI_DIR}" && python3 server.py >/var/tmp/devos-ai-core.log 2>&1 &)
         sleep 0.4
     fi
