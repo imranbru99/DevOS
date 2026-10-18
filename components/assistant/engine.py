@@ -583,8 +583,13 @@ class Assistant:
                     cancel: Optional[StreamHandle] = None) -> List[Reply]:
         replies: List[Reply] = []
         fallback = False
-        for a in actions:
+        for i, a in enumerate(actions):
+            if i > 0 and not dry_run:
+                # Smooth sequential execution so apps/browser/windows don't collide
+                time.sleep(1.0)
             res = tools.execute(a, self.ctx, dry_run=dry_run)
+            if res.data and res.data.get("url"):
+                setattr(self.ctx, "last_website", res.data["url"])
             if a.name == "open_app" and not a.args.get("strong") and res.data.get("not_found"):
                 fallback = True
                 continue

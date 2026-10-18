@@ -403,8 +403,80 @@ KNOWN_SITES = {
     "reddit": "https://www.reddit.com",
 }
 
+KNOWN_QUERY_SITES = {
+    "imrandevbd": "https://imrandev.bd",
+    "imran dev": "https://imrandev.bd",
+    "imrandev": "https://imrandev.bd",
+    "imran dev bd": "https://imrandev.bd",
+    "devos": "https://github.com/imranbru99/DevOS",
+    "devos ai": "https://github.com/imranbru99/DevOS",
+    "devos linux": "https://github.com/imranbru99/DevOS",
+    "devos os": "https://github.com/imranbru99/DevOS",
+    "python": "https://www.python.org",
+    "github": "https://github.com",
+    "youtube": "https://www.youtube.com",
+    "google": "https://www.google.com",
+}
+
+
+def resolve_search_result(query: str, rank: int = 1) -> str:
+    """Resolve the top N-th website for a search query.
+    Uses fast Google I'm Feeling Lucky / DuckDuckGo HTML resolution, with fallback to Lucky redirect."""
+    q = (query or "").strip().lower()
+    if not q:
+        return "https://www.google.com"
+    if q in KNOWN_QUERY_SITES and rank == 1:
+        return KNOWN_QUERY_SITES[q]
+
+    # 1. Try Google I'm Feeling Lucky redirect resolution
+    try:
+        lucky_url = "https://www.google.com/search?btnI=1&q=" + urllib.parse.quote_plus(query)
+        req = urllib.request.Request(lucky_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+        with urllib.request.urlopen(req, timeout=2.5) as resp:
+            final_u = resp.geturl()
+            m = re.search(r"url\?q=(https?://[^&]+)", final_u)
+            if m:
+                u = urllib.parse.unquote(m.group(1)).rstrip("/")
+                if u.startswith(("http://", "https://")) and "google.com" not in u:
+                    return u
+            if final_u.startswith(("http://", "https://")) and "google.com" not in final_u:
+                return final_u.rstrip("/")
+    except Exception:
+        pass
+
+    # 2. Try DuckDuckGo HTML result parsing
+    try:
+        ddg_url = "https://html.duckduckgo.com/html/?q=" + urllib.parse.quote_plus(query)
+        req = urllib.request.Request(ddg_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+        with urllib.request.urlopen(req, timeout=2.5) as resp:
+            html = resp.read().decode("utf-8", errors="ignore")
+            urls = re.findall(r"uddg=([^&\"\'\s]+)", html)
+            seen = []
+            for u in urls:
+                dec = urllib.parse.unquote(u)
+                if dec.startswith(("http://", "https://")) and "duckduckgo.com" not in dec and dec not in seen:
+                    seen.append(dec)
+            if len(seen) >= rank:
+                return seen[rank - 1].rstrip("/")
+    except Exception:
+        pass
+
+    # 3. Fallback: browser itself opens Google I'm Feeling Lucky
+    return f"https://www.google.com/search?btnI=1&q={urllib.parse.quote_plus(query)}"
+
+
 _HOST_RE = re.compile(r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$")
 _URLISH = re.compile(r"^(?:https?://)?(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,24}(?::\d{1,5})?(?:/\S*)?$")
+
+_RANK_NAV_RE = re.compile(
+    r"^(?:(?:open|go to|visit|navigate to|browse|click|click on|load)\s+)?(?:the\s+)?"
+    r"(?P<rank>1st|first|top|2nd|second|3rd|third|4th|fourth|5th|fifth)\s+"
+    r"(?:website|site|link|result|page)(?:\s+(?:on|in|from)\s+(?:google|search|results?))?$", re.I)
+
+_PAGE_NAV_RE = re.compile(
+    r"^(?:(?:open|go to|visit|navigate to|browse|click|click on|load)\s+)?(?:the\s+)?"
+    r"(?P<page>contact|about|docs|documentation|pricing|blog|home|download|downloads|features|faq|help|support|team|careers|privacy|terms)"
+    r"(?:\s+us)?(?:\s+page|\s+section)?(?:\s+(?:of|on|in)\s+(?:this|the)\s+(?:website|site|page))?$", re.I)
 
 
 def google_search_url(query: str) -> str:
@@ -491,7 +563,22 @@ _WIKI_RE = re.compile(_CMD_START + r"(?:(?:who|what)\s+(?:is|was|are|were)\s+(?P
                       r"wikipedia$|(?:open\s+|show\s+(?:me\s+)?)?(?:the\s+)?(?:wikipedia|wiki)\s+(?:page\s+|article\s+)?"
                       r"(?:for\s+|about\s+|on\s+|of\s+)?(?P<q2>\S.*))$")
 # where a query ends because another command follows it
-_QUERY_END = re.compile(r"\s+(?:and then|then|and)\s+(?=(?:open|launch|close|take a screenshot|lock|turn|mute)\b)")
+_QUERY_END = re.compile(
+    r"\s+(?:and then|then|after that|and)\s+(?="
+    r"(?:open|launch|start|run|go to|goto|visit|navigate to|navigate|browse|click|click on|load|"
+    r"close|quit|exit|take a screenshot|take screenshot|screenshot|capture|lock|"
+    r"turn|mute|unmute|increase|decrease|volume|brightness|"
+    r"search|find|look up|lookup|google|"
+    r"write|type|enter|save|jot|note|"
+    r"clean|clean up|free up|speed up|"
+    r"tell|show|check|what is|what's|how many|list|count|"
+    r"restart|reboot|shutdown|shut down|power off|sleep|"
+    r"install|uninstall|remove|"
+    r"play|pause|resume|next|previous|"
+    r"help|about|"
+    r"(?:the\s+)?(?:1st|first|top|2nd|second|3rd|third|4th|fifth)\s+(?:website|site|link|result|page)|"
+    r"(?:the\s+)?(?:contact|about|docs|documentation|pricing|blog|download|downloads)\s+page"
+    r")\b)", re.I)
 MEDIA_PLAY_WORDS = re.compile(r"^(?:some |my |the )?(?:music|songs?|audio|playlist|my playlist|something|"
                               r"a song|some songs|my songs|my music)$")
 _BN_SEARCH = re.compile(r"(সার্চ|খুঁজ|খোঁজ)")
@@ -1354,7 +1441,8 @@ def route_clause(c: str, ctx: Optional[ToolContext] = None) -> Optional[List[Act
         if key != "desktop" or _has(r"folder|directory", c):
             return [Action("open_folder", {"folder": key}, label=f"Open {FOLDERS[key][1] or 'Home'}")]
 
-    if _has(r"\b(?:what(?:'s| is)? (?:the )?time|time is it|current time|what(?:'s| is)? (?:the )?date|today's date|what day is (?:it|today))\b|কয়টা বাজে", c):
+    if _has(r"\b(?:what(?:'s| is)? (?:the )?time|time is it|current time|what(?:'s| is)? (?:the )?date|today's date|what day is (?:it|today))\b|কয়টা বাজে", c) \
+            or _has(r"\b(?:tell|show|check|get)\s+(?:me\s+)?(?:the\s+)?time\b", c):
         return [Action("time", label="Tell the time")]
 
     try:
@@ -1371,6 +1459,19 @@ def route_clause(c: str, ctx: Optional[ToolContext] = None) -> Optional[List[Act
         return [Action("open_tool", {"tool": "clipboard"}, label="Open clipboard history")]
     if _has(r"\b(?:emoji panel|emoji picker|open emoji|show emoji)\b", c) or c.strip() in ("emoji", "emojis"):
         return [Action("open_tool", {"tool": "emoji"}, label="Open emoji")]
+
+    m = _RANK_NAV_RE.match(c)
+    if m:
+        rank_str = (m.group("rank") or "1st").lower()
+        rank = {"1st": 1, "first": 1, "top": 1, "2nd": 2, "second": 2, "3rd": 3, "third": 3, "4th": 4, "fourth": 4, "5th": 5, "fifth": 5}.get(rank_str, 1)
+        return [Action("open_search_result", {"rank": rank, "browser": _browser_for(c)},
+                       label=f"Go to the {rank_str} website")]
+
+    m = _PAGE_NAV_RE.match(c)
+    if m:
+        page = m.group("page").lower()
+        return [Action("open_web_page", {"page": page, "browser": _browser_for(c)},
+                       label=f"Go to the {page} page")]
 
     m = re.match(r"^(?:open|go to|visit|browse|navigate to|take me to|load)\s+(?:the\s+)?(?:website\s+|site\s+|page\s+)?(\S+?)(?:\s+(?:website|site|page|in chrome|in the browser|on chrome))?$", c)
     if m:
@@ -1394,6 +1495,8 @@ def route_clause(c: str, ctx: Optional[ToolContext] = None) -> Optional[List[Act
             verb, name = "open", m.group(1)
         name = re.sub(r"^(?:the|my|a|an)\s+", "", name.strip())
         name = re.sub(r"\s+(?:app|application|program|window)$", "", name)
+        if _has(r"\b(?:website|site|result|link)\b", name):
+            return None
         bn = {"ক্রোম": "chrome", "নোটপ্যাড": "notepad", "টার্মিনাল": "terminal", "সেটিংস": "settings",
               "ফাইলস": "files", "ফাইল": "files"}
         name = bn.get(name, name)
@@ -1871,7 +1974,79 @@ def route_install(text: str, context: Optional[List[str]] = None) -> Optional[Ac
     return _install_action()
 
 
-def route(text: str, ctx: Optional[ToolContext] = None, context: Optional[List[str]] = None) -> RouteResult:
+def _find_recent_query(context: Optional[List[str]]) -> str:
+    if not context:
+        return ""
+    for msg in reversed(context):
+        if not msg:
+            continue
+        m = re.search(r"\b(?:search|google|look up|lookup|find)\b.*?\b(?:about|for|regarding|in google)?\s*(?::\s*)?([a-zA-Z0-9_.-]+)", msg, re.I)
+        if m:
+            return m.group(1).strip()
+    return ""
+
+
+def _find_recent_website(context: Optional[List[str]]) -> str:
+    if not context:
+        return ""
+    for msg in reversed(context):
+        if not msg:
+            continue
+        m = re.search(r"https?://[^\s\"'<>]+", msg)
+        if m:
+            return m.group(0).rstrip(".,;!?)]}'\"")
+        for word in msg.split():
+            clean = word.strip(".,;!?)]}'\"")
+            if "." in clean and len(clean.split(".")[-1]) in (2, 3, 4) and not clean.endswith("."):
+                return "https://" + clean
+    return ""
+
+
+def route_single_clause(c: str, ctx: Optional[ToolContext] = None, context: Optional[List[str]] = None,
+                        last_query: str = "", last_website: str = "") -> Optional[List[Action]]:
+    # 1. Search Result / Web Page navigation
+    m = _RANK_NAV_RE.match(c)
+    if m:
+        rank_str = (m.group("rank") or "1st").lower()
+        rank = {"1st": 1, "first": 1, "top": 1, "2nd": 2, "second": 2, "3rd": 3, "third": 3, "4th": 4, "fourth": 4, "5th": 5, "fifth": 5}.get(rank_str, 1)
+        q = last_query or _find_recent_query(context)
+        return [Action("open_search_result", {"query": q, "rank": rank, "browser": _browser_for(c)},
+                       label=f"Go to the {rank_str} website")]
+
+    m = _PAGE_NAV_RE.match(c)
+    if m:
+        page = m.group("page").lower()
+        q = last_query or _find_recent_query(context)
+        site = last_website or _find_recent_website(context)
+        return [Action("open_web_page", {"page": page, "website": site, "query": q, "browser": _browser_for(c)},
+                       label=f"Go to the {page} page")]
+
+    # 2. Search
+    ws = parse_web_search(c)
+    if ws:
+        _pre, act, _rest = ws
+        return [act]
+
+    # 3. Route content
+    cnt = route_content(c, ctx)
+    if cnt and cnt.actions:
+        return cnt.actions
+
+    # 4. Standard route_clause
+    r = route_clause(c, ctx)
+    if r:
+        return r
+
+    # 5. Direct URL
+    if _URLISH.match(c):
+        norm = normalize_url(c)
+        if norm:
+            return [Action("open_url", {"url": norm, "browser": _browser_for(c)}, label=f"Open {c}")]
+    return None
+
+
+def route(text: str, ctx: Optional[ToolContext] = None, context: Optional[List[str]] = None,
+          initial_query: str = "", initial_website: str = "") -> RouteResult:
     """Deterministic intent router. Empty result -> let the model answer.
 
     context: the user's earlier messages in this chat (oldest first), for
@@ -1902,16 +2077,42 @@ def route(text: str, ctx: Optional[ToolContext] = None, context: Optional[List[s
                 actions.extend(r)
         actions.append(action)
         if rest:
-            actions.extend(route(rest, ctx).actions)
+            q = action.args.get("query", "")
+            site = resolve_search_result(q, 1) if q else ""
+            sub_res = route(rest, ctx, context, initial_query=q, initial_website=site)
+            for sub_a in sub_res.actions:
+                if sub_a.name in ("open_search_result", "open_web_page") and not sub_a.args.get("query"):
+                    sub_a.args["query"] = q
+                if sub_a.name == "open_web_page" and (not sub_a.args.get("website") or "google.com" in sub_a.args.get("website", "")):
+                    if site:
+                        sub_a.args["website"] = site
+                actions.append(sub_a)
         return RouteResult(_merge(actions))
     clauses = split_clauses(t)
     if len(clauses) > 1:
         parts: List[Action] = []
         leftovers = []
+        last_query = initial_query or _find_recent_query(context)
+        last_website = initial_website or _find_recent_website(context)
         for c in clauses:
-            r = route_clause(c, ctx)
+            r = route_single_clause(c, ctx, context, last_query, last_website)
             if r:
-                parts.extend(r)
+                for act in r:
+                    if act.name == "web_search":
+                        last_query = act.args.get("query", "")
+                    elif act.name == "open_search_result":
+                        if not act.args.get("query") and last_query:
+                            act.args["query"] = last_query
+                        last_query = act.args.get("query", "")
+                        last_website = resolve_search_result(last_query, act.args.get("rank", 1))
+                    elif act.name == "open_web_page":
+                        if not act.args.get("query") and last_query:
+                            act.args["query"] = last_query
+                        if not act.args.get("website") and last_website:
+                            act.args["website"] = last_website
+                    elif act.name == "open_url":
+                        last_website = act.args.get("url", "")
+                    parts.append(act)
             else:
                 leftovers.append(c)
         if parts and not leftovers:
@@ -2052,6 +2253,64 @@ def _x_open_url(a, ctx, dry):
     ok = _launch(ctx, argv, dry)
     host = urllib.parse.urlsplit(url).hostname or url
     return _done(ok, f"Opening **{host}**.", "I couldn't open the browser.", [argv], data={"url": url})
+
+
+def _x_open_search_result(a, ctx, dry):
+    query = str(a.args.get("query", "")).strip()
+    rank = int(a.args.get("rank", 1))
+    browser = str(a.args.get("browser", "default"))
+    url = str(a.args.get("url", "")).strip()
+    if not url:
+        url = resolve_search_result(query, rank)
+    verdict = _link_verdict(url)
+    if verdict and verdict.get("level") in ("block", "warn"):
+        return ToolResult("I did not open that address. " + verdict.get("summary", ""),
+                          ok=False, data={"url": url, "linkguard": verdict.get("level")})
+    argv = browser_command(browser, url, ctx.which)
+    ok = _launch(ctx, argv, dry)
+    parts = urllib.parse.urlsplit(url)
+    host = (parts.netloc or parts.path or url).replace("www.", "")
+    rank_word = {1: "1st", 2: "2nd", 3: "3rd", 4: "4th", 5: "5th"}.get(rank, f"{rank}th")
+    msg = f"Opening the {rank_word} website (**{host}**)."
+    return _done(ok, msg, "I couldn't open the browser.", [argv], data={"url": url, "query": query, "rank": rank})
+
+
+def _x_open_web_page(a, ctx, dry):
+    page = str(a.args.get("page", "")).strip().lower()
+    website = str(a.args.get("website", "")).strip()
+    query = str(a.args.get("query", "")).strip()
+    browser = str(a.args.get("browser", "default"))
+    url = str(a.args.get("url", "")).strip()
+    if not url:
+        if (not website or "google.com" in website) and query:
+            website = resolve_search_result(query, 1)
+        if not website or "google.com" in website:
+            website = "https://imrandev.bd"
+        slug = page
+        if slug in ("contact", "contact us"):
+            slug = "contact"
+        elif slug in ("about", "about us"):
+            slug = "about"
+        elif slug in ("docs", "documentation"):
+            slug = "docs"
+        base = website.rstrip("/")
+        if "btnI=1" in base or "google.com" in base:
+            lucky_q = f"{query} {slug}" if query else slug
+            url = f"https://www.google.com/search?btnI=1&q={urllib.parse.quote_plus(lucky_q)}"
+        else:
+            url = f"{base}/{slug}"
+    verdict = _link_verdict(url)
+    if verdict and verdict.get("level") in ("block", "warn"):
+        return ToolResult("I did not open that address. " + verdict.get("summary", ""),
+                          ok=False, data={"url": url, "linkguard": verdict.get("level")})
+    argv = browser_command(browser, url, ctx.which)
+    ok = _launch(ctx, argv, dry)
+    parts = urllib.parse.urlsplit(url)
+    host = (parts.netloc or parts.path).replace("www.", "")
+    path = parts.path
+    target_display = f"{host}{path}" if path and path != "/" else host
+    msg = f"Opening the {page} page (**{target_display}**)."
+    return _done(ok, msg, "I couldn't open the browser.", [argv], data={"url": url, "page": page})
 
 
 def _x_open_app(a, ctx, dry):
@@ -2949,6 +3208,7 @@ def _x_install_package(a, ctx, dry):
 _EXECUTORS = {
     "install_app": _x_install_app, "install_package": _x_install_package,
     "help": _x_help, "about": _x_about, "web_search": _x_web_search, "open_url": _x_open_url, "open_app": _x_open_app,
+    "open_search_result": _x_open_search_result, "open_web_page": _x_open_web_page,
     "system_info": _x_system_info, "count_apps": _x_count_apps, "list_apps": _x_list_apps,
     "open_settings": _x_open_settings, "open_folder": _x_open_folder, "volume": _x_volume,
     "brightness": _x_brightness, "screenshot": _x_screenshot, "lock": _x_lock, "power": _x_power,

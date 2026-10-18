@@ -1940,3 +1940,49 @@ class TestChatWindowLayout(unittest.TestCase):
         self.assertFalse(w.sidebar.hands_free.switch.isChecked())
         self.assertFalse(w.sidebar.hands_free.hint.isHidden())
         self.assertTrue(w.toast.isVisible())
+
+
+class TestMultiStepChaining(unittest.TestCase):
+
+    def test_multi_step_search_and_navigate(self):
+        prompt = "search in google imrandevbd then go to the 1st website then go to contact page of this website"
+        res = tools.route(prompt)
+        self.assertEqual(len(res.actions), 3)
+        self.assertEqual(res.actions[0].name, "web_search")
+        self.assertEqual(res.actions[0].args.get("query"), "imrandevbd")
+        self.assertEqual(res.actions[1].name, "open_search_result")
+        self.assertEqual(res.actions[1].args.get("rank"), 1)
+        self.assertEqual(res.actions[1].args.get("query"), "imrandevbd")
+        self.assertEqual(res.actions[2].name, "open_web_page")
+        self.assertEqual(res.actions[2].args.get("page"), "contact")
+
+    def test_multi_step_apps_and_screenshot(self):
+        prompt = "open chrome then open terminal then take a screenshot"
+        res = tools.route(prompt)
+        self.assertEqual(len(res.actions), 3)
+        self.assertEqual([a.name for a in res.actions], ["open_app", "open_app", "screenshot"])
+
+    def test_multi_step_time_and_volume(self):
+        prompt = "tell me the time then mute sound"
+        res = tools.route(prompt)
+        self.assertEqual(len(res.actions), 2)
+        self.assertEqual([a.name for a in res.actions], ["time", "volume"])
+
+    def test_execution_search_result_and_web_page(self):
+        ctx = tools.ToolContext()
+        a_search = tools.Action("web_search", {"engine": "google", "query": "imrandevbd",
+                                               "url": "https://www.google.com/search?q=imrandevbd", "browser": "default"})
+        res1 = tools.execute(a_search, ctx, dry_run=True)
+        self.assertTrue(res1.ok)
+        self.assertIn("Searching Google for **imrandevbd**", res1.text)
+
+        a_result = tools.Action("open_search_result", {"query": "imrandevbd", "rank": 1, "browser": "default"})
+        res2 = tools.execute(a_result, ctx, dry_run=True)
+        self.assertTrue(res2.ok)
+        self.assertIn("Opening the 1st website (**imrandev.bd**)", res2.text)
+
+        a_page = tools.Action("open_web_page", {"page": "contact", "website": "https://imrandev.bd", "browser": "default"})
+        res3 = tools.execute(a_page, ctx, dry_run=True)
+        self.assertTrue(res3.ok)
+        self.assertIn("Opening the contact page (**imrandev.bd/contact**)", res3.text)
+
