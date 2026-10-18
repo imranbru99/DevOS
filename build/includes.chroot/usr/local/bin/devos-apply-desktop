@@ -67,4 +67,11 @@ if [ "${ready}" -eq 1 ]; then
         "$(cat "$script")" >/dev/null 2>&1 || true
 fi
 
+# Hide duplicate Chrome secondary-profile PWA launchers (Profile 1, Profile 2...)
+for prof in "${HOME}/.local/share/applications"/chrome-*-Profile_*.desktop; do
+    if [ -f "$prof" ] && ! grep -q '^NoDisplay=' "$prof"; then
+        printf 'NoDisplay=true\n' >> "$prof"
+    fi
+done
+
 exit 0

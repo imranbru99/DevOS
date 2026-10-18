@@ -366,7 +366,27 @@ def desktop_id_protected(desktop_id: str) -> bool:
 
 def desktop_id_hidden(desktop_id: str) -> bool:
     did = desktop_id.lower()
+    # Secondary Chrome/Chromium profile web app entries (Profile 1, Profile 2...)
+    if re.search(r"(?:chrome|chromium)-[a-p0-9]{32}-profile_", did):
+        return True
     return did.startswith(HIDDEN_DESKTOP_PREFIXES)
+
+
+def friendly_pwa_name(name: str) -> str:
+    s = name.strip()
+    if s.startswith("http://") or s.startswith("https://"):
+        low = s.lower()
+        if "onedrive" in low:
+            return "OneDrive"
+        if "weather" in low:
+            return "Weather"
+        if "bing.com/maps" in low or "maps" in low:
+            return "Maps"
+        if "windows.cloud" in low:
+            return "Windows App"
+        clean = re.sub(r"^https?://(www\.)?", "", s).split("/")[0]
+        return clean.capitalize() if clean else s
+    return s
 
 
 def unescape_desktop_string(value: str) -> str:
@@ -678,9 +698,19 @@ class AppDiscovery:
                 app_id = "deb:" + pkg
                 kind = "deb"
             else:
-                app_id = "desktop:" + did[:-8]
-                kind = "desktop"
-            name = scrub(entry.get("Name", did)) or did
+                m_pwa = re.match(r"^(?:chrome|chromium)-([a-p0-9]{32})-(?:Default|Profile_.*)$", did[:-8], re.I)
+                pwa_exec = re.search(r"--app-id=([a-p0-9]{32})", entry.get("Exec", ""), re.I)
+                wmclass = entry.get("StartupWMClass", "")
+                pwa_wm = re.match(r"^crx_([a-p0-9]{32})$", wmclass, re.I)
+                pwa_id = (m_pwa.group(1) if m_pwa else (pwa_exec.group(1) if pwa_exec else (pwa_wm.group(1) if pwa_wm else None)))
+                if pwa_id:
+                    app_id = "pwa:" + pwa_id.lower()
+                    kind = "desktop"
+                else:
+                    app_id = "desktop:" + did[:-8]
+                    kind = "desktop"
+            raw_name = scrub(entry.get("Name", did)) or did
+            name = friendly_pwa_name(raw_name) if app_id.startswith("pwa:") else raw_name
             app = groups.get(app_id)
             if app is None:
                 app = App(id=app_id, name=name, platform=PLATFORM_LINUX, kind=kind,
@@ -688,13 +718,22 @@ class AppDiscovery:
                           terminal=_bool(entry.get("Terminal")), workdir=entry.get("Path", ""),
                           package=pkg)
                 groups[app_id] = app
-            elif pkg and did[:-8] == pkg:
-                # Prefer the launcher named like the package as the main one.
+            elif (pkg and did[:-8] == pkg) or (app_id.startswith("pwa:") and ("-Default" in did or "--profile-directory=Default" in entry.get("Exec", ""))):
+                # Prefer the launcher named like the package as the main one, or the Default profile for PWAs.
                 app.name, app.icon, app.exec = name, entry.get("Icon", app.icon), entry.get("Exec", app.exec)
                 app.terminal = _bool(entry.get("Terminal"))
             app.desktop_files.append(path)
             app.desktop_ids.append(did)
             app.entries.append(name)
+
+        # Collect any associated hidden profile desktop files for PWAs so uninstall cleans all
+        for app in groups.values():
+            if app.id.startswith("pwa:"):
+                pwa_hash = app.id[4:]
+                for did_all, path_all, _ in files:
+                    if pwa_hash in did_all.lower() and path_all not in app.desktop_files:
+                        app.desktop_files.append(path_all)
+                        app.desktop_ids.append(did_all)
 
         for app in groups.values():
             if app.kind == "deb":

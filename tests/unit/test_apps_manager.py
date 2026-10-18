@@ -220,6 +220,27 @@ class TestDiscovery(AppsManagerBase):
         self.assertEqual([a.name for a in apps], ["VLC"])
         self.assertFalse(apps[0].uninstallable)  # unknown owner in a system folder
 
+    def test_chrome_pwa_deduplication_across_profiles(self):
+        # When Chrome installs a PWA across multiple profiles (Default, Profile 1, Profile 2),
+        # it generates separate .desktop files for each profile.
+        # DevOS Apps should group them into a single entry with all files attached.
+        pwa_id = "ikpngljipehikgkhoejokmkciamanopi"
+        write(os.path.join(self.user_apps, f"chrome-{pwa_id}-Default.desktop"),
+              desktop("Windows App", f'/opt/google/chrome/chrome --profile-directory=Default --app-id={pwa_id}',
+                      f"StartupWMClass=crx_{pwa_id}\n"))
+        write(os.path.join(self.user_apps, f"chrome-{pwa_id}-Profile_1.desktop"),
+              desktop("Windows App", f'/opt/google/chrome/chrome --profile-directory="Profile 1" --app-id={pwa_id}',
+                      f"StartupWMClass=crx_{pwa_id}\n"))
+        write(os.path.join(self.user_apps, f"chrome-{pwa_id}-Profile_2.desktop"),
+              desktop("Windows App", f'/opt/google/chrome/chrome --profile-directory="Profile 2" --app-id={pwa_id}',
+                      f"StartupWMClass=crx_{pwa_id}\n"))
+
+        apps = self.discovery().discover_linux()
+        win_apps = [a for a in apps if a.name == "Windows App"]
+        self.assertEqual(len(win_apps), 1)
+        self.assertEqual(win_apps[0].id, f"pwa:{pwa_id}")
+        self.assertEqual(len(win_apps[0].desktop_files), 3)
+
     def test_windows_grouping(self):
         prefixes = os.path.join(self.home, ".local/share/winlayer/prefixes")
         os.makedirs(os.path.join(prefixes, "notepadpp", "drive_c"))

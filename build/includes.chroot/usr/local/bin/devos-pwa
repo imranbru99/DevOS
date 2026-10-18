@@ -51,6 +51,12 @@ open_app() {
         printf '[Desktop Entry]\nType=Application\nHidden=true\nX-DevOS-Hidden=true\n' > "$apps/$ours"
         (kbuildsycoca5 >/dev/null 2>&1 &)
     fi
+    # Hide any auxiliary profile launchers (Profile 1, Profile 2...) so the app appears once
+    for prof in "$apps"/chrome-*-Profile_*.desktop; do
+        if [ -f "$prof" ] && ! grep -q '^NoDisplay=' "$prof"; then
+            printf 'NoDisplay=true\n' >> "$prof"
+        fi
+    done
     exec "$chrome" "${extra[@]}" --profile-directory=Default --app-id="$1"
 }
 

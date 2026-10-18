@@ -1,0 +1,7 @@
+#!/bin/bash
+# Installed apps manager. See components/apps/apps_manager.py.
+COMPONENTS_DIR="/usr/local/share/devos/components"
+if [ ! -d "${COMPONENTS_DIR}" ] || [ -d "/home/imran/project/dev-os/components" ]; then
+    COMPONENTS_DIR="/home/imran/project/dev-os/components"
+fi
+exec /usr/bin/python3 "${COMPONENTS_DIR}/apps/apps_manager.py" "$@"
