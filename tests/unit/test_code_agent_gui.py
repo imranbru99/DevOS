@@ -427,6 +427,32 @@ class TestCodeAgentGUI(unittest.TestCase):
         self.assertIn("Note", res)
 
 
+    def test_prompt_queue_lifecycle(self):
+        """When a task is running, new prompts must queue cleanly, show queue UI, and auto-dequeue."""
+        win = gui.AgentWindow(capable=(True, "Ready"))
+        self.assertEqual(len(win.prompt_queue), 0)
+        self.assertFalse(win.queue_bar.isVisible())
+
+        # Simulate active worker
+        win.worker = "dummy_active_worker"
+
+        # User submits a new prompt while worker is active
+        win.composer.setPlainText("tell me this application summery")
+        win.send()
+
+        # Composer must be cleared immediately, prompt added to queue, and queue bar shown
+        self.assertEqual(win.composer.toPlainText(), "")
+        self.assertEqual(len(win.prompt_queue), 1)
+        self.assertEqual(win.prompt_queue[0][0], "tell me this application summery")
+        self.assertFalse(win.queue_bar.isHidden())
+        self.assertIn("tell me this application summery", win.queue_label.text())
+
+        # User clears queue
+        win.clear_queue()
+        self.assertEqual(len(win.prompt_queue), 0)
+        self.assertTrue(win.queue_bar.isHidden())
+
+
 if __name__ == "__main__":
     unittest.main()
 

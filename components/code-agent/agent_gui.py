@@ -777,6 +777,11 @@ class AgentWorker(QtCore.QThread):
     def cancel(self) -> None:
         if self.agent:
             self.agent.cancel()
+        if hasattr(self.llm, "close"):
+            try:
+                self.llm.close()
+            except Exception:
+                pass
         self.answer(False)
 
     def run(self):
@@ -1106,6 +1111,7 @@ class AgentWindow(QtWidgets.QMainWindow):
         self.llm = llm
         self.worker = None
         self.pending = None
+        self.prompt_queue = []  # List of (raw_task, attached_images) for prompt queuing
         self.transcript = []  # [role, text]
         self.attached_images = []
         self.setAcceptDrops(True)
@@ -1381,6 +1387,48 @@ class AgentWindow(QtWidgets.QMainWindow):
             quick_row.addWidget(pill)
         quick_row.addStretch(1)
         chat_layout.addLayout(quick_row)
+
+        # Prompt Queue Bar (Cursor/Antigravity style)
+        self.queue_bar = QtWidgets.QFrame()
+        self.queue_bar.setObjectName("queueBar")
+        self.queue_bar.setStyleSheet("""
+            QFrame#queueBar {
+                background: #0f172a;
+                border: 1px solid #3b82f6;
+                border-radius: 8px;
+            }
+        """)
+        self.queue_layout = QtWidgets.QHBoxLayout(self.queue_bar)
+        self.queue_layout.setContentsMargins(10, 5, 10, 5)
+        self.queue_layout.setSpacing(10)
+        self.queue_label = QtWidgets.QLabel("")
+        self.queue_label.setStyleSheet("color: #93c5fd; font-size: 12px; font-weight: 600;")
+        self.queue_layout.addWidget(self.queue_label)
+        self.queue_layout.addStretch(1)
+
+        self.queue_run_btn = QtWidgets.QPushButton("⚡ Interrupt & Run Now")
+        self.queue_run_btn.setStyleSheet("""
+            QPushButton {
+                background: #2563eb; color: #ffffff; border-radius: 4px;
+                padding: 3px 10px; font-size: 11px; font-weight: bold; border: none;
+            }
+            QPushButton:hover { background: #1d4ed8; }
+        """)
+        self.queue_run_btn.clicked.connect(self.run_next_queued_now)
+        self.queue_layout.addWidget(self.queue_run_btn)
+
+        self.queue_clear_btn = QtWidgets.QPushButton("✕ Clear")
+        self.queue_clear_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent; color: #94a3b8; border: none;
+                padding: 3px 6px; font-size: 12px;
+            }
+            QPushButton:hover { color: #f87171; }
+        """)
+        self.queue_clear_btn.clicked.connect(self.clear_queue)
+        self.queue_layout.addWidget(self.queue_clear_btn)
+        self.queue_bar.setVisible(False)
+        chat_layout.addWidget(self.queue_bar)
 
         # Attachment Bar
         self.attachment_bar = QtWidgets.QFrame()
@@ -1912,26 +1960,67 @@ class AgentWindow(QtWidgets.QMainWindow):
         self.statusBar().showMessage(f"Opened live preview at {url}", 4000)
 
     # ---------------------------------------------------------------- send & stop
+    def _update_queue_ui(self):
+        if not self.prompt_queue:
+            self.queue_bar.setVisible(False)
+            return
+        count = len(self.prompt_queue)
+        first_text, _ = self.prompt_queue[0]
+        preview = (first_text[:50] + "…") if len(first_text) > 50 else (first_text or "[Image Prompt]")
+        self.queue_label.setText(f"⏳ Queued Prompt ({count}): \"{preview}\"")
+        self.queue_bar.setVisible(True)
+
+    def clear_queue(self):
+        self.prompt_queue.clear()
+        self._update_queue_ui()
+        self.statusBar().showMessage("Cleared prompt queue.", 3000)
+
+    def run_next_queued_now(self):
+        if not self.prompt_queue:
+            return
+        next_task, next_attached = self.prompt_queue.pop(0)
+        self._update_queue_ui()
+        if self.worker:
+            self.stop()
+            # Launch as soon as worker thread halts
+            def wait_and_launch():
+                if self.worker and self.worker.isRunning():
+                    QtCore.QTimer.singleShot(60, wait_and_launch)
+                else:
+                    self._execute_prompt(next_task, next_attached)
+            QtCore.QTimer.singleShot(100, wait_and_launch)
+        else:
+            self._execute_prompt(next_task, next_attached)
+
     def send(self):
         raw_task = self.composer.toPlainText().strip()
         if not raw_task and not self.attached_images:
             return
         if not self.capable:
             return
-        if self.worker:
-            self.stop()
-            self.step_chip.setText("Interrupting previous task…")
-            QtCore.QTimer.singleShot(250, self.send)
-            return
-        if not self.folder:
-            self.choose_folder()
-            if not self.folder:
-                return
 
         attached = list(self.attached_images)
         self.attached_images.clear()
         self._update_attachment_bar()
         self.composer.clear()
+
+        # If a task is actively running, queue this new prompt cleanly!
+        if self.worker:
+            self.prompt_queue.append((raw_task, attached))
+            self._update_queue_ui()
+            self.statusBar().showMessage(
+                f"Prompt queued ({len(self.prompt_queue)} in queue). Runs next, or click 'Interrupt & Run Now'.",
+                4000
+            )
+            return
+
+        self._execute_prompt(raw_task, attached)
+
+    def _execute_prompt(self, raw_task, attached):
+        if not self.folder:
+            self.choose_folder()
+            if not self.folder:
+                return
 
         task_text = raw_task if raw_task else "Please inspect the attached screenshot / image and address any issues, errors, or requests shown in it."
 
@@ -2004,10 +2093,20 @@ class AgentWindow(QtWidgets.QMainWindow):
             self.worker.cancel()
             self.step_chip.setText("Stopping…")
             self.tb_status.setText("Aborting active operation...")
+            QtCore.QTimer.singleShot(1200, self._force_cleanup_worker)
         self.stop_btn.setEnabled(False)
         self.stop_btn.setVisible(False)
         self.send_btn.setEnabled(True)
         self._set_pending(None)
+
+    def _force_cleanup_worker(self):
+        if self.worker and self.worker.isRunning():
+            try:
+                self.worker.terminate()
+                self.worker.wait(150)
+            except Exception:
+                pass
+            self.on_finished()
 
 
     # ---------------------------------------------------------------- event loop
@@ -2118,6 +2217,12 @@ class AgentWindow(QtWidgets.QMainWindow):
         self.step_chip.setText("● Idle")
         self.step_chip.setStyleSheet("background: #1e1b4b; color: #c4b5fd; border: 1px solid #4338ca;")
         self._update_plan_progress()
+
+        # If there are queued prompts, execute the next one in queue
+        if self.prompt_queue:
+            next_task, next_attached = self.prompt_queue.pop(0)
+            self._update_queue_ui()
+            QtCore.QTimer.singleShot(120, lambda: self._execute_prompt(next_task, next_attached))
 
 
     # ---------------------------------------------------------------- helpers

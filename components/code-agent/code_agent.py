@@ -843,6 +843,17 @@ class LocalLLM:
         self.is_local = (active.get("is_local", True) if endpoint is None else
                          ("127.0.0.1" in self.endpoint or "localhost" in self.endpoint))
         self.provider_name = active.get("name", "AI Engine")
+        self._current_resp = None
+
+    def close(self):
+        """Immediately closes active HTTP socket to unblock threads upon task cancellation."""
+        r = self._current_resp
+        self._current_resp = None
+        if r:
+            try:
+                r.close()
+            except Exception:
+                pass
 
     def chat(self, messages: List[Dict[str, str]], on_token: Optional[Callable[[str], None]] = None,
              should_stop: Optional[Callable[[], bool]] = None) -> str:
@@ -855,6 +866,7 @@ class LocalLLM:
                                      data=json.dumps(payload).encode("utf-8"), headers=headers)
         try:
             resp = urllib.request.urlopen(req, timeout=self.timeout)
+            self._current_resp = resp
         except (urllib.error.URLError, OSError) as exc:
             # If on localhost and connection failed, auto-start and retry once
             if self.is_local:
@@ -863,6 +875,7 @@ class LocalLLM:
                 if ensure_ai_service(self.endpoint, timeout_seconds=12.0):
                     try:
                         resp = urllib.request.urlopen(req, timeout=self.timeout)
+                        self._current_resp = resp
                     except (urllib.error.URLError, OSError) as retry_exc:
                         raise AgentError("DevOS AI is not answering on this PC. Please run 'devos-ai' in terminal. "
                                          f"({retry_exc})")
@@ -885,26 +898,29 @@ class LocalLLM:
 def read_sse(lines, on_token=None, should_stop=None) -> str:
     """Join the content deltas of an OpenAI-style event stream."""
     parts: List[str] = []
-    for raw in lines:
-        if should_stop and should_stop():
-            break
-        line = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw
-        line = line.strip()
-        if not line.startswith("data:"):
-            continue
-        data = line[5:].strip()
-        if data == "[DONE]":
-            break
-        try:
-            chunk = json.loads(data)
-        except ValueError:
-            continue
-        for choice in chunk.get("choices") or []:
-            piece = (choice.get("delta") or {}).get("content") or ""
-            if piece:
-                parts.append(piece)
-                if on_token:
-                    on_token(piece)
+    try:
+        for raw in lines:
+            if should_stop and should_stop():
+                break
+            line = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw
+            line = line.strip()
+            if not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if data == "[DONE]":
+                break
+            try:
+                chunk = json.loads(data)
+            except ValueError:
+                continue
+            for choice in chunk.get("choices") or []:
+                piece = (choice.get("delta") or {}).get("content") or ""
+                if piece:
+                    parts.append(piece)
+                    if on_token:
+                        on_token(piece)
+    except (OSError, ValueError):
+        pass
     return "".join(parts)
 
 
@@ -999,6 +1015,11 @@ class CodeAgent:
 
     def cancel(self) -> None:
         self.cancelled = True
+        if hasattr(self.llm, "close"):
+            try:
+                self.llm.close()
+            except Exception:
+                pass
 
     # ---------------------------------------------------------------- context
     def first_message(self, task: str) -> str:
