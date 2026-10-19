@@ -411,7 +411,47 @@ QScrollBar::handle:vertical {{
 QScrollBar::handle:vertical:hover {{
     background: #38bdf8;
 }}
-QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; }}
+QPushButton#jumpBtn {{
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0284c7, stop:1 #6366f1);
+    color: #ffffff;
+    border: 1px solid #38bdf8;
+    border-radius: 12px;
+    padding: 4px 14px;
+    font-size: 11.5px;
+    font-weight: 700;
+}}
+QPushButton#jumpBtn:hover {{
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0369a1, stop:1 #4f46e5);
+    border-color: #7dd3fc;
+}}
+QTabWidget::pane {{
+    border: 1px solid #1a263e;
+    background: #080c14;
+    border-radius: 9px;
+    top: -1px;
+}}
+QTabBar::tab {{
+    background: #0d1526;
+    color: #94a3b8;
+    border: 1px solid #1a263e;
+    border-bottom: none;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    padding: 7px 15px;
+    margin-right: 4px;
+    font-weight: 600;
+    font-size: 12px;
+}}
+QTabBar::tab:selected {{
+    background: #141f36;
+    color: #38bdf8;
+    border: 1px solid #283a5c;
+    border-bottom: 2px solid #38bdf8;
+}}
+QTabBar::tab:hover:!selected {{
+    background: #10192e;
+    color: #cbd5e1;
+}}
 QStatusBar, QLabel#status {{
     color: {MUTED};
     font-size: 12px;
@@ -1073,6 +1113,8 @@ class AgentWindow(QtWidgets.QMainWindow):
         self.active_status_text = "Idle"
         self.start_time = 0
         self._dirty = False
+        self._auto_scroll_to_bottom = True
+        self._last_rendered_html = ""
         self._capable_override = capable
         self._inhibit_cookie = None
 
@@ -1251,9 +1293,29 @@ class AgentWindow(QtWidgets.QMainWindow):
         self.step_chip.setObjectName("chip")
         chat_header.addWidget(self.step_chip)
 
+        chat_container = QtWidgets.QWidget()
+        chat_box_layout = QtWidgets.QVBoxLayout(chat_container)
+        chat_box_layout.setContentsMargins(0, 0, 0, 0)
+        chat_box_layout.setSpacing(2)
+
         self.chat = QtWidgets.QTextBrowser()
         self.chat.setOpenExternalLinks(False)
-        chat_layout.addWidget(self.chat, 1)
+        self.chat.verticalScrollBar().valueChanged.connect(self._on_chat_scroll)
+        chat_box_layout.addWidget(self.chat, 1)
+
+        jump_row = QtWidgets.QHBoxLayout()
+        jump_row.setContentsMargins(0, 0, 8, 2)
+        jump_row.addStretch(1)
+        self.jump_to_latest_btn = QtWidgets.QPushButton("↓ Jump to latest")
+        self.jump_to_latest_btn.setObjectName("jumpBtn")
+        self.jump_to_latest_btn.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        self.jump_to_latest_btn.setToolTip("Scroll down to the latest message and responses")
+        self.jump_to_latest_btn.setVisible(False)
+        self.jump_to_latest_btn.clicked.connect(self.scroll_to_bottom)
+        jump_row.addWidget(self.jump_to_latest_btn)
+        chat_box_layout.addLayout(jump_row)
+
+        chat_layout.addWidget(chat_container, 1)
 
         # Active Thinking & Execution Banner (Above Composer)
         self.thinking_banner = QtWidgets.QFrame()
@@ -1369,12 +1431,6 @@ class AgentWindow(QtWidgets.QMainWindow):
         QtWidgets.QShortcut(QtGui.QKeySequence.Paste, self, activated=self._handle_paste)
         split.addWidget(chat_card)
 
-        # Right Column: Plan & Steps, Changes, Terminal
-        right = QtWidgets.QSplitter(QtCore.Qt.Vertical)
-        right.setHandleWidth(8)
-        right.setMinimumWidth(220)
-        right.setChildrenCollapsible(False)
-
         # 1. Plan & Steps Card
         plan_card, plan_layout, plan_header = card("Roadmap & Planned Steps")
         plan_card.setMinimumWidth(80)
@@ -1387,7 +1443,6 @@ class AgentWindow(QtWidgets.QMainWindow):
         self.plan = QtWidgets.QListWidget()
         self.plan.setFocusPolicy(QtCore.Qt.NoFocus)
         plan_layout.addWidget(self.plan)
-        right.addWidget(plan_card)
 
         # 2. Changes / Diffs Card
         self.diff_card, diff_layout, diff_header = card("Code Changes & Unified Diff")
@@ -1416,7 +1471,6 @@ class AgentWindow(QtWidgets.QMainWindow):
         diff_buttons.addWidget(self.accept_btn)
         diff_layout.addWidget(self.diff_btn_box)
         self.diff_btn_box.setVisible(False)
-        right.addWidget(self.diff_card)
 
         # 3. Terminal Card
         self.term_card, term_layout, term_header = card("Terminal Execution")
@@ -1453,16 +1507,18 @@ class AgentWindow(QtWidgets.QMainWindow):
         term_buttons.addWidget(self.run_btn)
         term_layout.addWidget(self.term_btn_box)
         self.term_btn_box.setVisible(False)
-        right.addWidget(self.term_card)
 
-        plan_h = max(110, int(self.height() * 0.22))
-        diff_h = max(150, int(self.height() * 0.42))
-        term_h = max(110, int(self.height() * 0.26))
-        right.setSizes([plan_h, diff_h, term_h])
-        split.addWidget(right)
-        
-        left_w = max(300, int(self.width() * 0.52))
-        right_w = max(240, int(self.width() * 0.48))
+        # Right Column: Unified Tabbed Inspector (Cursor / Antigravity Grade)
+        self.tabs = QtWidgets.QTabWidget()
+        self.tabs.setObjectName("inspectorTabs")
+        self.tabs.setMinimumWidth(260)
+        self.tabs.addTab(self.diff_card, "⚡ Changes (0)")
+        self.tabs.addTab(self.term_card, "🖥️ Terminal")
+        self.tabs.addTab(plan_card, "📋 Roadmap")
+        split.addWidget(self.tabs)
+
+        left_w = max(300, int(self.width() * 0.58))
+        right_w = max(240, int(self.width() * 0.42))
         split.setSizes([left_w, right_w])
 
         self._set_pending(None)
@@ -1681,7 +1737,30 @@ class AgentWindow(QtWidgets.QMainWindow):
             except Exception:
                 pass
 
-    # ---------------------------------------------------------------- chat rendering
+    # ---------------------------------------------------------------- chat rendering & scrolling
+    def _on_chat_scroll(self, val):
+        bar = self.chat.verticalScrollBar()
+        distance_from_bottom = bar.maximum() - val
+        if distance_from_bottom > 120:
+            self._auto_scroll_to_bottom = False
+            if hasattr(self, "jump_to_latest_btn"):
+                self.jump_to_latest_btn.setVisible(True)
+        else:
+            self._auto_scroll_to_bottom = True
+            if hasattr(self, "jump_to_latest_btn"):
+                self.jump_to_latest_btn.setVisible(False)
+
+    def scroll_to_bottom(self):
+        self._auto_scroll_to_bottom = True
+        if hasattr(self, "jump_to_latest_btn"):
+            self.jump_to_latest_btn.setVisible(False)
+        self.chat.moveCursor(QtGui.QTextCursor.End)
+        bar = self.chat.verticalScrollBar()
+        bar.setValue(bar.maximum())
+        QtCore.QTimer.singleShot(0, lambda: self.chat.verticalScrollBar().setValue(self.chat.verticalScrollBar().maximum()))
+        QtCore.QTimer.singleShot(25, lambda: self.chat.verticalScrollBar().setValue(self.chat.verticalScrollBar().maximum()))
+        QtCore.QTimer.singleShot(75, lambda: self.chat.verticalScrollBar().setValue(self.chat.verticalScrollBar().maximum()))
+
     def _render_if_dirty(self):
         if not self._dirty:
             return
@@ -1692,17 +1771,12 @@ class AgentWindow(QtWidgets.QMainWindow):
         for i, (role, text) in enumerate(self.transcript):
             if role == "user":
                 parts.append(f'''
-                <table width="100%" cellspacing="0" cellpadding="0" style="margin: 10px 0;">
-                  <tr>
-                    <td width="15%"></td>
-                    <td style="background-color: #122244; border: 1px solid #1e386a; border-radius: 12px; padding: 12px 16px; color: #f8fafc;">
-                      <div style="color: #38bdf8; font-weight: 700; font-size: 12px; letter-spacing: 0.5px; margin-bottom: 4px;">
-                        👤 YOU
-                      </div>
-                      <div style="font-size: 13.5px; line-height: 1.5;">{_prose(text)}</div>
-                    </td>
-                  </tr>
-                </table>
+                <div style="background-color: #121c30; border: 1px solid #1e3358; border-radius: 10px; padding: 12px 16px; margin: 10px 0 10px 24px; color: #f8fafc;">
+                  <div style="color: #38bdf8; font-weight: 700; font-size: 11.5px; letter-spacing: 0.5px; margin-bottom: 5px;">
+                    👤 YOU
+                  </div>
+                  <div style="font-size: 13.5px; line-height: 1.5; color: #f1f5f9;">{_prose(text)}</div>
+                </div>
                 ''')
             elif role == "error":
                 parts.append(f'''
@@ -1743,24 +1817,29 @@ class AgentWindow(QtWidgets.QMainWindow):
                         body_html = "<p style='color: #64748b; font-style: italic;'>Generating thoughts…</p>"
 
                 parts.append(f'''
-                <table width="100%" cellspacing="0" cellpadding="0" style="margin: 10px 0;">
-                  <tr>
-                    <td style="background-color: #0c1424; border: 1px solid #192742; border-radius: 12px; padding: 12px 16px; color: #f1f5f9;">
-                      <div style="color: #38bdf8; font-weight: 700; font-size: 12.5px; letter-spacing: 0.5px; margin-bottom: 6px;">
-                        ⚡ DevOS AI Code Agent
-                      </div>
-                      <div>{body_html}</div>
-                    </td>
-                    <td width="6%"></td>
-                  </tr>
-                </table>
+                <div style="background-color: #0c1322; border: 1px solid #18253c; border-radius: 10px; padding: 12px 16px; margin: 10px 24px 10px 0; color: #f1f5f9;">
+                  <div style="color: #38bdf8; font-weight: 700; font-size: 12px; letter-spacing: 0.5px; margin-bottom: 6px;">
+                    ⚡ DevOS AI Code Agent
+                  </div>
+                  <div>{body_html}</div>
+                </div>
                 ''')
 
+        new_html = "".join(parts)
+        if getattr(self, "_last_rendered_html", "") == new_html:
+            return
+        self._last_rendered_html = new_html
+
         bar = self.chat.verticalScrollBar()
-        at_bottom = bar.value() >= bar.maximum() - 40
-        self.chat.setHtml("".join(parts))
-        if at_bottom:
-            bar.setValue(bar.maximum())
+        was_at_bottom = self._auto_scroll_to_bottom or (bar.value() >= bar.maximum() - 70)
+        old_val = bar.value()
+
+        self.chat.setHtml(new_html)
+
+        if was_at_bottom:
+            self.scroll_to_bottom()
+        else:
+            bar.setValue(old_val)
 
     def _warmup_ai_if_needed(self):
         if not core.check_ai_health():
@@ -1835,7 +1914,14 @@ class AgentWindow(QtWidgets.QMainWindow):
     # ---------------------------------------------------------------- send & stop
     def send(self):
         raw_task = self.composer.toPlainText().strip()
-        if (not raw_task and not self.attached_images) or self.worker or not self.capable:
+        if not raw_task and not self.attached_images:
+            return
+        if not self.capable:
+            return
+        if self.worker:
+            self.stop()
+            self.step_chip.setText("Interrupting previous task…")
+            QtCore.QTimer.singleShot(250, self.send)
             return
         if not self.folder:
             self.choose_folder()
@@ -1876,7 +1962,9 @@ class AgentWindow(QtWidgets.QMainWindow):
         self.transcript.append(["agent", ""])
         self.plan.clear()
         self.plan_progress.setValue(0)
+        self._auto_scroll_to_bottom = True
         self._dirty = True
+        self.scroll_to_bottom()
 
         self.start_time = time.time()
         self._elapsed_timer.start()
@@ -2032,6 +2120,9 @@ class AgentWindow(QtWidgets.QMainWindow):
     def _show_change(self, action):
         self.diff_title.setText(f"📄 {action.title}")
         self.diff.setHtml(diff_html(action.diff))
+        if hasattr(self, "tabs"):
+            self.tabs.setCurrentWidget(self.diff_card)
+            self.tabs.setTabText(0, "⚡ Changes (Pending)")
 
     def _set_pending(self, action):
         edit = bool(action and action.kind == "edit")
@@ -2042,6 +2133,10 @@ class AgentWindow(QtWidgets.QMainWindow):
         self.term_btn_box.setVisible(command)
         self.run_btn.setEnabled(command)
         self.deny_btn.setEnabled(command)
+        if edit and hasattr(self, "tabs"):
+            self.tabs.setCurrentWidget(self.diff_card)
+        elif command and hasattr(self, "tabs"):
+            self.tabs.setCurrentWidget(self.term_card)
         for frame, on in ((self.diff_card, edit), (self.term_card, command)):
             frame.setProperty("attention", "true" if on else "false")
             frame.style().unpolish(frame)
@@ -2069,10 +2164,14 @@ class AgentWindow(QtWidgets.QMainWindow):
         total = self.plan.count()
         if total == 0:
             self.plan_progress.setValue(0)
+            if hasattr(self, "tabs"):
+                self.tabs.setTabText(2, "📋 Roadmap")
             return
         done_count = sum(1 for row in range(total) if STEP_ICON["done"] in self.plan.item(row).text())
         pct = int((done_count / total) * 100)
         self.plan_progress.setValue(pct)
+        if hasattr(self, "tabs"):
+            self.tabs.setTabText(2, f"📋 Roadmap ({pct}%)")
         self.plan_progress.setToolTip(f"{done_count}/{total} steps completed ({pct}%)")
 
     def _policy_changed(self):

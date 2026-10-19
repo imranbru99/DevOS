@@ -355,9 +355,41 @@ class TestCodeAgentGUI(unittest.TestCase):
         dlg.provider_combo.setCurrentIndex(idx)
         self.assertIn("300+", dlg.speed_badge.text())
 
+    def test_chat_scroll_and_jump_to_latest(self):
+        """Test jump to latest button visibility and auto scroll mechanics."""
+        win = gui.AgentWindow(capable=(True, "Ready"))
+        self.assertIsNotNone(win.jump_to_latest_btn)
+        self.assertTrue(win._auto_scroll_to_bottom)
+        self.assertFalse(win.jump_to_latest_btn.isVisible())
+
+        # Simulate user scrolling up
+        win._on_chat_scroll(0)
+        # Calling scroll_to_bottom resets flag and hides jump button
+        win.scroll_to_bottom()
+        self.assertTrue(win._auto_scroll_to_bottom)
+        self.assertFalse(win.jump_to_latest_btn.isVisible())
+
+    def test_inspector_tabs_auto_switch(self):
+        """Test inspector tabs auto-switch on edit and command actions."""
+        win = gui.AgentWindow(capable=(True, "Ready"))
+        self.assertIsNotNone(win.tabs)
+        self.assertEqual(win.tabs.count(), 3)
+
+        # Trigger edit action
+        act_edit = gui.core.Action(kind="edit", tool="apply_patch", title="Update file", diff="--- a/f\n+++ b/f\n")
+        win._show_change(act_edit)
+        self.assertEqual(win.tabs.currentWidget(), win.diff_card)
+        self.assertIn("Pending", win.tabs.tabText(0))
+
+        # Trigger command action
+        act_cmd = gui.core.Action(kind="command", tool="run_command", title="Run server", command="npm run dev")
+        win._set_pending(act_cmd)
+        self.assertEqual(win.tabs.currentWidget(), win.term_card)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
 

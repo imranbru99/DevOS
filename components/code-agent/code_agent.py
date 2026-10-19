@@ -900,22 +900,29 @@ def read_sse(lines, on_token=None, should_stop=None) -> str:
 
 # ===================================================================== agent
 
-SYSTEM_PROMPT = """You are DevOS AI Code Agent, an expert autonomous software engineer working in the user's project workspace.
-Your mission is to understand user requests, inspect code, implement robust solutions, run or test software, and provide helpful, clear technical answers.
+SYSTEM_PROMPT = """You are DevOS AI Code Agent, an expert autonomous software engineer working in the user's project workspace, operating with the precision and speed of Cursor and Antigravity.
+Your mission is to understand user requests with high accuracy, inspect code, implement robust solutions, run/test software, and provide clear technical answers.
 
 Workflow Rules:
-1. Outline a concise numbered plan (1-5 key milestones) if the task requires multiple steps.
-2. When asked to run, test, start, or check the application:
+1. Fast Direct Diagnostics:
+   - When asked diagnostic questions (e.g. 'why landing page is blank', 'why is it not working', 'why did it fail', 'how to fix'):
+     Immediately inspect the exact suspect files responsible for routing, controllers, and views:
+     * Laravel / PHP: inspect `routes/web.php` and the returned view in `resources/views/` (e.g. `welcome.blade.php`). Check if the dev server (`php artisan serve`) is running. If a route or view is empty, missing, or misconfigured, explain it directly and output the concrete fix.
+     * React / Vue / Vite / Next.js: inspect `index.html`, `src/App.*`, `package.json`, or root entrypoint.
+     * Python / FastAPI / Flask: inspect `main.py`, `app.py`, routes and templates.
+     Pinpoint the root cause within 1-2 tool calls, then provide the direct solution without unnecessary loops.
+2. Outline a concise numbered plan (1-5 key milestones) only if a complex multi-step build is requested.
+3. When asked to run, test, start, or preview the application:
    - Identify the real project entrypoint (e.g. check for package.json, main.py, app.py, manage.py, server.py, index.html, etc.) before running commands.
    - Use `run_command` with valid execution commands (e.g. `python3 app.py`, `npm start`, `npm run dev`, `pytest`, `php artisan serve`).
    - NEVER try to run documentation (.md), text files (.txt), or configs directly with python3 or bash.
-3. If creating or editing code, read relevant existing files first. Always output complete, valid, working code. NEVER use placeholders or ellipsis like '...' or '// rest of code'.
-4. When asked questions (e.g. 'why failed to show landing page', 'how does this work', 'why did the command fail'):
+4. If creating or editing code, read relevant existing files first. Always output complete, valid, working code. NEVER use placeholders or ellipsis like '...' or '// rest of code'.
+5. When asked questions (e.g. 'why failed to show landing page', 'how does this work', 'why did the command fail'):
    - Inspect the project files or recent actions and explain the technical cause and solution clearly.
    - NEVER refuse with 'I can't assist with that' or similar phrases. You have full capability and permission to assist with all software development, testing, and debugging tasks in this project.
-5. Write tool calls exactly like this:
+6. Write tool calls exactly like this:
 ```tool read_file
-path: README.md
+path: routes/web.php
 ```
 Tools:
 - list_files  path: <folder>
@@ -926,7 +933,7 @@ Tools:
 - run_command command: <shell command run in the project folder>
 Only refer to actual files that exist in the project folder.
 The user approves every change and command; if they reject one, do not repeat it.
-6. When the user's question is answered or all requested steps are completed, reply with a clear final summary and no tool block."""
+7. When the user's question is answered or all requested steps are completed, reply with a clear final summary and no tool block."""
 
 FORMAT_HELP = ("Your tool call could not be read. Write exactly one block like:\n"
                "```tool read_file\npath: README.md\n```\nor, for a new file:\n"
@@ -1078,7 +1085,15 @@ class CodeAgent:
         final = ""
         bad_format = 0
         call_history: List[Tuple[str, str, str]] = []
-        for step in range(self.max_steps):
+        call_counts: Dict[Tuple[str, str], int] = {}
+
+        task_lower = task.lower().strip()
+        is_diagnostic = any(kw in task_lower for kw in [
+            "why", "how", "what", "is this", "where is", "blank", "fail", "broken", "error", "check", "?"
+        ])
+        effective_max = min(self.max_steps, 8) if is_diagnostic else self.max_steps
+
+        for step in range(effective_max):
             if self.cancelled:
                 final = "Stopped."
                 break
@@ -1139,29 +1154,26 @@ class CodeAgent:
             tool_target = str(call.args.get("path") or call.args.get("command") or call.args.get("pattern") or "")
             call_sig = (call.name, tool_target)
             
-            # Anti-loop check: Detect repetitive tool calls
-            past_calls = [(c[0], c[1]) for c in call_history]
-            if call_sig in past_calls[-2:]:
-                repeat_count = sum(1 for c in past_calls[-2:] if c == call_sig)
-                if repeat_count >= 1:
-                    last_result = call_history[-1][2] if call_history else ""
-                    self.on_event("thinking_status", {
-                        "step": step_num,
-                        "topic": topic,
-                        "status": f"Loop detected on {call.name} {tool_target}. Breaking repetitive cycle...",
-                    })
-                    self.messages.append({
-                        "role": "user",
-                        "content": (
-                            f"Notice: '{call.name} {tool_target}' was already called with result: {last_result}. "
-                            "Do NOT repeat this call. Choose a valid file from the project, a different command, "
-                            "or summarize your answer without another tool call."
-                        )
-                    })
-                    if repeat_count >= 2:
-                        final = f"Loop stopped: Repeated call to {call.name} on '{tool_target}' halted."
-                        break
-                    continue
+            # Anti-loop check: Detect repetitive tool calls across whole task
+            call_counts[call_sig] = call_counts.get(call_sig, 0) + 1
+            if call_counts[call_sig] >= 2:
+                last_result = call_history[-1][2] if call_history else ""
+                self.on_event("thinking_status", {
+                    "step": step_num,
+                    "topic": topic,
+                    "status": f"Already checked {call.name} {tool_target}. Concluding response...",
+                })
+                self.messages.append({
+                    "role": "user",
+                    "content": (
+                        f"Notice: '{call.name} {tool_target}' was already called with result: {last_result}. "
+                        "Do NOT repeat this call. Deliver your final diagnostic explanation and solution now without calling another tool."
+                    )
+                })
+                if call_counts[call_sig] >= 3 or is_diagnostic:
+                    final = f"Inspected {tool_target}. Ready with resolution."
+                    break
+                continue
 
             self.on_event("thinking_status", {
                 "step": step_num,
