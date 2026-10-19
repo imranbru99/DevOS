@@ -703,7 +703,10 @@ def list_drives():
             if mount == "/boot/efi" or (fstype in {"vfat", "fat"} and int(node.get("size") or 0) < 1024 ** 3):
                 continue
             if not fstype and not mount:
-                continue
+                if node.get("type") in {"part", "disk"} and int(node.get("size") or 0) >= 1024 ** 3:
+                    pass
+                else:
+                    continue
             found.append(node)
 
     try:
@@ -776,6 +779,7 @@ def list_drives():
             "free": free,
             "removable": removable,
             "is_system": False,
+            "fstype": (node.get("fstype") or "").lower(),
         })
 
     # Always put C: at the beginning
@@ -1213,7 +1217,10 @@ class DriveCard(QFrame):
             space_text = f"{format_bytes(free)} free of {format_bytes(total)}"
         elif total > 0:
             bar.setValue(0)
-            space_text = f"{format_bytes(total)}  ·  Not mounted (Double-click to open)"
+            if not drive.get("fstype"):
+                space_text = f"{format_bytes(total)}  ·  Unformatted (Double-click to setup)"
+            else:
+                space_text = f"{format_bytes(total)}  ·  Not mounted (Double-click to open)"
         else:
             bar.setValue(0)
             space_text = "Drive ready"
@@ -3327,6 +3334,25 @@ class WindowsFileExplorer(QMainWindow):
 
         if mount and os.path.exists(mount):
             self.navigate_to(mount, label=drive["title"])
+        elif not drive.get("fstype") and drive.get("path"):
+            self._handle_unformatted_drive(drive)
+
+    def _handle_unformatted_drive(self, drive):
+        """Prompt user when opening an unformatted drive."""
+        try:
+            msg = QMessageBox(self)
+            msg.setWindowTitle("DevOS - Storage Setup")
+            msg.setIcon(QMessageBox.Information)
+            msg.setText(f"Drive {drive.get('title', '')} ({drive.get('path', '')}) is not formatted yet.")
+            msg.setInformativeText("Would you like to open Storage & Boot Doctor to format this drive for use?")
+            open_btn = msg.addButton("Open Storage Doctor", QMessageBox.AcceptRole)
+            cancel_btn = msg.addButton("Cancel", QMessageBox.RejectRole)
+            msg.setDefaultButton(open_btn)
+            msg.exec_()
+            if msg.clickedButton() == open_btn:
+                subprocess.Popen(["devos-disk-gui"])
+        except Exception:
+            pass
 
     def is_in_recycle_bin(self):
         return is_recycle_bin_path(self._current_path)

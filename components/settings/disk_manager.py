@@ -360,6 +360,20 @@ class DiskManager:
                 "action_label": "Format with DevOS Standard Layout (EFI + BTRFS)"
             })
 
+        # Check for unformatted data partitions on secondary / non-system disks
+        if not disk.get("is_system_disk") and not disk.get("is_live_media"):
+            for p in partitions:
+                fstype = (p.get("fstype") or "").lower()
+                if fstype in ("unknown", "", "none") and not p.get("is_esp") and p.get("size_bytes", 0) >= 1024 ** 3:
+                    issues.append({
+                        "type": "unformatted_partition",
+                        "severity": "warning",
+                        "title": f"Unformatted Storage Partition ({p['device']})",
+                        "description": f"Partition {p['device']} ({p['size_human']}) has no filesystem. Format it to use as Storage in DevOS.",
+                        "action_id": f"format_partition:{p['device']}",
+                        "action_label": f"Format {p['device']} (BTRFS Storage)"
+                    })
+
         if not issues:
             if live:
                 issues.append({
@@ -462,6 +476,23 @@ class DiskManager:
                         return {"success": True, "message": f"Successfully formatted {device} with DevOS standard EFI + BTRFS layout!"}
                     return {"success": False, "error": proc.stderr.strip() or f"Formatting failed with exit code {proc.returncode}"}
                 return {"success": False, "error": "parted, mkfs.vfat and mkfs.btrfs are needed to format a disk."}
+
+            elif action_id.startswith("format_partition:"):
+                part_dev = action_id.split(":", 1)[1]
+                if not part_dev.startswith("/dev/") or not all(c.isalnum() or c in "/-_" for c in part_dev):
+                    return {"success": False, "error": f"Invalid partition device '{part_dev}'"}
+                if not shutil.which("mkfs.btrfs"):
+                    return {"success": False, "error": "mkfs.btrfs tool not found."}
+                script = f"mkfs.btrfs -f -L Storage {part_dev} && udevadm settle"
+                runner = ["pkexec", "bash", "-c", script] if needs_pkexec else ["bash", "-c", script]
+                proc = subprocess.run(runner, capture_output=True, text=True)
+                if proc.returncode == 0:
+                    try:
+                        subprocess.run(["udisksctl", "mount", "-b", part_dev], capture_output=True, text=True)
+                    except Exception:
+                        pass
+                    return {"success": True, "message": f"Successfully formatted and mounted {part_dev} as BTRFS Storage!"}
+                return {"success": False, "error": proc.stderr.strip() or f"Formatting failed with code {proc.returncode}"}
 
             return {"success": False, "error": f"Unknown action '{action_id}'"}
         except Exception as e:
