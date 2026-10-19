@@ -81,6 +81,13 @@ for uevent in /sys/class/drm/card*/device/uevent; do
     fi
 done
 
+# On 1366x768 screens, adjust device scale factor so all bookmark bar folders
+# and tabs fit cleanly without overflowing into the '>>' menu (matching Windows standard proportions)
+screen_w=$(xrandr --current 2>/dev/null | sed -n 's/.*current \([0-9]*\) x .*/\1/p' || echo "1920")
+if [ -n "$screen_w" ] && [ "$screen_w" -le 1366 ]; then
+    args+=(--force-device-scale-factor=0.90)
+fi
+
 log=$(mktemp)
 "$chrome" "${args[@]}" "$@" >"$log" 2>&1 &
 pid=$!
