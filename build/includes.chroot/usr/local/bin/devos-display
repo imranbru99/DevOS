@@ -93,43 +93,10 @@ def apply_resolution(output: str, mode: str, rate: Optional[str] = None) -> bool
 
 def auto_configure_displays() -> List[str]:
     """
-    Ensure displays select their best native resolution.
-    Especially fixes TV/monitors (like 32-inch HDMI screens) that report 768p
-    as preferred mode even though they support 1080p Full HD.
+    Ensure displays use their native preferred resolution.
+    Respects native TV/monitor hardware modes without forcing overscan.
     """
-    actions = []
-    displays = get_displays()
-    for disp in displays:
-        if not disp["connected"] or not disp["modes"]:
-            continue
-
-        active_mode = None
-        for m in disp["modes"]:
-            if m["active"]:
-                active_mode = m
-                break
-
-        # Check if 1920x1080 or better exists
-        has_1080p = any(m["res"] == "1920x1080" for m in disp["modes"])
-        is_sub_1080 = False
-        if active_mode:
-            try:
-                w, h = map(int, active_mode["res"].split("x"))
-                if h < 1080 and w < 1920:
-                    is_sub_1080 = True
-            except Exception:
-                pass
-
-        if has_1080p and is_sub_1080:
-            rate = "60.00"
-            for m in disp["modes"]:
-                if m["res"] == "1920x1080" and m["rates"]:
-                    rate = m["rates"][0]
-                    break
-            ok = apply_resolution(disp["name"], "1920x1080", rate)
-            if ok:
-                actions.append(f"Upgraded {disp['name']} from {active_mode['res']} to 1920x1080@{rate}")
-    return actions
+    return []
 
 
 def run_gui():

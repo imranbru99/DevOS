@@ -15,7 +15,7 @@ var panelList = panels();
 if (panelList.length === 0) {
     var panel = new Panel;
     panel.location = "bottom";
-    panel.height = 48;
+    panel.height = 40;
     panel.hiding = "none";
     panel.alignment = "left";
 

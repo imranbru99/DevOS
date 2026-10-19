@@ -1,6 +1,6 @@
 [kdeglobals][General]
 ColorScheme=DevOS
-font=Inter,11,-1,5,50,0,0,0,0,0
+font=Inter,9,-1,5,50,0,0,0,0,0
 
 [kdeglobals][Icons]
 Theme=Papirus-Dark
