@@ -16,6 +16,7 @@ from typing import Dict, List, Optional
 
 MODELS_DIR = "/var/lib/DevOS/models"
 CHOICE_FILE = "/etc/devos/ai.conf"
+USER_CHOICE_FILE = os.path.expanduser("~/.config/devos/ai.conf")
 GB = 1024 ** 3
 
 # min_ram_gb: total RAM the PC needs so the model plus the desktop, a browser
@@ -183,8 +184,11 @@ def format_choice(choice: Dict) -> str:
 
 
 def read_choice(path: str = CHOICE_FILE) -> Dict:
+    target = path
+    if target == CHOICE_FILE and os.path.isfile(USER_CHOICE_FILE):
+        target = USER_CHOICE_FILE
     try:
-        with open(path, encoding="utf-8") as handle:
+        with open(target, encoding="utf-8") as handle:
             return parse_choice(handle.read())
     except OSError:
         return parse_choice("")

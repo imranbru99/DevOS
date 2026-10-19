@@ -1014,6 +1014,13 @@ class CodeAgent:
         if notes:
             parts.append("Project notes (.devos/agent-notes.md):\n" + notes)
         parts.append("Task: " + task.strip())
+        parts.append(
+            "Execution Directive: Fulfill the task using tool calls.\n"
+            "- To inspect code: ```tool read_file\npath: <path>\n```\n"
+            "- To implement code: ```tool write_file\npath: <path>\n---\n<full code>\n```\n"
+            "- To run/test app: ```tool run_command\ncommand: <cmd>\n```\n"
+            "Begin immediately with a tool call block. Do not output conversational filler."
+        )
         return "\n\n".join(parts)
 
     def window(self) -> List[Dict[str, str]]:
@@ -1040,13 +1047,23 @@ class CodeAgent:
         reply_lower = reply.lower().strip()
         task_lower = task.lower().strip()
 
-        # Never force continue if the user asked a question, test/run command, or status check
-        if any(kw in task_lower for kw in [
-            "?", "is this", "ia this", "are there", "how to", "how do", "can you",
-            "what is", "why", "run this", "run the", "run app", "start the", "test this",
-            "test the", "check if", "check whether", "status", "everything is"
-        ]):
+        is_question = any(kw in task_lower for kw in [
+            "?", "what is", "why", "how does", "is this", "ia this", "are there",
+            "check if", "check whether", "status", "explain"
+        ])
+        is_build_or_code_action = any(kw in task_lower for kw in [
+            "make", "build", "create", "implement", "develop", "complete", "add", "fix",
+            "setup", "set up", "scaffold", "generate", "code", "write", "run", "start",
+            "serve", "deploy"
+        ])
+
+        # If it's a diagnostic or explanatory question without build actions, do not force continuation
+        if is_question and not is_build_or_code_action:
             return False
+
+        is_build_or_code_task = is_build_or_code_action or any(kw in task_lower for kw in [
+            "landing page", "erp", "project", "application", "app", "feature", "module", "system"
+        ])
         
         # 1. Check for explicit continuation phrases in the model's reply
         continuation_patterns = [
@@ -1066,18 +1083,11 @@ class CodeAgent:
             if re.search(pat, reply_lower):
                 return True
         
-        # 2. Check if the user requested building, creating, completing, or modifying an app or feature
-        is_build_or_code_task = any(kw in task_lower for kw in [
-            "make", "build", "create", "implement", "develop", "complete", "add", "fix",
-            "setup", "set up", "scaffold", "generate", "code", "write", "landing page", "erp",
-            "project", "application", "app", "feature", "module", "system"
-        ])
-        # If the user asked to build/create/implement and ZERO files have been written yet,
-        # the agent MUST NOT stop after just reading a readme or summarizing!
-        if is_build_or_code_task and len(self.changed) == 0 and step < 12:
+        # 2. If the user asked to build/create/implement and files haven't been written yet
+        if is_build_or_code_task and len(self.changed) == 0 and step < 6:
             return True
 
-        if is_build_or_code_task and len(self.changed) < 2 and step < 8:
+        if is_build_or_code_task and len(self.changed) < 2 and step < 6:
             completion_decl = any(ph in reply_lower for ph in [
                 "entire project is complete", "all phases are complete", "project has been fully built",
                 "everything is complete and ready"
@@ -1108,6 +1118,8 @@ class CodeAgent:
         bad_format = 0
         call_history: List[Tuple[str, str, str]] = []
         call_counts: Dict[Tuple[str, str], int] = {}
+        consecutive_no_tool = 0
+        last_non_tool_reply = ""
 
         task_lower = task.lower().strip()
         is_diagnostic = any(kw in task_lower for kw in [
@@ -1153,6 +1165,48 @@ class CodeAgent:
                     bad_format += 1
                     self.messages.append({"role": "user", "content": FORMAT_HELP})
                     continue
+
+                reply_clean = " ".join(reply.split()).lower()
+                is_repetition = (
+                    reply_clean == last_non_tool_reply
+                    or (last_non_tool_reply and (reply_clean in last_non_tool_reply or last_non_tool_reply in reply_clean))
+                )
+                last_non_tool_reply = reply_clean
+                consecutive_no_tool += 1
+
+                # If the model is repeating itself or has failed to produce a tool call twice
+                if is_repetition or consecutive_no_tool >= 2:
+                    # Check if user wanted to run/start/preview the app
+                    if any(kw in task_lower for kw in ["run", "start", "serve", "launch", "preview"]) and not any(c[0] == "run_command" for c in call_history):
+                        run_info = self.ws.detect_run_info()
+                        if run_info.get("command"):
+                            run_cmd_call = ToolCall("run_command", {"command": run_info["command"]})
+                            self.on_event("thinking_status", {
+                                "step": step_num,
+                                "topic": topic,
+                                "status": f"Executing detected project runner: {run_info['command']}...",
+                            })
+                            cmd_result = self.execute(run_cmd_call)
+                            call_history.append(("run_command", run_info["command"], str(cmd_result)[:80]))
+                            self.on_event("result", {"tool": "run_command", "text": cmd_result})
+                            final = f"Started application with `{run_info['command']}` (URL: {run_info.get('url') or 'active'})."
+                            break
+
+                    is_build_or_code_task = any(kw in task_lower for kw in [
+                        "make", "build", "create", "implement", "develop", "complete", "add", "fix",
+                        "setup", "set up", "scaffold", "generate", "code", "write", "landing page", "erp",
+                        "project", "application", "app", "feature", "module", "system"
+                    ])
+                    if len(self.changed) == 0 and is_build_or_code_task:
+                        final = (
+                            f"{reply.strip()}\n\n"
+                            "💡 **Note**: The active model provided the plan above but did not execute file modifications directly. "
+                            "To get Cursor / Antigravity quality and write full multi-file code at 180+ tok/s, "
+                            "switch the engine to **Google Gemini 2.0 Flash** or **Groq** via the top-right engine badge."
+                        )
+                    else:
+                        final = reply.strip()
+                    break
                 
                 # Check if the model gave intermediate commentary or if the overall task is unfinished
                 if self.should_continue_task(reply, task, step):
@@ -1163,9 +1217,11 @@ class CodeAgent:
                     })
                     if len(self.changed) == 0:
                         cont_prompt = (
-                            f"You have analyzed the project requirements. Now start implementing the requested code for '{task}'. "
-                            "Do NOT just summarize or stop. Invoke the next tool call ('write_file' or 'apply_patch') "
-                            "to create or update the relevant files (such as routes, views, controllers, or templates) now."
+                            f"You stated you will work on '{task}'. Start immediately by calling a tool now:\n"
+                            "```tool write_file\npath: <filepath>\n---\n<content>\n```\n"
+                            "or\n"
+                            "```tool run_command\ncommand: <shell command>\n```\n"
+                            "Do NOT reply with conversational filler. Output only the tool call block."
                         )
                     else:
                         cont_prompt = (
@@ -1181,6 +1237,7 @@ class CodeAgent:
 
                 final = reply.strip()
                 break
+            consecutive_no_tool = 0
             tool_target = str(call.args.get("path") or call.args.get("command") or call.args.get("pattern") or "")
             call_sig = (call.name, tool_target)
             

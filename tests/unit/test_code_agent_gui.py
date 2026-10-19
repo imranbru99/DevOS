@@ -386,6 +386,46 @@ class TestCodeAgentGUI(unittest.TestCase):
         win._set_pending(act_cmd)
         self.assertEqual(win.tabs.currentWidget(), win.term_card)
 
+    def test_action_prompts_with_polite_phrasing(self):
+        """Action prompts with polite phrasing like 'can you make...' must not be discarded as questions."""
+        agent = gui.core.CodeAgent(gui.core.Workspace(self.temp_dir), llm=None, approve=lambda a: True)
+        self.assertTrue(
+            agent.should_continue_task("I will build the landing page.", "can you make the landign page and run the full application", 0),
+            "Build prompts with 'can you make...' must continue when 0 files changed."
+        )
+        self.assertTrue(
+            agent.should_continue_task("I will start building.", "so build now", 0),
+            "'so build now' must continue when 0 files changed."
+        )
+        # But pure questions should not force continue
+        self.assertFalse(
+            agent.should_continue_task("This is how it works.", "why is the landing page blank?", 0),
+            "Pure questions must not force continuation."
+        )
+
+    def test_repetition_guard_prevents_stalling_loop(self):
+        """When a model repeats conversational filler without tools, repetition guard must halt cleanly."""
+        class MockEchoLLM:
+            def chat(self, messages, on_token=None, should_stop=None):
+                return "I will start building the landing page and running the full application."
+
+        recorded_events = []
+        def on_event(kind, payload):
+            recorded_events.append((kind, payload))
+
+        agent = gui.core.CodeAgent(
+            gui.core.Workspace(self.temp_dir),
+            llm=MockEchoLLM(),
+            approve=lambda a: True,
+            on_event=on_event,
+            max_steps=20
+        )
+        res = agent.run("so build now")
+        replies = [p for k, p in recorded_events if k == "reply"]
+        # It must NOT loop 20 or 12 times; it should stop after max 2 steps!
+        self.assertLessEqual(len(replies), 2, "Agent must not repeat conversational filler across steps.")
+        self.assertIn("Note", res)
+
 
 if __name__ == "__main__":
     unittest.main()

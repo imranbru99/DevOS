@@ -2062,7 +2062,11 @@ class AgentWindow(QtWidgets.QMainWindow):
         elif kind == "done":
             if self.transcript and self.transcript[-1] == ["agent", ""]:
                 self.transcript[-1][1] = payload or "Task completed successfully."
-            self.transcript.append(["note", "Mission accomplished. Notes recorded to .devos/agent-notes.md."])
+            if self.agent and getattr(self.agent, "changed", None):
+                count = len(self.agent.changed)
+                self.transcript.append(["note", f"Mission accomplished. {count} file{'s' if count != 1 else ''} updated."])
+            else:
+                self.transcript.append(["note", "Execution completed."])
             self.thinking_banner.setVisible(False)
             self._dirty = True
 
