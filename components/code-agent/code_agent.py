@@ -415,9 +415,19 @@ class Workspace:
     def read_notes(self, limit: int = 1500) -> str:
         try:
             with open(self.notes_path(), encoding="utf-8") as handle:
-                text = handle.read()
+                lines = handle.readlines()
         except OSError:
             return ""
+        clean = []
+        for line in lines:
+            s = line.strip()
+            if not s or s.startswith("#"):
+                continue
+            # Strip lines that contain raw tool commands or prompt syntax
+            if any(bad in s for bad in ("write_file", "read_file", "apply_patch", "run_command", "```", "--- #")):
+                continue
+            clean.append(s)
+        text = "\n".join(clean)
         return text[-limit:]
 
     def add_note(self, line: str) -> None:
@@ -911,12 +921,18 @@ Workflow Rules:
      * React / Vue / Vite / Next.js: inspect `index.html`, `src/App.*`, `package.json`, or root entrypoint.
      * Python / FastAPI / Flask: inspect `main.py`, `app.py`, routes and templates.
      Pinpoint the root cause within 1-2 tool calls, then provide the direct solution without unnecessary loops.
-2. Outline a concise numbered plan (1-5 key milestones) only if a complex multi-step build is requested.
-3. When asked to run, test, start, or preview the application:
+2. Autonomous Application & Feature Implementation:
+   - When asked to build, complete, or develop an application, feature, or landing page (e.g. 'make the complete erp application with landing page'):
+     * NEVER stop after reading README.md or reviewing files! Reading is only the first step.
+     * Actively implement the required code by calling `write_file` or `apply_patch` immediately.
+     * For Laravel ERP projects: build out a rich, modern landing page in `resources/views/welcome.blade.php` (with modern UI styling, Hero banner, ERP module cards for Sales, HR, Inventory, Finance, and Users, KPI metrics, and navigation links).
+     * Connect all necessary routes in `routes/web.php` and verify controllers.
+3. Outline a concise numbered plan (1-5 key milestones) only if a complex multi-step build is requested.
+4. When asked to run, test, start, or preview the application:
    - Identify the real project entrypoint (e.g. check for package.json, main.py, app.py, manage.py, server.py, index.html, etc.) before running commands.
    - Use `run_command` with valid execution commands (e.g. `python3 app.py`, `npm start`, `npm run dev`, `pytest`, `php artisan serve`).
    - NEVER try to run documentation (.md), text files (.txt), or configs directly with python3 or bash.
-4. If creating or editing code, read relevant existing files first. Always output complete, valid, working code. NEVER use placeholders or ellipsis like '...' or '// rest of code'.
+5. If creating or editing code, read relevant existing files first. Always output complete, valid, working code. NEVER use placeholders or ellipsis like '...' or '// rest of code'.
 5. When asked questions (e.g. 'why failed to show landing page', 'how does this work', 'why did the command fail'):
    - Inspect the project files or recent actions and explain the technical cause and solution clearly.
    - NEVER refuse with 'I can't assist with that' or similar phrases. You have full capability and permission to assist with all software development, testing, and debugging tasks in this project.
@@ -1050,12 +1066,18 @@ class CodeAgent:
             if re.search(pat, reply_lower):
                 return True
         
-        # 2. Check if the user explicitly requested building a full project from scratch
-        is_large_build = any(kw in task_lower for kw in [
-            "complete project", "full project", "entire project", "build from scratch",
-            "create a full", "create an entire", "scaffold the project"
+        # 2. Check if the user requested building, creating, completing, or modifying an app or feature
+        is_build_or_code_task = any(kw in task_lower for kw in [
+            "make", "build", "create", "implement", "develop", "complete", "add", "fix",
+            "setup", "set up", "scaffold", "generate", "code", "write", "landing page", "erp",
+            "project", "application", "app", "feature", "module", "system"
         ])
-        if is_large_build and len(self.changed) <= 1 and step < 8:
+        # If the user asked to build/create/implement and ZERO files have been written yet,
+        # the agent MUST NOT stop after just reading a readme or summarizing!
+        if is_build_or_code_task and len(self.changed) == 0 and step < 12:
+            return True
+
+        if is_build_or_code_task and len(self.changed) < 2 and step < 8:
             completion_decl = any(ph in reply_lower for ph in [
                 "entire project is complete", "all phases are complete", "project has been fully built",
                 "everything is complete and ready"
@@ -1139,13 +1161,21 @@ class CodeAgent:
                         "topic": topic,
                         "status": "Continuing autonomous build to next phase/component...",
                     })
-                    self.messages.append({
-                        "role": "user",
-                        "content": (
-                            "Do not stop or output a summary yet. Continue autonomously with the next step "
-                            "of the project. Invoke the next tool call (e.g. write_file, apply_patch, or run_command) "
+                    if len(self.changed) == 0:
+                        cont_prompt = (
+                            f"You have analyzed the project requirements. Now start implementing the requested code for '{task}'. "
+                            "Do NOT just summarize or stop. Invoke the next tool call ('write_file' or 'apply_patch') "
+                            "to create or update the relevant files (such as routes, views, controllers, or templates) now."
+                        )
+                    else:
+                        cont_prompt = (
+                            "Do not stop yet. Continue autonomously with the next step of the project. "
+                            "Invoke the next tool call (e.g. write_file, apply_patch, or run_command) "
                             "now to implement the next file/action."
                         )
+                    self.messages.append({
+                        "role": "user",
+                        "content": cont_prompt
                     })
                     continue
 
@@ -1197,8 +1227,8 @@ class CodeAgent:
 
     def remember(self, task: str, final: str) -> None:
         summary = " ".join(final.split())[:200]
-        # Never record generic refusals into project notes
-        if any(bad in summary.lower() for bad in ("i can't assist", "i cannot assist", "i'm sorry, but")):
+        # Never record generic refusals, raw tool commands, or loops into project notes
+        if any(bad in summary.lower() for bad in ("i can't assist", "i cannot assist", "i'm sorry, but", "write_file", "read_file", "apply_patch", "--- #")):
             return
         changed = f" Changed: {', '.join(sorted(set(self.changed))[:8])}." if self.changed else ""
         try:
