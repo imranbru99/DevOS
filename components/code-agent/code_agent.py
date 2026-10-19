@@ -45,6 +45,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import patching  # noqa: E402
+try:
+    import providers  # noqa: E402
+except ImportError:
+    from . import providers  # noqa: E402
 
 AI_ENDPOINT = os.environ.get("DEVOS_AI_ENDPOINT", "http://127.0.0.1:11434/v1")
 CODE_MODEL = os.environ.get("DEVOS_AI_MODEL", "devos-ai-code")
@@ -279,6 +283,130 @@ class Workspace:
         text = (out or b"").decode("utf-8", errors="replace")
         return {"code": proc.returncode, "output": cap_output(text), "timed_out": timed_out,
                 "seconds": seconds}
+
+    def detect_run_info(self) -> Dict[str, Any]:
+        """Intelligently detects application type, run/serve command, port, and landing page URL."""
+        root = self.root
+
+        # 1. Node / Frontend / Vite / Next.js / Express
+        pkg_json = os.path.join(root, "package.json")
+        if os.path.isfile(pkg_json):
+            try:
+                with open(pkg_json, encoding="utf-8") as f:
+                    data = json.load(f)
+                scripts = data.get("scripts") or {}
+                for s in ("dev", "start", "serve", "preview"):
+                    if s in scripts:
+                        cmd = f"npm run {s}" if s != "start" else "npm start"
+                        script_text = scripts.get(s, "")
+                        port = 5173 if "vite" in script_text else (3000 if "next" in str(data) else 3000)
+                        return {
+                            "type": "Node.js / Web Application",
+                            "command": cmd,
+                            "port": port,
+                            "url": f"http://localhost:{port}",
+                            "preview_url": f"http://localhost:{port}",
+                            "hint": f"package.json (script '{s}')"
+                        }
+            except Exception:
+                pass
+
+        # 2. Django
+        if os.path.isfile(os.path.join(root, "manage.py")):
+            return {
+                "type": "Python / Django",
+                "command": "python3 manage.py runserver 8000",
+                "port": 8000,
+                "url": "http://localhost:8000",
+                "preview_url": "http://localhost:8000",
+                "hint": "manage.py"
+            }
+
+        # 3. Python web frameworks
+        for candidate in ("app.py", "main.py", "server.py", "wsgi.py", "asgi.py", "run.py"):
+            p = os.path.join(root, candidate)
+            if os.path.isfile(p):
+                try:
+                    with open(p, "r", encoding="utf-8", errors="ignore") as f:
+                        content = f.read(3000)
+                    if "FastAPI" in content:
+                        mod = os.path.splitext(candidate)[0]
+                        return {
+                            "type": "Python / FastAPI",
+                            "command": f"uvicorn {mod}:app --reload --port 8000",
+                            "port": 8000,
+                            "url": "http://localhost:8000",
+                            "preview_url": "http://localhost:8000",
+                            "hint": candidate
+                        }
+                    if "Flask" in content:
+                        return {
+                            "type": "Python / Flask",
+                            "command": f"python3 {candidate}",
+                            "port": 5000,
+                            "url": "http://localhost:5000",
+                            "preview_url": "http://localhost:5000",
+                            "hint": candidate
+                        }
+                    if "streamlit" in content:
+                        return {
+                            "type": "Python / Streamlit",
+                            "command": f"streamlit run {candidate}",
+                            "port": 8501,
+                            "url": "http://localhost:8501",
+                            "preview_url": "http://localhost:8501",
+                            "hint": candidate
+                        }
+                    if "http.server" in content or "HTTPServer" in content or "__main__" in content:
+                        return {
+                            "type": "Python / Application Script",
+                            "command": f"python3 {candidate}",
+                            "port": 8000,
+                            "url": "http://localhost:8000",
+                            "preview_url": "http://localhost:8000",
+                            "hint": candidate
+                        }
+                except Exception:
+                    pass
+
+        # 4. PHP / Laravel
+        if os.path.isfile(os.path.join(root, "artisan")):
+            return {
+                "type": "PHP / Laravel",
+                "command": "php artisan serve",
+                "port": 8000,
+                "url": "http://localhost:8000",
+                "preview_url": "http://localhost:8000",
+                "hint": "artisan"
+            }
+
+        # 5. Static HTML landing page
+        for html_candidate in ("index.html", "landing.html", "public/index.html", "dist/index.html", "build/index.html"):
+            if os.path.isfile(os.path.join(root, html_candidate)):
+                return {
+                    "type": "HTML / Static Landing Page",
+                    "command": "python3 -m http.server 3000",
+                    "port": 3000,
+                    "url": "http://localhost:3000",
+                    "preview_url": "http://localhost:3000",
+                    "hint": html_candidate
+                }
+
+        # 6. Rust / Go / Makefile
+        if os.path.isfile(os.path.join(root, "Cargo.toml")):
+            return {"type": "Rust", "command": "cargo run", "port": None, "url": None, "hint": "Cargo.toml"}
+        if os.path.isfile(os.path.join(root, "go.mod")):
+            return {"type": "Go", "command": "go run .", "port": None, "url": None, "hint": "go.mod"}
+        if os.path.isfile(os.path.join(root, "Makefile")):
+            return {"type": "Makefile", "command": "make run", "port": None, "url": None, "hint": "Makefile"}
+
+        return {
+            "type": "Generic Project",
+            "command": None,
+            "port": None,
+            "url": None,
+            "hint": "No standard web entrypoint detected"
+        }
 
     # ------------------------------------------------------------------ notes
     def notes_path(self) -> str:
@@ -692,15 +820,19 @@ def ensure_ai_service(endpoint: str = AI_ENDPOINT, timeout_seconds: float = 12.0
 
 
 class LocalLLM:
-    """Talks to DevOS AI over its OpenAI-compatible API, streaming (SSE)."""
+    """Talks to DevOS Local AI or high-speed Cloud Providers (Gemini, Groq, DeepSeek, OpenAI) via OpenAI SSE."""
 
-    def __init__(self, endpoint: str = AI_ENDPOINT, model: str = CODE_MODEL, api_key: str = "",
-                 max_tokens: int = 1536, timeout: int = 600):
-        self.endpoint = endpoint.rstrip("/")
-        self.model = model
-        self.api_key = api_key or os.environ.get("DEVOS_AI_KEY", "")
+    def __init__(self, endpoint: Optional[str] = None, model: Optional[str] = None, api_key: Optional[str] = None,
+                 max_tokens: int = 2048, timeout: int = 180):
+        active = providers.get_active_engine()
+        self.endpoint = (endpoint or active["endpoint"]).rstrip("/")
+        self.model = model or active["model"]
+        self.api_key = api_key if api_key is not None else active["api_key"]
         self.max_tokens = max_tokens
         self.timeout = timeout
+        self.is_local = (active.get("is_local", True) if endpoint is None else
+                         ("127.0.0.1" in self.endpoint or "localhost" in self.endpoint))
+        self.provider_name = active.get("name", "AI Engine")
 
     def chat(self, messages: List[Dict[str, str]], on_token: Optional[Callable[[str], None]] = None,
              should_stop: Optional[Callable[[], bool]] = None) -> str:
@@ -715,8 +847,7 @@ class LocalLLM:
             resp = urllib.request.urlopen(req, timeout=self.timeout)
         except (urllib.error.URLError, OSError) as exc:
             # If on localhost and connection failed, auto-start and retry once
-            is_local = "127.0.0.1" in self.endpoint or "localhost" in self.endpoint
-            if is_local:
+            if self.is_local:
                 if on_token:
                     on_token("⚡ DevOS AI Core is starting on this PC... initializing neural engine.\n")
                 if ensure_ai_service(self.endpoint, timeout_seconds=12.0):
@@ -729,7 +860,8 @@ class LocalLLM:
                     raise AgentError("DevOS AI is not answering on this PC. Failed to auto-start DevOS AI Core. "
                                      f"Run 'devos-ai' in terminal or check /var/tmp/devos-ai-core.log. ({exc})")
             else:
-                raise AgentError(f"DevOS AI is not answering at {self.endpoint}. ({exc})")
+                raise AgentError(f"{self.provider_name} ({self.model}) connection error: {exc}. "
+                                 "Please check your API key and network connection in Engine Settings.")
         with resp:
             if "event-stream" not in (resp.headers.get("Content-Type") or ""):
                 data = json.loads(resp.read().decode("utf-8", errors="replace") or "{}")
@@ -849,8 +981,13 @@ class CodeAgent:
     def first_message(self, task: str) -> str:
         files = self.ws.list_files(".", limit=40)
         notes = self.ws.read_notes()
-        parts = [f"Project folder: {os.path.basename(self.ws.root) or self.ws.root}",
-                 "Files:\n" + files]
+        run_info = self.ws.detect_run_info()
+        parts = [f"Project folder: {os.path.basename(self.ws.root) or self.ws.root}"]
+        if run_info.get("command"):
+            url_hint = f" (serves landing page on {run_info['url']})" if run_info.get("url") else ""
+            parts.append(f"Project Architecture: {run_info['type']}\n"
+                         f"Detected Run Command: `{run_info['command']}`{url_hint}")
+        parts.append("Files:\n" + files)
         if notes:
             parts.append("Project notes (.devos/agent-notes.md):\n" + notes)
         parts.append("Task: " + task.strip())

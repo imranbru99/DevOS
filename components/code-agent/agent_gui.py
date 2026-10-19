@@ -14,12 +14,17 @@ import shutil
 import sys
 import threading
 import time
+from typing import Any, Dict, List, Optional, Tuple
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import capability  # noqa: E402
 import code_agent as core  # noqa: E402
+try:
+    import providers  # noqa: E402
+except ImportError:
+    from . import providers  # noqa: E402
 
 from PyQt5 import QtCore, QtGui, QtWidgets  # noqa: E402
 
@@ -748,6 +753,247 @@ class AgentWorker(QtCore.QThread):
 
 
 # ==============================================================================
+# Engine & Acceleration Settings Dialog
+# ==============================================================================
+class EngineSettingsDialog(QtWidgets.QDialog):
+    """Cursor/Antigravity-grade AI Engine & Speed Switcher."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("DevOS AI Engine & Acceleration Settings")
+        self.resize(540, 520)
+        self.setStyleSheet("""
+            QDialog { background-color: #0b0f19; color: #f8fafc; font-family: 'Inter', sans-serif; }
+            QLabel { color: #f8fafc; font-size: 13px; }
+            QComboBox, QLineEdit {
+                background: #141c2c; border: 1px solid #233148; border-radius: 6px;
+                padding: 8px 12px; color: #f8fafc; font-size: 13px;
+            }
+            QComboBox:focus, QLineEdit:focus { border: 1px solid #38bdf8; }
+            QPushButton {
+                border-radius: 6px; padding: 8px 16px; font-weight: 600; font-size: 13px;
+            }
+        """)
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(22, 20, 22, 20)
+        layout.setSpacing(14)
+
+        # Header
+        head_box = QtWidgets.QHBoxLayout()
+        icon = QtWidgets.QLabel("⚡")
+        icon.setStyleSheet("font-size: 26px;")
+        head_box.addWidget(icon)
+        
+        titles = QtWidgets.QVBoxLayout()
+        t1 = QtWidgets.QLabel("AI Acceleration & Engine Settings")
+        t1.setStyleSheet("font-size: 17px; font-weight: 800; color: #38bdf8;")
+        t2 = QtWidgets.QLabel("Run at Cursor/Antigravity speeds (150-300+ tok/s) via cloud or 100% offline.")
+        t2.setStyleSheet("font-size: 12px; color: #94a3b8;")
+        titles.addWidget(t1)
+        titles.addWidget(t2)
+        head_box.addLayout(titles)
+        head_box.addStretch(1)
+        layout.addLayout(head_box)
+
+        # Provider Selection Box
+        box = QtWidgets.QFrame()
+        box.setStyleSheet("background: #111827; border: 1px solid #1f2937; border-radius: 8px; padding: 14px;")
+        box_layout = QtWidgets.QVBoxLayout(box)
+        box_layout.setSpacing(10)
+
+        p_lbl = QtWidgets.QLabel("<b>Active AI Provider / Accelerator:</b>")
+        box_layout.addWidget(p_lbl)
+
+        self.provider_combo = QtWidgets.QComboBox()
+        self.providers_order = ["gemini", "groq", "deepseek", "openai", "local"]
+        for pid in self.providers_order:
+            pinfo = providers.PROVIDERS[pid]
+            self.provider_combo.addItem(f"{pinfo['name']} — {pinfo['speed']}", pid)
+        box_layout.addWidget(self.provider_combo)
+
+        self.speed_badge = QtWidgets.QLabel("")
+        self.speed_badge.setStyleSheet("color: #7dd3fc; font-size: 12px; font-weight: 600;")
+        box_layout.addWidget(self.speed_badge)
+
+        # Model Selection
+        m_lbl = QtWidgets.QLabel("<b>Model:</b>")
+        box_layout.addWidget(m_lbl)
+        self.model_combo = QtWidgets.QComboBox()
+        self.model_combo.setEditable(True)
+        box_layout.addWidget(self.model_combo)
+
+        # API Key
+        self.key_lbl = QtWidgets.QLabel("<b>API Key:</b>")
+        box_layout.addWidget(self.key_lbl)
+        key_row = QtWidgets.QHBoxLayout()
+        self.key_edit = QtWidgets.QLineEdit()
+        self.key_edit.setEchoMode(QtWidgets.QLineEdit.Password)
+        self.key_edit.setPlaceholderText("Enter API key (e.g. AIzaSy... or gsk_...)")
+        key_row.addWidget(self.key_edit)
+
+        self.toggle_eye = QtWidgets.QPushButton("👁")
+        self.toggle_eye.setFixedWidth(40)
+        self.toggle_eye.setStyleSheet("background: #1e293b; color: #cbd5e1;")
+        self.toggle_eye.clicked.connect(self._toggle_key_visibility)
+        key_row.addWidget(self.toggle_eye)
+        box_layout.addLayout(key_row)
+
+        self.key_link = QtWidgets.QLabel("")
+        self.key_link.setOpenExternalLinks(True)
+        self.key_link.setStyleSheet("font-size: 11.5px; color: #38bdf8;")
+        box_layout.addWidget(self.key_link)
+
+        # Endpoint URL (Advanced)
+        ep_lbl = QtWidgets.QLabel("<b>Endpoint URL:</b>")
+        box_layout.addWidget(ep_lbl)
+        self.endpoint_edit = QtWidgets.QLineEdit()
+        box_layout.addWidget(self.endpoint_edit)
+        
+        layout.addWidget(box)
+
+        # Benchmark / Test Button & Result
+        bench_row = QtWidgets.QHBoxLayout()
+        self.test_btn = QtWidgets.QPushButton("⚡ Benchmark & Test Connection")
+        self.test_btn.setStyleSheet("background: #0369a1; color: white;")
+        self.test_btn.clicked.connect(self._run_benchmark)
+        bench_row.addWidget(self.test_btn)
+        bench_row.addStretch(1)
+        layout.addLayout(bench_row)
+
+        self.result_lbl = QtWidgets.QLabel("")
+        self.result_lbl.setStyleSheet("font-size: 12px; color: #cbd5e1; padding: 4px;")
+        layout.addWidget(self.result_lbl)
+
+        layout.addStretch(1)
+
+        # Dialog Buttons
+        btn_box = QtWidgets.QHBoxLayout()
+        cancel_btn = QtWidgets.QPushButton("Cancel")
+        cancel_btn.setStyleSheet("background: #1e293b; color: #cbd5e1;")
+        cancel_btn.clicked.connect(self.reject)
+        
+        save_btn = QtWidgets.QPushButton("Save & Activate Engine")
+        save_btn.setStyleSheet("background: #2563eb; color: white; padding: 8px 20px;")
+        save_btn.clicked.connect(self._save_and_apply)
+
+        btn_box.addStretch(1)
+        btn_box.addWidget(cancel_btn)
+        btn_box.addWidget(save_btn)
+        layout.addLayout(btn_box)
+
+        self.provider_combo.currentIndexChanged.connect(self._on_provider_changed)
+        self._load_current_settings()
+
+    def _toggle_key_visibility(self):
+        if self.key_edit.echoMode() == QtWidgets.QLineEdit.Password:
+            self.key_edit.setEchoMode(QtWidgets.QLineEdit.Normal)
+            self.toggle_eye.setText("🙈")
+        else:
+            self.key_edit.setEchoMode(QtWidgets.QLineEdit.Password)
+            self.toggle_eye.setText("👁")
+
+    def _load_current_settings(self):
+        conf = providers.load_config()
+        active = conf.get("active_provider") or "local"
+        idx = self.provider_combo.findData(active)
+        if idx >= 0:
+            self.provider_combo.setCurrentIndex(idx)
+        else:
+            self.provider_combo.setCurrentIndex(0)
+        self._update_fields_for_provider(active, conf)
+
+    def _on_provider_changed(self, idx):
+        pid = self.provider_combo.currentData()
+        conf = providers.load_config()
+        self._update_fields_for_provider(pid, conf)
+
+    def _update_fields_for_provider(self, pid: str, conf: Dict[str, Any]):
+        pinfo = providers.PROVIDERS.get(pid, providers.PROVIDERS["local"])
+        p_conf = conf.get("providers", {}).get(pid, {})
+        
+        self.speed_badge.setText(f"{pinfo['tagline']}  ·  {pinfo['speed']}")
+
+        # Populate models
+        self.model_combo.blockSignals(True)
+        self.model_combo.clear()
+        for m in pinfo["models"]:
+            self.model_combo.addItem(m)
+        cur_model = p_conf.get("model") or pinfo["default_model"]
+        idx = self.model_combo.findText(cur_model)
+        if idx >= 0:
+            self.model_combo.setCurrentIndex(idx)
+        else:
+            self.model_combo.setEditText(cur_model)
+        self.model_combo.blockSignals(False)
+
+        # Endpoint
+        self.endpoint_edit.setText(p_conf.get("endpoint") or pinfo["endpoint"])
+
+        # API Key
+        cur_key = p_conf.get("api_key") or (os.environ.get(pinfo["env_key"], "") if pinfo.get("env_key") else "")
+        self.key_edit.setText(cur_key)
+
+        if pid == "local":
+            self.key_lbl.setText("<b>API Key (Not Required for Offline Engine):</b>")
+            self.key_edit.setEnabled(False)
+            self.key_edit.setPlaceholderText("Offline mode: runs on local CPU/GPU")
+            self.key_link.setText("🔒 100% private offline: no API key or internet required.")
+        else:
+            self.key_lbl.setText(f"<b>{pinfo['name']} API Key:</b>")
+            self.key_edit.setEnabled(True)
+            self.key_edit.setPlaceholderText("Enter API key (stored encrypted locally)")
+            if pinfo.get("key_url"):
+                self.key_link.setText(f'<a href="{pinfo["key_url"]}" style="color: #38bdf8;">🔑 Get free {pinfo["name"]} API key →</a>')
+            else:
+                self.key_link.setText("")
+
+    def _run_benchmark(self):
+        pid = self.provider_combo.currentData()
+        endpoint = self.endpoint_edit.text().strip()
+        model = self.model_combo.currentText().strip()
+        key = self.key_edit.text().strip()
+
+        self.test_btn.setEnabled(False)
+        self.test_btn.setText("⚡ Benchmarking...")
+        self.result_lbl.setText("Sending benchmark query...")
+        QtWidgets.QApplication.processEvents()
+
+        def do_test():
+            res = providers.test_engine_connection(endpoint, model, key)
+            QtCore.QMetaObject.invokeMethod(self, "_on_benchmark_done",
+                                            QtCore.Qt.QueuedConnection,
+                                            QtCore.Q_ARG(object, res))
+        threading.Thread(target=do_test, daemon=True).start()
+
+    @QtCore.pyqtSlot(object)
+    def _on_benchmark_done(self, res):
+        self.test_btn.setEnabled(True)
+        self.test_btn.setText("⚡ Benchmark & Test Connection")
+        if res.get("success"):
+            self.result_lbl.setStyleSheet("color: #4ade80; font-size: 12px; font-weight: bold;")
+            self.result_lbl.setText(f"✅ {res['message']} — Response: \"{res['reply'][:60]}\"")
+        else:
+            self.result_lbl.setStyleSheet("color: #f87171; font-size: 12px;")
+            self.result_lbl.setText(f"❌ Connection failed: {res.get('error', 'Unknown error')}")
+
+    def _save_and_apply(self):
+        pid = self.provider_combo.currentData()
+        endpoint = self.endpoint_edit.text().strip()
+        model = self.model_combo.currentText().strip()
+        key = self.key_edit.text().strip()
+
+        conf = providers.load_config()
+        conf["active_provider"] = pid
+        p_entry = conf.setdefault("providers", {}).setdefault(pid, {})
+        p_entry["endpoint"] = endpoint
+        p_entry["model"] = model
+        p_entry["api_key"] = key
+        providers.save_config(conf)
+        self.accept()
+
+
+# ==============================================================================
 # Gating Widget
 # ==============================================================================
 class GatePanel(QtWidgets.QWidget):
@@ -1054,6 +1300,8 @@ class AgentWindow(QtWidgets.QMainWindow):
         
         for label, prompt, tip in [
             ("⚡ Plan", "Analyze the repository and create an architectural plan in docs/PHASE_1.md for the next phase.", "Plan Architecture — Analyze repository and create architectural plan"),
+            ("🚀 Run App", "quick_run_app", "Run App — Automatically detect and launch the application dev server"),
+            ("🌐 Preview", "quick_open_preview", "Live Preview — Open landing page or localhost web server in browser"),
             ("🧪 Tests", "Inspect tests and run the test suite to verify code integrity and reporting status.", "Run Tests — Inspect and run test suite"),
             ("🔍 Scan", "List key directories and read core entrypoints to understand project architecture.", "Scan Structure — List key directories and inspect core entrypoints"),
             ("📝 Patch", "Implement the next requested feature cleanly with minimal, high-cohesion changes.", "Implement & Patch — Implement next feature cleanly with minimal changes")
@@ -1062,7 +1310,12 @@ class AgentWindow(QtWidgets.QMainWindow):
             pill.setObjectName("quickPill")
             pill.setToolTip(tip)
             pill.setMinimumWidth(20)
-            pill.clicked.connect(lambda _, p=prompt: self.insert_prompt(p))
+            if prompt == "quick_run_app":
+                pill.clicked.connect(self.quick_run_app)
+            elif prompt == "quick_open_preview":
+                pill.clicked.connect(self.quick_open_preview)
+            else:
+                pill.clicked.connect(lambda _, p=prompt: self.insert_prompt(p))
             quick_row.addWidget(pill)
         quick_row.addStretch(1)
         chat_layout.addLayout(quick_row)
@@ -1514,38 +1767,70 @@ class AgentWindow(QtWidgets.QMainWindow):
             threading.Thread(target=core.ensure_ai_service, daemon=True).start()
 
     def _check_ai_status(self):
-        healthy = core.check_ai_health()
+        engine = providers.get_active_engine()
         if hasattr(self, "ai_badge"):
-            if healthy:
-                self.ai_badge.setText("●  devos-ai-code")
-                self.ai_badge.setProperty("state", "online")
-                self.ai_badge.setToolTip("DevOS AI Core is running on 127.0.0.1:11434.\nZero cloud latency, 100% private and offline.")
+            if engine["is_local"]:
+                healthy = core.check_ai_health()
+                if healthy:
+                    self.ai_badge.setText("●  devos-ai-code (Local) ▾")
+                    self.ai_badge.setProperty("state", "online")
+                    self.ai_badge.setToolTip("DevOS AI Core (Local Offline Engine) is active on 127.0.0.1:11434.\nClick to change model or speed acceleration settings.")
+                else:
+                    self.ai_badge.setText("⚠  Offline · Click to Setup ▾")
+                    self.ai_badge.setProperty("state", "offline")
+                    self.ai_badge.setToolTip("DevOS AI Core is offline.\nClick to start local engine or switch to Gemini/Groq.")
             else:
-                self.ai_badge.setText("⚠  Offline · Click to Start")
-                self.ai_badge.setProperty("state", "offline")
-                self.ai_badge.setToolTip("DevOS AI Core is not answering on 127.0.0.1:11434.\nClick to start the local neural engine now.")
+                has_key = bool(engine.get("api_key"))
+                status_icon = "⚡" if has_key else "⚠"
+                self.ai_badge.setText(f"{status_icon}  {engine['badge']} ▾")
+                self.ai_badge.setProperty("state", "cloud" if has_key else "warning")
+                self.ai_badge.setToolTip(f"Active Provider: {engine['name']}\nModel: {engine['model']}\nSpeed: {engine['speed']}\nClick to configure AI engines and API keys.")
             self.ai_badge.style().unpolish(self.ai_badge)
             self.ai_badge.style().polish(self.ai_badge)
 
     def _on_badge_clicked(self):
-        if not core.check_ai_health():
-            self.ai_badge.setText("○  Starting…")
-            self.ai_badge.setProperty("state", "starting")
-            self.ai_badge.style().unpolish(self.ai_badge)
-            self.ai_badge.style().polish(self.ai_badge)
-            threading.Thread(target=self._manual_start_ai, daemon=True).start()
-        else:
-            QtWidgets.QMessageBox.information(
-                self, "DevOS AI Core Status",
-                "DevOS AI Core (Local Neural Engine) is active and running!\n\n"
-                "• Endpoint: http://127.0.0.1:11434/v1\n"
-                "• Model: devos-ai-code\n"
-                "• Mode: 100% offline, local GPU/CPU accelerated"
-            )
+        dlg = EngineSettingsDialog(self)
+        if dlg.exec_() == QtWidgets.QDialog.Accepted:
+            self.llm = core.LocalLLM()
+            self._check_ai_status()
+            eng = providers.get_active_engine()
+            self.statusBar().showMessage(f"AI Engine switched to: {eng['name']} ({eng['model']}) — {eng['speed']}", 6000)
 
     def _manual_start_ai(self):
         core.ensure_ai_service(timeout_seconds=15.0)
         QtCore.QMetaObject.invokeMethod(self, "_check_ai_status", QtCore.Qt.QueuedConnection)
+
+    def quick_run_app(self):
+        """Quick action: automatically detects app entrypoint and runs dev server."""
+        if not self.folder:
+            self.choose_folder()
+            if not self.folder:
+                return
+        try:
+            run_info = core.Workspace(self.folder).detect_run_info()
+            cmd = run_info.get("command")
+            if cmd:
+                self.composer.setPlainText(f"Run the application dev server using `{cmd}` and verify operational status.")
+                self.send()
+            else:
+                self.composer.setPlainText("Identify the project entrypoint, launch the dev server, and check the landing page.")
+                self.send()
+        except Exception as e:
+            self.composer.setPlainText(f"Run the application and verify landing page status. ({e})")
+            self.send()
+
+    def quick_open_preview(self):
+        """Quick action: opens the live landing page in the web browser."""
+        url = "http://localhost:3000"
+        if self.folder:
+            try:
+                run_info = core.Workspace(self.folder).detect_run_info()
+                if run_info.get("url"):
+                    url = run_info["url"]
+            except Exception:
+                pass
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl(url))
+        self.statusBar().showMessage(f"Opened live preview at {url}", 4000)
 
     # ---------------------------------------------------------------- send & stop
     def send(self):

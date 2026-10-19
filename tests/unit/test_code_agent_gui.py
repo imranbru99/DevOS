@@ -3,6 +3,7 @@
 Unit tests for DevOS AI Code Agent GUI, Persistence, and Dynamic Contextual Controls.
 """
 
+import json
 import os
 import shutil
 import sys
@@ -294,8 +295,69 @@ class TestCodeAgentGUI(unittest.TestCase):
         finally:
             gui.AgentWorker = orig_worker
 
+    def test_workspace_detect_run_info_node(self):
+        """Test workspace entrypoint detection for package.json dev script."""
+        pkg_json = os.path.join(self.temp_dir, "package.json")
+        with open(pkg_json, "w") as f:
+            json.dump({"name": "my-app", "scripts": {"dev": "vite", "build": "vite build"}}, f)
+        ws = gui.core.Workspace(self.temp_dir)
+        info = ws.detect_run_info()
+        self.assertIsNotNone(info)
+        self.assertIn("npm run dev", info["command"])
+        self.assertIn("http://localhost:5173", info["preview_url"])
+
+    def test_workspace_detect_run_info_python_fastapi(self):
+        """Test workspace entrypoint detection for main.py with FastAPI."""
+        main_py = os.path.join(self.temp_dir, "main.py")
+        with open(main_py, "w") as f:
+            f.write("from fastapi import FastAPI\napp = FastAPI()\n")
+        ws = gui.core.Workspace(self.temp_dir)
+        info = ws.detect_run_info()
+        self.assertIsNotNone(info)
+        self.assertIn("uvicorn", info["command"])
+        self.assertIn("http://localhost:8000", info["preview_url"])
+
+    def test_workspace_detect_run_info_static_html(self):
+        """Test workspace entrypoint detection for static index.html."""
+        idx_html = os.path.join(self.temp_dir, "index.html")
+        with open(idx_html, "w") as f:
+            f.write("<!DOCTYPE html><html><body><h1>Landing Page</h1></body></html>")
+        ws = gui.core.Workspace(self.temp_dir)
+        info = ws.detect_run_info()
+        self.assertIsNotNone(info)
+        self.assertIn("http.server", info["command"])
+        self.assertIn("http://localhost:3000", info["preview_url"])
+
+    def test_providers_load_and_active_engine(self):
+        """Test provider configuration and active engine retrieval."""
+        orig_p_config = gui.providers.CONFIG_FILE
+        try:
+            gui.providers.CONFIG_FILE = os.path.join(self.temp_dir, "prov-config.json")
+            conf = gui.providers.load_config()
+            self.assertIn("active_provider", conf)
+            
+            gui.providers.set_active_engine("gemini", model="gemini-2.0-flash", api_key="test_key_123")
+            engine = gui.providers.get_active_engine()
+            self.assertEqual(engine["provider"], "gemini")
+            self.assertEqual(engine["model"], "gemini-2.0-flash")
+            self.assertEqual(engine["api_key"], "test_key_123")
+        finally:
+            gui.providers.CONFIG_FILE = orig_p_config
+
+    def test_engine_settings_dialog(self):
+        """Test EngineSettingsDialog instantiates and updates fields correctly."""
+        dlg = gui.EngineSettingsDialog()
+        self.assertIsNotNone(dlg.provider_combo)
+        self.assertGreaterEqual(dlg.provider_combo.count(), 4)
+        # Select Groq
+        idx = dlg.provider_combo.findData("groq")
+        self.assertGreaterEqual(idx, 0)
+        dlg.provider_combo.setCurrentIndex(idx)
+        self.assertIn("300+", dlg.speed_badge.text())
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
