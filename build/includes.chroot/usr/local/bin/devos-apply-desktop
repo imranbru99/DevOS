@@ -82,4 +82,9 @@ if command -v devos-power >/dev/null 2>&1; then
     fi
 fi
 
+# Auto-detect optimal display resolution (e.g. 1080p Full HD on 32-inch and external screens)
+if command -v devos-display >/dev/null 2>&1; then
+    devos-display auto >/dev/null 2>&1 || true
+fi
+
 exit 0

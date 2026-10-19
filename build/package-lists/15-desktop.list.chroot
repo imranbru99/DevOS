@@ -61,4 +61,6 @@ libnotify-bin
 # Power management and hardware sleep/battery daemon
 powerdevil
 upower
+# KDE monitor hotplug, optimal native resolution detection, and display settings
+kscreen
 

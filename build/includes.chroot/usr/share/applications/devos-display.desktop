@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Name=Display Settings
+GenericName=Screen Resolution & Display
+Comment=Change screen resolution, refresh rate, and layout scaling
+Exec=devos-display
+Icon=preferences-desktop-display
+Terminal=false
+Type=Application
+Categories=Settings;HardwareSettings;DesktopSettings;Qt;
+Keywords=display;screen;resolution;monitor;scale;1080p;tv;
+StartupNotify=true

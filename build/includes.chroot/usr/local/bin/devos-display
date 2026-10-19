@@ -1,0 +1,486 @@
+#!/usr/bin/env python3
+"""
+DevOS Display Settings (Windows 11 Style)
+Provides GUI & CLI for resolution configuration, refresh rates,
+and display scaling with automatic optimal resolution selection.
+"""
+
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from typing import Dict, List, Optional, Tuple
+
+
+def get_displays() -> List[Dict]:
+    """Parse xrandr output into structured display info."""
+    displays = []
+    try:
+        raw = subprocess.check_output(["xrandr", "-q"], stderr=subprocess.DEVNULL).decode()
+    except Exception:
+        return displays
+
+    current_disp = None
+    for line in raw.splitlines():
+        conn_match = re.match(
+            r"^(\S+)\s+(connected|disconnected)\s*(primary)?\s*(\d+x\d+\+\d+\+\d+)?\s*(.*)$", line
+        )
+        if conn_match:
+            name, status, primary, geom, extra = conn_match.groups()
+            current_disp = {
+                "name": name,
+                "connected": status == "connected",
+                "primary": bool(primary),
+                "geometry": geom or "",
+                "modes": []
+            }
+            if current_disp["connected"]:
+                displays.append(current_disp)
+            continue
+
+        if current_disp and current_disp["connected"] and line.startswith("   "):
+            parts = line.split()
+            if parts:
+                res = parts[0]
+                is_active = "*" in line
+                is_pref = "+" in line
+                rates = []
+                for p in parts[1:]:
+                    cleaned = p.rstrip("*+").strip()
+                    if cleaned and cleaned not in rates:
+                        rates.append(cleaned)
+                current_disp["modes"].append({
+                    "res": res,
+                    "rates": rates,
+                    "active": is_active,
+                    "preferred": is_pref
+                })
+    return displays
+
+
+def apply_resolution(output: str, mode: str, rate: Optional[str] = None) -> bool:
+    """Apply resolution using kscreen-doctor (preferred) or xrandr fallback."""
+    # Try kscreen-doctor first
+    if shutil.which("kscreen-doctor"):
+        target_mode = mode
+        if rate:
+            # Round rate for kscreen-doctor (e.g. 60.00 -> 60)
+            try:
+                rate_int = int(round(float(rate)))
+                target_mode = f"{mode}@{rate_int}"
+            except Exception:
+                target_mode = f"{mode}@{rate}"
+        cmd = ["kscreen-doctor", f"output.{output}.mode.{target_mode}"]
+        try:
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+            if res.returncode == 0:
+                return True
+        except Exception:
+            pass
+
+    # Fallback to xrandr
+    cmd = ["xrandr", "--output", output, "--mode", mode]
+    if rate:
+        cmd.extend(["--rate", rate])
+    try:
+        res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+        return res.returncode == 0
+    except Exception:
+        return False
+
+
+def auto_configure_displays() -> List[str]:
+    """
+    Ensure displays select their best native resolution.
+    Especially fixes TV/monitors (like 32-inch HDMI screens) that report 768p
+    as preferred mode even though they support 1080p Full HD.
+    """
+    actions = []
+    displays = get_displays()
+    for disp in displays:
+        if not disp["connected"] or not disp["modes"]:
+            continue
+
+        active_mode = None
+        for m in disp["modes"]:
+            if m["active"]:
+                active_mode = m
+                break
+
+        # Check if 1920x1080 or better exists
+        has_1080p = any(m["res"] == "1920x1080" for m in disp["modes"])
+        is_sub_1080 = False
+        if active_mode:
+            try:
+                w, h = map(int, active_mode["res"].split("x"))
+                if h < 1080 and w < 1920:
+                    is_sub_1080 = True
+            except Exception:
+                pass
+
+        if has_1080p and is_sub_1080:
+            rate = "60.00"
+            for m in disp["modes"]:
+                if m["res"] == "1920x1080" and m["rates"]:
+                    rate = m["rates"][0]
+                    break
+            ok = apply_resolution(disp["name"], "1920x1080", rate)
+            if ok:
+                actions.append(f"Upgraded {disp['name']} from {active_mode['res']} to 1920x1080@{rate}")
+    return actions
+
+
+def run_gui():
+    try:
+        from PyQt5.QtCore import Qt, QTimer
+        from PyQt5.QtGui import QColor, QFont, QIcon
+        from PyQt5.QtWidgets import (
+            QApplication,
+            QComboBox,
+            QDialog,
+            QFrame,
+            QHBoxLayout,
+            QLabel,
+            QMainWindow,
+            QMessageBox,
+            QPushButton,
+            QVBoxLayout,
+            QWidget,
+        )
+    except ImportError:
+        print("PyQt5 is required for GUI mode. Use CLI commands instead.")
+        sys.exit(1)
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    app.setStyle("Fusion")
+
+    class DisplaySettingsWindow(QMainWindow):
+        def __init__(self):
+            super().__init__()
+            self.setWindowTitle("Display Settings - DevOS")
+            self.setMinimumSize(640, 500)
+            self.resize(700, 540)
+            self.displays = get_displays()
+            self._prev_settings = {}
+            self._init_ui()
+
+        def _init_ui(self):
+            self.setStyleSheet("""
+                QMainWindow {
+                    background-color: #202020;
+                }
+                QWidget {
+                    background-color: #202020;
+                    color: #ffffff;
+                    font-family: 'Segoe UI', 'Inter', 'Noto Sans', sans-serif;
+                    font-size: 13px;
+                }
+                QFrame#card {
+                    background-color: #2b2b2b;
+                    border: 1px solid #383838;
+                    border-radius: 8px;
+                    padding: 16px;
+                }
+                QFrame#previewCard {
+                    background-color: #1a1a1a;
+                    border: 2px dashed #0078d4;
+                    border-radius: 8px;
+                    min-height: 120px;
+                }
+                QLabel#headerTitle {
+                    font-size: 20px;
+                    font-weight: 600;
+                    color: #ffffff;
+                }
+                QLabel#sectionTitle {
+                    font-size: 15px;
+                    font-weight: 600;
+                    color: #ffffff;
+                }
+                QLabel#subText {
+                    color: #a0a0a0;
+                    font-size: 12px;
+                }
+                QComboBox {
+                    background-color: #333333;
+                    border: 1px solid #444444;
+                    border-radius: 4px;
+                    padding: 6px 12px;
+                    color: #ffffff;
+                    min-height: 22px;
+                }
+                QComboBox::drop-down {
+                    border: none;
+                    width: 24px;
+                }
+                QComboBox QAbstractItemView {
+                    background-color: #2b2b2b;
+                    color: #ffffff;
+                    selection-background-color: #0078d4;
+                    border: 1px solid #444444;
+                }
+                QPushButton {
+                    background-color: #333333;
+                    border: 1px solid #444444;
+                    border-radius: 4px;
+                    padding: 8px 20px;
+                    color: #ffffff;
+                    font-weight: 500;
+                }
+                QPushButton:hover {
+                    background-color: #3a3a3a;
+                    border-color: #555555;
+                }
+                QPushButton#primaryBtn {
+                    background-color: #0078d4;
+                    border: 1px solid #0078d4;
+                    color: #ffffff;
+                }
+                QPushButton#primaryBtn:hover {
+                    background-color: #106ebe;
+                }
+            """)
+
+            central = QWidget()
+            self.setCentralWidget(central)
+            main_layout = QVBoxLayout(central)
+            main_layout.setContentsMargins(28, 24, 28, 24)
+            main_layout.setSpacing(18)
+
+            # Title
+            title_lbl = QLabel("Display")
+            title_lbl.setObjectName("headerTitle")
+            sub_title = QLabel("Monitor resolution, refresh rate, and layout scaling")
+            sub_title.setObjectName("subText")
+            main_layout.addWidget(title_lbl)
+            main_layout.addWidget(sub_title)
+
+            # Display Preview Card (like Windows 11)
+            preview_card = QFrame()
+            preview_card.setObjectName("previewCard")
+            pv_layout = QVBoxLayout(preview_card)
+            pv_layout.setAlignment(Qt.AlignCenter)
+            disp_name = self.displays[0]["name"] if self.displays else "Default Display"
+            geom = self.displays[0].get("geometry", "1920x1080") if self.displays else "1920x1080"
+            self.preview_lbl = QLabel(f"🖥️  {disp_name}\n{geom}")
+            self.preview_lbl.setAlignment(Qt.AlignCenter)
+            self.preview_lbl.setStyleSheet("font-size: 15px; font-weight: 600; color: #60cdff;")
+            pv_layout.addWidget(self.preview_lbl)
+            main_layout.addWidget(preview_card)
+
+            # Scale & layout Card
+            card = QFrame()
+            card.setObjectName("card")
+            card_layout = QVBoxLayout(card)
+            card_layout.setSpacing(14)
+
+            sec_title = QLabel("Scale & layout")
+            sec_title.setObjectName("sectionTitle")
+            card_layout.addWidget(sec_title)
+
+            # Display Resolution row
+            res_row = QHBoxLayout()
+            res_info = QVBoxLayout()
+            res_lbl = QLabel("Display resolution")
+            res_desc = QLabel("Adjust the resolution to fit your screen")
+            res_desc.setObjectName("subText")
+            res_info.addWidget(res_lbl)
+            res_info.addWidget(res_desc)
+            res_row.addLayout(res_info)
+
+            self.res_combo = QComboBox()
+            self.res_combo.setMinimumWidth(220)
+            self.res_combo.currentIndexChanged.connect(self._on_res_changed)
+            res_row.addWidget(self.res_combo)
+            card_layout.addLayout(res_row)
+
+            # Refresh Rate row
+            rate_row = QHBoxLayout()
+            rate_info = QVBoxLayout()
+            rate_lbl = QLabel("Refresh rate")
+            rate_desc = QLabel("Higher rates give smoother motion")
+            rate_desc.setObjectName("subText")
+            rate_info.addWidget(rate_lbl)
+            rate_info.addWidget(rate_desc)
+            rate_row.addLayout(rate_info)
+
+            self.rate_combo = QComboBox()
+            self.rate_combo.setMinimumWidth(220)
+            rate_row.addWidget(self.rate_combo)
+            card_layout.addLayout(rate_row)
+
+            # Scale row
+            scale_row = QHBoxLayout()
+            scale_info = QVBoxLayout()
+            scale_lbl = QLabel("Scale")
+            scale_desc = QLabel("Change the size of text, apps, and items")
+            scale_desc.setObjectName("subText")
+            scale_info.addWidget(scale_lbl)
+            scale_info.addWidget(scale_desc)
+            scale_row.addLayout(scale_info)
+
+            self.scale_combo = QComboBox()
+            self.scale_combo.setMinimumWidth(220)
+            self.scale_combo.addItems(["100% (Recommended)", "125%", "150%"])
+            scale_row.addWidget(self.scale_combo)
+            card_layout.addLayout(scale_row)
+
+            main_layout.addWidget(card)
+            main_layout.addStretch()
+
+            # Bottom Actions
+            btn_row = QHBoxLayout()
+            btn_row.addStretch()
+            self.revert_btn = QPushButton("Cancel")
+            self.revert_btn.clicked.connect(self.close)
+            self.apply_btn = QPushButton("Apply")
+            self.apply_btn.setObjectName("primaryBtn")
+            self.apply_btn.clicked.connect(self._apply_settings)
+            btn_row.addWidget(self.revert_btn)
+            btn_row.addWidget(self.apply_btn)
+            main_layout.addLayout(btn_row)
+
+            self._populate_modes()
+
+        def _populate_modes(self):
+            if not self.displays:
+                return
+            disp = self.displays[0]
+            self.res_combo.clear()
+
+            active_idx = 0
+            # Identify highest resolution to mark as recommended
+            modes = disp.get("modes", [])
+            has_1080p = any(m["res"] == "1920x1080" for m in modes)
+
+            for i, m in enumerate(modes):
+                res_str = m["res"]
+                is_recommended = False
+                if has_1080p and res_str == "1920x1080":
+                    is_recommended = True
+                elif not has_1080p and i == 0:
+                    is_recommended = True
+
+                label = f"{res_str} (Recommended)" if is_recommended else res_str
+                self.res_combo.addItem(label, res_str)
+                if m.get("active"):
+                    active_idx = i
+
+            self.res_combo.setCurrentIndex(active_idx)
+            self._update_rates(active_idx)
+
+        def _on_res_changed(self, idx):
+            self._update_rates(idx)
+
+        def _update_rates(self, res_idx):
+            self.rate_combo.clear()
+            if not self.displays or res_idx < 0:
+                return
+            modes = self.displays[0].get("modes", [])
+            if res_idx >= len(modes):
+                return
+            m = modes[res_idx]
+            for r in m.get("rates", []):
+                self.rate_combo.addItem(f"{r} Hz", r)
+
+        def _apply_settings(self):
+            if not self.displays:
+                return
+            disp_name = self.displays[0]["name"]
+            selected_res = self.res_combo.currentData()
+            selected_rate = self.rate_combo.currentData()
+
+            # Record previous for rollback
+            prev_mode = None
+            for m in self.displays[0].get("modes", []):
+                if m.get("active"):
+                    prev_mode = m
+                    break
+
+            ok = apply_resolution(disp_name, selected_res, selected_rate)
+            if not ok:
+                QMessageBox.critical(self, "Error", f"Failed to apply {selected_res} on {disp_name}.")
+                return
+
+            # Show Keep Changes countdown dialog (Windows 11 style)
+            confirm_dlg = QDialog(self)
+            confirm_dlg.setWindowTitle("Keep display settings?")
+            confirm_dlg.setFixedSize(380, 160)
+            c_layout = QVBoxLayout(confirm_dlg)
+            c_layout.setContentsMargins(20, 20, 20, 20)
+
+            lbl = QLabel(f"Reverting to previous settings in 15 seconds…")
+            lbl.setStyleSheet("font-size: 14px; font-weight: 500;")
+            c_layout.addWidget(lbl)
+            c_layout.addStretch()
+
+            btn_box = QHBoxLayout()
+            btn_box.addStretch()
+            keep_btn = QPushButton("Keep changes")
+            keep_btn.setObjectName("primaryBtn")
+            revert_btn = QPushButton("Revert")
+            btn_box.addWidget(keep_btn)
+            btn_box.addWidget(revert_btn)
+            c_layout.addLayout(btn_box)
+
+            countdown = [15]
+            timer = QTimer(confirm_dlg)
+
+            def tick():
+                countdown[0] -= 1
+                if countdown[0] <= 0:
+                    timer.stop()
+                    confirm_dlg.reject()
+                else:
+                    lbl.setText(f"Reverting to previous settings in {countdown[0]} seconds…")
+
+            timer.timeout.connect(tick)
+            timer.start(1000)
+
+            keep_btn.clicked.connect(confirm_dlg.accept)
+            revert_btn.clicked.connect(confirm_dlg.reject)
+
+            res = confirm_dlg.exec_()
+            timer.stop()
+
+            if res != QDialog.Accepted and prev_mode:
+                prev_rate = prev_mode["rates"][0] if prev_mode.get("rates") else None
+                apply_resolution(disp_name, prev_mode["res"], prev_rate)
+            else:
+                self.displays = get_displays()
+                geom = self.displays[0].get("geometry", selected_res) if self.displays else selected_res
+                self.preview_lbl.setText(f"🖥️  {disp_name}\n{geom}")
+
+    win = DisplaySettingsWindow()
+    win.show()
+    sys.exit(app.exec_())
+
+
+def main():
+    if len(sys.argv) > 1:
+        cmd = sys.argv[1].lower()
+        if cmd == "auto":
+            actions = auto_configure_displays()
+            for a in actions:
+                print(a)
+            if not actions:
+                print("All connected displays are already at their optimal resolutions.")
+            return 0
+        elif cmd == "list":
+            print(json.dumps(get_displays(), indent=2))
+            return 0
+        elif cmd == "set" and len(sys.argv) >= 4:
+            out = sys.argv[2]
+            mode = sys.argv[3]
+            rate = sys.argv[4] if len(sys.argv) > 4 else None
+            ok = apply_resolution(out, mode, rate)
+            print(f"Set {out} to {mode}" + (f"@{rate}" if rate else "") + f": {'SUCCESS' if ok else 'FAILED'}")
+            return 0 if ok else 1
+
+    run_gui()
+
+
+if __name__ == "__main__":
+    main()
