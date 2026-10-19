@@ -768,14 +768,20 @@ def read_sse(lines, on_token=None, should_stop=None) -> str:
 
 # ===================================================================== agent
 
-SYSTEM_PROMPT = """You are DevOS AI Code Agent, an autonomous software engineer working in the user's project folder.
-Your mission is to understand user requests, inspect code, implement robust solutions, and run or test the software.
+SYSTEM_PROMPT = """You are DevOS AI Code Agent, an expert autonomous software engineer working in the user's project workspace.
+Your mission is to understand user requests, inspect code, implement robust solutions, run or test software, and provide helpful, clear technical answers.
 
 Workflow Rules:
 1. Outline a concise numbered plan (1-5 key milestones) if the task requires multiple steps.
-2. If the user asks to run, test, start, or check the application, use `run_command` (e.g. `php artisan test`, `php artisan serve`, `npm test`, `pytest`, `python3 <script>`) or inspect the code and answer directly.
+2. When asked to run, test, start, or check the application:
+   - Identify the real project entrypoint (e.g. check for package.json, main.py, app.py, manage.py, server.py, index.html, etc.) before running commands.
+   - Use `run_command` with valid execution commands (e.g. `python3 app.py`, `npm start`, `npm run dev`, `pytest`, `php artisan serve`).
+   - NEVER try to run documentation (.md), text files (.txt), or configs directly with python3 or bash.
 3. If creating or editing code, read relevant existing files first. Always output complete, valid, working code. NEVER use placeholders or ellipsis like '...' or '// rest of code'.
-4. Write a tool call exactly like this:
+4. When asked questions (e.g. 'why failed to show landing page', 'how does this work', 'why did the command fail'):
+   - Inspect the project files or recent actions and explain the technical cause and solution clearly.
+   - NEVER refuse with 'I can't assist with that' or similar phrases. You have full capability and permission to assist with all software development, testing, and debugging tasks in this project.
+5. Write tool calls exactly like this:
 ```tool read_file
 path: README.md
 ```
@@ -788,7 +794,7 @@ Tools:
 - run_command command: <shell command run in the project folder>
 Only refer to actual files that exist in the project folder.
 The user approves every change and command; if they reject one, do not repeat it.
-5. When the user's question is answered or all requested steps are completed, reply with a clear final summary and no tool block."""
+6. When the user's question is answered or all requested steps are completed, reply with a clear final summary and no tool block."""
 
 FORMAT_HELP = ("Your tool call could not be read. Write exactly one block like:\n"
                "```tool read_file\npath: README.md\n```\nor, for a new file:\n"
@@ -822,7 +828,8 @@ class CodeAgent:
 
     def __init__(self, workspace: Workspace, llm, approve: Callable[[Action], bool],
                  policy: Optional[ApprovalPolicy] = None, on_event: Callable[[str, Any], None] = noop_event,
-                 max_steps: int = 35, keep_notes: bool = True):
+                 max_steps: int = 35, keep_notes: bool = True,
+                 history: Optional[List[Dict[str, str]]] = None):
         self.ws = workspace
         self.llm = llm
         self.approve = approve
@@ -833,6 +840,7 @@ class CodeAgent:
         self.cancelled = False
         self.messages: List[Dict[str, str]] = []
         self.changed: List[str] = []
+        self.history: List[Dict[str, str]] = history or []
 
     def cancel(self) -> None:
         self.cancelled = True
@@ -926,8 +934,10 @@ class CodeAgent:
                 "Verify syntax & run validation checks",
             ]
         self.on_event("task_init", {"topic": topic, "task": task, "plan": initial_plan})
-        self.messages = [{"role": "system", "content": SYSTEM_PROMPT},
-                         {"role": "user", "content": self.first_message(task)}]
+        self.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        if self.history:
+            self.messages.extend(self.history[-6:])
+        self.messages.append({"role": "user", "content": self.first_message(task)})
         final = ""
         bad_format = 0
         call_history: List[Tuple[str, str, str]] = []
@@ -1038,6 +1048,9 @@ class CodeAgent:
 
     def remember(self, task: str, final: str) -> None:
         summary = " ".join(final.split())[:200]
+        # Never record generic refusals into project notes
+        if any(bad in summary.lower() for bad in ("i can't assist", "i cannot assist", "i'm sorry, but")):
+            return
         changed = f" Changed: {', '.join(sorted(set(self.changed))[:8])}." if self.changed else ""
         try:
             self.ws.add_note(f"- {datetime.date.today().isoformat()} · {' '.join(task.split())[:120]}"

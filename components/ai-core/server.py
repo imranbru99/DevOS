@@ -871,12 +871,14 @@ class DevOSAIEngine:
     def _build_chat(self, messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
         ram = self.tier_info.get("ram_gb")
         tier = self.tier_info.get("tier")
-        # The identity always comes first, even when a caller (Optimizer, code
-        # agent, VS Code) sends its own system message. Small models otherwise
-        # guess who they are and claimed to be a cloud assistant.
-        identity = devos_identity_prompt(ram, tier)
         callers = [m.get("content") or "" for m in messages if m.get("role") == "system"]
-        chat = [{"role": "system", "content": "\n\n".join([identity] + [c for c in callers if c])}]
+        if callers:
+            # When a specialized agent (Code Agent, Optimizer, IDE, etc.) provides its own
+            # system instructions, use them directly so the model is not restricted by desktop help-desk prompts.
+            chat = [{"role": "system", "content": "\n\n".join(c for c in callers if c)}]
+        else:
+            identity = devos_identity_prompt(ram, tier)
+            chat = [{"role": "system", "content": identity}]
         for message in messages:
             role = message.get("role") or "user"
             content = message.get("content") or ""

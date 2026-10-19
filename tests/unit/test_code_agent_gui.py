@@ -240,9 +240,11 @@ class TestCodeAgentGUI(unittest.TestCase):
 
         orig_worker = gui.AgentWorker
         captured_task = []
+        captured_kwargs = []
         try:
-            def mock_worker(folder, task, policy, llm):
+            def mock_worker(folder, task, policy, llm, *args, **kwargs):
                 captured_task.append(task)
+                captured_kwargs.append(kwargs)
                 return DummyWorker()
             gui.AgentWorker = mock_worker
 
@@ -252,6 +254,43 @@ class TestCodeAgentGUI(unittest.TestCase):
             self.assertIn("Attached image:", captured_task[0])
             self.assertEqual(len(win.attached_images), 0, "Attached images should be cleared after send")
             self.assertTrue(win.attachment_bar.isHidden())
+        finally:
+            gui.AgentWorker = orig_worker
+
+    def test_multi_turn_history_passed_to_worker(self):
+        """Verify that previous conversation turns are passed to AgentWorker."""
+        win = gui.AgentWindow(capable=(True, "Ready"))
+        win.set_folder(self.temp_dir)
+        win.transcript = [
+            ["user", "can u run this"],
+            ["agent", "run_command command: python3 main.py"],
+            ["user", "why failed to show landing page"],
+            ["agent", ""]
+        ]
+        win.composer.setPlainText("what is the fix")
+
+        class DummyWorker(QtCore.QObject):
+            event = QtCore.pyqtSignal(str, object)
+            approval = QtCore.pyqtSignal(object)
+            failed = QtCore.pyqtSignal(str)
+            finished = QtCore.pyqtSignal()
+            def start(self): pass
+
+        orig_worker = gui.AgentWorker
+        captured_history = []
+        try:
+            def mock_worker(folder, task, policy, llm, *args, **kwargs):
+                captured_history.append(kwargs.get("history", []))
+                return DummyWorker()
+            gui.AgentWorker = mock_worker
+
+            win.send()
+            self.assertEqual(len(captured_history), 1)
+            hist = captured_history[0]
+            self.assertGreaterEqual(len(hist), 2)
+            self.assertEqual(hist[0]["role"], "user")
+            self.assertEqual(hist[0]["content"], "can u run this")
+            self.assertEqual(hist[1]["role"], "assistant")
         finally:
             gui.AgentWorker = orig_worker
 

@@ -706,12 +706,13 @@ class AgentWorker(QtCore.QThread):
     approval = QtCore.pyqtSignal(object)
     failed = QtCore.pyqtSignal(str)
 
-    def __init__(self, folder, task, policy, llm=None):
+    def __init__(self, folder, task, policy, llm=None, history=None):
         super().__init__()
         self.folder = folder
         self.task = task
         self.policy = policy
         self.llm = llm or core.LocalLLM()
+        self.history = history or []
         self._answer = False
         self._answered = threading.Event()
         self.agent = None
@@ -738,7 +739,7 @@ class AgentWorker(QtCore.QThread):
             workspace = core.Workspace(self.folder)
             self.agent = core.CodeAgent(workspace, self.llm, self.ask, self.policy,
                                         on_event=lambda kind, payload=None: self.event.emit(kind, payload),
-                                        max_steps=40)
+                                        max_steps=40, history=self.history)
             self.agent.run(self.task)
         except core.AgentError as exc:
             self.failed.emit(str(exc))
@@ -1601,8 +1602,16 @@ class AgentWindow(QtWidgets.QMainWindow):
         self.tb_status.setText(self.active_status_text)
         self.tb_topic.setText(f"🎯 Target: {self.current_topic}")
         self.thinking_banner.setVisible(True)
+        # Collect previous conversation turns for multi-turn context
+        history_turns = []
+        for role, text in self.transcript[:-2]:
+            if text and text.strip():
+                history_turns.append({
+                    "role": "user" if role == "user" else "assistant",
+                    "content": text.strip()[:2000]
+                })
 
-        self.worker = AgentWorker(self.folder, agent_task, self.policy, self.llm)
+        self.worker = AgentWorker(self.folder, agent_task, self.policy, self.llm, history=history_turns)
         self.worker.event.connect(self.on_event)
         self.worker.approval.connect(self.on_approval)
         self.worker.failed.connect(self.on_failed)
