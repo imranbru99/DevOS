@@ -452,6 +452,23 @@ class TestCodeAgentGUI(unittest.TestCase):
         self.assertEqual(len(win.prompt_queue), 0)
         self.assertTrue(win.queue_bar.isHidden())
 
+    def test_code_agent_execute_command_and_edit(self):
+        """Verify CodeAgent has _command, _edit, and _read, and execute() works without attribute errors."""
+        agent = gui.core.CodeAgent(
+            gui.core.Workspace(self.temp_dir),
+            llm=None,
+            approve=lambda a: True,
+            policy=gui.core.ApprovalPolicy(auto_reads=True, auto_edits=True, auto_commands=True)
+        )
+        self.assertTrue(hasattr(agent, "_command"))
+        self.assertTrue(hasattr(agent, "_edit"))
+        self.assertTrue(hasattr(agent, "_read"))
+
+        # Test command execution
+        cmd_call = gui.core.ToolCall("run_command", {"command": "echo 'devos test'"})
+        res = agent.execute(cmd_call)
+        self.assertIn("devos test", res)
+
 
 if __name__ == "__main__":
     unittest.main()

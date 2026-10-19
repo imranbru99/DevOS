@@ -994,6 +994,20 @@ def extract_task_topic(task: str) -> str:
     return first_meaningful
 
 
+def clean_file_content(content: str) -> str:
+    if not content:
+        return ""
+    lines = content.split("\n")
+    while lines and (not lines[0].strip() or lines[0].strip().startswith("```") or lines[0].strip() in ("---", ", ---", "--")):
+        lines.pop(0)
+    while lines and (not lines[-1].strip() or lines[-1].strip().startswith("```") or lines[-1].strip() in ("---", ", ---", "--", "...", "... rest of code", "// ...", "# ...")):
+        lines.pop()
+    cleaned = "\n".join(lines)
+    if cleaned and not cleaned.endswith("\n"):
+        cleaned += "\n"
+    return cleaned
+
+
 class CodeAgent:
     """The agent loop: ask the model, run one tool, show the result, repeat."""
 
@@ -1354,20 +1368,6 @@ class CodeAgent:
             out = self.ws.list_files(path)
         self.on_event("step_status", "done")
         return out
-
-def clean_file_content(content: str) -> str:
-    if not content:
-        return ""
-    lines = content.split("\n")
-    while lines and (not lines[0].strip() or lines[0].strip().startswith("```") or lines[0].strip() in ("---", ", ---", "--")):
-        lines.pop(0)
-    while lines and (not lines[-1].strip() or lines[-1].strip().startswith("```") or lines[-1].strip() in ("---", ", ---", "--", "...", "... rest of code", "// ...", "# ...")):
-        lines.pop()
-    cleaned = "\n".join(lines)
-    if cleaned and not cleaned.endswith("\n"):
-        cleaned += "\n"
-    return cleaned
-
 
     def _edit(self, call: ToolCall) -> str:
         args = call.args
