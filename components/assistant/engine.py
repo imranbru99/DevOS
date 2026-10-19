@@ -23,7 +23,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
@@ -109,7 +109,7 @@ class LocalModel:
             return None
 
     def chat(self, messages: List[Dict[str, str]], on_delta: Optional[Callable[[str], None]] = None,
-             cancel: Optional["StreamHandle"] = None, max_tokens: int = 384,
+             cancel: Optional["StreamHandle"] = None, max_tokens: int = 1536,
              temperature: float = 0.3) -> str:
         """The answer text. With on_delta, the reply is streamed (server-sent events) and every new
         piece is passed to on_delta as it arrives; cancel.stop() ends it early (the text so far is
@@ -258,6 +258,28 @@ SMART_SIZE = "1.1 GB"
 _PROGRESS = re.compile(r"\[Downloading\]\s*([\d.]+)\s*MB\s*/\s*([\d.]+)\s*MB", re.I)
 
 
+def active_chat_model() -> Dict[str, Any]:
+    """Return info about the currently active chat model (e.g. 7B, 3B, 1.5B, or tiny)."""
+    try:
+        aicore_dir = os.path.join(tools.COMPONENTS, "ai-core")
+        if aicore_dir not in sys.path:
+            sys.path.insert(0, aicore_dir)
+        import model_catalog
+        choice = model_catalog.read_choice()
+        chat_id = choice.get("chat", "tiny")
+        chosen = model_catalog.chat_model(chat_id)
+        if chosen and model_catalog.installed_file(chosen["file"]):
+            return chosen
+        for m in reversed(model_catalog.CHAT_MODELS):
+            if model_catalog.installed_file(m["file"]):
+                return m
+        return model_catalog.chat_model("tiny") or {"id": "tiny", "name": "Tiny", "params": "0.5B", "size_mb": 490}
+    except Exception:
+        if os.path.isfile(SMART_MODEL_FILE):
+            return {"id": "small", "name": "Small", "params": "1.5B", "size_mb": 1120}
+        return {"id": "tiny", "name": "Tiny", "params": "0.5B", "size_mb": 490}
+
+
 def smart_model_installed(path: str = SMART_MODEL_FILE) -> bool:
     return os.path.isfile(path)
 
@@ -368,7 +390,10 @@ class History:
                 # Older replies saved as "me: …" made the model copy the label
                 # into every new answer; never feed it back.
                 text = _ROLE_LABEL.sub("", text, count=1)
-            if len(text) > chars:
+                # Keep long assistant answers concise in history so CPU prompt prefill stays blazing fast
+                if len(text) > 350:
+                    text = text[:350] + "… [clipped]"
+            elif len(text) > chars:
                 text = text[:chars] + "…"
             out.append({"role": str(m["role"]), "content": text})
         return out
@@ -553,8 +578,58 @@ class ChatStore:
 # The assistant
 # ---------------------------------------------------------------------------
 
-_OCR_WORDS = re.compile(r"\b(?:read|text|ocr|extract|copy|transcribe|what does (?:it|this) say|written|words?|"
-                        r"letters?|type out)\b|লেখা|পড়")
+_OCR_WORDS = re.compile(
+    r"\b(?:read|text|ocr|extract|copy|transcribe|what does (?:it|this) say|written|words?|"
+    r"letters?|type out|scrape|scraping|scraper|question|questions|problem|problems|math|"
+    r"formula|equation|solve|solving|answer|quiz|exam|test|mcq|paper|sheet|document|scan|"
+    r"screenshot|code|error|log)\b|লেখা|পড়|প্রশ্ন|সমাধান|তুলে|উত্তর|স্ক্র্যাপ|সবগুলো",
+    re.I
+)
+
+_RE_THANKS = re.compile(
+    r"^(?:(?:many\s+)?thanks(?:\s+a\s+lot|\s+so\s+much|\s+brother|\s+bro|\s+boss|\s+dear)?|"
+    r"thank\s+you(?:\s+so\s+much|\s+very\s+much|\s+brother|\s+bro|\s+boss)?|"
+    r"thx|thnx|tnx|dhonnobad|dhonnobaad|ধন্যবাদ|shukriya|jazakallah|onek\s+dhonnobad)[\s!.,:;]*$", re.I)
+
+_RE_ACK = re.compile(
+    r"^(?:ok|okay|alright|got\s+it|fine|cool|great|awesome|perfect|thik\s+ache|ঠিক\s+আছে|accha|আচ্ছা|done)[\s!.,:;]*$", re.I)
+
+_RE_STATUS = re.compile(
+    r"^(?:how\s+are\s+you\s+doing|kemon\s+acho|kemon\s+asen|kemon\s+achen|"
+    r"কেমন\s+আছো|কেমন\s+আছেন|valoni|bhalo\s+acho)[\s!?,.:;]*$", re.I)
+
+
+def fast_chat_reply(text: str, history: Optional[History] = None) -> Optional[Reply]:
+    """Instant (< 1ms) contextual response for common pleasantries, thanks, and acknowledgments,
+    eliminating 20s cold-start model reload and heavy CPU prompt evaluation."""
+    t = (text or "").strip()
+    if not t or len(t) > 60:
+        return None
+
+    is_bn = bool(re.search(r"[\u0980-\u09FF]|kemon|dhonno|thik|accha|bhalo|shukriya|shob", t, re.I))
+
+    if _RE_THANKS.match(t):
+        if is_bn:
+            ans = "আপনাকে অনেক ধন্যবাদ ও স্বাগতম! আপনার আর কোনো প্রশ্ন বা সহায়তা প্রয়োজন হলে নির্দ্বিধায় জানান। 😊"
+        else:
+            ans = "You're very welcome! If you need any more help or have other questions, feel free to ask anytime. 😊"
+        return Reply(ans, source="model")
+
+    if _RE_ACK.match(t):
+        if is_bn:
+            ans = "ঠিক আছে! পরবর্তী কোনো নির্দেশ বা জিজ্ঞাসা থাকলে নির্দ্বিধায় বলুন।"
+        else:
+            ans = "Got it! Let me know whenever you're ready for the next task."
+        return Reply(ans, source="model")
+
+    if _RE_STATUS.match(t):
+        if is_bn:
+            ans = "আলহামদুলিল্লাহ, আমি ভালো আছি এবং আপনার কাজ সহজ করতে পুরোপুরি প্রস্তুত! আপনি কেমন আছেন?"
+        else:
+            ans = "I'm running smoothly and ready to assist you! How are things going with you?"
+        return Reply(ans, source="model")
+
+    return None
 
 
 class Assistant:
@@ -621,6 +696,12 @@ class Assistant:
     def chat(self, text: str, history: Optional[History] = None,
              on_delta: Optional[Callable[[str], None]] = None, cancel: Optional[StreamHandle] = None) -> Reply:
         """on_delta(piece) gets the answer as it is written (streaming); cancel.stop() ends it early."""
+        fast = fast_chat_reply(text, history)
+        if fast is not None:
+            if on_delta is not None:
+                on_delta(fast.text)
+            return fast
+
         system = APP_PROMPT
         messages = [{"role": "system", "content": system}]
         if history is not None:
@@ -692,34 +773,61 @@ class Assistant:
         q = (question or "").strip()
         wants_text = bool(_OCR_WORDS.search(q.lower())) if q else False
         vision_ready = vision.model_installed() and vision.runtime_supported()[0]
-        if vision_ready and not wants_text:
+
+        # 1. Check OCR first: tesseract is fast (~1s) and accurate on text/documents/question papers
+        ocr_text, problem = ("", vision.OCR_MISSING)
+        if vision.ocr_available(self.which):
+            ocr_text, problem = vision.ocr(path, self.which)
+
+        has_text = bool(ocr_text and len(ocr_text.strip()) >= 15)
+
+        # 2. If it is purely a photograph without text and the user didn't ask for text:
+        if vision_ready and not has_text and not wants_text:
             try:
                 answer = vision.VisionModel.describe(path, q)
                 return Reply(f"**{name}:** {scrub(answer, os_names=False)}", source="image")
             except Exception as exc:
                 sys.stderr.write(f"assistant: vision failed: {exc}\n")
-        ocr_text, problem = ("", vision.OCR_MISSING)
-        if vision.ocr_available(self.which):
-            ocr_text, problem = vision.ocr(path, self.which)
+
         buttons = []
         if not vision_ready:
             buttons.append((vision.download_button_label(), "download_vision"))
-        if ocr_text:
+
+        # 3. If the image has readable text:
+        if has_text:
+            is_scrape = bool(re.search(r"\b(?:scrape|scraping|scraper|extract|extracting|list|copy|questions?|show questions?|all questions?)\b|সবগুলো|প্রশ্ন", q, re.I)) if q else False
+            if is_scrape:
+                # Return the accurately extracted questions and text directly without hallucination
+                body = f"**Scraped questions and text from {name}:**\n\n```text\n{ocr_text.strip()}\n```"
+                return Reply(body, source="image")
+
             if wants_text or not q:
-                body = f"**Text in {name}:**\n\n```\n{ocr_text[:4000]}\n```"
-                if not q and not vision_ready:
-                    body += ("\n\nTo also describe what's in photos, photo understanding needs a one-time "
-                             f"{vision.download_size_label()} download.")
-                return Reply(body, source="image", buttons=buttons if not q else [])
-            # a question about an image that contains text: answer from the text
+                body = f"**Text in {name}:**\n\n```text\n{ocr_text.strip()}\n```"
+                return Reply(body, source="image")
+
+            # A specific question or instruction about the text: answer with the local LLM
             try:
-                answer = self._ask(f"This text was read from an image named {name}:\n---\n{ocr_text[:5000]}\n---\n"
-                                   f"Using it, answer: {q}")
-                note = "" if vision_ready else ("\n\n_I answered from the text in the image. To understand the "
-                                                 "photo itself, download photo understanding._")
-                return Reply(f"**{name}:** {scrub(answer, os_names=False)}{note}", source="image", buttons=buttons)
-            except ModelUnavailable:
-                return Reply(f"**Text in {name}:**\n\n```\n{ocr_text[:4000]}\n```", source="image", buttons=buttons)
+                prompt = (
+                    f"This text was extracted from an image ({name}):\n---\n{ocr_text[:3000]}\n---\n"
+                    f"Using it, answer: {q}"
+                )
+                answer = self.model.chat([
+                    {"role": "system", "content": "You are DevOS AI. Answer accurately and clearly using the text from the image."},
+                    {"role": "user", "content": prompt}
+                ], max_tokens=1024)
+                return Reply(f"**{name}:** {scrub(answer, os_names=False)}", source="image")
+            except Exception:
+                return Reply(f"**Text in {name}:**\n\n```text\n{ocr_text.strip()}\n```", source="image")
+
+        # 4. If no text was found and vision model is available:
+        if vision_ready:
+            try:
+                answer = vision.VisionModel.describe(path, q)
+                return Reply(f"**{name}:** {scrub(answer, os_names=False)}", source="image")
+            except Exception as exc:
+                sys.stderr.write(f"assistant: vision failed: {exc}\n")
+
+        # 5. Fallback messages when neither text nor vision answered:
         lines = []
         if problem and problem != vision.OCR_MISSING:
             lines.append(problem)

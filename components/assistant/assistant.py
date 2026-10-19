@@ -233,6 +233,8 @@ def draw_icon(p, kind, rect, color, stroke=1.7):
     if kind == "plus":
         line(12, 5, 12, 19)
         line(5, 12, 19, 12)
+    elif kind == "minus":
+        line(5, 12, 19, 12)
     elif kind == "mic":
         p.drawRoundedRect(R(9, 3, 6, 11), 3, 3)
         p.drawArc(R(5, 4, 14, 14), 180 * 16, 180 * 16)
@@ -913,14 +915,18 @@ class FileTile(QtWidgets.QWidget):
 
 
 class Chip(QtWidgets.QFrame):
-    """An attachment waiting in the composer."""
+    """An attachment waiting in the composer, or displayed in the chat."""
     removed = QtCore.pyqtSignal(str)
 
     def __init__(self, path, removable=True):
         super().__init__()
         self.path = path
+        self.removable = removable
         self.setObjectName("chip")
         self.setFixedHeight(56)
+        if not removable:
+            self.setCursor(Qt.PointingHandCursor)
+            self.setToolTip(f"{path}\n(Click to open / view)")
         lay = QtWidgets.QHBoxLayout(self)
         lay.setContentsMargins(7, 7, 6 if removable else 12, 7)
         lay.setSpacing(10)
@@ -941,6 +947,238 @@ class Chip(QtWidgets.QFrame):
             x = IconButton("close", "Remove", size=22, icon_size=12, color=MUTED)
             x.clicked.connect(lambda: self.removed.emit(self.path))
             lay.addWidget(x, 0, Qt.AlignTop)
+
+    def mouseReleaseEvent(self, e):
+        if e.button() == Qt.LeftButton and not self.removable:
+            if documents.kind_of(self.path) == "image" and os.path.isfile(self.path):
+                dlg = ImagePreviewDialog(self.path, self.window())
+                dlg.exec_()
+            elif os.path.isfile(self.path) and shutil.which("xdg-open"):
+                subprocess.Popen(["xdg-open", self.path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        super().mouseReleaseEvent(e)
+
+
+class ClickableThumb(QtWidgets.QLabel):
+    """Rounded image thumbnail that opens a zoomable lightbox dialog on click."""
+
+    def __init__(self, path, size=120, radius=14):
+        super().__init__()
+        self.path = path
+        self.setFixedSize(size, size)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip(f"{os.path.basename(path)}\n(Click to view & zoom)")
+        self._hover = False
+        self._pm = rounded_thumb(path, size, radius)
+        if self._pm is not None:
+            self.setPixmap(self._pm)
+
+    def enterEvent(self, e):
+        self._hover = True
+        self.update()
+        super().enterEvent(e)
+
+    def leaveEvent(self, e):
+        self._hover = False
+        self.update()
+        super().leaveEvent(e)
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        if self._hover:
+            p = QtGui.QPainter(self)
+            p.setRenderHint(QtGui.QPainter.Antialiasing)
+            r = QtCore.QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+            p.setPen(QtGui.QPen(QtGui.QColor(ACCENT), 2))
+            p.setBrush(QtGui.QColor(0, 0, 0, 60))
+            p.drawRoundedRect(r, 14, 14)
+            draw_icon(p, "search", QtCore.QRectF(r.width() - 28, r.height() - 28, 20, 20), "#ffffff", stroke=2.0)
+            p.end()
+
+    def mouseReleaseEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            dlg = ImagePreviewDialog(self.path, self.window())
+            dlg.exec_()
+        super().mouseReleaseEvent(e)
+
+
+class ImageCanvas(QtWidgets.QLabel):
+    """Display area inside the lightbox; supports drag-panning and mouse-wheel zooming."""
+
+    def __init__(self, dialog):
+        super().__init__()
+        self.dialog = dialog
+        self.setAlignment(Qt.AlignCenter)
+        self.setCursor(Qt.OpenHandCursor)
+        self._drag_start = None
+
+    def wheelEvent(self, e):
+        delta = e.angleDelta().y()
+        if delta > 0:
+            self.dialog.adjust_zoom(1.18)
+        elif delta < 0:
+            self.dialog.adjust_zoom(0.85)
+        e.accept()
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self._drag_start = e.pos()
+            self.setCursor(Qt.ClosedHandCursor)
+        super().mousePressEvent(e)
+
+    def mouseMoveEvent(self, e):
+        if self._drag_start is not None and (e.buttons() & Qt.LeftButton):
+            delta = e.pos() - self._drag_start
+            h_bar = self.dialog.scroll.horizontalScrollBar()
+            v_bar = self.dialog.scroll.verticalScrollBar()
+            h_bar.setValue(h_bar.value() - delta.x())
+            v_bar.setValue(v_bar.value() - delta.y())
+        super().mouseMoveEvent(e)
+
+    def mouseReleaseEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self._drag_start = None
+            self.setCursor(Qt.OpenHandCursor)
+        super().mouseReleaseEvent(e)
+
+    def mouseDoubleClickEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            if abs(self.dialog.zoom - 1.0) < 0.05:
+                self.dialog.fit_to_window()
+            else:
+                self.dialog.set_zoom(1.0)
+        super().mouseDoubleClickEvent(e)
+
+
+class ImagePreviewDialog(QtWidgets.QDialog):
+    """A modal lightbox image viewer with zoom (wheel / buttons) and click-drag panning."""
+
+    def __init__(self, path, parent=None):
+        super().__init__(parent)
+        self.path = path
+        self.setWindowTitle(f"DevOS AI · {os.path.basename(path)}")
+        self.resize(1000, 750)
+        self.setStyleSheet(f"QDialog {{ background: #0b0e14; }}")
+
+        self.orig_pixmap = QtGui.QPixmap(path)
+        self.zoom = 1.0
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(18, 14, 18, 16)
+        layout.setSpacing(10)
+
+        header = QtWidgets.QHBoxLayout()
+        header.setSpacing(8)
+
+        info_col = QtWidgets.QVBoxLayout()
+        info_col.setSpacing(1)
+        name_lbl = QtWidgets.QLabel(os.path.basename(path))
+        name_lbl.setStyleSheet(f"color: {TEXT_STRONG}; font-size: 15px; font-weight: 600;")
+        dim_str = f"{self.orig_pixmap.width()} × {self.orig_pixmap.height()} px" if not self.orig_pixmap.isNull() else ""
+        size_str = ""
+        try:
+            sz = os.path.getsize(path)
+            size_str = f" · {sz / 1024:.1f} KB" if sz < 1024 * 1024 else f" · {sz / (1024 * 1024):.1f} MB"
+        except OSError:
+            pass
+        dim_lbl = QtWidgets.QLabel(dim_str + size_str)
+        dim_lbl.setStyleSheet(f"color: {FAINT}; font-size: 12px;")
+        info_col.addWidget(name_lbl)
+        info_col.addWidget(dim_lbl)
+        header.addLayout(info_col)
+        header.addStretch(1)
+
+        btn_out = IconButton("minus", "Zoom out (-)", size=32, icon_size=16)
+        btn_out.clicked.connect(lambda: self.adjust_zoom(0.8))
+
+        self.zoom_pct = QtWidgets.QLabel("100%")
+        self.zoom_pct.setStyleSheet(f"color: {TEXT_STRONG}; font-size: 13px; font-weight: 500; min-width: 50px;")
+        self.zoom_pct.setAlignment(Qt.AlignCenter)
+
+        btn_in = IconButton("plus", "Zoom in (+)", size=32, icon_size=16)
+        btn_in.clicked.connect(lambda: self.adjust_zoom(1.25))
+
+        btn_fit = QtWidgets.QPushButton("Fit to Window")
+        btn_fit.setCursor(Qt.PointingHandCursor)
+        btn_fit.setStyleSheet(f"background: rgba(255,255,255,0.06); color: {TEXT}; border: 1px solid {BORDER}; "
+                              f"border-radius: 8px; padding: 5px 12px; font-size: 12px;")
+        btn_fit.clicked.connect(self.fit_to_window)
+
+        btn_100 = QtWidgets.QPushButton("100%")
+        btn_100.setCursor(Qt.PointingHandCursor)
+        btn_100.setStyleSheet(f"background: rgba(255,255,255,0.06); color: {TEXT}; border: 1px solid {BORDER}; "
+                              f"border-radius: 8px; padding: 5px 12px; font-size: 12px;")
+        btn_100.clicked.connect(lambda: self.set_zoom(1.0))
+
+        btn_open = QtWidgets.QPushButton("Open External")
+        btn_open.setToolTip("Open in default system photo viewer")
+        btn_open.setCursor(Qt.PointingHandCursor)
+        btn_open.setStyleSheet(f"background: rgba(255,255,255,0.06); color: {TEXT}; border: 1px solid {BORDER}; "
+                               f"border-radius: 8px; padding: 5px 12px; font-size: 12px;")
+        btn_open.clicked.connect(self.open_external)
+
+        btn_close = IconButton("close", "Close (Esc)", size=32, icon_size=16)
+        btn_close.clicked.connect(self.accept)
+
+        header.addWidget(btn_out)
+        header.addWidget(self.zoom_pct)
+        header.addWidget(btn_in)
+        header.addSpacing(6)
+        header.addWidget(btn_fit)
+        header.addWidget(btn_100)
+        header.addSpacing(6)
+        header.addWidget(btn_open)
+        header.addSpacing(10)
+        header.addWidget(btn_close)
+        layout.addLayout(header)
+
+        self.scroll = QtWidgets.QScrollArea()
+        self.scroll.setStyleSheet(f"QScrollArea {{ background: #06080d; border: 1px solid {BORDER}; border-radius: 12px; }}")
+        self.scroll.setAlignment(Qt.AlignCenter)
+        self.scroll.setWidgetResizable(False)
+
+        self.canvas = ImageCanvas(self)
+        self.scroll.setWidget(self.canvas)
+        layout.addWidget(self.scroll, 1)
+
+        hint_bar = QtWidgets.QHBoxLayout()
+        hint = QtWidgets.QLabel("💡 Use Mouse Wheel or +/- to zoom · Click and drag to pan · Double-click to toggle Fit/100%")
+        hint.setStyleSheet(f"color: {FAINT}; font-size: 11px;")
+        hint_bar.addWidget(hint)
+        hint_bar.addStretch(1)
+        layout.addLayout(hint_bar)
+
+        QtCore.QTimer.singleShot(30, self.fit_to_window)
+
+    def set_zoom(self, z):
+        self.zoom = max(0.1, min(10.0, z))
+        self.zoom_pct.setText(f"{int(round(self.zoom * 100))}%")
+        self._update_display()
+
+    def adjust_zoom(self, factor):
+        self.set_zoom(self.zoom * factor)
+
+    def fit_to_window(self):
+        if self.orig_pixmap.isNull():
+            return
+        vw = max(100, self.scroll.viewport().width() - 24)
+        vh = max(100, self.scroll.viewport().height() - 24)
+        pw, ph = self.orig_pixmap.width(), self.orig_pixmap.height()
+        if pw > 0 and ph > 0:
+            scale = min(vw / pw, vh / ph, 1.0)
+            self.set_zoom(scale)
+
+    def _update_display(self):
+        if self.orig_pixmap.isNull():
+            return
+        w = max(10, int(self.orig_pixmap.width() * self.zoom))
+        h = max(10, int(self.orig_pixmap.height() * self.zoom))
+        scaled = self.orig_pixmap.scaled(w, h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.canvas.setPixmap(scaled)
+        self.canvas.resize(w, h)
+
+    def open_external(self):
+        if os.path.isfile(self.path) and shutil.which("xdg-open"):
+            subprocess.Popen(["xdg-open", self.path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 # ---------------------------------------------------------------------------
@@ -1006,14 +1244,9 @@ class UserRow(ChatRow):
             fl = FlowLayout(holder, 8)
             for f in self.files:
                 if os.path.isfile(f) and documents.kind_of(f) == "image":
-                    t = QtWidgets.QLabel()
-                    pm = rounded_thumb(f, 120, 14)
-                    if pm is not None:
-                        t.setPixmap(pm)
-                        t.setFixedSize(120, 120)
-                        t.setToolTip(os.path.basename(f))
-                        fl.addWidget(t)
-                        continue
+                    t = ClickableThumb(f, 120, 14)
+                    fl.addWidget(t)
+                    continue
                 fl.addWidget(Chip(f, removable=False))
             row = QtWidgets.QHBoxLayout()
             row.addStretch(1)
@@ -1878,7 +2111,9 @@ class SmartCard(QtWidgets.QFrame):
         self.refresh()
 
     def refresh(self):
-        self.on = engine.smart_model_installed()
+        self.model_info = engine.active_chat_model()
+        model_id = self.model_info.get("id", "tiny")
+        self.on = model_id != "tiny"
         if self.busy:
             return
         pm = QtGui.QPixmap(60, 60)
@@ -1892,7 +2127,13 @@ class SmartCard(QtWidgets.QFrame):
         draw_icon(p, "spark", QtCore.QRectF(7, 7, 16, 16), QtGui.QColor("#ffffff") if self.on else qcolor("#a5f3fc"))
         p.end()
         self.icon.setPixmap(pm)
-        if self.on:
+        if model_id in ("large", "xl", "medium"):
+            params = self.model_info.get("params", model_id.upper())
+            name = self.model_info.get("name", "Active")
+            self.title.setText(f"DevOS AI {params}")
+            self.sub.setText(f"{name} model active")
+            self.setToolTip(f"{name} ({params}) model is running on this PC. Click to manage models.")
+        elif self.on:
             self.title.setText(f"{engine.SMART_LABEL} is on")
             self.sub.setText(f"Switch back (free {engine.SMART_SIZE})")
             self.setToolTip("Go back to the built-in DevOS AI and free the space")
@@ -2714,8 +2955,15 @@ class AssistantWindow(QtWidgets.QWidget):
 
     def _set_status(self, state):
         extra = ""
-        if state == "ready" and engine.smart_model_installed():
-            extra = "Smarter · On this PC"
+        if state == "ready":
+            model_info = engine.active_chat_model()
+            model_id = model_info.get("id", "tiny")
+            if model_id in ("large", "xl"):
+                extra = f"{model_info.get('params', '7B')} · On this PC"
+            elif model_id == "medium":
+                extra = "3B · On this PC"
+            elif model_id == "small":
+                extra = "Smarter · On this PC"
         self.status.set_state(state, extra)
 
     def check_status(self):
@@ -3275,9 +3523,22 @@ class AssistantWindow(QtWidgets.QWidget):
         self._run(job, done, track_busy=False, on_progress=prog)
 
     def smarter_ai(self):
-        """Install (or remove) the bigger chat model through the root helper."""
+        """Install (or remove) the bigger chat model through the root helper, or open model manager."""
         card = self.sidebar.smart
         if card.busy:
+            return
+        model_info = getattr(card, "model_info", None) or engine.active_chat_model()
+        model_id = model_info.get("id", "tiny")
+        if model_id in ("large", "xl", "medium"):
+            models_gui_py = os.path.join(tools.COMPONENTS, "ai-core", "models_gui.py")
+            if os.path.isfile(models_gui_py):
+                try:
+                    subprocess.Popen([sys.executable or "python3", models_gui_py], start_new_session=True)
+                    return
+                except OSError:
+                    pass
+            if shutil.which("devos-ai-models"):
+                subprocess.Popen(["devos-ai-models", "status"], start_new_session=True)
             return
         remove = engine.smart_model_installed()
         if remove:

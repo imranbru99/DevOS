@@ -2,7 +2,7 @@
 Name=DevOS App Hub
 Comment=Universal Installer for Windows, Linux, and Android Applications
 Exec=/usr/local/bin/devos-open-app %f
-Icon=system-software-install
+Icon=devos-apphub
 Terminal=false
 Type=Application
 MimeType=application/vnd.android.package-archive;application/vnd.debian.binary-package;application/vnd.appimage;

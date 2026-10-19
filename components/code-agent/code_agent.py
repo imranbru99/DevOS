@@ -36,6 +36,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from typing import Any, Callable, Dict, List, Optional
@@ -582,11 +583,12 @@ def extract_plan(text: str, limit: int = 8) -> List[str]:
 
 class ApprovalPolicy:
     """Reads run on their own by default; edits ask unless auto-approved;
-    commands always ask."""
+    commands ask unless auto-approved."""
 
-    def __init__(self, auto_reads: bool = True, auto_edits: bool = False):
+    def __init__(self, auto_reads: bool = True, auto_edits: bool = False, auto_commands: bool = False):
         self.auto_reads = auto_reads
         self.auto_edits = auto_edits
+        self.auto_commands = auto_commands
 
     @staticmethod
     def category(tool: str) -> str:
@@ -602,6 +604,8 @@ class ApprovalPolicy:
             return not self.auto_reads
         if kind == "edit":
             return not self.auto_edits
+        if kind == "command":
+            return not self.auto_commands
         return True
 
 
@@ -629,6 +633,64 @@ class AgentError(Exception):
     pass
 
 
+def check_ai_health(endpoint: str = AI_ENDPOINT) -> bool:
+    """Return True if DevOS AI Core is responding on health endpoint."""
+    base = endpoint.rstrip("/")
+    if base.endswith("/v1"):
+        health_url = base[:-3] + "/health"
+    else:
+        health_url = f"{base}/health"
+    try:
+        req = urllib.request.Request(health_url, headers={"User-Agent": "DevOS-Code-Agent/1.0"})
+        with urllib.request.urlopen(req, timeout=2.0) as resp:
+            return resp.status == 200
+    except Exception:
+        return False
+
+
+def find_ai_server_py() -> Optional[str]:
+    """Find the server.py script for DevOS AI Core."""
+    candidates = [
+        os.path.abspath(os.path.join(HERE, "..", "ai-core", "server.py")),
+        "/usr/local/share/devos/components/ai-core/server.py",
+        os.path.expanduser("~/project/dev-os/components/ai-core/server.py"),
+    ]
+    for p in candidates:
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def ensure_ai_service(endpoint: str = AI_ENDPOINT, timeout_seconds: float = 12.0) -> bool:
+    """Ensure DevOS AI Core is running on 127.0.0.1:11434. Auto-starts if not running."""
+    if check_ai_health(endpoint):
+        return True
+
+    server_py = find_ai_server_py()
+    if not server_py:
+        return False
+
+    try:
+        log_path = os.path.join("/var/tmp", "devos-ai-core.log")
+        try:
+            log_fh = open(log_path, "ab")
+        except OSError:
+            log_fh = subprocess.DEVNULL
+        subprocess.Popen([sys.executable or "python3", server_py],
+                         cwd=os.path.dirname(server_py),
+                         stdin=subprocess.DEVNULL, stdout=log_fh, stderr=log_fh,
+                         start_new_session=True)
+    except Exception:
+        return False
+
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        time.sleep(0.6)
+        if check_ai_health(endpoint):
+            return True
+    return False
+
+
 class LocalLLM:
     """Talks to DevOS AI over its OpenAI-compatible API, streaming (SSE)."""
 
@@ -652,8 +714,22 @@ class LocalLLM:
         try:
             resp = urllib.request.urlopen(req, timeout=self.timeout)
         except (urllib.error.URLError, OSError) as exc:
-            raise AgentError("DevOS AI is not answering on this PC. Open DevOS AI Code Agent again "
-                             f"(it starts DevOS AI) or run devos-ai. ({exc})")
+            # If on localhost and connection failed, auto-start and retry once
+            is_local = "127.0.0.1" in self.endpoint or "localhost" in self.endpoint
+            if is_local:
+                if on_token:
+                    on_token("⚡ DevOS AI Core is starting on this PC... initializing neural engine.\n")
+                if ensure_ai_service(self.endpoint, timeout_seconds=12.0):
+                    try:
+                        resp = urllib.request.urlopen(req, timeout=self.timeout)
+                    except (urllib.error.URLError, OSError) as retry_exc:
+                        raise AgentError("DevOS AI is not answering on this PC. Please run 'devos-ai' in terminal. "
+                                         f"({retry_exc})")
+                else:
+                    raise AgentError("DevOS AI is not answering on this PC. Failed to auto-start DevOS AI Core. "
+                                     f"Run 'devos-ai' in terminal or check /var/tmp/devos-ai-core.log. ({exc})")
+            else:
+                raise AgentError(f"DevOS AI is not answering at {self.endpoint}. ({exc})")
         with resp:
             if "event-stream" not in (resp.headers.get("Content-Type") or ""):
                 data = json.loads(resp.read().decode("utf-8", errors="replace") or "{}")
@@ -692,9 +768,15 @@ def read_sse(lines, on_token=None, should_stop=None) -> str:
 
 # ===================================================================== agent
 
-SYSTEM_PROMPT = """You are DevOS AI Code Agent, a careful coding agent working in the user's project folder.
-First write a short numbered plan (1-5 steps). Then use ONE tool per reply and stop; you get the result in the next message.
-Write a tool call exactly like this:
+SYSTEM_PROMPT = """You are DevOS AI Code Agent, an autonomous full-stack software engineer working in the user's project folder.
+Your mission is to build COMPLETE, production-ready software solutions end-to-end. Do NOT stop after creating just a README or a single placeholder file!
+
+Autonomous Workflow Rules:
+1. First, outline a concise numbered plan (1-5 key milestones).
+2. Execute EVERY step autonomously one after another. Use ONE tool call per response and stop; you get the result in the next message.
+3. After each tool result, DO NOT PAUSE or ask the user what to do next. Immediately invoke the next tool call to create/edit the next file or run the next setup command.
+4. Continue building until the ENTIRE requested project, all required modules, code files, configs, and documentation are fully implemented on disk.
+5. Write a tool call exactly like this:
 ```tool read_file
 path: src/main.py
 ```
@@ -707,7 +789,7 @@ Tools:
 - run_command command: <shell command run in the project folder>
 Read a file before changing it. Prefer apply_patch for small edits of existing files.
 The user approves every change and command; if they reject one, do not repeat it.
-When the task is done, reply with a short summary and no tool block."""
+6. Only when ALL files, configs, and code for the complete project are 100% written and verified, reply with a final completion report and no tool block."""
 
 FORMAT_HELP = ("Your tool call could not be read. Write exactly one block like:\n"
                "```tool read_file\npath: README.md\n```\nor, for a new file:\n"
@@ -718,12 +800,30 @@ def noop_event(kind: str, payload: Any = None) -> None:
     return None
 
 
+def extract_task_topic(task: str) -> str:
+    """Extract a concise topic/goal headline from the user's task prompt."""
+    if not task:
+        return "Autonomous Development Task"
+    lines = [line.strip() for line in task.strip().splitlines() if line.strip()]
+    first_meaningful = ""
+    for line in lines:
+        cleaned = re.sub(r"^(?:#+|\d+[.)]|[-*•]|\b(?:task|goal|todo|prompt)\b[:\s-]*)\s*", "", line, flags=re.I).strip()
+        if len(cleaned) >= 5 and not cleaned.lower().startswith(("you are", "role and mission")):
+            first_meaningful = cleaned
+            break
+    if not first_meaningful:
+        first_meaningful = lines[0] if lines else "Development Task"
+    if len(first_meaningful) > 75:
+        first_meaningful = first_meaningful[:72] + "..."
+    return first_meaningful
+
+
 class CodeAgent:
     """The agent loop: ask the model, run one tool, show the result, repeat."""
 
     def __init__(self, workspace: Workspace, llm, approve: Callable[[Action], bool],
                  policy: Optional[ApprovalPolicy] = None, on_event: Callable[[str, Any], None] = noop_event,
-                 max_steps: int = 15, keep_notes: bool = True):
+                 max_steps: int = 35, keep_notes: bool = True):
         self.ws = workspace
         self.llm = llm
         self.approve = approve
@@ -765,9 +865,61 @@ class CodeAgent:
             kept.append({"role": message["role"], "content": content})
         return head + list(reversed(kept))
 
+    def should_continue_task(self, reply: str, task: str, step: int) -> bool:
+        """Determine if the agent should continue executing steps rather than halting prematurely."""
+        if step >= self.max_steps - 2:
+            return False
+        
+        reply_lower = reply.lower().strip()
+        
+        # 1. Check for explicit continuation phrases in the model's reply
+        continuation_patterns = [
+            r"\bnext[,:\s]+(?:we|let['’]?s|i|step)\b",
+            r"\bnow[,:\s]+(?:let['’]?s|we|i)\b",
+            r"\bstart\s+setting\s+up\b",
+            r"\bproceed(?:ing)?\s+to\b",
+            r"\bwe\s+can\s+(?:start|begin|create|set\s+up|implement|add)\b",
+            r"\bi\s+will\s+(?:now\s+)?(?:create|write|implement|add|set\s+up)\b",
+            r"\bto\s+set\s+up\b",
+            r"\bmoving\s+on\s+to\b",
+            r"\bnext\s+step\b",
+            r"\bto\s+implement\b",
+            r"\bstep\s+\d+:\s*(?:create|build|implement|setup)",
+        ]
+        for pat in continuation_patterns:
+            if re.search(pat, reply_lower):
+                return True
+        
+        # 2. Check if the user requested a full project or multi-part build, but only a trivial file was touched
+        task_lower = task.lower()
+        is_large_task = any(kw in task_lower for kw in [
+            "complete project", "full project", "entire project", "phase", "module",
+            "application", "repository", "architecture", "build", "create", "initialize",
+            "laravel", "filament", "erp", "api", "database"
+        ])
+        if is_large_task and len(self.changed) <= 1 and step < 12:
+            completion_decl = any(ph in reply_lower for ph in [
+                "entire project is complete", "all phases are complete", "project has been fully built",
+                "everything is complete and ready"
+            ])
+            if not completion_decl:
+                return True
+                
+        return False
+
     # ------------------------------------------------------------------- loop
     def run(self, task: str) -> str:
         self.cancelled = False
+        topic = extract_task_topic(task)
+        initial_plan = extract_plan(task)
+        if not initial_plan:
+            initial_plan = [
+                f"Analyze project requirements & files for {topic}",
+                "Formulate architectural plan & component changes",
+                "Execute code edits & file implementations",
+                "Verify syntax & run validation checks",
+            ]
+        self.on_event("task_init", {"topic": topic, "task": task, "plan": initial_plan})
         self.messages = [{"role": "system", "content": SYSTEM_PROMPT},
                          {"role": "user", "content": self.first_message(task)}]
         final = ""
@@ -776,8 +928,26 @@ class CodeAgent:
             if self.cancelled:
                 final = "Stopped."
                 break
-            self.on_event("thinking", step + 1)
-            reply = self.llm.chat(self.window(), on_token=lambda t: self.on_event("token", t),
+            step_num = step + 1
+            self.on_event("thinking_status", {
+                "step": step_num,
+                "topic": topic,
+                "status": f"Step {step_num}: Reasoning on architecture and determining next tool action...",
+            })
+            self.on_event("thinking", step_num)
+
+            current_reply = []
+
+            def on_stream_token(t: str):
+                current_reply.append(t)
+                self.on_event("token", t)
+                partial_text = "".join(current_reply)
+                if step == 0:
+                    streamed_plan = extract_plan(partial_text)
+                    if len(streamed_plan) >= 2 and streamed_plan != initial_plan:
+                        self.on_event("plan", streamed_plan)
+
+            reply = self.llm.chat(self.window(), on_token=on_stream_token,
                                   should_stop=lambda: self.cancelled)
             self.on_event("reply", reply)
             if step == 0:
@@ -786,16 +956,44 @@ class CodeAgent:
                     self.on_event("plan", plan)
             call = parse_tool_call(reply)
             self.messages.append({"role": "assistant", "content": reply[:4000]})
+
             if call is None:
                 if looks_like_tool_attempt(reply) and bad_format < 2:
                     bad_format += 1
                     self.messages.append({"role": "user", "content": FORMAT_HELP})
                     continue
+                
+                # Check if the model gave intermediate commentary or if the overall task is unfinished
+                if self.should_continue_task(reply, task, step):
+                    self.on_event("thinking_status", {
+                        "step": step_num,
+                        "topic": topic,
+                        "status": "Continuing autonomous build to next phase/component...",
+                    })
+                    self.messages.append({
+                        "role": "user",
+                        "content": (
+                            "Do not stop or output a summary yet. Continue autonomously with the next step "
+                            "of the project. Invoke the next tool call (e.g. write_file, apply_patch, or run_command) "
+                            "now to implement the next file/action."
+                        )
+                    })
+                    continue
+
                 final = reply.strip()
                 break
+            tool_target = str(call.args.get("path") or call.args.get("command") or call.args.get("pattern") or "")
+            self.on_event("thinking_status", {
+                "step": step_num,
+                "topic": topic,
+                "status": f"Executing {call.name} {('· ' + tool_target) if tool_target else ''}...",
+            })
             result = self.execute(call)
             self.on_event("result", {"tool": call.name, "text": result})
-            self.messages.append({"role": "user", "content": f"Result of {call.name}:\n{result}"})
+            self.messages.append({
+                "role": "user",
+                "content": f"Result of {call.name}:\n{result}\n\nProceed immediately with the next step of the project using the next tool call."
+            })
         else:
             final = (f"Stopped after {self.max_steps} steps. The changes so far are kept; "
                      "ask again to continue.")
@@ -912,7 +1110,7 @@ class CodeAgent:
         action = Action("command", call.name, f"Run: {command}", command=command)
         self.on_event("step", {"title": action.title, "kind": "command"})
         self.on_event("command", action)
-        if not self.approve(action):  # commands always ask
+        if self.policy.needs_approval(call.name) and not self.approve(action):
             self.on_event("step_status", "denied")
             return "The user did not allow this command. Do not run it again; continue without it or ask."
         result = self.ws.run_command(command, call.args.get("timeout"))
@@ -1044,7 +1242,7 @@ def cli_events(kind: str, payload: Any = None) -> None:
 
 
 def run_cli(task: str, folder: str, auto_edits: bool = False, auto_reads: bool = True,
-            max_steps: int = 15) -> int:
+            auto_commands: bool = False, max_steps: int = 15) -> int:
     sys.path.insert(0, HERE)
     import capability
     ok, reason = capability.coding_capable()
@@ -1058,7 +1256,7 @@ def run_cli(task: str, folder: str, auto_edits: bool = False, auto_reads: bool =
         return 2
     print(_color(f"DevOS AI Code Agent · Local · {CODE_MODEL} · {workspace.root}", "1;36"))
     agent = CodeAgent(workspace, LocalLLM(), cli_approver(),
-                      ApprovalPolicy(auto_reads=auto_reads, auto_edits=auto_edits),
+                      ApprovalPolicy(auto_reads=auto_reads, auto_edits=auto_edits, auto_commands=auto_commands),
                       on_event=cli_events, max_steps=max_steps)
     try:
         agent.run(task)

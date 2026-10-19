@@ -95,7 +95,7 @@ def clamp_tokens(value) -> int:
     try:
         return max(16, min(2048, int(value)))
     except (TypeError, ValueError):
-        return 384
+        return 1024
 
 
 def parallel_slots(ram_gb: float, threads: int, configured: int = 0) -> int:
@@ -191,12 +191,10 @@ def thread_plan(logical: int, physical: int, parallel: int) -> Tuple[int, int]:
     physical = max(1, min(physical, logical))
     slots = max(1, parallel)
     if slots <= 1:
-        gen = min(8, physical)
+        gen = min(12, physical)
     else:
-        # Scale generation threads across performance cores without starvation
-        gen = min(8, max(4, physical // max(1, slots // 2)))
-    # Batch / prompt evaluation is matrix-heavy and scales very well with threads
-    batch = max(gen, min(16, logical))
+        gen = min(12, max(4, (physical * 3) // max(2, slots + 1)))
+    batch = max(gen, logical)
     gen = max(1, min(_int_env("DEVOS_AI_THREADS", gen), logical))
     batch = max(gen, min(_int_env("DEVOS_AI_BATCH_THREADS", batch), logical))
     return gen, batch
@@ -214,10 +212,10 @@ def llama_speed_kwargs(kind: str, ram_gb: float, parallel: int, gpu_layers: int,
     physical = physical if physical is not None else physical_cores(logical)
     gen, batch = thread_plan(logical, physical, parallel)
     gpu_layers = max(0, int(gpu_layers))
-    ctx = 8192 if kind == "code" else 2048
+    ctx = 8192 if kind == "code" else (4096 if ram_gb >= 15.5 else 2048)
     if kind == "embedding":
         ctx = 2048
-    n_batch = 1024 if batch >= 8 and ram_gb >= 8 else 512
+    n_batch = 2048 if batch >= 16 and ram_gb >= 16 else (1024 if batch >= 8 and ram_gb >= 8 else 512)
     n_batch = min(n_batch, ctx)
     kwargs = {
         "n_ctx": ctx,
@@ -227,8 +225,8 @@ def llama_speed_kwargs(kind: str, ram_gb: float, parallel: int, gpu_layers: int,
         "n_ubatch": min(512, n_batch),
         "n_gpu_layers": gpu_layers,
         "use_mmap": True,
-        # Locking a multi-GB file on a 16 GB PC pushes the desktop into swap.
-        "use_mlock": ram_gb >= 32 and gpu_layers == 0,
+        # Locking a multi-GB file on a 32 GB PC (reported ~31.1 GB) keeps it locked in RAM with 0 cold-start latency.
+        "use_mlock": ram_gb >= 24 and gpu_layers == 0,
         "verbose": False,
     }
     if fast_mode(fast):
@@ -287,7 +285,8 @@ def open_llama(llama_cls, path: str, kwargs: Dict[str, Any]):
 
 
 def call_completion(llm, **kwargs):
-    """create_chat_completion, dropping sampling fields this build does not accept."""
+    """create_chat_completion, dropping sampling fields this build does not accept,
+    and automatically adjusting max_tokens if prompt + completion exceeds the context window."""
     while True:
         try:
             return llm.create_chat_completion(**kwargs)
@@ -296,6 +295,25 @@ def call_completion(llm, **kwargs):
             if not key:
                 raise
             kwargs.pop(key, None)
+        except ValueError as exc:
+            msg = str(exc)
+            m = re.search(r"Requested tokens \((\d+)\) exceed(?:s)? context window of (\d+)", msg, re.I)
+            if m:
+                requested, limit = int(m.group(1)), int(m.group(2))
+                cur_max = kwargs.get("max_tokens") or 1024
+                excess = requested - limit
+                if cur_max - excess >= 64:
+                    kwargs["max_tokens"] = max(64, cur_max - excess - 16)
+                    continue
+                msgs = kwargs.get("messages")
+                if isinstance(msgs, list) and len(msgs) > 2:
+                    for i, item in enumerate(msgs):
+                        if item.get("role") != "system":
+                            msgs.pop(i)
+                            break
+                    kwargs["max_tokens"] = min(limit // 2, max(64, cur_max))
+                    continue
+            raise
 
 
 def sampling_kwargs(req: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -423,12 +441,14 @@ class DevOSAIEngine:
         conf_timeout = configured_idle_timeout()
         if conf_timeout > 0:
             self.idle_timeout_seconds = conf_timeout
+        elif ram >= 24.0:
+            self.idle_timeout_seconds = 86400 * 7  # 7 days (never unload during normal usage on 32GB RAM)
         elif ram >= 15.5:
-            self.idle_timeout_seconds = 3600  # 1 hour on 16GB+ RAM
+            self.idle_timeout_seconds = 86400      # 24 hours on 16GB+ RAM
         elif ram >= 7.5:
-            self.idle_timeout_seconds = 1800  # 30 min on 8GB+ RAM
+            self.idle_timeout_seconds = 3600       # 1 hour on 8GB+ RAM
         else:
-            self.idle_timeout_seconds = 300   # 5 min on small memory (<8GB) systems
+            self.idle_timeout_seconds = 300        # 5 min on small memory (<8GB) systems
         self.last_activity = time.time()
         self.is_loaded = False
         self._model_file = None
@@ -560,7 +580,7 @@ class DevOSAIEngine:
         return "code" if "code" in (model_name or "").lower() else "chat"
 
     def generate_chat_response(self, messages: List[Dict[str, str]], stream: bool = False,
-                               model: str = "devos-ai", max_tokens: int = 384,
+                               model: str = "devos-ai", max_tokens: int = 1024,
                                options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Answer from the local GGUF when it is installed."""
         self.last_activity = time.time()
@@ -834,15 +854,19 @@ class DevOSAIEngine:
     def warm_up(self):
         """Load the model and process the system prompt at service start, so
         the first question does not pay for it."""
-        with self._lock:
-            self._ensure_model()
-            if self._llm is None:
-                return
-            try:
-                self._llm.create_chat_completion(messages=self._build_chat([{"role": "user", "content": "Hi"}]),
-                                                 max_tokens=1, temperature=0.0)
-            except Exception as exc:
-                sys.stderr.write(f"[ai-core] warm-up failed: {exc}\n")
+        try:
+            slot = self._slots[0]
+            with slot.lock:
+                self._load(slot, "chat")
+                if slot.llm is None:
+                    return
+                slot.llm.create_chat_completion(
+                    messages=self._build_chat([{"role": "user", "content": "Hi"}]),
+                    max_tokens=1,
+                    temperature=0.0
+                )
+        except Exception as exc:
+            sys.stderr.write(f"[ai-core] warm-up failed: {exc}\n")
 
     def _build_chat(self, messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
         ram = self.tier_info.get("ram_gb")
@@ -859,13 +883,20 @@ class DevOSAIEngine:
             if role not in ("user", "assistant") or not content:
                 continue
             chat.append({"role": role, "content": content})
+        total_chars = sum(len(m.get("content") or "") for m in chat)
+        max_chars = 12000 if (ram and ram >= 15.5) else 5000
+        if total_chars > max_chars and len(chat) > 2:
+            for msg in chat[1:-1]:
+                c = msg.get("content") or ""
+                if len(c) > 400:
+                    msg["content"] = c[:400] + "..."
         return chat
 
     def _complete(self, messages: List[Dict[str, str]]) -> str:
         text, _usage = self._complete_on(self._slots[0], messages)
         return text
 
-    def _complete_on(self, slot: _Slot, messages: List[Dict[str, str]], max_tokens: int = 384,
+    def _complete_on(self, slot: _Slot, messages: List[Dict[str, str]], max_tokens: int = 1024,
                      options: Optional[Dict[str, Any]] = None):
         chat = self._build_chat(messages)
         if not any(item["role"] == "user" for item in chat):
@@ -891,7 +922,7 @@ class DevOSAIEngine:
             sys.stderr.write(f"[ai-core] generation failed: {exc}\n")
         return "The local model is installed, but it did not produce an answer. Ask again.", {}
 
-    def stream_chat(self, messages: List[Dict[str, str]], model: str = "devos-ai", max_tokens: int = 384,
+    def stream_chat(self, messages: List[Dict[str, str]], model: str = "devos-ai", max_tokens: int = 1024,
                     options: Optional[Dict[str, Any]] = None):
         """Yield the answer in small pieces as the model writes it, so the
         window shows words within a second instead of after the whole reply."""
@@ -922,6 +953,17 @@ class DevOSAIEngine:
                             yield delta
                 except Exception as exc:
                     sys.stderr.write(f"[ai-core] generation failed: {exc}\n")
+                    if "exceed" in str(exc).lower() and len(chat) > 2:
+                        try:
+                            truncated_chat = [chat[0], chat[-1]]
+                            for chunk in call_completion(
+                                    slot.llm, messages=truncated_chat, max_tokens=min(512, clamp_tokens(max_tokens)), stream=True, **opts):
+                                delta = chunk["choices"][0].get("delta", {}).get("content")
+                                if delta:
+                                    yield delta
+                            return
+                        except Exception:
+                            pass
                     yield "The local model did not produce an answer. Ask again."
         finally:
             cpu_boost.leave()
@@ -1198,7 +1240,7 @@ class OpenAIHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def _send_stream(self, messages, model="devos-ai", max_tokens=384, options=None, legacy=False):
+    def _send_stream(self, messages, model="devos-ai", max_tokens=1024, options=None, legacy=False):
         """OpenAI-style server-sent events: one small piece of text per event."""
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
@@ -1305,7 +1347,7 @@ class OpenAIHandler(BaseHTTPRequestHandler):
         else:
             messages = req.get("messages") or []
         model = str(req.get("model") or "devos-ai")
-        max_tokens = req.get("max_tokens") or req.get("max_completion_tokens") or 384
+        max_tokens = req.get("max_tokens") or req.get("max_completion_tokens") or 1024
         options = sampling_kwargs(req)
         if req.get("stream", False):
             self._send_stream(messages, model, max_tokens, options, legacy=legacy)

@@ -13,8 +13,6 @@ winetricks
 libvulkan1
 mesa-vulkan-drivers
 vulkan-tools
-dxvk
-vkd3d
 libvkd3d1
 
 # Performance & Process Boosters

@@ -316,8 +316,8 @@ FEATURES: List[Dict] = [
 
     # ---------------------------------------------------------------- compat
     F("winapps", "compat", "Windows apps (.exe, .msi)", "Run Windows programs with a double-click. DirectX 9–11 uses DXVK.", 900,
-      win=".exe support", apt=["wine", "wine64", "winetricks", "dxvk", "vkd3d", "libvkd3d1"],
-      remove=["wine", "wine64", "wine32:i386", "winetricks", "dxvk", "vkd3d", "libvkd3d1"],
+      win=".exe support", apt=["wine", "wine64", "winetricks", "libvkd3d1"],
+      remove=["wine", "wine64", "wine32:i386", "winetricks", "libvkd3d1"],
       preinstalled=True, presets=ESSENTIAL),
     F("winvm", "compat", "Windows virtual machine",
       "Run programs Wine cannot run, such as kernel anti-cheat, inside a virtual PC. "

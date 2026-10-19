@@ -9,4 +9,4 @@ Terminal=false
 Categories=Development;IDE;Utility;
 Keywords=devos;ai;agent;coding;code;copilot;gemini;developer;pair-programmer;
 StartupNotify=true
-StartupWMClass=DevOS AI Code Agent
+StartupWMClass=devos-ai-code-agent

@@ -133,6 +133,7 @@ class TestInstalledSystemBoot(unittest.TestCase):
         self.assertIn("GRUB_DISABLE_OS_PROBER: false", read("build/includes.chroot/etc/calamares/modules/grubcfg.conf"))
         self.assertIn("udisks2", desktop)
         self.assertIn("DisplayServer=x11", session)
+        self.assertIn("Current=devos", session)
         self.assertIn("NOPASSWD:SETENV:", read("build/hooks/02-disable-services.hook.chroot"))
         self.assertIn("sudo -E -n", install_gui)
         self.assertNotIn("DevOS is not installed yet", install_gui)
@@ -171,7 +172,7 @@ class TestInstalledSystemBoot(unittest.TestCase):
         self.assertIn("ubuntu-desktop-bootstrap", read("build/hooks/02-disable-services.hook.chroot"))
         # Icons-only taskbar: running apps must not eat the panel width.
         self.assertIn("org.kde.plasma.icontasks", panel)
-        self.assertIn("groupingStrategy=1", panel)
+        self.assertIn("groupingStrategy=0", panel)
         self.assertIn("onlyGroupWhenFull=false", panel)
         self.assertIn("devos-windows.desktop", panel)
         self.assertIn("devos-thispc.desktop", panel)

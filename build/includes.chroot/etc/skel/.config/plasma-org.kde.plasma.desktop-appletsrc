@@ -46,7 +46,7 @@ plugin=org.kde.plasma.icontasks
 
 [Containments][3][Applets][6][Configuration][General]
 launchers=applications:devos-search.desktop,applications:devos-taskman.desktop,applications:devos-windows.desktop,applications:devos-browser.desktop,applications:devos-thispc.desktop,applications:devos-chat.desktop,applications:devos-code.desktop,applications:systemsettings.desktop,applications:devos-install.desktop
-groupingStrategy=1
+groupingStrategy=0
 indicateAudioStreams=true
 iconSpacing=1
 groupPopups=true

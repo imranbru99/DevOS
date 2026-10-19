@@ -473,6 +473,9 @@ def _apply(selected, remove_unselected: bool) -> bool:
     installed = installed_ids()
     write_mimeapps(system_defaults(installed))
     missing = [fid for fid in selected if fid not in installed]
+    for fid in missing:
+        if fid not in failed:
+            failed[fid] = "download or install failed"
     write_state(running=False, current="", failed=failed, pending=missing, installed=installed)
     if missing:
         enable_service()

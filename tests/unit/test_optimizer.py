@@ -258,5 +258,42 @@ class TestIdleDecisions(unittest.TestCase):
         self.assertFalse(optimizer.is_live_session("/nonexistent/cmdline"))
 
 
+    def test_20_devos_ai_identity_and_protection(self):
+        # DevOS AI Core names in PROTECTED_NAMES
+        self.assertTrue(optimizer.is_protected("devos-ai"))
+        self.assertTrue(optimizer.is_protected("devos-ai-core"))
+        self.assertTrue(optimizer.is_protected("devos-ai-code-agent"))
+        self.assertTrue(optimizer.is_protected("devos-chat"))
+        
+        # Test simulated /proc cmdline resolution
+        fake_proc = tempfile.mkdtemp(prefix="fake-proc-")
+        try:
+            pid_dir = os.path.join(fake_proc, "9999")
+            os.makedirs(pid_dir)
+            with open(os.path.join(pid_dir, "cmdline"), "wb") as f:
+                f.write(b"python3\x00/usr/local/share/devos/components/code-agent/agent_gui.py\x00")
+            name, prot = optimizer.resolve_app_identity("python3", pid=9999, proc_root=fake_proc)
+            self.assertEqual(name, "DevOS AI Code Agent")
+            self.assertTrue(prot)
+            self.assertTrue(optimizer.is_protected("python3", pid=9999, proc_root=fake_proc))
+            
+            # Simulated DevOS AI Core server.py
+            with open(os.path.join(pid_dir, "cmdline"), "wb") as f:
+                f.write(b"python3\x00/usr/local/share/devos/components/ai-core/server.py\x00")
+            name, prot = optimizer.resolve_app_identity("python3", pid=9999, proc_root=fake_proc)
+            self.assertEqual(name, "DevOS AI Core (Local Neural Engine & API)")
+            self.assertTrue(prot)
+
+            # Simulated DevOS AI Chat assistant.py
+            with open(os.path.join(pid_dir, "cmdline"), "wb") as f:
+                f.write(b"python3\x00/usr/local/share/devos/components/assistant/assistant.py\x00")
+            name, prot = optimizer.resolve_app_identity("python3", pid=9999, proc_root=fake_proc)
+            self.assertEqual(name, "DevOS AI Chat")
+            self.assertTrue(prot)
+        finally:
+            shutil.rmtree(fake_proc, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()
+

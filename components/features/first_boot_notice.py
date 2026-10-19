@@ -27,6 +27,16 @@ POLL_SECONDS = 30
 MAX_WAIT_SECONDS = 3 * 3600
 APP_LABEL = "DevOS"
 ICON = "system-software-install"
+DONE_MARKER = os.path.expanduser("~/.config/devos/first_boot_notice.done")
+
+
+def mark_done() -> None:
+    try:
+        os.makedirs(os.path.dirname(DONE_MARKER), exist_ok=True)
+        with open(DONE_MARKER, "w", encoding="utf-8") as handle:
+            handle.write(str(int(time.time())))
+    except OSError:
+        pass
 
 
 def read_state(path: str = STATE_FILE) -> dict:
@@ -56,6 +66,8 @@ def failed_ids(state: dict):
 
 
 def needs_notice(state: dict) -> bool:
+    if os.path.exists(DONE_MARKER) and not state.get("running"):
+        return False
     return bool(state.get("running")) or bool(pending_ids(state))
 
 
@@ -135,7 +147,9 @@ def main() -> int:
         if is_finished(state, start, seen_running):
             refresh_menu()
             notify(*done_message(state))
+            mark_done()
             return 0
+    mark_done()
     return 0
 
 

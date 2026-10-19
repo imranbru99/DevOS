@@ -163,6 +163,21 @@ background=/usr/share/wallpapers/DevOS/DevOS-Default.png
 needsFullUserModel=false
 EOF
 cp -f /usr/share/sddm/themes/breeze/theme.conf /usr/share/sddm/themes/breeze/theme.conf.user
+
+# Configure SDDM to use the custom DevOS Modern login screen
+mkdir -p /etc/sddm.conf.d
+cat > /etc/sddm.conf.d/devos-theme.conf << 'EOF'
+[General]
+DisplayServer=x11
+
+[Theme]
+Current=devos
+EOF
+chmod 644 /etc/sddm.conf.d/devos-theme.conf
+if [ -d /usr/share/sddm/themes/devos ]; then
+    chmod 755 /usr/share/sddm/themes/devos
+    chmod 644 /usr/share/sddm/themes/devos/* 2>/dev/null || true
+fi
 python3 - << 'PY'
 import re
 from pathlib import Path

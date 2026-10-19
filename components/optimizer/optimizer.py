@@ -66,6 +66,11 @@ PROTECTED_NAMES = {
     "xdg-desktop-portal", "xdg-desktop-portal-kde", "kwalletd5", "kwalletd6",
     "ibus-daemon", "fcitx5", "at-spi-bus-launcher", "at-spi2-registryd",
     "gpg-agent", "ssh-agent", "calamares", "devos-optimizer",
+    # DevOS AI & Core Services (never suggest closing or kill)
+    "devos-ai", "devos-ai-core", "devos-ai-code-agent", "devos-code-agent",
+    "devos-chat", "devos-ai-models", "devos-ai-api", "devos-dashboard",
+    "devos-security", "devos-vault", "devos-session", "devos-taskman",
+    "llama-server", "ollama",
 }
 
 # Parents under which a DISPLAY-bearing process counts as a separate app
@@ -564,14 +569,72 @@ def app_root(pid, table):
     return cur
 
 
-def pretty_name(comm):
-    key = comm.lower()
-    if key in PRETTY_NAMES:
-        return PRETTY_NAMES[key]
-    return comm[:1].upper() + comm[1:]
+DEVOS_CMD_IDENTITIES = (
+    ("agent_gui.py", "DevOS AI Code Agent", True),
+    ("code_agent.py", "DevOS AI Code Agent", True),
+    ("devos-ai-code-agent", "DevOS AI Code Agent", True),
+    ("assistant.py", "DevOS AI Chat", True),
+    ("devos-chat", "DevOS AI Chat", True),
+    ("chat_gui.py", "DevOS AI Chat", True),
+    ("ai-core/server.py", "DevOS AI Core (Local Neural Engine & API)", True),
+    ("server.py", "DevOS AI Core (Local Neural Engine & API)", True),
+    ("devos-ai-core", "DevOS AI Core (Local Neural Engine & API)", True),
+    ("models_gui.py", "DevOS AI Models", True),
+    ("models_cli.py", "DevOS AI Models", True),
+    ("dashboard_server.py", "DevOS Dashboard", True),
+    ("optimizer.py", "DevOS Optimizer", True),
+    ("security_gui.py", "DevOS Security", True),
+    ("security_center.py", "DevOS Security", True),
+    ("notepad.py", "DevOS Notepad", False),
+    ("notes.py", "DevOS Notes", False),
+    ("phonelink.py", "DevOS Phone Link", False),
+    ("islamic", "DevOS Islamic", False),
+    ("winlayer", "DevOS WinLayer", True),
+    ("vault.py", "DevOS Vault", True),
+    ("cloud_backup.py", "DevOS Cloud Backup", True),
+)
 
 
-def is_protected(comm, pid=None, uid=None, my_uid=None, my_pid=None):
+def resolve_proc_cmdline(pid, proc_root="/proc"):
+    try:
+        with open(os.path.join(proc_root, str(pid), "cmdline"), "rb") as fh:
+            return fh.read().decode("utf-8", "replace").replace("\x00", " ")
+    except OSError:
+        return ""
+
+
+def is_ai_service_active(pid, proc_root="/proc"):
+    """Check if process or its command line represents an active DevOS AI daemon."""
+    cmd = resolve_proc_cmdline(pid, proc_root)
+    if "server.py" in cmd or "ai-core" in cmd or "devos-ai" in cmd or "11434" in cmd:
+        return True
+    return False
+
+
+def resolve_app_identity(comm, pid=None, proc_root="/proc"):
+    """Identify real app name and whether it is a protected system/AI service."""
+    comm_lower = comm.lower()
+    if pid is not None:
+        cmd = resolve_proc_cmdline(pid, proc_root)
+        if cmd:
+            for pattern, name, is_prot in DEVOS_CMD_IDENTITIES:
+                if pattern in cmd:
+                    return name, is_prot
+            if is_ai_service_active(pid, proc_root):
+                return "DevOS AI Core (Local Neural Engine & API)", True
+
+    if comm_lower in PRETTY_NAMES:
+        return PRETTY_NAMES[comm_lower], comm_lower in PROTECTED_NAMES
+    name = comm[:1].upper() + comm[1:]
+    return name, comm_lower in PROTECTED_NAMES
+
+
+def pretty_name(comm, pid=None):
+    name, _ = resolve_app_identity(comm, pid)
+    return name
+
+
+def is_protected(comm, pid=None, uid=None, my_uid=None, my_pid=None, proc_root="/proc"):
     if comm.lower() in PROTECTED_NAMES:
         return True
     if pid is not None and pid <= 1:
@@ -580,6 +643,12 @@ def is_protected(comm, pid=None, uid=None, my_uid=None, my_pid=None):
         return True
     if my_uid is not None and uid != my_uid:
         return True
+    if pid is not None:
+        _, prot = resolve_app_identity(comm, pid, proc_root=proc_root)
+        if prot:
+            return True
+        if is_ai_service_active(pid, proc_root=proc_root):
+            return True
     return False
 
 
@@ -694,13 +763,14 @@ def collect_apps(table=None, windows=None, my_uid=None, my_pid=None):
         key = "%s:%d" % (info["comm"].lower(), root)
         app = apps.get(key)
         if app is None:
+            name, is_prot = resolve_app_identity(info["comm"], root)
+            protected = is_prot or is_protected(info["comm"], root, info["uid"], my_uid, my_pid) or _is_self(root)
             app = apps[key] = {
-                "key": key, "name": pretty_name(info["comm"]),
+                "key": key, "name": name,
                 "comm": info["comm"].lower(), "pid": root, "uid": info["uid"],
                 "rss": tree_rss(root, table, kids), "cpu": tree_cpu(root, table, kids),
                 "windows": [],
-                "protected": is_protected(info["comm"], root, info["uid"], my_uid, my_pid)
-                or _is_self(root),
+                "protected": protected,
             }
         app["windows"].extend(wins)
     return apps

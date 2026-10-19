@@ -3,17 +3,28 @@
 # Launches the DevOS AI Code Agent experience
 set -euo pipefail
 
-# Ensure AI backend or bridge is accessible
-AI_DIR="/usr/local/share/devos/components/ai-core"
-if [ -f "${AI_DIR}/server.py" ] && ! ss -ltn 2>/dev/null | grep -q ':11434'; then
-    (cd "${AI_DIR}" && python3 server.py >/var/tmp/devos-ai-core.log 2>&1 &)
-    sleep 0.5
+# Ensure AI backend is accessible
+AI_DIRS=(
+    "${HOME:-}/project/dev-os/components/ai-core"
+    "/usr/local/share/devos/components/ai-core"
+)
+if ! ss -ltn 2>/dev/null | grep -q ':11434'; then
+    for AD in "${AI_DIRS[@]}"; do
+        if [ -f "${AD}/server.py" ]; then
+            (cd "${AD}" && python3 server.py >/var/tmp/devos-ai-core.log 2>&1 &)
+            break
+        fi
+    done
 fi
 
-# Prefer local repo components if executed from source checkout
+# Prefer local repo components if executed from source checkout or development environment
 REPO_COMPONENTS="$(dirname "$0")/../../../../../components/code-agent"
 if [ -d "${REPO_COMPONENTS}" ]; then
     DIR="$(cd "${REPO_COMPONENTS}" && pwd)"
+elif [ -n "${DEVOS_COMPONENTS_DIR:-}" ] && [ -d "${DEVOS_COMPONENTS_DIR}/code-agent" ]; then
+    DIR="${DEVOS_COMPONENTS_DIR}/code-agent"
+elif [ -d "${HOME:-}/project/dev-os/components/code-agent" ]; then
+    DIR="${HOME:-}/project/dev-os/components/code-agent"
 else
     DIR="/usr/local/share/devos/components/code-agent"
 fi

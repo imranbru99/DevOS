@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-DevOS AI Code Agent window: chat with a coding agent that runs on the local DevOS
-AI model, watch its plan, and accept or reject every file change and command.
-
-The agent (code_agent.CodeAgent) runs in a worker thread. When it needs an
-approval it asks the window through a signal and waits; the Accept / Reject
-and Run / Deny buttons answer it.
+DevOS AI Code Agent: Next-Generation Autonomous Pair Programmer and Multi-Agent Development Engine.
+Runs locally on DevOS AI (127.0.0.1:11434). Zero cloud latency, 100% private and offline.
+Features real-time neural reasoning visualization, live code generation streaming,
+instant roadmap planning, and VS Code-grade interactive diff reviews.
 """
 
 import html
+import json
 import os
 import re
 import shutil
 import sys
 import threading
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -24,130 +24,510 @@ import code_agent as core  # noqa: E402
 from PyQt5 import QtCore, QtGui, QtWidgets  # noqa: E402
 
 MODELS_GUI = os.path.join(os.path.dirname(HERE), "ai-core", "models_gui.py")
+CONFIG_DIR = os.path.expanduser("~/.config/devos")
+CONFIG_PATH = os.path.join(CONFIG_DIR, "code-agent.json")
 
-BG = "#0b0f1a"
-CARD = "#0f172a"
-LINE = "#1e293b"
-TEXT = "#e2e8f0"
+
+def get_app_icon() -> QtGui.QIcon:
+    """Return high-resolution multi-size icon for DevOS AI Code Agent."""
+    icon = QtGui.QIcon()
+    for s in [16, 22, 24, 32, 48, 64, 128, 256, 512]:
+        p = os.path.expanduser(f"~/.local/share/icons/hicolor/{s}x{s}/apps/devos-ai-code-agent.png")
+        if os.path.exists(p):
+            icon.addFile(p, QtCore.QSize(s, s))
+        p_chroot = os.path.join(HERE, f"../../build/includes.chroot/usr/share/icons/hicolor/{s}x{s}/apps/devos-ai-code-agent.png")
+        if os.path.exists(p_chroot):
+            icon.addFile(p_chroot, QtCore.QSize(s, s))
+
+    candidates = [
+        os.path.join(HERE, "assets", "devos-ai-code-agent.png"),
+        os.path.expanduser("~/.local/share/pixmaps/devos-ai-code-agent.png"),
+        "/usr/share/pixmaps/devos-ai-code-agent.png",
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            icon.addFile(path)
+            break
+    return icon
+
+
+
+def get_persisted_config() -> dict:
+    try:
+        if os.path.exists(CONFIG_PATH):
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+def save_persisted_config(data: dict) -> None:
+    try:
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+    except Exception:
+        pass
+
+
+def get_last_opened_folder() -> str:
+    cfg = get_persisted_config()
+    last = cfg.get("last_folder", "")
+    if last and os.path.isdir(last):
+        return os.path.abspath(last)
+    return ""
+
+
+def record_opened_folder(folder: str) -> None:
+    if not folder or not os.path.isdir(folder):
+        return
+    folder = os.path.abspath(folder)
+    cfg = get_persisted_config()
+    cfg["last_folder"] = folder
+    recents = [r for r in cfg.get("recent_folders", []) if r != folder and os.path.isdir(r)]
+    recents.insert(0, folder)
+    cfg["recent_folders"] = recents[:10]
+    save_persisted_config(cfg)
+
+
+# ==============================================================================
+# Theme & Premium Palette (Deep Obsidian & Cyber Cyan)
+# ==============================================================================
+BG = "#080c14"
+CARD = "#0d1526"
+CARD_HOVER = "#111c33"
+LINE = "#1a263e"
+LINE_ACTIVE = "#38bdf8"
+TEXT = "#f1f5f9"
 MUTED = "#94a3b8"
+SUBTLE = "#64748b"
 ACCENT = "#38bdf8"
-VIOLET = "#a78bfa"
-GOOD = "#34d399"
-BAD = "#f87171"
+ACCENT_HOVER = "#0ea5e9"
+VIOLET = "#818cf8"
+GOOD = "#10b981"
+GOOD_BG = "#064e3b"
+BAD = "#ef4444"
+BAD_BG = "#450a0a"
+AMBER = "#f59e0b"
+AMBER_BG = "#451a03"
 
 STYLE = f"""
-QWidget {{ background: {BG}; color: {TEXT}; font-family: 'Inter', 'Noto Sans', sans-serif; font-size: 14px; }}
+QWidget {{
+    background: {BG};
+    color: {TEXT};
+    font-family: 'Inter', 'Segoe UI', 'Noto Sans', sans-serif;
+    font-size: 13.5px;
+}}
 QLabel {{ background: transparent; }}
-QLabel#title {{ font-size: 19px; font-weight: 700; color: #f8fafc; }}
+QLabel#title {{
+    font-size: 17px;
+    font-weight: 700;
+    color: #ffffff;
+    letter-spacing: 0.3px;
+}}
+QLabel#subtitle {{
+    font-size: 11.5px;
+    color: {MUTED};
+}}
 QLabel#muted, QLabel#path {{ color: {MUTED}; }}
-QLabel#cardTitle {{ font-size: 12px; font-weight: 700; color: {MUTED}; letter-spacing: 1px; }}
-QLabel#badge {{ background: #052e2b; color: #5eead4; border: 1px solid #115e59; border-radius: 11px;
-               padding: 3px 12px; font-size: 12px; font-weight: 600; }}
-QLabel#chip {{ background: #1e1b4b; color: #c4b5fd; border: 1px solid #3730a3; border-radius: 9px;
-              padding: 2px 10px; font-size: 12px; }}
-QFrame#topbar {{ background: #0d1424; border-bottom: 1px solid {LINE}; }}
-QFrame#card {{ background: {CARD}; border: 1px solid {LINE}; border-radius: 14px; }}
-QFrame#card[attention="true"] {{ border: 1px solid {ACCENT}; }}
-QFrame#gate {{ background: {CARD}; border: 1px solid {LINE}; border-radius: 18px; }}
-QPushButton {{ background: #1e293b; border: 1px solid #334155; border-radius: 9px; padding: 7px 14px;
-              color: {TEXT}; }}
-QPushButton:hover {{ background: #273449; }}
-QPushButton:disabled {{ color: #475569; background: #111827; border-color: #1f2937; }}
-QPushButton#primary {{ background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0284c7, stop:1 #7c3aed);
-                      border: 1px solid #38bdf8; color: white; font-weight: 600; padding: 8px 18px; }}
-QPushButton#primary:disabled {{ background: #1e293b; border-color: #334155; color: #64748b; }}
-QPushButton#accept {{ background: #064e3b; border-color: #10b981; color: #d1fae5; font-weight: 600; }}
-QPushButton#reject {{ background: #450a0a; border-color: #ef4444; color: #fee2e2; }}
-QPushButton#accept:disabled, QPushButton#reject:disabled {{ background: #111827; border-color: #1f2937;
-                                                           color: #475569; }}
-QTextBrowser, QPlainTextEdit, QListWidget {{ background: #0a0f1c; border: 1px solid {LINE}; border-radius: 10px;
-                                            padding: 6px; selection-background-color: #1d4ed8; }}
-QPlainTextEdit#composer {{ background: #0a1222; border: 1px solid #334155; border-radius: 12px; padding: 8px;
-                          font-size: 14px; }}
-QPlainTextEdit#composer:focus {{ border: 1px solid {ACCENT}; }}
-QPlainTextEdit#terminal {{ font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace; font-size: 12px;
-                          color: #cbd5e1; background: #05080f; }}
-QListWidget::item {{ padding: 5px 4px; border-radius: 6px; }}
-QListWidget::item:selected {{ background: #172554; }}
-QCheckBox {{ background: transparent; color: {MUTED}; spacing: 7px; }}
-QCheckBox::indicator {{ width: 30px; height: 16px; border-radius: 8px; background: #334155; }}
-QCheckBox::indicator:checked {{ background: {ACCENT}; }}
+QLabel#cardTitle {{
+    font-size: 11.5px;
+    font-weight: 700;
+    color: #7dd3fc;
+    letter-spacing: 0.8px;
+}}
+QPushButton#badge {{
+    background: #042f2e;
+    color: #2dd4bf;
+    border: 1px solid #0f766e;
+    border-radius: 12px;
+    padding: 3px 12px;
+    font-size: 12px;
+    font-weight: 600;
+}}
+QPushButton#badge[state="online"] {{
+    background: #042f2e;
+    color: #2dd4bf;
+    border: 1px solid #0f766e;
+}}
+QPushButton#badge[state="starting"] {{
+    background: #451a03;
+    color: #fde047;
+    border: 1px solid #b45309;
+}}
+QPushButton#badge[state="offline"] {{
+    background: #4c0519;
+    color: #fb7185;
+    border: 1px solid #e11d48;
+}}
+QPushButton#badge:hover {{
+    border-color: #38bdf8;
+}}
+QLabel#chip {{
+    background: #1e1b4b;
+    color: #c4b5fd;
+    border: 1px solid #4338ca;
+    border-radius: 9px;
+    padding: 3px 11px;
+    font-size: 12px;
+    font-weight: 600;
+}}
+QLabel#topicLabel {{
+    color: #38bdf8;
+    font-size: 12.5px;
+    font-weight: 600;
+}}
+QFrame#topbar {{
+    background: #09101f;
+    border-bottom: 1px solid {LINE};
+}}
+QFrame#card {{
+    background: {CARD};
+    border: 1px solid {LINE};
+    border-radius: 12px;
+}}
+QFrame#card[attention="true"] {{
+    border: 1px solid {ACCENT};
+    background: #0f1a30;
+}}
+QFrame#thinkingCard {{
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0d1a33, stop:1 #111e3b);
+    border: 1px solid #2563eb;
+    border-radius: 10px;
+}}
+QFrame#gate {{
+    background: {CARD};
+    border: 1px solid {LINE};
+    border-radius: 18px;
+}}
+QPushButton {{
+    background: #17243c;
+    border: 1px solid #253654;
+    border-radius: 8px;
+    padding: 7px 14px;
+    color: {TEXT};
+    font-weight: 500;
+}}
+QPushButton:hover {{
+    background: #203152;
+    border-color: #38bdf8;
+}}
+QPushButton:disabled {{
+    color: #475569;
+    background: #0d1627;
+    border-color: #1e293b;
+}}
+QPushButton#primary {{
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0284c7, stop:1 #6366f1);
+    border: 1px solid #38bdf8;
+    color: #ffffff;
+    font-weight: 600;
+    padding: 8px 18px;
+    border-radius: 8px;
+}}
+QPushButton#primary:hover {{
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0369a1, stop:1 #4f46e5);
+    border-color: #7dd3fc;
+}}
+QPushButton#primary:disabled {{
+    background: #1e293b;
+    border-color: #334155;
+    color: #64748b;
+}}
+QPushButton#stopBtn {{
+    background: #450a0a;
+    border: 1px solid #991b1b;
+    color: #fecaca;
+    font-weight: 600;
+    border-radius: 8px;
+}}
+QPushButton#stopBtn:hover {{
+    background: #7f1d1d;
+    border-color: #ef4444;
+}}
+QPushButton#accept {{
+    background: #064e3b;
+    border: 1px solid #059669;
+    color: #d1fae5;
+    font-weight: 600;
+    border-radius: 8px;
+}}
+QPushButton#accept:hover {{
+    background: #047857;
+    border-color: #10b981;
+}}
+QPushButton#reject {{
+    background: #450a0a;
+    border: 1px solid #b91c1c;
+    color: #fee2e2;
+    border-radius: 8px;
+}}
+QPushButton#reject:hover {{
+    background: #7f1d1d;
+    border-color: #ef4444;
+}}
+QPushButton#quickPill {{
+    background: #111c30;
+    border: 1px solid #1e2e4a;
+    color: #94a3b8;
+    border-radius: 12px;
+    padding: 3px 10px;
+    font-size: 11.5px;
+}}
+QPushButton#quickPill:hover {{
+    background: #1a2a47;
+    color: #38bdf8;
+    border-color: #38bdf8;
+}}
+QTextBrowser, QPlainTextEdit, QListWidget {{
+    background: #070e1c;
+    border: 1px solid {LINE};
+    border-radius: 9px;
+    padding: 8px;
+    selection-background-color: #1d4ed8;
+}}
+QPlainTextEdit#composer {{
+    background: #0a1324;
+    border: 1px solid #223452;
+    border-radius: 10px;
+    padding: 9px;
+    font-size: 13.5px;
+}}
+QPlainTextEdit#composer:focus {{
+    border: 1px solid {ACCENT};
+    background: #0c172d;
+}}
+QPlainTextEdit#terminal {{
+    font-family: 'JetBrains Mono', 'Fira Code', 'DejaVu Sans Mono', monospace;
+    font-size: 12px;
+    color: #cbd5e1;
+    background: #040812;
+}}
+QListWidget {{
+    background: #070e1c;
+    border: 1px solid {LINE};
+    border-radius: 9px;
+}}
+QListWidget::item {{
+    padding: 7px 6px;
+    border-radius: 7px;
+    margin-bottom: 2px;
+}}
+QListWidget::item:selected {{
+    background: #132442;
+    color: #ffffff;
+}}
+QCheckBox {{
+    background: transparent;
+    color: {MUTED};
+    spacing: 7px;
+    font-size: 12.5px;
+}}
+QCheckBox::indicator {{
+    width: 28px;
+    height: 15px;
+    border-radius: 7px;
+    background: #23334d;
+}}
+QCheckBox::indicator:checked {{
+    background: {ACCENT};
+}}
+QProgressBar {{
+    border: 1px solid #1e293b;
+    border-radius: 4px;
+    text-align: center;
+    background: #0a1222;
+    color: #7dd3fc;
+    font-size: 11px;
+    font-weight: 600;
+}}
+QProgressBar::chunk {{
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0284c7, stop:1 #38bdf8);
+    border-radius: 3px;
+}}
 QSplitter::handle {{ background: {BG}; }}
-QScrollBar:vertical {{ background: transparent; width: 10px; margin: 2px; }}
-QScrollBar::handle:vertical {{ background: #334155; border-radius: 4px; min-height: 30px; }}
+QScrollBar:vertical {{
+    background: transparent;
+    width: 9px;
+    margin: 2px;
+}}
+QScrollBar::handle:vertical {{
+    background: #253654;
+    border-radius: 4px;
+    min-height: 28px;
+}}
+QScrollBar::handle:vertical:hover {{
+    background: #38bdf8;
+}}
 QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; }}
-QStatusBar, QLabel#status {{ color: {MUTED}; font-size: 12px; }}
+QStatusBar, QLabel#status {{
+    color: {MUTED};
+    font-size: 12px;
+}}
 """
 
-STEP_ICON = {"running": "○", "done": "✓", "denied": "✕", "failed": "!", "plan": "•"}
+STEP_ICON = {"running": "⚡", "done": "✓", "denied": "✕", "failed": "!", "plan": "○"}
 STEP_COLOR = {"running": ACCENT, "done": GOOD, "denied": BAD, "failed": "#fbbf24", "plan": MUTED}
 
 
-def card(title: str):
+class CompactLabel(QtWidgets.QLabel):
+    """A QLabel that does not force parent layouts to expand to its full text width."""
+    def minimumSizeHint(self) -> QtCore.QSize:
+        h = super().minimumSizeHint().height()
+        return QtCore.QSize(20, h)
+
+
+def card(title: str, subtitle: str = ""):
     frame = QtWidgets.QFrame()
     frame.setObjectName("card")
+    frame.setMinimumWidth(80)
     layout = QtWidgets.QVBoxLayout(frame)
     layout.setContentsMargins(14, 12, 14, 12)
     layout.setSpacing(8)
     header = QtWidgets.QHBoxLayout()
-    label = QtWidgets.QLabel(title.upper())
+    header_titles = QtWidgets.QVBoxLayout()
+    header_titles.setSpacing(1)
+    label = CompactLabel(title.upper())
     label.setObjectName("cardTitle")
-    header.addWidget(label)
+    label.setMinimumWidth(20)
+    header_titles.addWidget(label)
+    if subtitle:
+        sub = CompactLabel(subtitle)
+        sub.setObjectName("subtitle")
+        sub.setMinimumWidth(20)
+        header_titles.addWidget(sub)
+    header.addLayout(header_titles)
     header.addStretch(1)
     layout.addLayout(header)
     return frame, layout, header
 
 
 def diff_html(diff: str) -> str:
+    if not diff or not diff.strip():
+        return ("<div style=\"color:#94a3b8; font-family:'JetBrains Mono','Fira Code',monospace; "
+                "font-size:12px; padding:14px; font-style:italic;\">(New empty file or no content changes)</div>")
     rows = []
-    for line in diff.splitlines():
+    lines = diff.splitlines()
+    for i, line in enumerate(lines):
         text = html.escape(line) or "&nbsp;"
         if line.startswith("+++") or line.startswith("---"):
-            style = f"color:{MUTED};"
+            style = f"color:{MUTED}; font-weight: 600;"
         elif line.startswith("+"):
-            style = "background-color:#06301f; color:#a7f3d0;"
+            style = "background-color:#063520; color:#a7f3d0;"
         elif line.startswith("-"):
-            style = "background-color:#3a0d14; color:#fecaca;"
+            style = "background-color:#3d0d17; color:#fecaca;"
         elif line.startswith("@@"):
-            style = f"color:{VIOLET};"
+            style = f"color:{VIOLET}; font-weight: 600;"
         else:
             style = "color:#cbd5e1;"
-        rows.append(f'<tr><td style="{style} padding:0 6px; white-space:pre;">{text}</td></tr>')
+        rows.append(f'<tr><td width="36" style="color:#475569; padding:0 6px; text-align:right; user-select:none;">{i+1}</td>'
+                    f'<td style="{style} padding:0 8px; white-space:pre;">{text}</td></tr>')
     return ("<table width='100%' cellspacing='0' cellpadding='0' style=\"font-family:'JetBrains Mono',"
-            "'DejaVu Sans Mono',monospace; font-size:12px;\">" + "".join(rows) + "</table>")
+            "'Fira Code',monospace; font-size:12px; line-height: 1.4;\">" + "".join(rows) + "</table>")
 
 
-_TOOL_BLOCK = re.compile(r"```[ \t]*tool[ \t]*([^\n]*)\n.*?(?:\n```|\Z)|<tool_call>.*?(?:</tool_call>|\Z)", re.S)
-_CODE_BLOCK = re.compile(r"```[^\n]*\n(.*?)(?:\n```|\Z)", re.S)
+_TOOL_BLOCK = re.compile(r"```[ \t]*tool[ \t]*([^\n]*)\n(.*?)(?:\n```|\Z)|<tool_call>(.*?)(?:</tool_call>|\Z)", re.S)
+_CODE_BLOCK = re.compile(r"```([^\n]*)\n(.*?)(?:\n```|\Z)", re.S)
+_THINK_BLOCK = re.compile(r"<think>(.*?)(?:</think>|\Z)", re.S)
 
 
-def message_html(text: str) -> str:
-    """Model text for the chat: tool blocks become small chips, code blocks <pre>."""
+def message_html(text: str, is_generating: bool = False) -> str:
+    """Format AI text into rich markdown, live code previews, and reasoning cards."""
+    if not text:
+        return ""
+
+    out = []
+    
+    # 1. Format reasoning <think> tags if present
+    think_match = _THINK_BLOCK.search(text)
+    if think_match:
+        think_content = think_match.group(1).strip()
+        if think_content:
+            out.append(f'''
+            <div style="background:#091224; border:1px solid #1e3a6a; border-left:3px solid #818cf8; border-radius:8px; padding:8px 12px; margin:6px 0;">
+              <div style="color:#a5b4fc; font-weight:700; font-size:11px; letter-spacing:0.5px; margin-bottom:4px;">
+                🧠 NEURAL REASONING & THOUGHT PROCESS
+              </div>
+              <div style="color:#cbd5e1; font-size:12px; line-height:1.4;">{html.escape(think_content)}</div>
+            </div>
+            ''')
+        text = _THINK_BLOCK.sub("", text)
+
     pieces = []
     pos = 0
     for match in _TOOL_BLOCK.finditer(text):
         pieces.append(("text", text[pos:match.start()]))
-        call = core.parse_tool_call(match.group(0))
-        label = call.name.replace("_", " ") if call else "tool"
+        raw_call = match.group(0)
+        call = core.parse_tool_call(raw_call)
+        
+        tool_name = call.name if call else "tool"
         target = ""
+        content = ""
         if call:
             target = str(call.args.get("path") or call.args.get("pattern") or call.args.get("command") or "")
             if call.name == "apply_patch":
-                target = ", ".join(re.findall(r"^\+\+\+ (?:b/)?(\S+)", str(call.args.get("patch", "")), re.M))
-        pieces.append(("tool", f"{label}  {target}".strip()))
+                target = ", ".join(re.findall(r"^\+\+\+ (?:b/)?(\S+)", str(call.args.get("patch", "")), re.M)) or target
+                content = str(call.args.get("patch", ""))
+            elif call.name == "write_file":
+                content = str(call.args.get("content", ""))
+            elif call.name == "run_command":
+                content = str(call.args.get("command", ""))
+        else:
+            # Check if streaming tool call
+            first_line = raw_call.splitlines()[0] if raw_call else ""
+            tool_name = first_line.replace("```tool", "").strip() or "tool"
+            m_path = re.search(r"(?:path|file|target)[:\s]*([^\n]+)", raw_call, re.I)
+            if m_path:
+                target = m_path.group(1).strip()
+            # Extract content after ---
+            if "---" in raw_call:
+                content = raw_call.split("---", 1)[1]
+
+        pieces.append(("tool", (tool_name, target, content)))
         pos = match.end()
     pieces.append(("text", text[pos:]))
-    out = []
+
     for kind, value in pieces:
         if kind == "tool":
-            out.append(f'<p><span style="background-color:#1e1b4b; color:#c4b5fd;">&nbsp;▸ '
-                       f'{html.escape(value[:90])}&nbsp;</span></p>')
+            tool_name, target, content = value
+            tool_title = f"{tool_name.replace('_', ' ').upper()}"
+            if target:
+                tool_title += f" · {html.escape(target)}"
+            
+            if content.strip():
+                lines = content.strip().splitlines()
+                preview = "\n".join(lines[:30])
+                more = f"\n... ({len(lines) - 30} more lines)" if len(lines) > 30 else ""
+                live_badge = ' &nbsp;<span style="color:#38bdf8; font-size:11px;">(Generating...)</span>' if is_generating else ''
+                out.append(f'''
+                <div style="background:#071224; border:1px solid #1e3a6a; border-radius:9px; margin:8px 0; overflow:hidden;">
+                  <div style="background:#0e1e3b; padding:6px 12px; color:#38bdf8; font-size:12px; font-weight:700; border-bottom:1px solid #1e3a6a;">
+                    ⚡ {tool_title}{live_badge}
+                  </div>
+                  <pre style="background:#040914; color:#e2e8f0; font-family:'JetBrains Mono','Fira Code',monospace; font-size:12px; padding:10px; margin:0; white-space:pre-wrap; line-height:1.4;">{html.escape(preview + more)}</pre>
+                </div>
+                ''')
+            else:
+                out.append(f'''
+                <div style="background:#09152b; border:1px solid #1e2c45; border-radius:7px; padding:5px 12px; margin:6px 0; display:inline-block;">
+                  <span style="color:#7dd3fc; font-weight:600; font-size:12px;">⚡ {tool_title}</span>
+                </div>
+                ''')
             continue
+
         last = 0
         for code in _CODE_BLOCK.finditer(value):
             out.append(_prose(value[last:code.start()]))
-            out.append('<pre style="background-color:#05080f; color:#e2e8f0; font-family:\'JetBrains Mono\','
-                       f'monospace; font-size:12px;">{html.escape(code.group(1))}</pre>')
+            lang = (code.group(1) or "code").strip()
+            out.append(f'''
+            <div style="background:#050c18; border:1px solid #1a273e; border-radius:8px; margin:6px 0; overflow:hidden;">
+              <div style="background:#091426; padding:4px 10px; color:#64748b; font-size:11px; font-family:sans-serif; border-bottom:1px solid #152238;">
+                {html.escape(lang)}
+              </div>
+              <pre style="color:#e2e8f0; font-family:'JetBrains Mono','Fira Code',monospace; font-size:12px; padding:10px; margin:0; white-space:pre-wrap; line-height:1.4;">{html.escape(code.group(2))}</pre>
+            </div>
+            ''')
             last = code.end()
         out.append(_prose(value[last:]))
     return "".join(out)
@@ -158,11 +538,14 @@ def _prose(text: str) -> str:
     if not text.strip():
         return ""
     escaped = html.escape(text)
-    escaped = re.sub(r"`([^`\n]+)`", r'<code style="color:#7dd3fc;">\1</code>', escaped)
-    escaped = re.sub(r"\*\*([^*\n]+)\*\*", r"<b>\1</b>", escaped)
-    return "<p>" + escaped.replace("\n", "<br>") + "</p>"
+    escaped = re.sub(r"`([^`\n]+)`", r'<code style="background:#111e33; color:#7dd3fc; padding:2px 5px; border-radius:4px; font-family:\'JetBrains Mono\',monospace; font-size:12px;">\1</code>', escaped)
+    escaped = re.sub(r"\*\*([^*\n]+)\*\*", r"<b style='color:#ffffff;'>\1</b>", escaped)
+    return "<p style='margin:4px 0; line-height: 1.5;'>" + escaped.replace("\n", "<br>") + "</p>"
 
 
+# ==============================================================================
+# Worker Thread
+# ==============================================================================
 class AgentWorker(QtCore.QThread):
     event = QtCore.pyqtSignal(str, object)
     approval = QtCore.pyqtSignal(object)
@@ -199,17 +582,19 @@ class AgentWorker(QtCore.QThread):
         try:
             workspace = core.Workspace(self.folder)
             self.agent = core.CodeAgent(workspace, self.llm, self.ask, self.policy,
-                                        on_event=lambda kind, payload=None: self.event.emit(kind, payload))
+                                        on_event=lambda kind, payload=None: self.event.emit(kind, payload),
+                                        max_steps=40)
             self.agent.run(self.task)
         except core.AgentError as exc:
             self.failed.emit(str(exc))
-        except Exception as exc:  # keep the window alive, show what happened
+        except Exception as exc:
             self.failed.emit(f"The agent stopped: {exc}")
 
 
+# ==============================================================================
+# Gating Widget
+# ==============================================================================
 class GatePanel(QtWidgets.QWidget):
-    """Shown instead of the agent when this PC's AI is too small for coding."""
-
     def __init__(self, reason: str, recheck):
         super().__init__()
         outer = QtWidgets.QVBoxLayout(self)
@@ -218,19 +603,18 @@ class GatePanel(QtWidgets.QWidget):
         row.addStretch(1)
         box = QtWidgets.QFrame()
         box.setObjectName("gate")
-        box.setFixedWidth(560)
+        box.setFixedWidth(580)
         layout = QtWidgets.QVBoxLayout(box)
-        layout.setContentsMargins(32, 28, 32, 28)
-        layout.setSpacing(12)
-        title = QtWidgets.QLabel("Coding needs a stronger DevOS AI")
+        layout.setContentsMargins(34, 30, 34, 30)
+        layout.setSpacing(14)
+        title = QtWidgets.QLabel("Coding requires a stronger DevOS AI")
         title.setObjectName("title")
         layout.addWidget(title)
         text = QtWidgets.QLabel(reason)
         text.setObjectName("muted")
         text.setWordWrap(True)
         layout.addWidget(text)
-        hint = QtWidgets.QLabel("Everything runs on this PC, so the agent appears once the Coding model or a "
-                                "Medium (3B) or bigger model is downloaded.")
+        hint = QtWidgets.QLabel("DevOS runs neural AI offline on your local CPU/GPU. The agent activates automatically once the Coding model or a Medium 3B+ model is downloaded.")
         hint.setObjectName("muted")
         hint.setWordWrap(True)
         layout.addWidget(hint)
@@ -251,24 +635,61 @@ class GatePanel(QtWidgets.QWidget):
         outer.addStretch(2)
 
 
+# ==============================================================================
+# Main Agent Window
+# ==============================================================================
 class AgentWindow(QtWidgets.QMainWindow):
     def __init__(self, folder: str = "", capable=None, llm=None):
         super().__init__()
         self.setWindowTitle("DevOS AI Code Agent")
-        self.resize(1320, 840)
+        self.setWindowIcon(get_app_icon())
+        
+        # Responsive sizing: fit cleanly within screen work area (e.g. 1024x576, 1366x768)
+        screen = QtWidgets.QApplication.primaryScreen()
+        geom = screen.availableGeometry() if screen else QtCore.QRect(0, 0, 1024, 576)
+        w = min(1360, max(640, geom.width() - 16))
+        h = min(840, max(460, geom.height() - 36))
+        self.resize(w, h)
+        # Position cleanly inside visible screen bounds, never negative X or off to the left
+        pos_x = max(geom.x(), geom.x() + max(0, (geom.width() - w) // 2))
+        pos_y = max(geom.y(), geom.y() + max(0, (geom.height() - h) // 2))
+        self.move(pos_x, pos_y)
         self.setStyleSheet(STYLE)
-        self.folder = os.path.abspath(folder) if folder else ""
-        self.policy = core.ApprovalPolicy(auto_reads=True, auto_edits=False)
+        
+        # Restore last opened folder if none explicitly provided
+        if not folder:
+            folder = get_last_opened_folder()
+        self.folder = os.path.abspath(folder) if (folder and os.path.isdir(folder)) else ""
+        self.policy = core.ApprovalPolicy(auto_reads=True, auto_edits=False, auto_commands=False)
         self.llm = llm
         self.worker = None
         self.pending = None
         self.transcript = []  # [role, text]
+        self.current_topic = ""
+        self.active_status_text = "Idle"
+        self.start_time = 0
         self._dirty = False
         self._capable_override = capable
+        self._inhibit_cookie = None
+
+        # Animation & update timer
         self._render_timer = QtCore.QTimer(self)
         self._render_timer.setInterval(60)
         self._render_timer.timeout.connect(self._render_if_dirty)
         self._render_timer.start()
+
+        # Elapsed timer for thinking & execution
+        self._elapsed_timer = QtCore.QTimer(self)
+        self._elapsed_timer.setInterval(1000)
+        self._elapsed_timer.timeout.connect(self._tick_elapsed)
+
+        # AI backend health monitor
+        self._ai_health_timer = QtCore.QTimer(self)
+        self._ai_health_timer.setInterval(4000)
+        self._ai_health_timer.timeout.connect(self._check_ai_status)
+        self._ai_health_timer.start()
+        QtCore.QTimer.singleShot(250, self._check_ai_status)
+        QtCore.QTimer.singleShot(600, self._warmup_ai_if_needed)
 
         root = QtWidgets.QWidget()
         self.setCentralWidget(root)
@@ -280,153 +701,345 @@ class AgentWindow(QtWidgets.QMainWindow):
         self.root_layout.addWidget(self.stack, 1)
         self.main = self._main_panel()
         self.stack.addWidget(self.main)
-        self.status = QtWidgets.QLabel()
+        
+        # Telemetry Status Bar
+        self.status = CompactLabel()
         self.status.setObjectName("status")
-        self.status.setContentsMargins(18, 6, 18, 8)
+        self.status.setContentsMargins(14, 4, 14, 6)
         self.root_layout.addWidget(self.status)
+
         self.check_capable()
         self.set_folder(self.folder)
 
-    # --------------------------------------------------------------- layout
+    # ------------------------------------------------------------------ top bar
     def _topbar(self):
         bar = QtWidgets.QFrame()
         bar.setObjectName("topbar")
         row = QtWidgets.QHBoxLayout(bar)
-        row.setContentsMargins(18, 12, 18, 12)
-        row.setSpacing(12)
+        row.setContentsMargins(12, 6, 12, 6)
+        row.setSpacing(8)
+
+        # Brand Emblem & Title
         mark = QtWidgets.QLabel()
         mark.setFixedSize(30, 30)
-        mark.setStyleSheet("border-radius: 9px; background: qlineargradient(x1:0, y1:0, x2:1, y2:1, "
-                           "stop:0 #38bdf8, stop:1 #8b5cf6); color: white; font-weight: 800;")
+        app_icon = get_app_icon()
+        if not app_icon.isNull():
+            mark.setPixmap(app_icon.pixmap(28, 28))
+            mark.setStyleSheet("background: transparent;")
+        else:
+            mark.setStyleSheet("border-radius: 8px; background: qlineargradient(x1:0, y1:0, x2:1, y2:1, "
+                               "stop:0 #0ea5e9, stop:1 #6366f1); color: white; font-weight: 800; font-size: 13px;")
+            mark.setText("⚡")
         mark.setAlignment(QtCore.Qt.AlignCenter)
-        mark.setText("</>")
         row.addWidget(mark)
+
         names = QtWidgets.QVBoxLayout()
         names.setSpacing(0)
-        title = QtWidgets.QLabel("DevOS AI Code Agent")
+        title = CompactLabel("DevOS AI Code Agent")
         title.setObjectName("title")
-        self.path_label = QtWidgets.QLabel("No folder open")
+        title.setMinimumWidth(30)
+        self.path_label = CompactLabel("No folder open")
         self.path_label.setObjectName("path")
+        self.path_label.setStyleSheet("color: #38bdf8; font-weight: 500;")
+        self.path_label.setMinimumWidth(30)
         names.addWidget(title)
         names.addWidget(self.path_label)
         row.addLayout(names)
-        row.addSpacing(8)
-        badge = QtWidgets.QLabel(f"●  Local · {core.CODE_MODEL}")
-        badge.setObjectName("badge")
-        badge.setToolTip("Runs on this PC's DevOS AI. Nothing is sent to the internet.")
-        row.addWidget(badge)
+        row.addSpacing(6)
+
+        # Model Beacon Pill (Interactive Status)
+        self.ai_badge = QtWidgets.QPushButton("●  devos-ai-code")
+        self.ai_badge.setObjectName("badge")
+        self.ai_badge.setMinimumWidth(30)
+        self.ai_badge.setToolTip("DevOS AI Core is running on 127.0.0.1:11434.\nZero cloud latency, 100% private and offline.")
+        self.ai_badge.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        self.ai_badge.clicked.connect(self._on_badge_clicked)
+        row.addWidget(self.ai_badge)
+
         row.addStretch(1)
-        self.auto_reads = QtWidgets.QCheckBox("Auto-approve reads")
+
+        # Policy Toggles
+        self.auto_reads = QtWidgets.QCheckBox("Reads")
+        self.auto_reads.setToolTip("Auto-approve reads: Automatically inspect project files without confirmation")
         self.auto_reads.setChecked(True)
+        self.auto_reads.setMinimumWidth(20)
         self.auto_reads.toggled.connect(self._policy_changed)
-        self.auto_edits = QtWidgets.QCheckBox("Auto-approve edits")
+
+        self.auto_edits = QtWidgets.QCheckBox("Edits")
+        self.auto_edits.setToolTip("Auto-approve edits: Automatically apply file edits without confirmation")
+        self.auto_edits.setMinimumWidth(20)
         self.auto_edits.toggled.connect(self._policy_changed)
+
+        self.auto_commands = QtWidgets.QCheckBox("Commands")
+        self.auto_commands.setToolTip("Auto-run commands: Automatically run terminal commands without confirmation")
+        self.auto_commands.setMinimumWidth(20)
+        self.auto_commands.toggled.connect(self._policy_changed)
+
         row.addWidget(self.auto_reads)
         row.addWidget(self.auto_edits)
-        self.open_btn = QtWidgets.QPushButton("Open folder…")
+        row.addWidget(self.auto_commands)
+
+        # Quick Project Buttons
+        folder_box = QtWidgets.QHBoxLayout()
+        folder_box.setSpacing(2)
+        self.open_btn = QtWidgets.QPushButton("📁 Open…")
+        self.open_btn.setToolTip("Open project folder…")
+        self.open_btn.setMinimumWidth(30)
         self.open_btn.clicked.connect(self.choose_folder)
-        row.addWidget(self.open_btn)
+        self.open_btn.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.open_btn.customContextMenuRequested.connect(lambda pos: self._show_recent_menu(self.open_btn.mapToGlobal(pos)))
+        folder_box.addWidget(self.open_btn)
+
+        self.recent_btn = QtWidgets.QPushButton("▾")
+        self.recent_btn.setFixedWidth(24)
+        self.recent_btn.setToolTip("Switch to recent project…")
+        self.recent_btn.clicked.connect(lambda: self._show_recent_menu(self.recent_btn.mapToGlobal(self.recent_btn.rect().bottomLeft())))
+        folder_box.addWidget(self.recent_btn)
+        row.addLayout(folder_box)
+
+        self.new_btn = QtWidgets.QPushButton("🧹 New")
+        self.new_btn.setToolTip("Reset the chat canvas for a new objective")
+        self.new_btn.setMinimumWidth(30)
+        self.new_btn.clicked.connect(self.new_task)
+        row.addWidget(self.new_btn)
+
         return bar
 
+    def _show_recent_menu(self, global_pos: QtCore.QPoint):
+        cfg = get_persisted_config()
+        recents = [r for r in cfg.get("recent_folders", []) if os.path.isdir(r)]
+        menu = QtWidgets.QMenu(self)
+        menu.setStyleSheet(f"""
+            QMenu {{ background: #0d1526; color: #f1f5f9; border: 1px solid {LINE}; border-radius: 8px; padding: 6px; }}
+            QMenu::item {{ padding: 6px 18px; border-radius: 6px; }}
+            QMenu::item:selected {{ background: #1e293b; color: {ACCENT}; }}
+            QMenu::separator {{ height: 1px; background: {LINE}; margin: 4px 6px; }}
+        """)
+        choose_act = menu.addAction("📁 Browse folder…")
+        choose_act.triggered.connect(self.choose_folder)
+        if recents:
+            menu.addSeparator()
+            label_act = menu.addAction("Recent Projects:")
+            label_act.setEnabled(False)
+            for rpath in recents:
+                rname = os.path.basename(rpath) or rpath
+                prefix = "✓ " if rpath == self.folder else "   "
+                act = menu.addAction(f"{prefix}📦 {rname}  ({rpath})")
+                act.triggered.connect(lambda _, p=rpath: self.set_folder(p))
+        menu.exec_(global_pos)
+
+
+    # ----------------------------------------------------------------- main panel
     def _main_panel(self):
         panel = QtWidgets.QWidget()
         layout = QtWidgets.QHBoxLayout(panel)
-        layout.setContentsMargins(14, 14, 14, 6)
+        layout.setContentsMargins(10, 8, 10, 6)
         split = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
-        split.setHandleWidth(12)
+        split.setHandleWidth(8)
+        split.setChildrenCollapsible(False)
         layout.addWidget(split)
 
-        # chat
-        chat_card, chat_layout, chat_header = card("Chat")
-        self.step_chip = QtWidgets.QLabel("Idle")
+        # Left Column: Conversation & Execution Canvas
+        chat_card, chat_layout, chat_header = card("Conversation & Agent Execution")
+        chat_card.setMinimumWidth(240)
+        
+        self.step_chip = QtWidgets.QLabel("● Idle")
         self.step_chip.setObjectName("chip")
         chat_header.addWidget(self.step_chip)
+
         self.chat = QtWidgets.QTextBrowser()
         self.chat.setOpenExternalLinks(False)
         chat_layout.addWidget(self.chat, 1)
+
+        # Active Thinking & Execution Banner (Above Composer)
+        self.thinking_banner = QtWidgets.QFrame()
+        self.thinking_banner.setObjectName("thinkingCard")
+        tb_layout = QtWidgets.QVBoxLayout(self.thinking_banner)
+        tb_layout.setContentsMargins(10, 8, 10, 8)
+        tb_layout.setSpacing(4)
+
+        tb_top = QtWidgets.QHBoxLayout()
+        self.tb_icon = QtWidgets.QLabel("🧠")
+        self.tb_icon.setStyleSheet("font-size: 15px;")
+        tb_top.addWidget(self.tb_icon)
+
+        self.tb_status = CompactLabel("Analyzing task & project files...")
+        self.tb_status.setStyleSheet("color: #f1f5f9; font-weight: 600; font-size: 12.5px;")
+        self.tb_status.setMinimumWidth(20)
+        tb_top.addWidget(self.tb_status, 1)
+
+        self.tb_timer = QtWidgets.QLabel("00:00s")
+        self.tb_timer.setStyleSheet("background: #1e1b4b; color: #a78bfa; border: 1px solid #4338ca; border-radius: 6px; padding: 2px 8px; font-weight: 700; font-size: 11px;")
+        tb_top.addWidget(self.tb_timer)
+        tb_layout.addLayout(tb_top)
+
+        self.tb_topic = CompactLabel("")
+        self.tb_topic.setObjectName("topicLabel")
+        self.tb_topic.setMinimumWidth(20)
+        tb_layout.addWidget(self.tb_topic)
+
+        self.tb_progress = QtWidgets.QProgressBar()
+        self.tb_progress.setFixedHeight(4)
+        self.tb_progress.setTextVisible(False)
+        self.tb_progress.setRange(0, 0)  # Shimmer / pulsating mode
+        tb_layout.addWidget(self.tb_progress)
+
+        self.thinking_banner.setVisible(False)
+        chat_layout.addWidget(self.thinking_banner)
+
+        # Composer & Quick Prompts
+        quick_row = QtWidgets.QHBoxLayout()
+        quick_row.setSpacing(6)
+        quick_lbl = QtWidgets.QLabel("Quick:")
+        quick_lbl.setStyleSheet("color: #64748b; font-size: 11.5px; font-weight: 600;")
+        quick_row.addWidget(quick_lbl)
+        
+        for label, prompt, tip in [
+            ("⚡ Plan", "Analyze the repository and create an architectural plan in docs/PHASE_1.md for the next phase.", "Plan Architecture — Analyze repository and create architectural plan"),
+            ("🧪 Tests", "Inspect tests and run the test suite to verify code integrity and reporting status.", "Run Tests — Inspect and run test suite"),
+            ("🔍 Scan", "List key directories and read core entrypoints to understand project architecture.", "Scan Structure — List key directories and inspect core entrypoints"),
+            ("📝 Patch", "Implement the next requested feature cleanly with minimal, high-cohesion changes.", "Implement & Patch — Implement next feature cleanly with minimal changes")
+        ]:
+            pill = QtWidgets.QPushButton(label)
+            pill.setObjectName("quickPill")
+            pill.setToolTip(tip)
+            pill.setMinimumWidth(20)
+            pill.clicked.connect(lambda _, p=prompt: self.insert_prompt(p))
+            quick_row.addWidget(pill)
+        quick_row.addStretch(1)
+        chat_layout.addLayout(quick_row)
+
         self.composer = QtWidgets.QPlainTextEdit()
         self.composer.setObjectName("composer")
-        self.composer.setPlaceholderText("Describe a change…  e.g. “Add a --verbose flag to cli.py "
-                                         "and a test for it”   (Ctrl+Enter to run)")
-        self.composer.setFixedHeight(84)
+        self.composer.setPlaceholderText("Describe your development objective… (e.g. 'Build Phase 1 ERP inventory models with transactions', Ctrl+Enter to run)")
+        self.composer.setFixedHeight(86)
         chat_layout.addWidget(self.composer)
+
         actions = QtWidgets.QHBoxLayout()
-        hint = QtWidgets.QLabel("Reads run on their own · edits and commands wait for you")
-        hint.setObjectName("muted")
-        hint.setStyleSheet("font-size: 12px;")
-        actions.addWidget(hint)
+        self.hint = CompactLabel("Reads automatic · Edits & terminal commands ask for approval")
+        self.hint.setObjectName("muted")
+        self.hint.setStyleSheet("font-size: 12px;")
+        self.hint.setMinimumWidth(20)
+        actions.addWidget(self.hint)
         actions.addStretch(1)
-        self.stop_btn = QtWidgets.QPushButton("Stop")
+
+        self.stop_btn = QtWidgets.QPushButton("✕ Stop")
+        self.stop_btn.setObjectName("stopBtn")
         self.stop_btn.setEnabled(False)
+        self.stop_btn.setVisible(False)
         self.stop_btn.clicked.connect(self.stop)
-        self.send_btn = QtWidgets.QPushButton("Run agent")
-        self.send_btn.setObjectName("primary")
-        self.send_btn.clicked.connect(self.send)
         actions.addWidget(self.stop_btn)
+
+        self.send_btn = QtWidgets.QPushButton("⚡ Run agent")
+        self.send_btn.setObjectName("primary")
+        self.send_btn.setMinimumWidth(30)
+        self.send_btn.clicked.connect(self.send)
         actions.addWidget(self.send_btn)
+
         chat_layout.addLayout(actions)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Return"), self.composer, activated=self.send)
         split.addWidget(chat_card)
 
-        # right column
+        # Right Column: Plan & Steps, Changes, Terminal
         right = QtWidgets.QSplitter(QtCore.Qt.Vertical)
-        right.setHandleWidth(12)
-        plan_card, plan_layout, _ = card("Plan & steps")
+        right.setHandleWidth(8)
+        right.setMinimumWidth(220)
+        right.setChildrenCollapsible(False)
+
+        # 1. Plan & Steps Card
+        plan_card, plan_layout, plan_header = card("Roadmap & Planned Steps")
+        plan_card.setMinimumWidth(80)
+        self.plan_progress = QtWidgets.QProgressBar()
+        self.plan_progress.setFixedHeight(14)
+        self.plan_progress.setFixedWidth(50)
+        self.plan_progress.setValue(0)
+        plan_header.addWidget(self.plan_progress)
+
         self.plan = QtWidgets.QListWidget()
         self.plan.setFocusPolicy(QtCore.Qt.NoFocus)
         plan_layout.addWidget(self.plan)
         right.addWidget(plan_card)
 
-        self.diff_card, diff_layout, diff_header = card("Changes")
-        self.diff_title = QtWidgets.QLabel("No changes yet")
+        # 2. Changes / Diffs Card
+        self.diff_card, diff_layout, diff_header = card("Code Changes & Unified Diff")
+        self.diff_card.setMinimumWidth(80)
+        self.diff_title = CompactLabel("No pending changes")
         self.diff_title.setObjectName("muted")
+        self.diff_title.setMinimumWidth(20)
         diff_header.addWidget(self.diff_title)
+
         self.diff = QtWidgets.QTextBrowser()
         diff_layout.addWidget(self.diff, 1)
-        diff_buttons = QtWidgets.QHBoxLayout()
+
+        self.diff_btn_box = QtWidgets.QWidget()
+        diff_buttons = QtWidgets.QHBoxLayout(self.diff_btn_box)
+        diff_buttons.setContentsMargins(0, 4, 0, 0)
         diff_buttons.addStretch(1)
-        self.reject_btn = QtWidgets.QPushButton("Reject")
+        self.reject_btn = QtWidgets.QPushButton("✕ Reject")
         self.reject_btn.setObjectName("reject")
-        self.accept_btn = QtWidgets.QPushButton("Accept change")
+        self.reject_btn.setMinimumWidth(30)
+        self.accept_btn = QtWidgets.QPushButton("✓ Accept")
         self.accept_btn.setObjectName("accept")
+        self.accept_btn.setMinimumWidth(30)
         self.reject_btn.clicked.connect(lambda: self.respond(False))
         self.accept_btn.clicked.connect(lambda: self.respond(True))
         diff_buttons.addWidget(self.reject_btn)
         diff_buttons.addWidget(self.accept_btn)
-        diff_layout.addLayout(diff_buttons)
+        diff_layout.addWidget(self.diff_btn_box)
+        self.diff_btn_box.setVisible(False)
         right.addWidget(self.diff_card)
 
-        self.term_card, term_layout, term_header = card("Terminal")
-        self.command_label = QtWidgets.QLabel("")
-        self.command_label.setStyleSheet("color: #fde68a; font-family: 'JetBrains Mono', monospace;")
+        # 3. Terminal Card
+        self.term_card, term_layout, term_header = card("Terminal Execution")
+        self.term_card.setMinimumWidth(80)
+        self.command_label = CompactLabel("")
+        self.command_label.setStyleSheet("color: #fde68a; font-family: 'JetBrains Mono', monospace; font-size: 11.5px;")
+        self.command_label.setMinimumWidth(20)
         term_header.addWidget(self.command_label)
+
         self.terminal = QtWidgets.QPlainTextEdit()
         self.terminal.setObjectName("terminal")
         self.terminal.setReadOnly(True)
         term_layout.addWidget(self.terminal, 1)
-        term_buttons = QtWidgets.QHBoxLayout()
-        term_note = QtWidgets.QLabel("Commands run in the project folder and always ask first")
+
+        self.term_btn_box = QtWidgets.QWidget()
+        term_buttons = QtWidgets.QHBoxLayout(self.term_btn_box)
+        term_buttons.setContentsMargins(0, 4, 0, 0)
+        term_note = CompactLabel("Executed inside project root")
         term_note.setObjectName("muted")
-        term_note.setStyleSheet("font-size: 12px;")
+        term_note.setStyleSheet("font-size: 11.5px;")
+        term_note.setMinimumWidth(20)
         term_buttons.addWidget(term_note)
         term_buttons.addStretch(1)
-        self.deny_btn = QtWidgets.QPushButton("Deny")
+
+        self.deny_btn = QtWidgets.QPushButton("✕ Deny")
         self.deny_btn.setObjectName("reject")
-        self.run_btn = QtWidgets.QPushButton("Run command")
+        self.deny_btn.setMinimumWidth(30)
+        self.run_btn = QtWidgets.QPushButton("⚡ Run")
         self.run_btn.setObjectName("accept")
+        self.run_btn.setMinimumWidth(30)
         self.deny_btn.clicked.connect(lambda: self.respond(False))
         self.run_btn.clicked.connect(lambda: self.respond(True))
         term_buttons.addWidget(self.deny_btn)
         term_buttons.addWidget(self.run_btn)
-        term_layout.addLayout(term_buttons)
+        term_layout.addWidget(self.term_btn_box)
+        self.term_btn_box.setVisible(False)
         right.addWidget(self.term_card)
-        right.setSizes([250, 360, 230])
+
+        plan_h = max(110, int(self.height() * 0.22))
+        diff_h = max(150, int(self.height() * 0.42))
+        term_h = max(110, int(self.height() * 0.26))
+        right.setSizes([plan_h, diff_h, term_h])
         split.addWidget(right)
-        split.setSizes([700, 600])
+        
+        left_w = max(300, int(self.width() * 0.52))
+        right_w = max(240, int(self.width() * 0.48))
+        split.setSizes([left_w, right_w])
+
         self._set_pending(None)
         return panel
 
-    # ---------------------------------------------------------------- gating
+    # ---------------------------------------------------------------- capabilities
     def check_capable(self):
         ok, reason = self._capable_override if self._capable_override else capability.coding_capable()
         if ok:
@@ -448,7 +1061,7 @@ class AgentWindow(QtWidgets.QMainWindow):
         if self.capable and current is not self.main:
             self.stack.removeWidget(current)
 
-    # --------------------------------------------------------------- folder
+    # ---------------------------------------------------------------- folder
     def choose_folder(self):
         folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Open project folder",
                                                             self.folder or os.path.expanduser("~"))
@@ -456,51 +1069,212 @@ class AgentWindow(QtWidgets.QMainWindow):
             self.set_folder(folder)
 
     def set_folder(self, folder: str):
-        self.folder = folder
-        self.path_label.setText(folder or "No folder open — choose one to start")
+        if folder and os.path.isdir(folder):
+            self.folder = os.path.abspath(folder)
+            record_opened_folder(self.folder)
+        else:
+            self.folder = ""
+        short_name = os.path.basename(self.folder) or self.folder
+        self.path_label.setText(f"📁 {short_name}" if self.folder else "No folder open — choose one to start")
+        self.path_label.setToolTip(self.folder or "")
         self.transcript = []
-        if folder:
-            notes = ""
-            try:
-                notes = core.Workspace(folder).read_notes(400)
-            except core.ToolError:
-                pass
-            intro = (f"Ready to work in **{os.path.basename(folder) or folder}**. Tell me what to build or fix; "
-                     "I will plan it, read the code, and show every change for you to accept.")
-            if notes:
-                intro += "\n\nI keep notes about this project in `.devos/agent-notes.md`."
+        if self.folder:
+            intro = (f"Ready to work in **{short_name}**. Tell me what to build or fix;\n"
+                     "I will plan it, read the codebase, write changes, and execute verification tests.")
             self.transcript.append(["agent", intro])
         else:
-            self.transcript.append(["agent", "Open a project folder to start. I only read and change files "
-                                             "inside the folder you choose."])
+            self.transcript.append(["agent", "Open a project folder to start. I work autonomously inside your chosen workspace."])
         self._dirty = True
         self._update_status()
 
-    # ----------------------------------------------------------------- chat
+
+    def new_task(self):
+        if self.worker:
+            self.stop()
+        self.transcript = []
+        self.plan.clear()
+        self.plan_progress.setValue(0)
+        self.diff.clear()
+        self.diff_title.setText("No pending changes")
+        self.terminal.clear()
+        self.command_label.setText("")
+        self.thinking_banner.setVisible(False)
+        self.stop_btn.setEnabled(False)
+        self.stop_btn.setVisible(False)
+        self.send_btn.setEnabled(True)
+        self._set_pending(None)
+        self.set_folder(self.folder)
+
+
+    def insert_prompt(self, prompt: str):
+        self.composer.setPlainText(prompt)
+        self.composer.setFocus()
+
+    def _inhibit_sleep(self):
+        """Inhibit display sleep and screen locking while the agent is actively working."""
+        if self._inhibit_cookie is not None:
+            return
+        try:
+            res = subprocess.run(
+                ["qdbus", "org.freedesktop.ScreenSaver", "/ScreenSaver", "Inhibit",
+                 "DevOS AI Code Agent", "Autonomous coding task in progress"],
+                capture_output=True, text=True, timeout=2
+            )
+            val = res.stdout.strip()
+            if res.returncode == 0 and val.isdigit():
+                self._inhibit_cookie = int(val)
+        except Exception:
+            pass
+
+    def _uninhibit_sleep(self):
+        """Release screen sleep inhibit lock when agent is idle or stopped."""
+        if self._inhibit_cookie is not None:
+            try:
+                subprocess.run(
+                    ["qdbus", "org.freedesktop.ScreenSaver", "/ScreenSaver", "UnInhibit",
+                     str(self._inhibit_cookie)],
+                    check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2
+                )
+            except Exception:
+                pass
+            self._inhibit_cookie = None
+
+    # ---------------------------------------------------------------- timer
+    def _tick_elapsed(self):
+        if not self.worker:
+            self._elapsed_timer.stop()
+            return
+        elapsed = int(time.time() - self.start_time)
+        mins, secs = divmod(elapsed, 60)
+        self.tb_timer.setText(f"{mins:02d}:{secs:02d}s")
+        # Every 20 seconds of active work, reset system idle timer so screen does not sleep while user watches
+        if elapsed > 0 and elapsed % 20 == 0:
+            try:
+                subprocess.run(["qdbus", "org.freedesktop.ScreenSaver", "/ScreenSaver", "SimulateUserActivity"],
+                               check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
+            except Exception:
+                pass
+
+    # ---------------------------------------------------------------- chat rendering
     def _render_if_dirty(self):
         if not self._dirty:
             return
         self._dirty = False
         parts = []
-        for role, text in self.transcript:
+        is_working = bool(self.worker)
+        
+        for i, (role, text) in enumerate(self.transcript):
             if role == "user":
-                parts.append('<table width="100%" cellspacing="0" cellpadding="10" style="margin:6px 0;">'
-                             '<tr><td width="18%"></td><td style="background-color:#13233f; color:#e0f2fe;">'
-                             f'{_prose(text) or "&nbsp;"}</td></tr></table>')
+                parts.append(f'''
+                <table width="100%" cellspacing="0" cellpadding="0" style="margin: 10px 0;">
+                  <tr>
+                    <td width="15%"></td>
+                    <td style="background-color: #122244; border: 1px solid #1e386a; border-radius: 12px; padding: 12px 16px; color: #f8fafc;">
+                      <div style="color: #38bdf8; font-weight: 700; font-size: 12px; letter-spacing: 0.5px; margin-bottom: 4px;">
+                        👤 YOU
+                      </div>
+                      <div style="font-size: 13.5px; line-height: 1.5;">{_prose(text)}</div>
+                    </td>
+                  </tr>
+                </table>
+                ''')
             elif role == "error":
-                parts.append(f'<p style="color:{BAD};">{html.escape(text)}</p>')
+                parts.append(f'''
+                <div style="background-color: #450a0a; border: 1px solid #991b1b; border-radius: 8px; padding: 10px 14px; margin: 8px 0; color: #fecaca;">
+                  <b style="color: #ef4444;">✕ Error:</b> {html.escape(text)}
+                </div>
+                ''')
             elif role == "note":
-                parts.append(f'<p style="color:{MUTED}; font-size:12px;">{html.escape(text)}</p>')
+                parts.append(f'''
+                <div style="background-color: #0c182c; border: 1px solid #1a2942; border-radius: 8px; padding: 8px 12px; margin: 6px 0; color: #94a3b8; font-size: 12px;">
+                  ℹ️ {html.escape(text)}
+                </div>
+                ''')
             else:
-                parts.append('<table width="100%" cellspacing="0" cellpadding="4" style="margin:6px 0;"><tr>'
-                             f'<td style="color:{TEXT};"><span style="color:{ACCENT}; font-weight:600;">'
-                             f'DevOS AI Code Agent</span>{message_html(text) or "<p>&hellip;</p>"}</td></tr></table>')
+                is_last_agent = (i == len(self.transcript) - 1)
+                
+                # If text is empty and agent is actively working, show rich thinking card
+                if not text.strip() and is_working and is_last_agent:
+                    body_html = f'''
+                    <div style="background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0d1a33, stop:1 #111e3b); border: 1px solid #2563eb; border-radius: 10px; padding: 12px 16px; margin: 4px 0;">
+                      <table width="100%">
+                        <tr>
+                          <td width="28"><span style="font-size: 18px;">🧠</span></td>
+                          <td>
+                            <div style="color: #38bdf8; font-weight: 700; font-size: 13px;">NEURAL REASONING & TASK PLANNING</div>
+                            <div style="color: #cbd5e1; font-size: 12.5px; margin-top: 3px;">{html.escape(self.active_status_text)}</div>
+                          </td>
+                          <td align="right" width="80">
+                            <span style="background: #1e1b4b; color: #c4b5fd; border: 1px solid #4338ca; border-radius: 6px; padding: 3px 8px; font-size: 11px; font-weight: 700;">THINKING</span>
+                          </td>
+                        </tr>
+                      </table>
+                    </div>
+                    '''
+                else:
+                    body_html = message_html(text, is_generating=(is_working and is_last_agent))
+                    if not body_html:
+                        body_html = "<p style='color: #64748b; font-style: italic;'>Generating thoughts…</p>"
+
+                parts.append(f'''
+                <table width="100%" cellspacing="0" cellpadding="0" style="margin: 10px 0;">
+                  <tr>
+                    <td style="background-color: #0c1424; border: 1px solid #192742; border-radius: 12px; padding: 12px 16px; color: #f1f5f9;">
+                      <div style="color: #38bdf8; font-weight: 700; font-size: 12.5px; letter-spacing: 0.5px; margin-bottom: 6px;">
+                        ⚡ DevOS AI Code Agent
+                      </div>
+                      <div>{body_html}</div>
+                    </td>
+                    <td width="6%"></td>
+                  </tr>
+                </table>
+                ''')
+
         bar = self.chat.verticalScrollBar()
         at_bottom = bar.value() >= bar.maximum() - 40
         self.chat.setHtml("".join(parts))
         if at_bottom:
             bar.setValue(bar.maximum())
 
+    def _warmup_ai_if_needed(self):
+        if not core.check_ai_health():
+            threading.Thread(target=core.ensure_ai_service, daemon=True).start()
+
+    def _check_ai_status(self):
+        healthy = core.check_ai_health()
+        if hasattr(self, "ai_badge"):
+            if healthy:
+                self.ai_badge.setText("●  devos-ai-code")
+                self.ai_badge.setProperty("state", "online")
+                self.ai_badge.setToolTip("DevOS AI Core is running on 127.0.0.1:11434.\nZero cloud latency, 100% private and offline.")
+            else:
+                self.ai_badge.setText("⚠  Offline · Click to Start")
+                self.ai_badge.setProperty("state", "offline")
+                self.ai_badge.setToolTip("DevOS AI Core is not answering on 127.0.0.1:11434.\nClick to start the local neural engine now.")
+            self.ai_badge.style().unpolish(self.ai_badge)
+            self.ai_badge.style().polish(self.ai_badge)
+
+    def _on_badge_clicked(self):
+        if not core.check_ai_health():
+            self.ai_badge.setText("○  Starting…")
+            self.ai_badge.setProperty("state", "starting")
+            self.ai_badge.style().unpolish(self.ai_badge)
+            self.ai_badge.style().polish(self.ai_badge)
+            threading.Thread(target=self._manual_start_ai, daemon=True).start()
+        else:
+            QtWidgets.QMessageBox.information(
+                self, "DevOS AI Core Status",
+                "DevOS AI Core (Local Neural Engine) is active and running!\n\n"
+                "• Endpoint: http://127.0.0.1:11434/v1\n"
+                "• Model: devos-ai-code\n"
+                "• Mode: 100% offline, local GPU/CPU accelerated"
+            )
+
+    def _manual_start_ai(self):
+        core.ensure_ai_service(timeout_seconds=15.0)
+        QtCore.QMetaObject.invokeMethod(self, "_check_ai_status", QtCore.Qt.QueuedConnection)
+
+    # ---------------------------------------------------------------- send & stop
     def send(self):
         task = self.composer.toPlainText().strip()
         if not task or self.worker or not self.capable:
@@ -513,26 +1287,63 @@ class AgentWindow(QtWidgets.QMainWindow):
         self.transcript.append(["user", task])
         self.transcript.append(["agent", ""])
         self.plan.clear()
+        self.plan_progress.setValue(0)
         self._dirty = True
+
+        self.start_time = time.time()
+        self._elapsed_timer.start()
+
+        # Update thinking banner
+        self.current_topic = core.extract_task_topic(task)
+        self.active_status_text = "Analyzing project context & task requirements..."
+        self.tb_status.setText(self.active_status_text)
+        self.tb_topic.setText(f"🎯 Target: {self.current_topic}")
+        self.thinking_banner.setVisible(True)
+
         self.worker = AgentWorker(self.folder, task, self.policy, self.llm)
         self.worker.event.connect(self.on_event)
         self.worker.approval.connect(self.on_approval)
         self.worker.failed.connect(self.on_failed)
         self.worker.finished.connect(self.on_finished)
+
         self.send_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
-        self.step_chip.setText("Thinking…")
+        self.stop_btn.setVisible(True)
+        self.step_chip.setText("🧠 Thinking…")
+        self.step_chip.setStyleSheet("background: #1e1b4b; color: #c4b5fd; border: 1px solid #4338ca;")
+        self._inhibit_sleep()
         self.worker.start()
 
     def stop(self):
+        self._uninhibit_sleep()
         if self.worker:
             self.worker.cancel()
             self.step_chip.setText("Stopping…")
+            self.tb_status.setText("Aborting active operation...")
+        self.stop_btn.setEnabled(False)
+        self.stop_btn.setVisible(False)
+        self.send_btn.setEnabled(True)
         self._set_pending(None)
 
+
+    # ---------------------------------------------------------------- event loop
     def on_event(self, kind, payload):
-        if kind == "thinking":
-            self.step_chip.setText(f"Step {payload} · thinking")
+        if kind == "task_init":
+            self.current_topic = payload.get("topic", "")
+            self.tb_topic.setText(f"🎯 Target: {self.current_topic}")
+            initial_plan = payload.get("plan", [])
+            if initial_plan:
+                for step in initial_plan:
+                    self._add_step(step, "plan")
+        elif kind == "thinking_status":
+            self.active_status_text = payload.get("status", "")
+            self.tb_status.setText(self.active_status_text)
+            step_num = payload.get("step", 1)
+            self.step_chip.setText(f"🧠 Step {step_num} · Thinking")
+            self._dirty = True
+        elif kind == "thinking":
+            self.step_chip.setText(f"🧠 Step {payload} · Working")
+            self.step_chip.setStyleSheet("background: #1e1b4b; color: #a78bfa; border: 1px solid #6366f1;")
             last = self.transcript[-1] if self.transcript else None
             if last is None or last[0] != "agent" or last[1]:
                 self.transcript.append(["agent", ""])
@@ -542,12 +1353,17 @@ class AgentWindow(QtWidgets.QMainWindow):
             self.transcript[-1][1] += payload
             self._dirty = True
         elif kind == "plan":
+            self.plan.clear()
             for step in payload:
                 self._add_step(step, "plan")
+            self._update_plan_progress()
         elif kind == "step":
             self._add_step(payload["title"], "running")
+            self.step_chip.setText(f"⚡ {payload['title'][:32]}")
+            self._update_plan_progress()
         elif kind == "step_status":
             self._mark_last_step(payload)
+            self._update_plan_progress()
         elif kind == "change":
             self._show_change(payload)
         elif kind == "change_status":
@@ -561,8 +1377,9 @@ class AgentWindow(QtWidgets.QMainWindow):
             self.terminal.appendPlainText(f"[exit {payload['code']}{suffix}]\n")
         elif kind == "done":
             if self.transcript and self.transcript[-1] == ["agent", ""]:
-                self.transcript[-1][1] = payload or "Done."
-            self.transcript.append(["note", "Finished. Notes saved to .devos/agent-notes.md."])
+                self.transcript[-1][1] = payload or "Task completed successfully."
+            self.transcript.append(["note", "Mission accomplished. Notes recorded to .devos/agent-notes.md."])
+            self.thinking_banner.setVisible(False)
             self._dirty = True
 
     def on_approval(self, action):
@@ -577,7 +1394,8 @@ class AgentWindow(QtWidgets.QMainWindow):
             self.command_label.setText("$ " + action.command[:80])
             self.terminal.appendPlainText(f"$ {action.command}")
         self._set_pending(action)
-        self.step_chip.setText("Waiting for you")
+        self.step_chip.setText("⏳ Waiting for you")
+        self.step_chip.setStyleSheet("background: #451a03; color: #fde047; border: 1px solid #d97706;")
         QtWidgets.QApplication.alert(self)
 
     def respond(self, ok: bool):
@@ -588,30 +1406,44 @@ class AgentWindow(QtWidgets.QMainWindow):
         self.pending = None
         self._set_pending(None)
         if self.worker:
-            self.step_chip.setText("Working…")
+            self.step_chip.setText("⚡ Working…")
+            self.step_chip.setStyleSheet("background: #022c22; color: #5eead4; border: 1px solid #0f766e;")
 
     def on_failed(self, message):
         self.transcript.append(["error", message])
+        self.thinking_banner.setVisible(False)
+        self.stop_btn.setEnabled(False)
+        self.stop_btn.setVisible(False)
+        self.send_btn.setEnabled(True)
         self._dirty = True
 
     def on_finished(self):
+        self._uninhibit_sleep()
         self.worker = None
         self.pending = None
         self._set_pending(None)
+        self._elapsed_timer.stop()
+        self.thinking_banner.setVisible(False)
         self.send_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
-        self.step_chip.setText("Idle")
+        self.stop_btn.setVisible(False)
+        self.step_chip.setText("● Idle")
+        self.step_chip.setStyleSheet("background: #1e1b4b; color: #c4b5fd; border: 1px solid #4338ca;")
+        self._update_plan_progress()
 
-    # -------------------------------------------------------------- helpers
+
+    # ---------------------------------------------------------------- helpers
     def _show_change(self, action):
-        self.diff_title.setText(action.title)
+        self.diff_title.setText(f"📄 {action.title}")
         self.diff.setHtml(diff_html(action.diff))
 
     def _set_pending(self, action):
         edit = bool(action and action.kind == "edit")
         command = bool(action and action.kind == "command")
+        self.diff_btn_box.setVisible(edit)
         self.accept_btn.setEnabled(edit)
         self.reject_btn.setEnabled(edit)
+        self.term_btn_box.setVisible(command)
         self.run_btn.setEnabled(command)
         self.deny_btn.setEnabled(command)
         for frame, on in ((self.diff_card, edit), (self.term_card, command)):
@@ -620,7 +1452,8 @@ class AgentWindow(QtWidgets.QMainWindow):
             frame.style().polish(frame)
 
     def _add_step(self, title, state):
-        item = QtWidgets.QListWidgetItem(f"{STEP_ICON[state]}  {title[:90]}")
+        idx = self.plan.count() + 1
+        item = QtWidgets.QListWidgetItem(f"{idx:02d}. {STEP_ICON[state]}  {title[:85]}")
         item.setData(QtCore.Qt.UserRole, title)
         item.setForeground(QtGui.QColor(STEP_COLOR[state] if state != "plan" else TEXT))
         self.plan.addItem(item)
@@ -629,43 +1462,78 @@ class AgentWindow(QtWidgets.QMainWindow):
     def _mark_last_step(self, state):
         for row in range(self.plan.count() - 1, -1, -1):
             item = self.plan.item(row)
-            if item.text().startswith(STEP_ICON["running"]):
-                item.setText(f"{STEP_ICON.get(state, '?')}  {item.data(QtCore.Qt.UserRole)[:90]}")
+            if STEP_ICON["running"] in item.text():
+                title = item.data(QtCore.Qt.UserRole)
+                idx = row + 1
+                item.setText(f"{idx:02d}. {STEP_ICON.get(state, '?')}  {title[:85]}")
                 item.setForeground(QtGui.QColor(STEP_COLOR.get(state, MUTED)))
                 return
+
+    def _update_plan_progress(self):
+        total = self.plan.count()
+        if total == 0:
+            self.plan_progress.setValue(0)
+            return
+        done_count = sum(1 for row in range(total) if STEP_ICON["done"] in self.plan.item(row).text())
+        pct = int((done_count / total) * 100)
+        self.plan_progress.setValue(pct)
+        self.plan_progress.setToolTip(f"{done_count}/{total} steps completed ({pct}%)")
 
     def _policy_changed(self):
         self.policy.auto_reads = self.auto_reads.isChecked()
         self.policy.auto_edits = self.auto_edits.isChecked()
+        self.policy.auto_commands = getattr(self, 'auto_commands', None) and self.auto_commands.isChecked()
         self._update_status()
 
     def _update_status(self):
         if not getattr(self, "capable", True):
             self.status.setText("DevOS AI Code Agent is waiting for a coding-capable DevOS AI model.")
             return
-        rg = "ripgrep search" if shutil.which("rg") else "built-in search"
+        rg = "Ripgrep Accelerated" if shutil.which("rg") else "Built-in Search"
+        cmd_str = "Auto-commands: ON" if getattr(self.policy, "auto_commands", False) else "Commands: Ask First"
         self.status.setText(
-            f"Local only · {'reads automatic' if self.policy.auto_reads else 'reads ask'} · "
-            f"{'edits automatic' if self.policy.auto_edits else 'edits ask'} · commands always ask · {rg}")
+            f"⚡ Local Neural Engine · {'Auto-reads: ON' if self.policy.auto_reads else 'Auto-reads: OFF'} · "
+            f"{'Auto-edits: ON' if self.policy.auto_edits else 'Auto-edits: OFF'} · {cmd_str} · {rg} · 100% Private Offline")
+        if hasattr(self, "hint"):
+            auto_c = getattr(self.policy, "auto_commands", False)
+            auto_e = getattr(self.policy, "auto_edits", False)
+            if auto_e and auto_c:
+                self.hint.setText("Autonomous mode · Reads, edits & terminal commands run automatically")
+            elif auto_c:
+                self.hint.setText("Reads & terminal commands automatic · Edits ask for approval")
+            elif auto_e:
+                self.hint.setText("Reads & edits automatic · Terminal commands ask for approval")
+            else:
+                self.hint.setText("Reads automatic · Edits & terminal commands ask for approval")
 
     def closeEvent(self, event):
+        self._uninhibit_sleep()
         if self.worker:
             self.worker.cancel()
             self.worker.wait(3000)
         super().closeEvent(event)
 
 
+# ==============================================================================
+# Entry Point
+# ==============================================================================
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
-    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([sys.argv[0]])
-    app.setApplicationName("DevOS AI Code Agent")
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(["devos-ai-code-agent"] + sys.argv[1:])
+    app.setApplicationName("devos-ai-code-agent")
+    app.setApplicationDisplayName("DevOS AI Code Agent")
     app.setDesktopFileName("devos-ai-code-agent")
+    app.setWindowIcon(get_app_icon())
     folder = next((a for a in argv if not a.startswith("-")), "")
     if folder and not os.path.isdir(folder):
         folder = os.path.dirname(os.path.abspath(folder)) if os.path.exists(folder) else ""
+    if not folder:
+        folder = get_last_opened_folder()
     window = AgentWindow(folder)
     window.show()
     return app.exec_()
+
+
 
 
 if __name__ == "__main__":

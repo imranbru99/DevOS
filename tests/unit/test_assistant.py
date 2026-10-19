@@ -1986,3 +1986,25 @@ class TestMultiStepChaining(unittest.TestCase):
         self.assertTrue(res3.ok)
         self.assertIn("Opening the contact page (**imrandev.bd/contact**)", res3.text)
 
+    def test_fast_chat_reply_instant_speed(self):
+        ctx = tools.ToolContext(root="/nonexistent", which=lambda n: None, launcher=lambda a: True)
+        a = engine.Assistant(ctx=ctx)
+        # Thanks
+        r_thanks = a.chat("thanks")
+        self.assertTrue(r_thanks.ok)
+        self.assertIn("welcome", r_thanks.text.lower())
+        r_dhonno = a.chat("ধন্যবাদ")
+        self.assertTrue(r_dhonno.ok)
+        self.assertIn("স্বাগতম", r_dhonno.text)
+        # Ack
+        r_ok = a.chat("ok")
+        self.assertTrue(r_ok.ok)
+        self.assertIn("Got it", r_ok.text)
+        # Status
+        r_status = a.chat("kemon acho")
+        self.assertTrue(r_status.ok)
+        self.assertIn("ভালো আছি", r_status.text)
+        # Non-fast path goes to normal model
+        self.assertIsNone(engine.fast_chat_reply("what is docker"))
+
+

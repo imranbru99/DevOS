@@ -79,6 +79,17 @@ if [ -n "$plasma_session" ]; then
     chown sddm:sddm /var/lib/sddm/state.conf 2>/dev/null || true
 fi
 
+# Ensure SDDM loads the DevOS Modern login theme on the installed system
+mkdir -p /etc/sddm.conf.d
+cat > /etc/sddm.conf.d/devos-theme.conf << 'EOF'
+[General]
+DisplayServer=x11
+
+[Theme]
+Current=devos
+EOF
+chmod 644 /etc/sddm.conf.d/devos-theme.conf
+
 # The live account "devos" does not exist on the disk. Run the dashboard as
 # the account the installer just created (uid 1000).
 owner="$(getent passwd 1000 | cut -d: -f1)"

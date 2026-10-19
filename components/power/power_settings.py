@@ -147,7 +147,7 @@ def get_current_screen_timeout() -> Tuple[bool, int]:
 
 
 def apply_screen_timeout(seconds: int) -> bool:
-    """Apply screen timeout to X11 display using DPMS and screensaver blanking."""
+    """Apply screen timeout to X11 display (DPMS) and KDE Plasma Screen Locker."""
     try:
         if seconds > 0:
             subprocess.run(["xset", "+dpms"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -158,6 +158,20 @@ def apply_screen_timeout(seconds: int) -> bool:
         else:
             subprocess.run(["xset", "-dpms"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             subprocess.run(["xset", "s", "off"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        # Sync to KDE Plasma ScreenLocker (~/.config/kscreenlockerrc)
+        # Timeout in kscreenlockerrc is measured in minutes
+        autolock = "true" if seconds > 0 else "false"
+        minutes = max(1, seconds // 60) if seconds > 0 else 0
+        subprocess.run(["kwriteconfig5", "--file", "kscreenlockerrc", "--group", "Daemon", "--key", "Autolock", autolock],
+                       check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if seconds > 0:
+            subprocess.run(["kwriteconfig5", "--file", "kscreenlockerrc", "--group", "Daemon", "--key", "Timeout", str(minutes)],
+                           check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        # Notify KDE ScreenSaver daemon to reload its configuration immediately
+        subprocess.run(["qdbus", "org.freedesktop.ScreenSaver", "/ScreenSaver", "configure"],
+                       check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return True
     except Exception:
         return False
