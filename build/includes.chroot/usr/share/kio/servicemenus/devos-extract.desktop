@@ -1,0 +1,22 @@
+[Desktop Entry]
+Type=Service
+ServiceTypes=KonqPopupMenu/Plugin
+MimeType=application/zip;application/x-7z-compressed;application/x-rar;application/x-tar;application/x-compressed-tar;application/x-bzip-compressed-tar;application/x-xz-compressed-tar;application/gzip;application/x-gzip;application/x-bzip;application/x-xz;application/x-zstd;
+Actions=ExtractDialog;ExtractHere;ExtractFolder;
+X-KDE-Priority=TopLevel
+X-KDE-Submenu=7-Zip / Extract
+
+[Desktop Action ExtractDialog]
+Name=Extract All…
+Icon=archive-extract
+Exec=devos-archive extract-dialog %F
+
+[Desktop Action ExtractHere]
+Name=Extract Here
+Icon=archive-extract
+Exec=devos-archive extract-here %F
+
+[Desktop Action ExtractFolder]
+Name=Extract to subfolder
+Icon=archive-extract
+Exec=devos-archive extract-folder %F

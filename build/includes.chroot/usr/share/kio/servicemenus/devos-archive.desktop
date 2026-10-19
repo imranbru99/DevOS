@@ -1,0 +1,22 @@
+[Desktop Entry]
+Type=Service
+ServiceTypes=KonqPopupMenu/Plugin
+MimeType=all/allfiles;inode/directory;
+Actions=CompressZip;Compress7z;CompressDialog;
+X-KDE-Priority=TopLevel
+X-KDE-Submenu=7-Zip / Compress
+
+[Desktop Action CompressZip]
+Name=Compress to ZIP file
+Icon=archive-insert
+Exec=devos-archive compress-zip %F
+
+[Desktop Action Compress7z]
+Name=Add to .7z archive
+Icon=archive-insert
+Exec=devos-archive compress-7z %F
+
+[Desktop Action CompressDialog]
+Name=Add to archive…
+Icon=archive-insert
+Exec=devos-archive compress-dialog %F

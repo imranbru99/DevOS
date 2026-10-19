@@ -1,0 +1,176 @@
+#!/usr/bin/env python3
+"""
+DevOS Archive Helper (Windows 11 / 7-Zip style).
+Provides 1-click compression and extraction for files and folders,
+used by File Explorer (devos-files) and KDE Plasma / Dolphin context menus.
+"""
+
+import os
+import shutil
+import subprocess
+import sys
+import zipfile
+
+
+def notify(title: str, message: str, icon: str = "file-archive"):
+    try:
+        subprocess.run(["notify-send", "-a", "DevOS", "-i", icon, title, message],
+                       timeout=10, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
+
+def get_archive_base_name(paths: list) -> str:
+    if not paths:
+        return "Archive"
+    first = os.path.abspath(paths[0])
+    if len(paths) == 1:
+        if os.path.isfile(first):
+            stem = os.path.splitext(os.path.basename(first))[0]
+            return stem or "archive"
+        return os.path.basename(first.rstrip("/\\")) or "archive"
+    parent_dir = os.path.dirname(first)
+    parent_base = os.path.basename(parent_dir.rstrip("/\\"))
+    if parent_base and parent_base not in ("/", "\\", "."):
+        return parent_base
+    base = os.path.splitext(os.path.basename(first))[0] if os.path.isfile(first) else os.path.basename(first.rstrip("/\\"))
+    return f"{base}_files"
+
+
+def get_unique_path(parent_dir: str, name: str, ext: str) -> str:
+    target = os.path.join(parent_dir, f"{name}{ext}")
+    idx = 2
+    while os.path.exists(target):
+        target = os.path.join(parent_dir, f"{name} ({idx}){ext}")
+        idx += 1
+    return target
+
+
+def compress_zip(paths: list) -> str:
+    if not paths:
+        return ""
+    first = os.path.abspath(paths[0])
+    parent_dir = os.path.dirname(first)
+    name = get_archive_base_name(paths)
+    out_path = get_unique_path(parent_dir, name, ".zip")
+
+    # Prefer 7z if available, otherwise native zipfile
+    if shutil.which("7z"):
+        cmd = ["7z", "a", "-tzip", "-y", out_path] + [os.path.basename(os.path.abspath(p)) for p in paths]
+        res = subprocess.run(cmd, cwd=parent_dir, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if res.returncode == 0 and os.path.exists(out_path):
+            notify("ZIP Created", f"Successfully created {os.path.basename(out_path)}")
+            return out_path
+
+    # Fallback to python zipfile
+    with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for p in paths:
+            abs_p = os.path.abspath(p)
+            if os.path.isdir(abs_p):
+                base_dir = os.path.dirname(abs_p)
+                for root, _, files in os.walk(abs_p):
+                    for f in files:
+                        full = os.path.join(root, f)
+                        rel = os.path.relpath(full, base_dir)
+                        zf.write(full, rel)
+            else:
+                zf.write(abs_p, os.path.basename(abs_p))
+
+    notify("ZIP Created", f"Successfully created {os.path.basename(out_path)}")
+    return out_path
+
+
+def compress_7z(paths: list) -> str:
+    if not paths:
+        return ""
+    first = os.path.abspath(paths[0])
+    parent_dir = os.path.dirname(first)
+    name = get_archive_base_name(paths)
+    out_path = get_unique_path(parent_dir, name, ".7z")
+
+    if shutil.which("7z"):
+        cmd = ["7z", "a", "-t7z", "-y", out_path] + [os.path.basename(os.path.abspath(p)) for p in paths]
+        res = subprocess.run(cmd, cwd=parent_dir, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if res.returncode == 0 and os.path.exists(out_path):
+            notify("7-Zip Archive Created", f"Successfully created {os.path.basename(out_path)}")
+            return out_path
+
+    # Fallback to zip if 7z binary missing
+    return compress_zip(paths)
+
+
+def extract_here(archive_path: str):
+    if not os.path.exists(archive_path):
+        return
+    parent_dir = os.path.dirname(os.path.abspath(archive_path))
+    if shutil.which("7z"):
+        res = subprocess.run(["7z", "x", "-y", f"-o{parent_dir}", archive_path],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if res.returncode == 0:
+            notify("Extraction Complete", f"Extracted {os.path.basename(archive_path)} here")
+            return
+    if shutil.which("ark"):
+        subprocess.run(["ark", "-b", "-e", archive_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        notify("Extraction Complete", f"Extracted {os.path.basename(archive_path)}")
+
+
+def extract_folder(archive_path: str):
+    if not os.path.exists(archive_path):
+        return
+    parent_dir = os.path.dirname(os.path.abspath(archive_path))
+    base = os.path.basename(archive_path)
+    for ext in (".tar.gz", ".tar.bz2", ".tar.xz", ".tar.zst", ".zip", ".7z", ".rar", ".tar"):
+        if base.lower().endswith(ext):
+            base = base[:-len(ext)]
+            break
+    dest_dir = os.path.join(parent_dir, base)
+    os.makedirs(dest_dir, exist_ok=True)
+
+    if shutil.which("7z"):
+        res = subprocess.run(["7z", "x", "-y", f"-o{dest_dir}", archive_path],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if res.returncode == 0:
+            notify("Extraction Complete", f"Extracted to {base}/")
+            return
+    if shutil.which("ark"):
+        subprocess.run(["ark", "-b", "-a", "-o", dest_dir, archive_path],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        notify("Extraction Complete", f"Extracted to {base}/")
+
+
+def main():
+    if len(sys.argv) < 3:
+        if len(sys.argv) == 2 and sys.argv[1] == "--help":
+            print("Usage: devos-archive [compress-zip|compress-7z|compress-dialog|extract-here|extract-folder|extract-dialog] [paths...]")
+            return 0
+        sys.exit(1)
+
+    cmd = sys.argv[1]
+    paths = sys.argv[2:]
+
+    if cmd == "compress-zip":
+        compress_zip(paths)
+    elif cmd == "compress-7z":
+        compress_7z(paths)
+    elif cmd == "compress-dialog":
+        if shutil.which("ark"):
+            subprocess.run(["ark", "--add", "-d"] + paths)
+        else:
+            compress_zip(paths)
+    elif cmd == "extract-here":
+        for p in paths:
+            extract_here(p)
+    elif cmd == "extract-folder":
+        for p in paths:
+            extract_folder(p)
+    elif cmd == "extract-dialog":
+        if shutil.which("ark"):
+            for p in paths:
+                subprocess.run(["ark", "--dialog", p])
+        else:
+            for p in paths:
+                extract_folder(p)
+
+
+if __name__ == "__main__":
+    main()
