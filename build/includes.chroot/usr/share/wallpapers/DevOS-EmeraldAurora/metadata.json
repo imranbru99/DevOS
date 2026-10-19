@@ -1,0 +1,12 @@
+{
+    "KPlugin": {
+        "Id": "DevOS-EmeraldAurora",
+        "Name": "Emerald Aurora",
+        "Authors": [
+            {
+                "Name": "DevOS"
+            }
+        ],
+        "License": "CC-BY-SA-4.0"
+    }
+}

@@ -188,13 +188,15 @@ if not picture.is_file():
 blob = picture.read_bytes()
 suffixes = {".png", ".jpg", ".jpeg", ".webp"}
 replaced = 0
-root = Path("/usr/share/wallpapers/Next")
-if blob and root.is_dir():
-    for path in root.rglob("*"):
-        if path.is_file() and path.suffix.lower() in suffixes:
-            path.write_bytes(blob)
-            replaced += 1
-print(f"Replaced {replaced} stock wallpaper images")
+stock_dirs = ["Next", "Flow", "Breeze", "Altai", "MilkyWay"]
+for stock_name in stock_dirs:
+    root = Path(f"/usr/share/wallpapers/{stock_name}")
+    if blob and root.is_dir():
+        for path in root.rglob("*"):
+            if path.is_file() and path.suffix.lower() in suffixes:
+                path.write_bytes(blob)
+                replaced += 1
+print(f"Replaced {replaced} stock wallpaper images across {stock_dirs}")
 
 # The greeter starts a 60s timer that hides the password field and leaves
 # only the background. Stop that timer; the controls stay up.

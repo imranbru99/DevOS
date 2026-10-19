@@ -1,0 +1,12 @@
+{
+    "KPlugin": {
+        "Id": "DevOS-SolarDawn",
+        "Name": "Solar Dawn",
+        "Authors": [
+            {
+                "Name": "DevOS"
+            }
+        ],
+        "License": "CC-BY-SA-4.0"
+    }
+}

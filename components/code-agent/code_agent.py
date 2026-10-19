@@ -47,7 +47,7 @@ sys.path.insert(0, HERE)
 import patching  # noqa: E402
 
 AI_ENDPOINT = os.environ.get("DEVOS_AI_ENDPOINT", "http://127.0.0.1:11434/v1")
-CODE_MODEL = "devos-ai-code"
+CODE_MODEL = os.environ.get("DEVOS_AI_MODEL", "devos-ai-code")
 
 IGNORED_DIRS = {".git", "node_modules", "vendor", "__pycache__", ".venv", "venv", "out", "build_work",
                 "dist", ".mypy_cache", ".pytest_cache", ".idea", ".tox", "target", ".next"}
@@ -768,17 +768,16 @@ def read_sse(lines, on_token=None, should_stop=None) -> str:
 
 # ===================================================================== agent
 
-SYSTEM_PROMPT = """You are DevOS AI Code Agent, an autonomous full-stack software engineer working in the user's project folder.
-Your mission is to build COMPLETE, production-ready software solutions end-to-end. Do NOT stop after creating just a README or a single placeholder file!
+SYSTEM_PROMPT = """You are DevOS AI Code Agent, an autonomous software engineer working in the user's project folder.
+Your mission is to understand user requests, inspect code, implement robust solutions, and run or test the software.
 
-Autonomous Workflow Rules:
-1. First, outline a concise numbered plan (1-5 key milestones).
-2. Execute EVERY step autonomously one after another. Use ONE tool call per response and stop; you get the result in the next message.
-3. After each tool result, DO NOT PAUSE or ask the user what to do next. Immediately invoke the next tool call to create/edit the next file or run the next setup command.
-4. Continue building until the ENTIRE requested project, all required modules, code files, configs, and documentation are fully implemented on disk.
-5. Write a tool call exactly like this:
+Workflow Rules:
+1. Outline a concise numbered plan (1-5 key milestones) if the task requires multiple steps.
+2. If the user asks to run, test, start, or check the application, use `run_command` (e.g. `php artisan test`, `php artisan serve`, `npm test`, `pytest`, `python3 <script>`) or inspect the code and answer directly.
+3. If creating or editing code, read relevant existing files first. Always output complete, valid, working code. NEVER use placeholders or ellipsis like '...' or '// rest of code'.
+4. Write a tool call exactly like this:
 ```tool read_file
-path: src/main.py
+path: README.md
 ```
 Tools:
 - list_files  path: <folder>
@@ -787,9 +786,9 @@ Tools:
 - write_file  path: <file>, then a line with ---, then the whole new file content
 - apply_patch a unified diff (--- a/file, +++ b/file, @@ hunks with exact unchanged lines)
 - run_command command: <shell command run in the project folder>
-Read a file before changing it. Prefer apply_patch for small edits of existing files.
+Only refer to actual files that exist in the project folder.
 The user approves every change and command; if they reject one, do not repeat it.
-6. Only when ALL files, configs, and code for the complete project are 100% written and verified, reply with a final completion report and no tool block."""
+5. When the user's question is answered or all requested steps are completed, reply with a clear final summary and no tool block."""
 
 FORMAT_HELP = ("Your tool call could not be read. Write exactly one block like:\n"
                "```tool read_file\npath: README.md\n```\nor, for a new file:\n"
@@ -871,6 +870,15 @@ class CodeAgent:
             return False
         
         reply_lower = reply.lower().strip()
+        task_lower = task.lower().strip()
+
+        # Never force continue if the user asked a question, test/run command, or status check
+        if any(kw in task_lower for kw in [
+            "?", "is this", "ia this", "are there", "how to", "how do", "can you",
+            "what is", "why", "run this", "run the", "run app", "start the", "test this",
+            "test the", "check if", "check whether", "status", "everything is"
+        ]):
+            return False
         
         # 1. Check for explicit continuation phrases in the model's reply
         continuation_patterns = [
@@ -890,14 +898,12 @@ class CodeAgent:
             if re.search(pat, reply_lower):
                 return True
         
-        # 2. Check if the user requested a full project or multi-part build, but only a trivial file was touched
-        task_lower = task.lower()
-        is_large_task = any(kw in task_lower for kw in [
-            "complete project", "full project", "entire project", "phase", "module",
-            "application", "repository", "architecture", "build", "create", "initialize",
-            "laravel", "filament", "erp", "api", "database"
+        # 2. Check if the user explicitly requested building a full project from scratch
+        is_large_build = any(kw in task_lower for kw in [
+            "complete project", "full project", "entire project", "build from scratch",
+            "create a full", "create an entire", "scaffold the project"
         ])
-        if is_large_task and len(self.changed) <= 1 and step < 12:
+        if is_large_build and len(self.changed) <= 1 and step < 8:
             completion_decl = any(ph in reply_lower for ph in [
                 "entire project is complete", "all phases are complete", "project has been fully built",
                 "everything is complete and ready"
@@ -924,6 +930,7 @@ class CodeAgent:
                          {"role": "user", "content": self.first_message(task)}]
         final = ""
         bad_format = 0
+        call_history: List[Tuple[str, str, str]] = []
         for step in range(self.max_steps):
             if self.cancelled:
                 final = "Stopped."
@@ -983,16 +990,43 @@ class CodeAgent:
                 final = reply.strip()
                 break
             tool_target = str(call.args.get("path") or call.args.get("command") or call.args.get("pattern") or "")
+            call_sig = (call.name, tool_target)
+            
+            # Anti-loop check: Detect repetitive tool calls
+            past_calls = [(c[0], c[1]) for c in call_history]
+            if call_sig in past_calls[-2:]:
+                repeat_count = sum(1 for c in past_calls[-2:] if c == call_sig)
+                if repeat_count >= 1:
+                    last_result = call_history[-1][2] if call_history else ""
+                    self.on_event("thinking_status", {
+                        "step": step_num,
+                        "topic": topic,
+                        "status": f"Loop detected on {call.name} {tool_target}. Breaking repetitive cycle...",
+                    })
+                    self.messages.append({
+                        "role": "user",
+                        "content": (
+                            f"Notice: '{call.name} {tool_target}' was already called with result: {last_result}. "
+                            "Do NOT repeat this call. Choose a valid file from the project, a different command, "
+                            "or summarize your answer without another tool call."
+                        )
+                    })
+                    if repeat_count >= 2:
+                        final = f"Loop stopped: Repeated call to {call.name} on '{tool_target}' halted."
+                        break
+                    continue
+
             self.on_event("thinking_status", {
                 "step": step_num,
                 "topic": topic,
                 "status": f"Executing {call.name} {('· ' + tool_target) if tool_target else ''}...",
             })
             result = self.execute(call)
+            call_history.append((call.name, tool_target, str(result)[:80]))
             self.on_event("result", {"tool": call.name, "text": result})
             self.messages.append({
                 "role": "user",
-                "content": f"Result of {call.name}:\n{result}\n\nProceed immediately with the next step of the project using the next tool call."
+                "content": f"Result of {call.name}:\n{result}\n\nProceed with the next step or output your final summary."
             })
         else:
             final = (f"Stopped after {self.max_steps} steps. The changes so far are kept; "
@@ -1051,6 +1085,20 @@ class CodeAgent:
         self.on_event("step_status", "done")
         return out
 
+def clean_file_content(content: str) -> str:
+    if not content:
+        return ""
+    lines = content.split("\n")
+    while lines and (not lines[0].strip() or lines[0].strip().startswith("```") or lines[0].strip() in ("---", ", ---", "--")):
+        lines.pop(0)
+    while lines and (not lines[-1].strip() or lines[-1].strip().startswith("```") or lines[-1].strip() in ("---", ", ---", "--", "...", "... rest of code", "// ...", "# ...")):
+        lines.pop()
+    cleaned = "\n".join(lines)
+    if cleaned and not cleaned.endswith("\n"):
+        cleaned += "\n"
+    return cleaned
+
+
     def _edit(self, call: ToolCall) -> str:
         args = call.args
         if call.name == "write_file":
@@ -1060,9 +1108,7 @@ class CodeAgent:
             content = args.get("content")
             if content is None:
                 raise ToolError("write_file needs the file content after a --- line.")
-            content = str(content)
-            if content and not content.endswith("\n"):
-                content += "\n"
+            content = clean_file_content(str(content))
             self.ws.check_writable(path)
             changes = {path: content}
         else:

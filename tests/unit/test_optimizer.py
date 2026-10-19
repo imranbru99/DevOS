@@ -294,6 +294,101 @@ class TestIdleDecisions(unittest.TestCase):
             shutil.rmtree(fake_proc, ignore_errors=True)
 
 
+    def test_21_clipboard_shader_devcache_and_recent_cleanup(self):
+        fake_home = tempfile.mkdtemp(prefix="fake-home-")
+        uid = os.getuid()
+        try:
+            # 1. Clipboard files
+            clip_dir = os.path.join(fake_home, ".local", "share", "DevOS")
+            write(os.path.join(clip_dir, "clipboard-history.json"), 150)
+            klipper_dir = os.path.join(fake_home, ".local", "share", "klipper")
+            write(os.path.join(klipper_dir, "history.lst"), 80)
+
+            # 2. Shader caches
+            mesa_dir = os.path.join(fake_home, ".cache", "mesa_shader_cache")
+            write(os.path.join(mesa_dir, "index"), 500)
+
+            # 3. Dev cache (pip)
+            pip_dir = os.path.join(fake_home, ".cache", "pip")
+            write(os.path.join(pip_dir, "wheel.whl"), 1200)
+
+            # 4. Recent history
+            recent_file = os.path.join(fake_home, ".local", "share", "recently-used.xbel")
+            write(recent_file, 300)
+
+            cats = optimizer.build_categories(home=fake_home, uid=uid)
+            cat_map = {c.id: optimizer.scan_category(c) for c in cats}
+
+            self.assertIn("clipboard", cat_map)
+            self.assertEqual(cat_map["clipboard"]["size"], 230)
+            self.assertEqual(cat_map["clipboard"]["count"], 2)
+
+            self.assertIn("shaders", cat_map)
+            self.assertEqual(cat_map["shaders"]["size"], 500)
+
+            self.assertIn("devcache", cat_map)
+            self.assertEqual(cat_map["devcache"]["size"], 1200)
+
+            self.assertIn("recent", cat_map)
+            self.assertEqual(cat_map["recent"]["size"], 300)
+
+            # Test cleaning clipboard entries
+            freed, errors = optimizer.clean_entries(cat_map["clipboard"]["_entries"])
+            self.assertEqual(freed, 230)
+            self.assertEqual(errors, 0)
+            self.assertFalse(os.path.exists(os.path.join(clip_dir, "clipboard-history.json")))
+            self.assertFalse(os.path.exists(os.path.join(klipper_dir, "history.lst")))
+        finally:
+            shutil.rmtree(fake_home, ignore_errors=True)
+
+    def test_22_notification_history_and_cache_cleanup(self):
+        fake_home = tempfile.mkdtemp(prefix="devos-notif-test-")
+        uid = os.getuid()
+        try:
+            # 1. Platform Notifications (WebApps & Browsers)
+            chrome_notif = os.path.join(fake_home, ".config", "google-chrome", "Default", "Platform Notifications")
+            write(os.path.join(chrome_notif, "000003.log"), 450)
+            write(os.path.join(chrome_notif, "CURRENT"), 16)
+
+            webapp_notif = os.path.join(fake_home, ".local", "share", "DevOS", "webapps", "dashboard", "storage", "Platform Notifications")
+            write(os.path.join(webapp_notif, "LOG"), 200)
+
+            # 2. Desktop notification cache
+            knotif_cache = os.path.join(fake_home, ".cache", "knotifications5")
+            write(os.path.join(knotif_cache, "icons.db"), 800)
+
+            # 3. Notification config / seen state
+            plasmanotifyrc = os.path.join(fake_home, ".config", "plasmanotifyrc")
+            write(plasmanotifyrc, 64)
+
+            # 4. App GPU / code cache inside .config
+            gpu_cache = os.path.join(fake_home, ".config", "Code", "GPUCache")
+            write(os.path.join(gpu_cache, "data_0"), 1024, age_s=2 * 3600)
+
+            cats = optimizer.build_categories(home=fake_home, uid=uid)
+            cat_map = {c.id: optimizer.scan_category(c) for c in cats}
+
+            self.assertIn("notifications", cat_map)
+            self.assertEqual(cat_map["notifications"]["size"], 450 + 16 + 200 + 800 + 64)
+            self.assertEqual(cat_map["notifications"]["count"], 5)
+            self.assertTrue(cat_map["notifications"]["default_checked"])
+
+            # Verify GPU cache in .config is scanned in app caches
+            self.assertIn("cache", cat_map)
+            self.assertGreaterEqual(cat_map["cache"]["size"], 1024)
+
+            # Test cleaning notification entries
+            freed, errors = optimizer.clean_entries(cat_map["notifications"]["_entries"])
+            self.assertEqual(freed, 1530)
+            self.assertEqual(errors, 0)
+            self.assertFalse(os.path.exists(os.path.join(chrome_notif, "000003.log")))
+            self.assertFalse(os.path.exists(os.path.join(webapp_notif, "LOG")))
+            self.assertFalse(os.path.exists(os.path.join(knotif_cache, "icons.db")))
+            self.assertFalse(os.path.exists(plasmanotifyrc))
+        finally:
+            shutil.rmtree(fake_home, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()
 

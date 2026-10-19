@@ -320,13 +320,100 @@ def build_categories(home=None, uid=None, tmp_roots=("/tmp", "/var/tmp")):
     temp_targets = [Target(r, min_age_s=DAY, uid=uid) for r in tmp_roots]
     temp_targets += [Target(d, min_age_s=DAY, uid=uid) for d in tmpish]
 
-    # ~/.cache as a whole; browser caches and thumbnails live inside it.
-    # Skip our own state, the tmp-ish dirs (counted above) and files touched
-    # in the last hour (likely in use by a running app).
-    cache_targets = [Target(cache, min_age_s=3600, uid=uid,
-                            exclude=[os.path.join(cache, "devos")] + tmpish)]
-
     trash_targets = [Target(os.path.join(local_share, "Trash"), uid=uid)]
+
+    # Graphics and compiled shader caches
+    shader_roots = [
+        os.path.join(cache, "mesa_shader_cache"),
+        os.path.join(home, ".nv", "GLCache"),
+        os.path.join(cache, "vulkan"),
+    ]
+    for p in sorted(glob.glob(os.path.join(cache, "qtshadercache*"))):
+        shader_roots.append(p)
+    shader_targets = [Target(r, uid=uid) for r in shader_roots if not os.path.islink(r)]
+
+    # Developer package & language build caches
+    dev_roots = [
+        os.path.join(cache, "pip"),
+        os.path.join(home, ".npm", "_cacache"),
+        os.path.join(cache, "yarn"),
+        os.path.join(home, ".cargo", "registry", "cache"),
+        os.path.join(cache, "go-build"),
+    ]
+    dev_targets = [Target(r, uid=uid) for r in dev_roots if not os.path.islink(r)]
+
+    # Clipboard history (DevOS Clipboard JSON + KDE Klipper history files)
+    clip_files = [
+        os.path.join(local_share, "DevOS", "clipboard-history.json"),
+        os.path.join(local_share, "klipper", "history.lst"),
+        os.path.join(local_share, "klipper", "history2.lst"),
+        os.path.join(local_share, "klipper", "data"),
+    ]
+    clip_targets = [Target(f, uid=uid) for f in clip_files if not os.path.islink(f)]
+
+    # Recent files and documents history
+    recent_files = [
+        os.path.join(local_share, "recently-used.xbel"),
+        os.path.join(local_share, "RecentlyUsed.xbel"),
+        os.path.join(local_share, "recent-documents"),
+    ]
+    recent_targets = [Target(f, uid=uid) for f in recent_files if not os.path.islink(f)]
+
+    # Notifications history & related web/app caches
+    notif_patterns = [
+        os.path.join(local_share, "DevOS", "webapps", "*", "storage", "Platform Notifications"),
+        os.path.join(home, ".config", "*", "Platform Notifications"),
+        os.path.join(home, ".config", "*", "*", "Platform Notifications"),
+        os.path.join(local_share, "plasma_notifications"),
+        os.path.join(local_share, "notifications"),
+        os.path.join(local_share, "knotifications5"),
+        os.path.join(local_share, "knotifications6"),
+        os.path.join(cache, "knotifications5"),
+        os.path.join(cache, "knotifications6"),
+        os.path.join(cache, "notify-osd"),
+        os.path.join(local_share, "notify-osd"),
+        os.path.join(local_share, "xfce4", "notifyd"),
+        os.path.join(cache, "xfce4", "notifyd"),
+        os.path.join(local_share, "dunst"),
+        os.path.join(cache, "dunst"),
+    ]
+    notif_roots = []
+    for pattern in notif_patterns:
+        for match in sorted(glob.glob(pattern)):
+            if (os.path.isdir(match) or os.path.isfile(match)) and not os.path.islink(match) and is_within(match, home):
+                notif_roots.append(match)
+    for notif_cache in sorted(glob.glob(os.path.join(cache, "*notif*"))):
+        if not os.path.islink(notif_cache) and is_within(notif_cache, home):
+            notif_roots.append(notif_cache)
+    for notif_local in sorted(glob.glob(os.path.join(local_share, "*notif*"))):
+        if not os.path.islink(notif_local) and is_within(notif_local, home):
+            notif_roots.append(notif_local)
+    for nfile in [os.path.join(home, ".config", "plasmanotifyrc")]:
+        if os.path.isfile(nfile) and not os.path.islink(nfile):
+            notif_roots.append(nfile)
+    notif_targets = [Target(r, uid=uid) for r in sorted(set(notif_roots))]
+
+    # Application Web, GPU, and bytecode caches in ~/.config and WebApps
+    app_cache_patterns = [
+        os.path.join(home, ".config", "*", "GPUCache"),
+        os.path.join(home, ".config", "*", "*", "GPUCache"),
+        os.path.join(home, ".config", "*", "Code Cache"),
+        os.path.join(home, ".config", "*", "*", "Code Cache"),
+        os.path.join(home, ".config", "*", "DawnCache"),
+        os.path.join(home, ".config", "*", "*", "DawnCache"),
+        os.path.join(local_share, "DevOS", "webapps", "*", "storage", "GPUCache"),
+        os.path.join(local_share, "DevOS", "webapps", "*", "storage", "Code Cache"),
+    ]
+    app_cache_roots = []
+    for pattern in app_cache_patterns:
+        for match in sorted(glob.glob(pattern)):
+            if os.path.isdir(match) and not os.path.islink(match) and is_within(match, home):
+                app_cache_roots.append(match)
+
+    # Exclusions for generic ~/.cache target so items are not counted twice
+    cache_exclude = [os.path.join(cache, "devos")] + tmpish + [t.root for t in shader_targets + dev_targets + notif_targets]
+    cache_targets = [Target(cache, min_age_s=3600, uid=uid, exclude=cache_exclude)]
+    cache_targets += [Target(r, min_age_s=3600, uid=uid) for r in sorted(set(app_cache_roots))]
 
     win_patterns = [
         os.path.join(local_share, "winlayer", "prefixes", "*", "drive_c", "users",
@@ -348,23 +435,44 @@ def build_categories(home=None, uid=None, tmp_roots=("/tmp", "/var/tmp")):
         if os.path.isdir(logs) and not os.path.islink(logs):
             log_targets.append(Target(logs, min_age_s=7 * DAY, uid=uid))
     log_targets.append(Target(os.path.join(home, ".xsession-errors.old"), uid=uid))
+    for crash in sorted(glob.glob(os.path.join(cache, "crash*"))):
+        if not os.path.islink(crash):
+            log_targets.append(Target(crash, uid=uid))
+    for xerr in sorted(glob.glob(os.path.join(home, ".xsession-errors*"))):
+        if os.path.isfile(xerr) and not os.path.islink(xerr) and xerr != os.path.join(home, ".xsession-errors"):
+            log_targets.append(Target(xerr, uid=uid))
 
     return [
         Category("temp", "Temporary files",
                  "Your files in /tmp and /var/tmp older than a day, plus app temp folders.",
                  temp_targets),
         Category("cache", "App caches",
-                 "Browser caches, thumbnails and other app caches. Apps rebuild them as needed.",
+                 "Browser caches, thumbnails, GPU/code cache and app data. Apps rebuild them as needed.",
                  cache_targets),
+        Category("shaders", "Graphics & shader caches",
+                 "Mesa, Vulkan, and OpenGL compiled shader caches. Rebuilt on demand.",
+                 shader_targets),
+        Category("devcache", "Package & dev caches",
+                 "Python pip wheels, NPM, and language build package caches.",
+                 dev_targets),
+        Category("notifications", "Notifications & cache",
+                 "Desktop notification history, active popups, and app/browser notification caches.",
+                 notif_targets, default_checked=True),
+        Category("clipboard", "Clipboard history",
+                 "Saved clipboard clips and copy history in DevOS Clipboard and Klipper.",
+                 clip_targets, default_checked=False),
         Category("trash", "Recycle Bin", "Everything currently in the Trash.", trash_targets),
         Category("wintemp", "Windows app temp",
                  "Temp folders inside your Windows app prefixes (like %TEMP% on Windows).",
                  win_targets),
+        Category("recent", "Recent files history",
+                 "Recently opened document history in file picker and desktop menus.",
+                 recent_targets, default_checked=False),
         Category("downloads", "Old downloads",
                  "Files in Downloads older than 30 days. Review before selecting.",
                  downloads_targets, default_checked=False, list_files=True),
         Category("logs", "Crash reports & logs",
-                 "App logs older than 7 days and old session error logs.", log_targets),
+                 "App logs older than 7 days, crash dumps, and old session error logs.", log_targets),
     ]
 
 
@@ -406,15 +514,57 @@ def scan_all(categories=None, now=None):
     return [scan_category(c, now=now) for c in categories]
 
 
+def clear_live_clipboard():
+    """Clear clipboard contents and history in Klipper, X11, and Wayland."""
+    for exe in ("qdbus6", "qdbus", "qdbus-qt6", "qdbus-qt5"):
+        try:
+            subprocess.run([exe, "org.kde.klipper", "/klipper", "clearClipboardHistory"],
+                           capture_output=True, timeout=1)
+            subprocess.run([exe, "org.kde.klipper", "/klipper", "clearClipboardContents"],
+                           capture_output=True, timeout=1)
+        except (OSError, subprocess.SubprocessError):
+            continue
+    try:
+        subprocess.run(["xclip", "-selection", "clipboard", "/dev/null"],
+                       capture_output=True, timeout=1)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        subprocess.run(["wl-copy", "--clear"], capture_output=True, timeout=1)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def clear_live_notifications():
+    """Dismiss active notification popups and clear live desktop notifications."""
+    for exe in ("qdbus6", "qdbus", "qdbus-qt6", "qdbus-qt5"):
+        try:
+            for notif_id in range(1, 200):
+                subprocess.run([exe, "org.freedesktop.Notifications",
+                                "/org/freedesktop/Notifications",
+                                "org.freedesktop.Notifications.CloseNotification",
+                                str(notif_id)], capture_output=True, timeout=0.03)
+            break
+        except (OSError, subprocess.SubprocessError):
+            continue
+
+
 def clean_entries(entries):
     """Delete scanned entries after re-checking safety. Returns (freed, errors)."""
     freed = 0
     errors = 0
     parents = {}
+    had_clipboard = False
+    had_notifications = False
     for path, root, uid in entries:
         if not is_safe_entry(path, root, uid):
             errors += 1
             continue
+        p_lower = path.lower()
+        if "clipboard" in p_lower or "klipper" in p_lower:
+            had_clipboard = True
+        if "notif" in p_lower or "platform notifications" in p_lower:
+            had_notifications = True
         try:
             size = os.lstat(path).st_size
             os.remove(path)
@@ -435,6 +585,10 @@ def clean_entries(entries):
             except OSError:
                 break
             cur = os.path.dirname(cur)
+    if had_clipboard:
+        clear_live_clipboard()
+    if had_notifications:
+        clear_live_notifications()
     return freed, errors
 
 
@@ -1033,17 +1187,17 @@ QLabel { color: #e5e7eb; background: transparent; }
 QLabel#title { font-size: 18pt; font-weight: 600; color: #f9fafb; }
 QLabel#muted { color: #9ca3af; font-size: 9.5pt; }
 QLabel#size { color: #38bdf8; font-weight: 600; }
-QLabel#total { color: #38bdf8; font-size: 14pt; font-weight: 600; }
+QLabel#total { color: #38bdf8; font-size: 11.5pt; font-weight: 600; }
 QLabel#ai { color: #cbd5e1; background: #0f172a; border-radius: 10px; padding: 10px; }
 QCheckBox { color: #f3f4f6; font-weight: 600; spacing: 10px; background: transparent; }
 QCheckBox::indicator { width: 18px; height: 18px; border-radius: 5px;
   border: 1px solid #374151; background: #0b0f19; }
 QCheckBox::indicator:checked { background: #38bdf8; border-color: #38bdf8; }
-QPushButton { background: #1f2937; color: #e5e7eb; border: none; border-radius: 10px;
-  padding: 8px 16px; }
+QPushButton { background: #1f2937; color: #e5e7eb; border: none; border-radius: 8px;
+  padding: 7px 14px; font-weight: 500; font-size: 10pt; }
 QPushButton:hover { background: #273449; }
 QPushButton:disabled { color: #6b7280; }
-QPushButton#primary { background: #38bdf8; color: #0b0f19; font-weight: 600; }
+QPushButton#primary { background: #38bdf8; color: #0b0f19; font-weight: 600; font-size: 10.5pt; }
 QPushButton#primary:hover { background: #7dd3fc; }
 QProgressBar { background: #1f2937; border: none; border-radius: 4px; height: 8px; }
 QProgressBar::chunk { background: #38bdf8; border-radius: 4px; }
@@ -1117,7 +1271,8 @@ def run_gui(open_cleanup=False):
             self.freed_msg = ""
             self.setWindowTitle("DevOS Optimizer — Clean up")
             self.setWindowIcon(app_icon())
-            self.setMinimumSize(620, 680)
+            self.setMinimumSize(640, 700)
+            self.resize(660, 720)
             self.setStyleSheet(STYLE)
             outer = QtWidgets.QVBoxLayout(self)
             outer.setContentsMargins(24, 22, 24, 22)
@@ -1168,23 +1323,37 @@ def run_gui(open_cleanup=False):
             self.ai_label.hide()
             outer.addWidget(self.ai_label)
 
-            bottom = QtWidgets.QHBoxLayout()
+            footer = QtWidgets.QVBoxLayout()
+            footer.setSpacing(10)
+
+            top_row = QtWidgets.QHBoxLayout()
             self.total_label = QtWidgets.QLabel("")
             self.total_label.setObjectName("total")
-            bottom.addWidget(self.total_label, 1)
+            top_row.addWidget(self.total_label, 1)
+
             self.security_btn = QtWidgets.QPushButton("Security")
             self.security_btn.setToolTip("Open DevOS Security (virus, web and disk protection)")
             self.security_btn.setCursor(QtCore.Qt.PointingHandCursor)
             self.security_btn.clicked.connect(open_security)
-            bottom.addWidget(self.security_btn)
+            top_row.addWidget(self.security_btn)
+
             self.rescan_btn = QtWidgets.QPushButton("Rescan")
+            self.rescan_btn.setCursor(QtCore.Qt.PointingHandCursor)
+            top_row.addWidget(self.rescan_btn)
+            footer.addLayout(top_row)
+
+            btn_row = QtWidgets.QHBoxLayout()
             self.ai_btn = QtWidgets.QPushButton("Ask DevOS AI")
+            self.ai_btn.setCursor(QtCore.Qt.PointingHandCursor)
             self.clean_btn = QtWidgets.QPushButton("Clean selected")
             self.clean_btn.setObjectName("primary")
-            for b in (self.rescan_btn, self.ai_btn, self.clean_btn):
-                b.setCursor(QtCore.Qt.PointingHandCursor)
-                bottom.addWidget(b)
-            outer.addLayout(bottom)
+            self.clean_btn.setCursor(QtCore.Qt.PointingHandCursor)
+            self.clean_btn.setMinimumHeight(38)
+            btn_row.addWidget(self.ai_btn)
+            btn_row.addWidget(self.clean_btn, 1)
+            footer.addLayout(btn_row)
+
+            outer.addLayout(footer)
 
             self.rescan_btn.clicked.connect(self.rescan)
             self.ai_btn.clicked.connect(self.ask_ai)

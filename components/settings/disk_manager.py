@@ -414,32 +414,53 @@ class DiskManager:
                 return {"success": False, "error": f"{device} is in use (mounted). Unmount it first."}
 
         try:
+            needs_pkexec = (os.geteuid() != 0 and shutil.which("pkexec") is not None)
+
             if action_id == "convert_gpt":
                 # Use sgdisk to convert MBR to GPT non-destructively
                 if shutil.which("sgdisk"):
-                    subprocess.run(["sgdisk", "-g", device], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                    return {"success": True, "message": f"Successfully converted {device} from MBR to GPT!"}
+                    cmd = ["sgdisk", "-g", device]
+                    if needs_pkexec:
+                        cmd = ["pkexec"] + cmd
+                    proc = subprocess.run(cmd, capture_output=True, text=True)
+                    if proc.returncode == 0:
+                        return {"success": True, "message": f"Successfully converted {device} from MBR to GPT!"}
+                    return {"success": False, "error": proc.stderr.strip() or f"sgdisk exited with code {proc.returncode}"}
                 return {"success": False, "error": "sgdisk tool not found in live system."}
 
             elif action_id == "convert_mbr":
                 if shutil.which("parted"):
-                    subprocess.run(["parted", device, "--script", "mklabel", "msdos"], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                    return {"success": True, "message": f"Successfully initialized {device} as MBR (msdos)."}
+                    cmd = ["parted", device, "--script", "mklabel", "msdos"]
+                    if needs_pkexec:
+                        cmd = ["pkexec"] + cmd
+                    proc = subprocess.run(cmd, capture_output=True, text=True)
+                    if proc.returncode == 0:
+                        return {"success": True, "message": f"Successfully initialized {device} as MBR (msdos)."}
+                    return {"success": False, "error": proc.stderr.strip() or f"parted exited with code {proc.returncode}"}
                 return {"success": False, "error": "parted tool not found."}
 
             elif action_id == "format_devos":
                 # Standard DevOS layout: GPT + 512MB EFI (vfat) + remainder BTRFS
                 if shutil.which("parted") and shutil.which("mkfs.vfat") and shutil.which("mkfs.btrfs"):
-                    subprocess.run(["parted", device, "--script", "mklabel", "gpt"], check=True)
-                    subprocess.run(["parted", device, "--script", "mkpart", "DEVOS_EFI", "fat32", "1MiB", "513MiB"], check=True)
-                    subprocess.run(["parted", device, "--script", "set", "1", "esp", "on"], check=True)
-                    subprocess.run(["parted", device, "--script", "mkpart", "DEVOS_ROOT", "btrfs", "513MiB", "100%"], check=True)
-                    # Format
-                    part1 = f"{device}1" if not "nvme" in device else f"{device}p1"
-                    part2 = f"{device}2" if not "nvme" in device else f"{device}p2"
-                    subprocess.run(["mkfs.vfat", "-F32", "-n", "DEVOS_EFI", part1], check=True)
-                    subprocess.run(["mkfs.btrfs", "-f", "-L", "DEVOS_ROOT", part2], check=True)
-                    return {"success": True, "message": f"Successfully formatted {device} with DevOS standard EFI + BTRFS layout!"}
+                    part1 = f"{device}1" if "nvme" not in device else f"{device}p1"
+                    part2 = f"{device}2" if "nvme" not in device else f"{device}p2"
+
+                    script = (
+                        f"set -e\n"
+                        f"parted {device} --script mklabel gpt\n"
+                        f"parted {device} --script mkpart DEVOS_EFI fat32 1MiB 513MiB\n"
+                        f"parted {device} --script set 1 esp on\n"
+                        f"parted {device} --script mkpart DEVOS_ROOT btrfs 513MiB 100%\n"
+                        f"udevadm settle || sleep 1\n"
+                        f"mkfs.vfat -F32 -n DEVOS_EFI {part1}\n"
+                        f"mkfs.btrfs -f -L DEVOS_ROOT {part2}\n"
+                    )
+
+                    runner = ["pkexec", "bash", "-c", script] if needs_pkexec else ["bash", "-c", script]
+                    proc = subprocess.run(runner, capture_output=True, text=True)
+                    if proc.returncode == 0:
+                        return {"success": True, "message": f"Successfully formatted {device} with DevOS standard EFI + BTRFS layout!"}
+                    return {"success": False, "error": proc.stderr.strip() or f"Formatting failed with exit code {proc.returncode}"}
                 return {"success": False, "error": "parted, mkfs.vfat and mkfs.btrfs are needed to format a disk."}
 
             return {"success": False, "error": f"Unknown action '{action_id}'"}

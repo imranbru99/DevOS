@@ -145,6 +145,116 @@ class TestCodeAgentGUI(unittest.TestCase):
             self.assertLessEqual(win.width(), geom.width())
             self.assertLessEqual(win.height(), geom.height())
 
+    def test_composer_enter_submits(self):
+        composer = gui.AgentComposer()
+        submitted = []
+        composer.submit_requested.connect(lambda: submitted.append(True))
+
+        # Regular Enter key press
+        event = QtGui.QKeyEvent(QtCore.QEvent.KeyPress, QtCore.Qt.Key_Return, QtCore.Qt.NoModifier)
+        composer.keyPressEvent(event)
+        self.assertEqual(len(submitted), 1, "Enter without Shift must emit submit_requested")
+
+    def test_composer_shift_enter_newlines(self):
+        composer = gui.AgentComposer()
+        submitted = []
+        composer.submit_requested.connect(lambda: submitted.append(True))
+
+        # Shift+Enter key press
+        event = QtGui.QKeyEvent(QtCore.QEvent.KeyPress, QtCore.Qt.Key_Return, QtCore.Qt.ShiftModifier)
+        composer.keyPressEvent(event)
+        self.assertEqual(len(submitted), 0, "Shift+Enter must not emit submit_requested")
+        self.assertIn("\n", composer.toPlainText(), "Shift+Enter must insert a newline")
+
+    def test_composer_image_paste_and_drop(self):
+        composer = gui.AgentComposer()
+        attached = []
+        composer.image_attached.connect(attached.append)
+
+        # 1. Clipboard image data
+        img = QtGui.QImage(32, 32, QtGui.QImage.Format_RGB32)
+        img.fill(QtGui.QColor("blue"))
+        mime = QtCore.QMimeData()
+        mime.setImageData(img)
+        self.assertTrue(composer.canInsertFromMimeData(mime))
+        composer.insertFromMimeData(mime)
+        self.assertEqual(len(attached), 1)
+        self.assertTrue(os.path.exists(attached[0]))
+
+        # 2. File URL image
+        test_img = os.path.join(self.temp_dir, "test_pic.png")
+        img.save(test_img, "PNG")
+        mime_url = QtCore.QMimeData()
+        mime_url.setUrls([QtCore.QUrl.fromLocalFile(test_img)])
+        self.assertTrue(composer.canInsertFromMimeData(mime_url))
+        composer.insertFromMimeData(mime_url)
+        self.assertEqual(len(attached), 2)
+        self.assertEqual(attached[1], test_img)
+
+        # 3. Plain text paste does not trigger image attach
+        mime_text = QtCore.QMimeData()
+        mime_text.setText("hello world")
+        composer.insertFromMimeData(mime_text)
+        self.assertEqual(len(attached), 2)
+        self.assertIn("hello world", composer.toPlainText())
+
+    def test_attachment_bar_lifecycle(self):
+        win = gui.AgentWindow(capable=(True, "Ready"))
+        self.assertTrue(win.attachment_bar.isHidden(), "Attachment bar should be hidden by default")
+
+        test_img = os.path.join(self.temp_dir, "test.png")
+        img = QtGui.QImage(16, 16, QtGui.QImage.Format_RGB32)
+        img.fill(QtGui.QColor("green"))
+        img.save(test_img, "PNG")
+
+        win.add_attachment(test_img)
+        self.assertIn(test_img, win.attached_images)
+        self.assertFalse(win.attachment_bar.isHidden(), "Attachment bar should be visible after adding attachment")
+
+        # Removing attachment
+        win.remove_attachment(test_img)
+        self.assertNotIn(test_img, win.attached_images)
+        self.assertTrue(win.attachment_bar.isHidden(), "Attachment bar should be hidden when attachments empty")
+
+    def test_send_incorporates_images_and_clears_attachments(self):
+        win = gui.AgentWindow(capable=(True, "Ready"))
+        test_project = os.path.join(self.temp_dir, "send-proj")
+        os.makedirs(test_project, exist_ok=True)
+        win.set_folder(test_project)
+
+        test_img = os.path.join(self.temp_dir, "error_screenshot.png")
+        img = QtGui.QImage(16, 16, QtGui.QImage.Format_RGB32)
+        img.fill(QtGui.QColor("yellow"))
+        img.save(test_img, "PNG")
+
+        win.add_attachment(test_img)
+        win.composer.setPlainText("Fix the syntax error")
+
+        # Mock AgentWorker to prevent spawning real thread
+        class DummyWorker(QtCore.QObject):
+            event = QtCore.pyqtSignal(str, object)
+            approval = QtCore.pyqtSignal(object)
+            failed = QtCore.pyqtSignal(str)
+            finished = QtCore.pyqtSignal()
+            def start(self): pass
+
+        orig_worker = gui.AgentWorker
+        captured_task = []
+        try:
+            def mock_worker(folder, task, policy, llm):
+                captured_task.append(task)
+                return DummyWorker()
+            gui.AgentWorker = mock_worker
+
+            win.send()
+            self.assertEqual(len(captured_task), 1)
+            self.assertIn("Fix the syntax error", captured_task[0])
+            self.assertIn("Attached image:", captured_task[0])
+            self.assertEqual(len(win.attached_images), 0, "Attached images should be cleared after send")
+            self.assertTrue(win.attachment_bar.isHidden())
+        finally:
+            gui.AgentWorker = orig_worker
+
 
 if __name__ == "__main__":
     unittest.main()

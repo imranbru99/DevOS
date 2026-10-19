@@ -12,6 +12,11 @@ widgetStyle=kvantum
 [plasmarc][Theme]
 name=breeze-dark
 
+[plasmarc][Wallpapers]
+usersWallpapers=/usr/share/wallpapers/DevOS/DevOS-Default.png
+defaultWallpaperTheme=DevOS
+defaultFile=/usr/share/wallpapers/DevOS/DevOS-Default.png
+
 [kwinrc][org.kde.kdecoration2]
 library=org.kde.breeze
 theme=Breeze

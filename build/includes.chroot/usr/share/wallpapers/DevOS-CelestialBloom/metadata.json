@@ -1,0 +1,12 @@
+{
+    "KPlugin": {
+        "Id": "DevOS-CelestialBloom",
+        "Name": "Celestial Bloom",
+        "Authors": [
+            {
+                "Name": "DevOS"
+            }
+        ],
+        "License": "CC-BY-SA-4.0"
+    }
+}

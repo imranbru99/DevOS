@@ -23,6 +23,15 @@ import code_agent as core  # noqa: E402
 
 from PyQt5 import QtCore, QtGui, QtWidgets  # noqa: E402
 
+ASSISTANT_DIR = os.path.join(os.path.dirname(HERE), "assistant")
+if os.path.exists(ASSISTANT_DIR) and ASSISTANT_DIR not in sys.path:
+    sys.path.insert(0, ASSISTANT_DIR)
+
+try:
+    import vision  # noqa: E402
+except Exception:
+    vision = None
+
 MODELS_GUI = os.path.join(os.path.dirname(HERE), "ai-core", "models_gui.py")
 CONFIG_DIR = os.path.expanduser("~/.config/devos")
 CONFIG_PATH = os.path.join(CONFIG_DIR, "code-agent.json")
@@ -298,6 +307,43 @@ QPlainTextEdit#composer:focus {{
     border: 1px solid {ACCENT};
     background: #0c172d;
 }}
+QFrame#attachmentBar {{
+    background: #0b1528;
+    border: 1px dashed #1e3a6a;
+    border-radius: 8px;
+    padding: 3px 6px;
+}}
+QFrame#attachmentChip {{
+    background: #101e38;
+    border: 1px solid #1e3c70;
+    border-radius: 6px;
+}}
+QPushButton#removeAttachBtn {{
+    background: transparent;
+    border: none;
+    color: #ef4444;
+    font-size: 11px;
+    font-weight: bold;
+    padding: 0 4px;
+}}
+QPushButton#removeAttachBtn:hover {{
+    color: #fca5a5;
+    background: #450a0a;
+    border-radius: 3px;
+}}
+QPushButton#attachBtn {{
+    background: #111c30;
+    border: 1px solid #1e2e4a;
+    color: #94a3b8;
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 12px;
+}}
+QPushButton#attachBtn:hover {{
+    background: #1a2a47;
+    color: #38bdf8;
+    border-color: #38bdf8;
+}}
 QPlainTextEdit#terminal {{
     font-family: 'JetBrains Mono', 'Fira Code', 'DejaVu Sans Mono', monospace;
     font-size: 12px;
@@ -537,10 +583,119 @@ def _prose(text: str) -> str:
     text = text.strip("\n")
     if not text.strip():
         return ""
-    escaped = html.escape(text)
+    img_matches = list(re.finditer(r'\[Attached image: ([^\]]+)\]', text))
+    clean_text = re.sub(r'\[Attached image: [^\]]+\]', '', text).strip()
+    escaped = html.escape(clean_text)
     escaped = re.sub(r"`([^`\n]+)`", r'<code style="background:#111e33; color:#7dd3fc; padding:2px 5px; border-radius:4px; font-family:\'JetBrains Mono\',monospace; font-size:12px;">\1</code>', escaped)
     escaped = re.sub(r"\*\*([^*\n]+)\*\*", r"<b style='color:#ffffff;'>\1</b>", escaped)
-    return "<p style='margin:4px 0; line-height: 1.5;'>" + escaped.replace("\n", "<br>") + "</p>"
+    rendered = "<p style='margin:4px 0; line-height: 1.5;'>" + escaped.replace("\n", "<br>") + "</p>" if clean_text else ""
+
+    if img_matches:
+        img_html = ""
+        for m in img_matches:
+            ipath = m.group(1).strip()
+            iname = os.path.basename(ipath)
+            img_html += f'''
+            <div style="margin: 6px 0; background: #081120; border: 1px solid #1a2c4e; border-radius: 8px; padding: 6px; display: inline-block;">
+                <img src="{html.escape(ipath)}" width="240" style="border-radius: 6px;"><br>
+                <span style="font-size: 11px; color: #94a3b8; font-family: monospace;">📷 {html.escape(iname)}</span>
+            </div><br>
+            '''
+        rendered = img_html + rendered
+
+    return rendered
+
+
+# ==============================================================================
+# Agent Composer (Enter to send, Shift+Enter newline, Drag/Drop & Paste Images)
+# ==============================================================================
+class AgentComposer(QtWidgets.QPlainTextEdit):
+    submit_requested = QtCore.pyqtSignal()
+    image_attached = QtCore.pyqtSignal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+
+    def keyPressEvent(self, event: QtGui.QKeyEvent):
+        if event.key() in (QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter):
+            if event.modifiers() & QtCore.Qt.ShiftModifier:
+                super().keyPressEvent(event)
+                return
+            else:
+                event.accept()
+                self.submit_requested.emit()
+                return
+        super().keyPressEvent(event)
+
+    def canInsertFromMimeData(self, source: QtCore.QMimeData) -> bool:
+        if source.hasImage() or (source.hasUrls() and any(self._is_image_url(u) for u in source.urls())):
+            return True
+        return super().canInsertFromMimeData(source)
+
+    def insertFromMimeData(self, source: QtCore.QMimeData):
+        if source.hasImage():
+            image = source.imageData()
+            if isinstance(image, QtGui.QImage) and not image.isNull():
+                saved_path = self._save_qimage(image)
+                if saved_path:
+                    self.image_attached.emit(saved_path)
+                    return
+            elif isinstance(image, QtGui.QPixmap) and not image.isNull():
+                saved_path = self._save_qimage(image.toImage())
+                if saved_path:
+                    self.image_attached.emit(saved_path)
+                    return
+
+        if source.hasUrls():
+            img_urls = [u for u in source.urls() if self._is_image_url(u)]
+            if img_urls:
+                for u in img_urls:
+                    local = u.toLocalFile()
+                    if local and os.path.exists(local):
+                        self.image_attached.emit(local)
+                return
+
+        super().insertFromMimeData(source)
+
+    def dragEnterEvent(self, event: QtGui.QDragEnterEvent):
+        mime = event.mimeData()
+        if mime.hasImage() or (mime.hasUrls() and any(self._is_image_url(u) for u in mime.urls())):
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event: QtGui.QDragMoveEvent):
+        mime = event.mimeData()
+        if mime.hasImage() or (mime.hasUrls() and any(self._is_image_url(u) for u in mime.urls())):
+            event.acceptProposedAction()
+            return
+        super().dragMoveEvent(event)
+
+    def dropEvent(self, event: QtGui.QDropEvent):
+        mime = event.mimeData()
+        if mime.hasImage() or (mime.hasUrls() and any(self._is_image_url(u) for u in mime.urls())):
+            self.insertFromMimeData(mime)
+            event.acceptProposedAction()
+            return
+        super().dropEvent(event)
+
+    @staticmethod
+    def _is_image_url(url: QtCore.QUrl) -> bool:
+        if not url.isLocalFile():
+            return False
+        fn = url.toLocalFile().lower()
+        return fn.endswith((".png", ".jpg", ".jpeg", ".bmp", ".webp", ".gif", ".svg"))
+
+    @staticmethod
+    def _save_qimage(qimg: QtGui.QImage) -> str:
+        cache_dir = os.path.expanduser("~/.local/share/devos/ai/agent-images")
+        os.makedirs(cache_dir, exist_ok=True)
+        ts = int(time.time() * 1000)
+        out_path = os.path.join(cache_dir, f"clipboard_{ts}.png")
+        if qimg.save(out_path, "PNG"):
+            return out_path
+        return ""
 
 
 # ==============================================================================
@@ -665,6 +820,8 @@ class AgentWindow(QtWidgets.QMainWindow):
         self.worker = None
         self.pending = None
         self.transcript = []  # [role, text]
+        self.attached_images = []
+        self.setAcceptDrops(True)
         self.current_topic = ""
         self.active_status_text = "Idle"
         self.start_time = 0
@@ -909,16 +1066,33 @@ class AgentWindow(QtWidgets.QMainWindow):
         quick_row.addStretch(1)
         chat_layout.addLayout(quick_row)
 
-        self.composer = QtWidgets.QPlainTextEdit()
+        # Attachment Bar
+        self.attachment_bar = QtWidgets.QFrame()
+        self.attachment_bar.setObjectName("attachmentBar")
+        self.attachment_layout = QtWidgets.QHBoxLayout(self.attachment_bar)
+        self.attachment_layout.setContentsMargins(6, 4, 6, 4)
+        self.attachment_layout.setSpacing(6)
+        self.attachment_bar.setVisible(False)
+        chat_layout.addWidget(self.attachment_bar)
+
+        self.composer = AgentComposer()
         self.composer.setObjectName("composer")
-        self.composer.setPlaceholderText("Describe your development objective… (e.g. 'Build Phase 1 ERP inventory models with transactions', Ctrl+Enter to run)")
+        self.composer.setPlaceholderText("Describe your development objective… (Enter to run, Shift+Enter for newline, paste/drop images)")
         self.composer.setFixedHeight(86)
+        self.composer.submit_requested.connect(self.send)
+        self.composer.image_attached.connect(self.add_attachment)
         chat_layout.addWidget(self.composer)
 
         actions = QtWidgets.QHBoxLayout()
-        self.hint = CompactLabel("Reads automatic · Edits & terminal commands ask for approval")
+        self.attach_btn = QtWidgets.QPushButton("📷 Attach")
+        self.attach_btn.setObjectName("attachBtn")
+        self.attach_btn.setToolTip("Attach screenshot or image file (or paste Ctrl+V / drag-and-drop)")
+        self.attach_btn.clicked.connect(self.choose_attachment)
+        actions.addWidget(self.attach_btn)
+
+        self.hint = CompactLabel("Enter to send · Shift+Enter newline · Paste/drop images")
         self.hint.setObjectName("muted")
-        self.hint.setStyleSheet("font-size: 12px;")
+        self.hint.setStyleSheet("font-size: 11.5px;")
         self.hint.setMinimumWidth(20)
         actions.addWidget(self.hint)
         actions.addStretch(1)
@@ -938,6 +1112,7 @@ class AgentWindow(QtWidgets.QMainWindow):
 
         chat_layout.addLayout(actions)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Return"), self.composer, activated=self.send)
+        QtWidgets.QShortcut(QtGui.QKeySequence.Paste, self, activated=self._handle_paste)
         split.addWidget(chat_card)
 
         # Right Column: Plan & Steps, Changes, Terminal
@@ -1092,6 +1267,9 @@ class AgentWindow(QtWidgets.QMainWindow):
         if self.worker:
             self.stop()
         self.transcript = []
+        self.attached_images.clear()
+        self._update_attachment_bar()
+        self.composer.clear()
         self.plan.clear()
         self.plan_progress.setValue(0)
         self.diff.clear()
@@ -1104,6 +1282,100 @@ class AgentWindow(QtWidgets.QMainWindow):
         self.send_btn.setEnabled(True)
         self._set_pending(None)
         self.set_folder(self.folder)
+
+    def choose_attachment(self):
+        files, _ = QtWidgets.QFileDialog.getOpenFileNames(
+            self,
+            "Attach Image / Screenshot",
+            os.path.expanduser("~"),
+            "Images (*.png *.jpg *.jpeg *.bmp *.webp *.gif *.svg);;All Files (*)"
+        )
+        for f in files:
+            if f and os.path.exists(f):
+                self.add_attachment(f)
+
+    def add_attachment(self, path: str):
+        if path and path not in self.attached_images:
+            self.attached_images.append(path)
+            self._update_attachment_bar()
+
+    def remove_attachment(self, path: str):
+        if path in self.attached_images:
+            self.attached_images.remove(path)
+            self._update_attachment_bar()
+
+    def _update_attachment_bar(self):
+        while self.attachment_layout.count():
+            item = self.attachment_layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+
+        if not self.attached_images:
+            self.attachment_bar.setVisible(False)
+            return
+
+        lbl = QtWidgets.QLabel(f"📷 Attached ({len(self.attached_images)}):")
+        lbl.setStyleSheet("color: #38bdf8; font-weight: 600; font-size: 11.5px;")
+        self.attachment_layout.addWidget(lbl)
+
+        for path in self.attached_images:
+            chip = QtWidgets.QFrame()
+            chip.setObjectName("attachmentChip")
+            chip_layout = QtWidgets.QHBoxLayout(chip)
+            chip_layout.setContentsMargins(6, 2, 4, 2)
+            chip_layout.setSpacing(6)
+
+            thumb = QtWidgets.QLabel()
+            pix = QtGui.QPixmap(path)
+            if not pix.isNull():
+                thumb.setPixmap(pix.scaled(20, 20, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation))
+            chip_layout.addWidget(thumb)
+
+            name_lbl = QtWidgets.QLabel(os.path.basename(path))
+            name_lbl.setStyleSheet("color: #e2e8f0; font-size: 11.5px;")
+            name_lbl.setToolTip(path)
+            chip_layout.addWidget(name_lbl)
+
+            del_btn = QtWidgets.QPushButton("✕")
+            del_btn.setObjectName("removeAttachBtn")
+            del_btn.setFixedSize(18, 18)
+            del_btn.setToolTip("Remove attachment")
+            del_btn.clicked.connect(lambda _, p=path: self.remove_attachment(p))
+            chip_layout.addWidget(del_btn)
+
+            self.attachment_layout.addWidget(chip)
+
+        self.attachment_layout.addStretch(1)
+        self.attachment_bar.setVisible(True)
+
+    def _handle_paste(self):
+        cb = QtWidgets.QApplication.clipboard()
+        mime = cb.mimeData()
+        if mime and (mime.hasImage() or (mime.hasUrls() and any(AgentComposer._is_image_url(u) for u in mime.urls()))):
+            self.composer.insertFromMimeData(mime)
+
+    def dragEnterEvent(self, event: QtGui.QDragEnterEvent):
+        mime = event.mimeData()
+        if mime.hasImage() or (mime.hasUrls() and any(AgentComposer._is_image_url(u) for u in mime.urls())):
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event: QtGui.QDragMoveEvent):
+        mime = event.mimeData()
+        if mime.hasImage() or (mime.hasUrls() and any(AgentComposer._is_image_url(u) for u in mime.urls())):
+            event.acceptProposedAction()
+            return
+        super().dragMoveEvent(event)
+
+    def dropEvent(self, event: QtGui.QDropEvent):
+        mime = event.mimeData()
+        if mime.hasImage() or (mime.hasUrls() and any(AgentComposer._is_image_url(u) for u in mime.urls())):
+            self.composer.insertFromMimeData(mime)
+            event.acceptProposedAction()
+            return
+        super().dropEvent(event)
 
 
     def insert_prompt(self, prompt: str):
@@ -1276,15 +1548,45 @@ class AgentWindow(QtWidgets.QMainWindow):
 
     # ---------------------------------------------------------------- send & stop
     def send(self):
-        task = self.composer.toPlainText().strip()
-        if not task or self.worker or not self.capable:
+        raw_task = self.composer.toPlainText().strip()
+        if (not raw_task and not self.attached_images) or self.worker or not self.capable:
             return
         if not self.folder:
             self.choose_folder()
             if not self.folder:
                 return
+
+        attached = list(self.attached_images)
+        self.attached_images.clear()
+        self._update_attachment_bar()
         self.composer.clear()
-        self.transcript.append(["user", task])
+
+        task_text = raw_task if raw_task else "Please inspect the attached screenshot / image and address any issues, errors, or requests shown in it."
+
+        display_text = task_text
+        worker_task_parts = [task_text]
+
+        if attached:
+            for p in attached:
+                display_text += f"\n[Attached image: {p}]"
+
+                ocr_text = ""
+                try:
+                    if vision and vision.ocr_available():
+                        extracted, _ = vision.ocr(p)
+                        if extracted and extracted.strip():
+                            ocr_text = extracted.strip()
+                except Exception:
+                    pass
+
+                part = f"[Attached image: {p}]"
+                if ocr_text:
+                    part += f"\n[Extracted text/code from {os.path.basename(p)} via OCR]:\n```\n{ocr_text}\n```"
+                worker_task_parts.append(part)
+
+        agent_task = "\n\n".join(worker_task_parts)
+
+        self.transcript.append(["user", display_text])
         self.transcript.append(["agent", ""])
         self.plan.clear()
         self.plan_progress.setValue(0)
@@ -1294,13 +1596,13 @@ class AgentWindow(QtWidgets.QMainWindow):
         self._elapsed_timer.start()
 
         # Update thinking banner
-        self.current_topic = core.extract_task_topic(task)
+        self.current_topic = core.extract_task_topic(agent_task)
         self.active_status_text = "Analyzing project context & task requirements..."
         self.tb_status.setText(self.active_status_text)
         self.tb_topic.setText(f"🎯 Target: {self.current_topic}")
         self.thinking_banner.setVisible(True)
 
-        self.worker = AgentWorker(self.folder, task, self.policy, self.llm)
+        self.worker = AgentWorker(self.folder, agent_task, self.policy, self.llm)
         self.worker.event.connect(self.on_event)
         self.worker.approval.connect(self.on_approval)
         self.worker.failed.connect(self.on_failed)

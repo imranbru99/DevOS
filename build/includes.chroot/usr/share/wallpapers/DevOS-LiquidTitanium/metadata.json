@@ -1,0 +1,12 @@
+{
+    "KPlugin": {
+        "Id": "DevOS-LiquidTitanium",
+        "Name": "Liquid Titanium",
+        "Authors": [
+            {
+                "Name": "DevOS"
+            }
+        ],
+        "License": "CC-BY-SA-4.0"
+    }
+}

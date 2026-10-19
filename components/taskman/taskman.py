@@ -54,12 +54,19 @@ PROTECTED = {
 # Has a display, but it is a helper, not an app the person opened.
 NON_APP = {
     "bash", "sh", "zsh", "dash", "fish", "sleep", "cat", "sd-pam",
-    "dbus-daemon", "dbus-broker", "at-spi-bus-launcher", "at-spi2-registryd",
-    "xdg-desktop-portal", "xdg-desktop-portal-kde", "xdg-dbus-proxy",
-    "xdg-document-portal", "kded5", "kded6", "kiod5", "kioworker",
-    "kioslave5", "dconf-service", "gvfsd", "obexd", "ksystemstats",
-    "fusermount", "fusermount3", "kaccess", "kglobalaccel5",
-    "xembedsniproxy", "gmenudbusmenuproxy", "agent", "ssh-agent", "gpg-agent",
+    "dbus-daemon", "dbus-broker", "at-spi-bus-launcher", "at-spi-bus-laun",
+    "at-spi2-registryd", "at-spi2-registr",
+    "xdg-desktop-portal", "xdg-desktop-por", "xdg-desktop-portal-kde", "xdg-dbus-proxy",
+    "xdg-document-portal", "xdg-document-po", "xdg-permission-store", "xdg-permission-",
+    "kded5", "kded6", "kiod5", "kioworker", "kioslave5", "dconf-service", "gvfsd", "obexd",
+    "ksystemstats", "fusermount", "fusermount3", "kaccess", "kglobalaccel5", "kglobalaccel6",
+    "xembedsniproxy", "gmenudbusmenuproxy", "gmenudbusmenupr", "agent", "ssh-agent", "gpg-agent",
+    "kactivitymanagerd", "kactivitymanage", "ksmserver", "kscreen_backend_launcher",
+    "kscreen_backend", "ibus-extension-gtk3", "ibus-extension-", "ibus-ui-gtk3", "ibus-x11",
+    "ibus-portal", "ibus-dconf", "ibus-engine-simple", "ibus-engine-sim",
+    "speech-dispatcher", "speech-dispatch", "language_server",
+    "startplasma-x11", "startplasma-wayland", "devos-session", "ibus-daemon",
+    "chrome_crashpad_handler", "chrome_crashpad", "optimizer.py", "optimizer",
 }
 
 # Count as an app even when another user's environment cannot be read.
@@ -68,6 +75,8 @@ KNOWN_GUI = {
     "firefox-bin", "code", "codium", "cursor", "plasmashell", "dolphin",
     "konsole", "kate", "okular", "gimp", "soffice.bin", "vlc", "spotify",
     "telegram-desktop", "discord", "steam", "systemsettings",
+    "taskman.py", "devos-taskman", "devos-files", "devos-terminal",
+    "devos-settings", "devos-ai-code-agent",
 }
 
 PRETTY = {
@@ -81,6 +90,9 @@ PRETTY = {
     "telegram-desktop": "Telegram", "discord": "Discord", "steam": "Steam",
     "systemsettings": "Settings", "kwin_x11": "Window manager",
     "kwin_wayland": "Window manager",
+    "taskman.py": "Task Manager", "devos-taskman": "Task Manager", "taskman": "Task Manager",
+    "devos-files": "Files", "devos-terminal": "Terminal",
+    "devos-settings": "Settings", "devos-ai-code-agent": "AI Code Agent",
 }
 
 STATE_NAMES = {
@@ -230,16 +242,44 @@ def state_name(code):
 def classify(proc):
     if not proc["cmdline"]:
         return "kernel"
-    if proc["display"] and proc["comm"] not in NON_APP:
+    name_lower = (proc.get("name") or "").lower()
+    comm_lower = (proc.get("comm") or "").lower()
+    if comm_lower in NON_APP or name_lower in NON_APP:
+        return "background"
+    if comm_lower in KNOWN_GUI or name_lower in KNOWN_GUI:
         return "app"
-    if proc["comm"] in KNOWN_GUI:
+    if proc["display"]:
         return "app"
     return "background"
+
+
+def extract_script_name(cmdline):
+    if not cmdline or len(cmdline) < 2:
+        return None
+    for i, arg in enumerate(cmdline[1:], 1):
+        if arg in ("-c",):
+            return None
+        if arg == "-m" and i < len(cmdline) - 1:
+            mod = cmdline[i + 1]
+            if mod and not mod.startswith("-") and "\n" not in mod and len(mod) < 256:
+                return mod
+            return None
+        if not arg.startswith("-") and "\n" not in arg and len(arg) < 256:
+            if arg.endswith((".py", ".js", ".sh", ".pl", ".rb")) or ("/" in arg and not arg.endswith("/")):
+                base = os.path.basename(arg)
+                if base:
+                    return base
+            break
+    return None
 
 
 def description_of(proc):
     if proc["cmdline"]:
         base = os.path.basename(proc["cmdline"][0]) or proc["comm"]
+        if base.startswith(("python", "node", "ruby", "perl", "bash", "sh")):
+            script = extract_script_name(proc["cmdline"])
+            if script:
+                return script
         return base
     return proc["comm"]
 
@@ -667,10 +707,32 @@ def read_process(proc_root, pid, pagesz):
     cmdline = parse_cmdline(read_text(os.path.join(base, "cmdline")))
     if rss_kb is None:
         rss_kb = stat["rss_pages"] * pagesz / 1024.0
+    comm = stat["comm"]
+    if len(comm) >= 14:
+        try:
+            exe_base = os.path.basename(os.readlink(os.path.join(base, "exe")))
+            if exe_base and (exe_base == comm or exe_base.startswith(comm)):
+                comm = exe_base
+        except Exception:
+            pass
+        if len(comm) <= 15 and cmdline and cmdline[0]:
+            cmd_base = os.path.basename(cmdline[0])
+            if cmd_base and (cmd_base == comm or cmd_base.startswith(comm)):
+                comm = cmd_base
+
+    app_name = pretty_name(comm)
+    if comm.startswith(("python", "node", "ruby", "perl", "bash", "sh")) and cmdline:
+        script = extract_script_name(cmdline)
+        if script:
+            if script in PRETTY:
+                app_name = PRETTY[script]
+            else:
+                app_name = pretty_name(script)
+
     proc = {
         "pid": stat["pid"],
-        "comm": stat["comm"],
-        "name": pretty_name(stat["comm"]),
+        "comm": comm,
+        "name": app_name,
         "state": stat["state"],
         "status": state_name(stat["state"]),
         "ppid": stat["ppid"],
@@ -1418,14 +1480,40 @@ def run_gui():
             self.history_page = self._history_page()
             self.stack.addWidget(self.history_page)
             self.startup_table = self._table(["Name", "Command", "Status", "Startup impact"])
+            self.startup_table.horizontalHeader().setStretchLastSection(False)
+            self.startup_table.horizontalHeader().setSectionResizeMode(0, QtWidgets.QHeaderView.Interactive)
+            self.startup_table.setColumnWidth(0, 220)
+            self.startup_table.horizontalHeader().setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
+            self.startup_table.horizontalHeader().setSectionResizeMode(2, QtWidgets.QHeaderView.Interactive)
+            self.startup_table.setColumnWidth(2, 100)
+            self.startup_table.horizontalHeader().setSectionResizeMode(3, QtWidgets.QHeaderView.Interactive)
+            self.startup_table.setColumnWidth(3, 130)
             self.stack.addWidget(self.startup_table)
+
             self.users_table = self._table(["User", "Status", "CPU", "Memory", "Disk", "Network"])
+            self.users_table.horizontalHeader().setStretchLastSection(False)
+            self.users_table.horizontalHeader().setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
+            for c, w in {1: 100, 2: 95, 3: 130, 4: 110, 5: 140}.items():
+                self.users_table.horizontalHeader().setSectionResizeMode(c, QtWidgets.QHeaderView.Interactive)
+                self.users_table.setColumnWidth(c, w)
             self.stack.addWidget(self.users_table)
+
             self.details_table = self._table(
                 ["Name", "PID", "Status", "User name", "CPU", "Memory", "Architecture", "Description"])
+            self.details_table.horizontalHeader().setStretchLastSection(True)
+            for c, w in {0: 180, 1: 75, 2: 95, 3: 110, 4: 85, 5: 100, 6: 100}.items():
+                self.details_table.horizontalHeader().setSectionResizeMode(c, QtWidgets.QHeaderView.Interactive)
+                self.details_table.setColumnWidth(c, w)
+            self.details_table.horizontalHeader().setSectionResizeMode(7, QtWidgets.QHeaderView.Stretch)
             self.details_table.itemSelectionChanged.connect(self._selection)
             self.stack.addWidget(self.details_table)
+
             self.services_table = self._table(["Name", "PID", "State", "Description"])
+            self.services_table.horizontalHeader().setStretchLastSection(True)
+            for c, w in {0: 240, 1: 80, 2: 100}.items():
+                self.services_table.horizontalHeader().setSectionResizeMode(c, QtWidgets.QHeaderView.Interactive)
+                self.services_table.setColumnWidth(c, w)
+            self.services_table.horizontalHeader().setSectionResizeMode(3, QtWidgets.QHeaderView.Stretch)
             self.services_table.itemSelectionChanged.connect(self._selection)
             self.stack.addWidget(self.services_table)
             self.show_page(0)
@@ -1450,7 +1538,14 @@ def run_gui():
             tree.setHeaderLabels(headers)
             tree.setRootIsDecorated(True)
             tree.setAlternatingRowColors(True)
-            tree.header().setStretchLastSection(True)
+            tree.header().setStretchLastSection(False)
+            tree.header().setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
+            tree.header().setHighlightSections(False)
+            col_widths = {1: 100, 2: 95, 3: 130, 4: 110, 5: 140}
+            for col, width in col_widths.items():
+                if col < len(headers):
+                    tree.header().setSectionResizeMode(col, QtWidgets.QHeaderView.Interactive)
+                    tree.setColumnWidth(col, width)
             tree.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
             tree.customContextMenuRequested.connect(self._menu)
             return tree
@@ -1510,6 +1605,11 @@ def run_gui():
             row.addWidget(clear)
             layout.addLayout(row)
             self.history_table = self._table(["Name", "CPU time", "Network", "Notifications"])
+            self.history_table.horizontalHeader().setStretchLastSection(False)
+            self.history_table.horizontalHeader().setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
+            for c, w in {1: 120, 2: 120, 3: 140}.items():
+                self.history_table.horizontalHeader().setSectionResizeMode(c, QtWidgets.QHeaderView.Interactive)
+                self.history_table.setColumnWidth(c, w)
             layout.addWidget(self.history_table, 1)
             return page
 
@@ -1561,6 +1661,8 @@ def run_gui():
                 "Name", "Status", "%s CPU" % cpu, "%s Memory" % mem,
                 "%s Disk" % disk, "%s Network" % net,
             ])
+            for col in (2, 3, 4, 5):
+                self.proc_tree.headerItem().setTextAlignment(col, QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
             self.proc_tree.clear()
             sections = (
                 ("Apps (%d)" % snap["counts"]["apps"], snap["processes"]["apps"]),
@@ -1593,6 +1695,7 @@ def run_gui():
                 fmt_disk(row["disk_bps"]), "—",
             ])
             item.setData(0, QtCore.Qt.UserRole, list(row["pids"]))
+            item.setToolTip(0, row["label"])
             if row["status"] == "Running":
                 item.setForeground(1, QtGui.QBrush(QtGui.QColor("#059669")))
                 font = item.font(1)

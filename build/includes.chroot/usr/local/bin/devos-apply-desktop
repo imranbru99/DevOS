@@ -28,7 +28,7 @@ if command -v kwriteconfig5 >/dev/null 2>&1 \
 fi
 
 qdbus_bin=""
-for candidate in qdbus qdbus-qt5; do
+for candidate in qdbus qdbus-qt5 qdbus6 qdbus-qt6; do
     if command -v "${candidate}" >/dev/null 2>&1; then
         qdbus_bin="${candidate}"
         break
@@ -44,14 +44,22 @@ for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
     sleep 1
 done
 
+kw_bin=""
+for candidate in kwriteconfig5 kwriteconfig6; do
+    if command -v "${candidate}" >/dev/null 2>&1; then
+        kw_bin="${candidate}"
+        break
+    fi
+done
+
 stamp="${HOME}/.config/devos-ui.stamp"
 if [ ! -f "${stamp}" ]; then
-    if command -v kwriteconfig5 >/dev/null 2>&1; then
-        kwriteconfig5 --file kdeglobals --group General --key ColorScheme DevOS
-        kwriteconfig5 --file kdeglobals --group Icons --key Theme Papirus-Dark
-        kwriteconfig5 --file kdeglobals --group KDE --key widgetStyle kvantum
-        kwriteconfig5 --file kdeglobals --group KDE --key LookAndFeelPackage org.devos.desktop
-        kwriteconfig5 --file plasmarc --group Theme --key name breeze-dark
+    if [ -n "${kw_bin}" ]; then
+        "${kw_bin}" --file kdeglobals --group General --key ColorScheme DevOS
+        "${kw_bin}" --file kdeglobals --group Icons --key Theme Papirus-Dark
+        "${kw_bin}" --file kdeglobals --group KDE --key widgetStyle kvantum
+        "${kw_bin}" --file kdeglobals --group KDE --key LookAndFeelPackage org.devos.desktop
+        "${kw_bin}" --file plasmarc --group Theme --key name breeze-dark
     fi
     # Do not run lookandfeeltool here: it rebuilds the whole layout and can
     # leave a desktop with icons but no taskbar. Theme keys above are enough;
@@ -60,6 +68,12 @@ if [ ! -f "${stamp}" ]; then
 fi
 
 # Every login: DevOS background, and a taskbar if Plasma omitted it.
+# 1. Native KDE wallpaper tool (fastest, sets all screens immediately)
+if command -v plasma-apply-wallpaperimage >/dev/null 2>&1; then
+    plasma-apply-wallpaperimage /usr/share/wallpapers/DevOS/DevOS-Default.png >/dev/null 2>&1 || true
+fi
+
+# 2. PlasmaShell script fallback (also restores panel if omitted)
 if [ "${ready}" -eq 1 ]; then
     script="/usr/local/share/devos/apply-ui.js"
     [ -f "$script" ] || script="/usr/local/share/devos/apply-wallpaper.js"

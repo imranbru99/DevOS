@@ -1,0 +1,12 @@
+{
+    "KPlugin": {
+        "Id": "DevOS-NeonCyberpulse",
+        "Name": "Neon Cyberpulse",
+        "Authors": [
+            {
+                "Name": "DevOS"
+            }
+        ],
+        "License": "CC-BY-SA-4.0"
+    }
+}

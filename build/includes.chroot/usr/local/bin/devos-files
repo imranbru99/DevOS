@@ -17,10 +17,12 @@ import datetime
 import json
 import mimetypes
 import os
+import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import unquote
 
 try:
     from PyQt5.QtCore import (
@@ -469,6 +471,36 @@ def get_win_icon(name, size=32):
         p.setPen(QColor("#0078d4"))
         p.drawText(QRectF(14 * s, 18 * s, 36 * s, 32 * s), Qt.AlignCenter, '“”')
 
+    elif name == "restore":
+        # Windows restore curved arrow
+        p.setPen(QPen(QColor("#0284c7"), 4 * s, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        path = QPainterPath()
+        path.moveTo(46 * s, 44 * s)
+        path.arcTo(QRectF(18 * s, 16 * s, 34 * s, 34 * s), -30, 210)
+        p.drawPath(path)
+        # Arrowhead at top left
+        p.setBrush(QColor("#0284c7"))
+        p.setPen(Qt.NoPen)
+        arrow = QPolygonF([
+            QPointF(12 * s, 26 * s),
+            QPointF(26 * s, 16 * s),
+            QPointF(24 * s, 32 * s),
+        ])
+        p.drawPolygon(arrow)
+
+    elif name == "delete-perm":
+        # Red permanent delete icon with X badge
+        p.setBrush(QColor("#ef4444"))
+        p.setPen(QPen(QColor("#dc2626"), 1.5 * s))
+        p.drawRoundedRect(QRectF(16 * s, 14 * s, 32 * s, 40 * s), 4 * s, 4 * s)
+        p.setBrush(QColor("#dc2626"))
+        p.drawRoundedRect(QRectF(12 * s, 10 * s, 40 * s, 5 * s), 2 * s, 2 * s)
+        p.drawRect(QRectF(28 * s, 7 * s, 8 * s, 3 * s))
+        # White X badge
+        p.setPen(QPen(QColor("#ffffff"), 2.5 * s, Qt.SolidLine, Qt.RoundCap))
+        p.drawLine(QPointF(26 * s, 28 * s), QPointF(38 * s, 40 * s))
+        p.drawLine(QPointF(38 * s, 28 * s), QPointF(26 * s, 40 * s))
+
     else:
         # Fallback to system icon or clean generic document
         sys_icon = QIcon.fromTheme(name)
@@ -566,6 +598,72 @@ def get_icon_for_file(path, is_dir=False):
     if ext in [".mp3", ".wav", ".flac", ".ogg", ".aac"]:
         return get_win_icon("folder-music", 32)
     return get_win_icon("file-doc", 32)
+
+
+def is_recycle_bin_path(path: str) -> bool:
+    """Check if given path represents the Recycle Bin or an item within it."""
+    if not path:
+        return False
+    if str(path).strip() in ("trash:/", "trash:", "trash", "Recycle Bin"):
+        return True
+    try:
+        norm = os.path.normpath(os.path.abspath(os.path.expanduser(str(path))))
+        trash_files = os.path.normpath(os.path.expanduser("~/.local/share/Trash/files"))
+        trash_root = os.path.normpath(os.path.expanduser("~/.local/share/Trash"))
+        return norm == trash_files or norm == trash_root or norm.startswith(trash_files + os.sep)
+    except Exception:
+        return False
+
+
+def get_trash_info(trash_file_path: str):
+    """Parse FreeDesktop trashinfo for a file in ~/.local/share/Trash/files/."""
+    try:
+        base = os.path.basename(trash_file_path)
+        info_dir = os.path.expanduser("~/.local/share/Trash/info")
+        info_path = os.path.join(info_dir, f"{base}.trashinfo")
+        orig_path = None
+        del_date = None
+        if os.path.exists(info_path):
+            with open(info_path, "r", encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith("Path="):
+                        orig_path = unquote(line[5:])
+                    elif line.startswith("DeletionDate="):
+                        del_date = line[13:]
+
+        # If orig_path itself points inside trash (from legacy re-trash bugs), trace backwards
+        visited = set()
+        while orig_path and is_recycle_bin_path(orig_path) and orig_path not in visited:
+            visited.add(orig_path)
+            prev_base = os.path.basename(orig_path)
+            prev_info = os.path.join(info_dir, f"{prev_base}.trashinfo")
+            if os.path.exists(prev_info):
+                next_orig = None
+                with open(prev_info, "r", encoding="utf-8", errors="replace") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line.startswith("Path="):
+                            next_orig = unquote(line[5:])
+                if next_orig:
+                    orig_path = next_orig
+                    continue
+            clean_base = re.sub(r"\s+\(\d+\)(\.[^.]+)?$", r"\1", prev_base)
+            clean_info = os.path.join(info_dir, f"{clean_base}.trashinfo")
+            if os.path.exists(clean_info):
+                with open(clean_info, "r", encoding="utf-8", errors="replace") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line.startswith("Path="):
+                            next_orig = unquote(line[5:])
+                if next_orig and not is_recycle_bin_path(next_orig):
+                    orig_path = next_orig
+                    break
+            break
+
+        return orig_path, del_date
+    except Exception:
+        return None, None
 
 
 SKIP_PREFIX = ("loop", "zram", "ram", "nbd", "sr", "fd")
@@ -1075,6 +1173,7 @@ class DriveCard(QFrame):
         self.on_context = on_context
         self.setObjectName("driveCard")
         self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.ClickFocus)
         self.setMinimumHeight(86)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
@@ -1140,7 +1239,7 @@ class DriveCard(QFrame):
 
 
 class FolderTile(QFrame):
-    """Windows-style Folder Tile for standard user folders (Documents, Downloads, etc.)."""
+    """Windows 11-style premium Folder Card for user standard folders."""
 
     def __init__(self, name, path, icon_name, on_open, on_context=None):
         super().__init__()
@@ -1150,24 +1249,47 @@ class FolderTile(QFrame):
         self.on_context = on_context
         self.setObjectName("folderTile")
         self.setCursor(Qt.PointingHandCursor)
-        self.setFixedSize(140, 110)
+        self.setFocusPolicy(Qt.ClickFocus)
+        self.setMinimumHeight(66)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 12, 8, 8)
-        layout.setSpacing(8)
-        layout.setAlignment(Qt.AlignCenter)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(12)
 
+        # 42x42 Vibrant Windows 11 Folder Icon
         icon_label = QLabel()
-        icon_label.setPixmap(get_win_icon(icon_name, 50).pixmap(50, 50))
+        icon_label.setPixmap(get_win_icon(icon_name, 42).pixmap(42, 42))
+        icon_label.setFixedSize(42, 42)
         icon_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(icon_label, 0, Qt.AlignVCenter)
+
+        # Text Column (Title + Item count / info)
+        text_layout = QVBoxLayout()
+        text_layout.setSpacing(3)
+        text_layout.setAlignment(Qt.AlignVCenter)
 
         title = QLabel(name)
         title.setObjectName("folderTileTitle")
-        title.setAlignment(Qt.AlignCenter)
-        title.setFont(QFont("Inter", 10, QFont.Medium))
+        title.setFont(QFont("Inter", 11, QFont.DemiBold))
 
-        layout.addWidget(icon_label)
-        layout.addWidget(title)
+        # Dynamic Item Count / Subtitle
+        try:
+            if os.path.isdir(path):
+                cnt = len(os.listdir(path))
+                sub_text = f"{cnt} {'item' if cnt == 1 else 'items'}"
+            else:
+                sub_text = "Personal folder"
+        except Exception:
+            sub_text = "Personal folder"
+
+        subtitle = QLabel(sub_text)
+        subtitle.setObjectName("folderTileSub")
+        subtitle.setFont(QFont("Inter", 9))
+
+        text_layout.addWidget(title)
+        text_layout.addWidget(subtitle)
+        layout.addLayout(text_layout, 1)
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -1278,7 +1400,10 @@ class BreadcrumbBar(QWidget):
         self._copy_address(self._current_path or "This PC")
 
     def _copy_address(self, path):
-        target = path if path else (self._current_path or "This PC")
+        if is_recycle_bin_path(path):
+            target = "Recycle Bin"
+        else:
+            target = path if path else (self._current_path or "This PC")
         QApplication.clipboard().setText(target)
         win = self.window()
         if win and hasattr(win, "status"):
@@ -1298,10 +1423,11 @@ class BreadcrumbBar(QWidget):
 
     def _show_crumb_context_menu(self, path, global_pos):
         menu = QMenu(self)
-        label = "This PC" if not path else os.path.basename(path)
-        act_open = menu.addAction(get_win_icon("folder" if path else "this-pc", 16), f"Open '{label}'")
+        label = "This PC" if not path else ("Recycle Bin" if is_recycle_bin_path(path) else os.path.basename(path))
+        icon_name = "this-pc" if not path else ("recycle-bin" if is_recycle_bin_path(path) else "folder")
+        act_open = menu.addAction(get_win_icon(icon_name, 16), f"Open '{label}'")
         act_open.triggered.connect(lambda: self.path_changed.emit(path))
-        if path:
+        if path and not is_recycle_bin_path(path):
             act_new_win = menu.addAction("Open in new window")
             act_new_win.triggered.connect(lambda: open_in_new_window(path))
             act_term = menu.addAction("Open in Terminal")
@@ -1317,17 +1443,22 @@ class BreadcrumbBar(QWidget):
     def set_location(self, path, label=""):
         self._current_path = path
         self._current_label = label or path
-        self.path_edit.setText(path if path else "This PC")
         self.path_edit.hide()
         self.crumbs_container.show()
 
         # Update address bar icon
         if not path or path == "This PC":
             self.icon_label.setPixmap(get_win_icon("this-pc", 18).pixmap(18, 18))
+            self.path_edit.setText("This PC")
+        elif is_recycle_bin_path(path):
+            self.icon_label.setPixmap(get_win_icon("recycle-bin", 18).pixmap(18, 18))
+            self.path_edit.setText("Recycle Bin")
         elif path == "/":
             self.icon_label.setPixmap(get_win_icon("drive-c", 18).pixmap(18, 18))
+            self.path_edit.setText(path)
         else:
             self.icon_label.setPixmap(get_win_icon("folder", 18).pixmap(18, 18))
+            self.path_edit.setText(path)
 
         # Rebuild breadcrumbs
         while self.crumbs_layout.count():
@@ -1350,6 +1481,18 @@ class BreadcrumbBar(QWidget):
         sep = QLabel("›")
         sep.setObjectName("crumbSep")
         self.crumbs_layout.addWidget(sep)
+
+        # Recycle Bin clean breadcrumb
+        if is_recycle_bin_path(path):
+            bin_btn = QPushButton("Recycle Bin")
+            bin_btn.setObjectName("crumbBtn")
+            bin_btn.setCursor(Qt.PointingHandCursor)
+            trash_path = os.path.expanduser("~/.local/share/Trash/files")
+            bin_btn.clicked.connect(lambda _=False, p=trash_path: self.path_changed.emit(p))
+            bin_btn.setContextMenuPolicy(Qt.CustomContextMenu)
+            bin_btn.customContextMenuRequested.connect(lambda pos, b=bin_btn: self._show_crumb_context_menu(trash_path, b.mapToGlobal(pos)))
+            self.crumbs_layout.addWidget(bin_btn)
+            return
 
         # Home directory shortcut friendly formatting
         home = os.path.expanduser("~")
@@ -1412,6 +1555,8 @@ class BreadcrumbBar(QWidget):
         text = self.path_edit.text().strip()
         if text == "This PC" or not text:
             self.path_changed.emit("")
+        elif text.lower() in ("recycle bin", "recycle-bin", "trash", "trash:", "trash:/"):
+            self.path_changed.emit(os.path.expanduser("~/.local/share/Trash/files"))
         else:
             # Handle Windows-style C:\ paths
             if text.upper().startswith("C:\\") or text.upper() == "C:":
@@ -1556,16 +1701,23 @@ class WindowsFolderPropertiesDialog(QDialog):
         grid.addWidget(self._make_label("Type of file:"), 0, 0)
         grid.addWidget(self._make_value_label("File folder"), 0, 1)
 
-        loc = os.path.dirname(self.path)
-        win_loc = loc.replace("/", "\\")
-        if win_loc.startswith("\\home\\"):
-            win_loc = "C:\\Users" + win_loc[5:]
-        elif win_loc == "":
-            win_loc = "C:\\"
+        if is_recycle_bin_path(self.path):
+            orig_path, _ = get_trash_info(self.path)
+            loc_label = "Original location:" if orig_path else "Location:"
+            loc_disp = orig_path or "Recycle Bin"
+            grid.addWidget(self._make_label(loc_label), 1, 0)
+            grid.addWidget(self._make_value_label(loc_disp), 1, 1)
         else:
-            win_loc = "C:" + win_loc
-        grid.addWidget(self._make_label("Location:"), 1, 0)
-        grid.addWidget(self._make_value_label(win_loc), 1, 1)
+            loc = os.path.dirname(self.path)
+            win_loc = loc.replace("/", "\\")
+            if win_loc.startswith("\\home\\"):
+                win_loc = "C:\\Users" + win_loc[5:]
+            elif win_loc == "":
+                win_loc = "C:\\"
+            else:
+                win_loc = "C:" + win_loc
+            grid.addWidget(self._make_label("Location:"), 1, 0)
+            grid.addWidget(self._make_value_label(win_loc), 1, 1)
 
         self.size_val = self._make_value_label("Calculating...")
         grid.addWidget(self._make_label("Size:"), 2, 0)
@@ -1795,16 +1947,23 @@ class WindowsFilePropertiesDialog(QDialog):
         grid2.setHorizontalSpacing(16)
         grid2.setVerticalSpacing(8)
 
-        loc = os.path.dirname(self.path)
-        win_loc = loc.replace("/", "\\")
-        if win_loc.startswith("\\home\\"):
-            win_loc = "C:\\Users" + win_loc[5:]
-        elif win_loc == "":
-            win_loc = "C:\\"
+        if is_recycle_bin_path(self.path):
+            orig_path, _ = get_trash_info(self.path)
+            loc_label = "Original location:" if orig_path else "Location:"
+            loc_disp = orig_path or "Recycle Bin"
+            grid2.addWidget(self._make_label(loc_label), 0, 0)
+            grid2.addWidget(self._make_value_label(loc_disp), 0, 1)
         else:
-            win_loc = "C:" + win_loc
-        grid2.addWidget(self._make_label("Location:"), 0, 0)
-        grid2.addWidget(self._make_value_label(win_loc), 0, 1)
+            loc = os.path.dirname(self.path)
+            win_loc = loc.replace("/", "\\")
+            if win_loc.startswith("\\home\\"):
+                win_loc = "C:\\Users" + win_loc[5:]
+            elif win_loc == "":
+                win_loc = "C:\\"
+            else:
+                win_loc = "C:" + win_loc
+            grid2.addWidget(self._make_label("Location:"), 0, 0)
+            grid2.addWidget(self._make_value_label(win_loc), 0, 1)
 
         try:
             st = os.stat(self.path)
@@ -2436,6 +2595,35 @@ class WindowsFileExplorer(QMainWindow):
         self.btn_compress.setVisible(False)
         self.btn_compress.clicked.connect(lambda: self.action_compress_zip())
 
+        # Recycle Bin specific buttons
+        self.btn_empty_trash = QPushButton("Empty Recycle Bin")
+        self.btn_empty_trash.setIcon(get_win_icon("recycle-bin", 18))
+        self.btn_empty_trash.setObjectName("cmdBtn")
+        self.btn_empty_trash.setToolTip("Permanently delete all items in the Recycle Bin")
+        self.btn_empty_trash.setVisible(False)
+        self.btn_empty_trash.clicked.connect(self.action_empty_recycle_bin)
+
+        self.btn_restore_all = QPushButton("Restore all items")
+        self.btn_restore_all.setIcon(get_win_icon("restore", 18))
+        self.btn_restore_all.setObjectName("cmdBtn")
+        self.btn_restore_all.setToolTip("Restore all items in the Recycle Bin to their original locations")
+        self.btn_restore_all.setVisible(False)
+        self.btn_restore_all.clicked.connect(self.action_restore_all)
+
+        self.btn_restore_selected = QPushButton("Restore selected")
+        self.btn_restore_selected.setIcon(get_win_icon("restore", 18))
+        self.btn_restore_selected.setObjectName("cmdBtn")
+        self.btn_restore_selected.setToolTip("Restore selected item(s) to original location")
+        self.btn_restore_selected.setVisible(False)
+        self.btn_restore_selected.clicked.connect(self.action_restore_selected)
+
+        self.btn_delete_permanently = QPushButton("Delete permanently")
+        self.btn_delete_permanently.setIcon(get_win_icon("delete-perm", 18))
+        self.btn_delete_permanently.setObjectName("cmdBtn")
+        self.btn_delete_permanently.setToolTip("Permanently delete selected item(s)")
+        self.btn_delete_permanently.setVisible(False)
+        self.btn_delete_permanently.clicked.connect(self.action_delete_permanently)
+
         cmd_layout.addWidget(self.btn_new_folder)
         cmd_layout.addWidget(self.btn_cut)
         cmd_layout.addWidget(self.btn_copy)
@@ -2445,6 +2633,10 @@ class WindowsFileExplorer(QMainWindow):
         cmd_layout.addWidget(self.btn_delete)
         cmd_layout.addWidget(self.btn_extract)
         cmd_layout.addWidget(self.btn_compress)
+        cmd_layout.addWidget(self.btn_empty_trash)
+        cmd_layout.addWidget(self.btn_restore_all)
+        cmd_layout.addWidget(self.btn_restore_selected)
+        cmd_layout.addWidget(self.btn_delete_permanently)
         cmd_layout.addSpacing(10)
         cmd_layout.addWidget(self.btn_view)
         cmd_layout.addWidget(self.btn_terminal)
@@ -2489,38 +2681,35 @@ class WindowsFileExplorer(QMainWindow):
         sidebar_layout.addWidget(self.this_pc_btn)
         self._side_btns[""] = self.this_pc_btn
 
-        # Dynamic Folders AND Drives under This PC (indented tree)
+        # Dynamic Drives under This PC (indented tree)
         self.this_pc_items_layout = QVBoxLayout()
         self.this_pc_items_layout.setContentsMargins(14, 0, 0, 0)
         self.this_pc_items_layout.setSpacing(2)
         sidebar_layout.addLayout(self.this_pc_items_layout)
 
-        self.drive_sidebar_layout = QVBoxLayout()
-        self.drive_sidebar_layout.setContentsMargins(0, 0, 0, 0)
-        self.drive_sidebar_layout.setSpacing(2)
-        self.this_pc_items_layout.addLayout(self.drive_sidebar_layout)
-
         sidebar_layout.addSpacing(12)
 
         # Network, Recycle Bin, PC Properties
-        net_btn = QPushButton("Network")
-        net_btn.setIcon(get_win_icon("network", 20))
-        net_btn.setObjectName("sideBtn")
-        net_btn.setCursor(Qt.PointingHandCursor)
-        net_btn.clicked.connect(lambda _=False: self.navigate_to("network:/"))
-        net_btn.setContextMenuPolicy(Qt.CustomContextMenu)
-        net_btn.customContextMenuRequested.connect(lambda pos, b=net_btn: self._show_network_context_menu(b.mapToGlobal(pos)))
-        sidebar_layout.addWidget(net_btn)
+        self.net_btn = QPushButton("Network")
+        self.net_btn.setIcon(get_win_icon("network", 20))
+        self.net_btn.setObjectName("sideBtn")
+        self.net_btn.setCursor(Qt.PointingHandCursor)
+        self.net_btn.clicked.connect(lambda _=False: self.navigate_to("network:/"))
+        self.net_btn.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.net_btn.customContextMenuRequested.connect(lambda pos: self._show_network_context_menu(self.net_btn.mapToGlobal(pos)))
+        sidebar_layout.addWidget(self.net_btn)
+        self._side_btns["network:/"] = self.net_btn
 
         trash_path = os.path.expanduser("~/.local/share/Trash/files")
-        bin_btn = QPushButton("Recycle Bin")
-        bin_btn.setIcon(get_win_icon("recycle-bin", 20))
-        bin_btn.setObjectName("sideBtn")
-        bin_btn.setCursor(Qt.PointingHandCursor)
-        bin_btn.clicked.connect(lambda _=False, p=trash_path: self.navigate_to(p))
-        bin_btn.setContextMenuPolicy(Qt.CustomContextMenu)
-        bin_btn.customContextMenuRequested.connect(lambda pos, b=bin_btn: self._show_bin_context_menu(b.mapToGlobal(pos)))
-        sidebar_layout.addWidget(bin_btn)
+        self.bin_btn = QPushButton("Recycle Bin")
+        self.bin_btn.setIcon(get_win_icon("recycle-bin", 20))
+        self.bin_btn.setObjectName("sideBtn")
+        self.bin_btn.setCursor(Qt.PointingHandCursor)
+        self.bin_btn.clicked.connect(lambda _=False, p=trash_path: self.navigate_to(p))
+        self.bin_btn.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.bin_btn.customContextMenuRequested.connect(lambda pos: self._show_bin_context_menu(self.bin_btn.mapToGlobal(pos)))
+        sidebar_layout.addWidget(self.bin_btn)
+        self._side_btns[trash_path] = self.bin_btn
 
         props_btn = QPushButton("PC properties")
         props_btn.setObjectName("sideBtn")
@@ -2554,29 +2743,17 @@ class WindowsFileExplorer(QMainWindow):
         self.this_pc_scroll_layout.setContentsMargins(0, 0, 0, 0)
         self.this_pc_scroll_layout.setSpacing(20)
 
-        home = os.path.expanduser("~")
-        quick_folders = [
-            ("Desktop", os.path.join(home, "Desktop"), "folder-desktop"),
-            ("Downloads", os.path.join(home, "Downloads"), "folder-downloads"),
-            ("Documents", os.path.join(home, "Documents"), "folder-documents"),
-            ("Pictures", os.path.join(home, "Pictures"), "folder-pictures"),
-            ("Music", os.path.join(home, "Music"), "folder-music"),
-            ("Videos", os.path.join(home, "Videos"), "folder-videos"),
-        ]
-
         # Folders Section Header: "Folders (6)"
         self.folders_heading = QLabel("Folders (6)")
         self.folders_heading.setObjectName("sectionHeading")
         self.folders_heading.setFont(QFont("Inter", 13, QFont.DemiBold))
         self.this_pc_scroll_layout.addWidget(self.folders_heading)
 
-        self.folders_flow = QHBoxLayout()
-        self.folders_flow.setSpacing(14)
-        for name, path, icon_name in quick_folders:
-            tile = FolderTile(name, path, icon_name, on_open=self.navigate_to, on_context=self._show_folder_tile_context_menu)
-            self.folders_flow.addWidget(tile)
-        self.folders_flow.addStretch(1)
-        self.this_pc_scroll_layout.addLayout(self.folders_flow)
+        # Folders Grid (3 columns of responsive horizontal cards)
+        self.folders_grid = QGridLayout()
+        self.folders_grid.setHorizontalSpacing(14)
+        self.folders_grid.setVerticalSpacing(12)
+        self.this_pc_scroll_layout.addLayout(self.folders_grid)
 
         # Devices & Drives Header: "Devices and drives"
         self.drives_heading = QLabel("Devices and drives")
@@ -2777,44 +2954,52 @@ class WindowsFileExplorer(QMainWindow):
                 color: #f8fafc;
             }
             #folderTile {
-                background: #20252f;
-                border: 1px solid #2b3341;
-                border-radius: 8px;
-            }
-            #folderTile:hover {
-                background: #272e3a;
-                border-color: #0078d4;
-            }
-            QLabel#folderTileTitle {
-                color: #f1f5f9;
-            }
-            #driveCard {
-                background: #20252f;
-                border: 1px solid #2b3341;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #222733, stop:1 #1a1f29);
+                border: 1px solid rgba(255, 255, 255, 0.08);
                 border-radius: 10px;
             }
-            #driveCard:hover {
-                background: #272e3a;
-                border-color: #0078d4;
+            #folderTile:hover, #folderTile:focus {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #2b3344, stop:1 #222938);
+                border: 1px solid #0078d4;
+            }
+            QLabel#folderTileTitle {
+                color: #f8fafc;
+                background: transparent;
+            }
+            QLabel#folderTileSub {
+                color: #94a3b8;
+                font-size: 11px;
+                background: transparent;
+            }
+            #driveCard {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #222733, stop:1 #1a1f29);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 10px;
+            }
+            #driveCard:hover, #driveCard:focus {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #2b3344, stop:1 #222938);
+                border: 1px solid #0078d4;
             }
             QLabel#driveTitle {
                 color: #f8fafc;
+                background: transparent;
             }
             QLabel#driveSpace {
                 color: #94a3b8;
                 font-size: 12px;
+                background: transparent;
             }
             QProgressBar#driveBar {
-                background: #334155;
+                background: #2b3341;
                 border: none;
                 border-radius: 4px;
             }
             QProgressBar#driveBar::chunk {
-                background: #0078d4;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0078d4, stop:1 #0ea5e9);
                 border-radius: 4px;
             }
             QProgressBar#driveBarFull::chunk {
-                background: #ef4444;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #ef4444, stop:1 #f87171);
                 border-radius: 4px;
             }
             QTableWidget#fileTable, QListWidget#fileList {
@@ -3007,7 +3192,9 @@ class WindowsFileExplorer(QMainWindow):
             self._rebuild_sidebar()
 
     def _rebuild_sidebar(self):
-        """Populate Quick Access with pinned items, and This PC with personal folders and drives."""
+        """Populate Quick Access with pinned items, and This PC with personal drives."""
+        self._side_btns = {"": self.this_pc_btn}
+
         while self.qa_sidebar_layout.count():
             item = self.qa_sidebar_layout.takeAt(0)
             if item.widget():
@@ -3017,10 +3204,6 @@ class WindowsFileExplorer(QMainWindow):
             item = self.this_pc_items_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-
-        self.drive_sidebar_layout = QVBoxLayout()
-        self.drive_sidebar_layout.setContentsMargins(0, 0, 0, 0)
-        self.drive_sidebar_layout.setSpacing(2)
 
         home = os.path.expanduser("~")
         std_folders = [
@@ -3061,19 +3244,7 @@ class WindowsFileExplorer(QMainWindow):
             self.qa_sidebar_layout.addWidget(btn)
             self._side_btns[path] = btn
 
-        # 2. This PC Personal folders (Always show on left side!)
-        for name, path, icon_name in std_folders:
-            btn = QPushButton(name)
-            btn.setIcon(get_win_icon(icon_name, 18))
-            btn.setIconSize(QSize(18, 18))
-            btn.setObjectName("sideBtn")
-            btn.setCursor(Qt.PointingHandCursor)
-            btn.clicked.connect(lambda _=False, p=path: self.navigate_to(p))
-            btn.setContextMenuPolicy(Qt.CustomContextMenu)
-            btn.customContextMenuRequested.connect(lambda pos, p=path, b=btn: self._show_sidebar_folder_context_menu(p, False, b.mapToGlobal(pos)))
-            self.this_pc_items_layout.addWidget(btn)
-
-        # 3. This PC Drives
+        # 2. This PC Drives (Directly under This PC button, indented tree - no duplicate folders!)
         for drive in self._drives:
             btn = QPushButton(drive["title"])
             icon_type = "drive-c" if drive["is_system"] else ("drive-usb" if drive["removable"] else "drive-fixed")
@@ -3084,12 +3255,36 @@ class WindowsFileExplorer(QMainWindow):
             btn.clicked.connect(lambda _=False, d=drive: self.open_drive(d))
             btn.setContextMenuPolicy(Qt.CustomContextMenu)
             btn.customContextMenuRequested.connect(lambda pos, d=drive, b=btn: self._show_drive_context_menu(d, b.mapToGlobal(pos)))
-            self.drive_sidebar_layout.addWidget(btn)
+            self.this_pc_items_layout.addWidget(btn)
+            if drive.get("mount"):
+                self._side_btns[drive["mount"]] = btn
 
-        self.this_pc_items_layout.addLayout(self.drive_sidebar_layout)
+    def reload_folders(self):
+        """Fetch and populate user standard folders in This PC view."""
+        while self.folders_grid.count():
+            item = self.folders_grid.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        home = os.path.expanduser("~")
+        quick_folders = [
+            ("Desktop", os.path.join(home, "Desktop"), "folder-desktop"),
+            ("Downloads", os.path.join(home, "Downloads"), "folder-downloads"),
+            ("Documents", os.path.join(home, "Documents"), "folder-documents"),
+            ("Pictures", os.path.join(home, "Pictures"), "folder-pictures"),
+            ("Music", os.path.join(home, "Music"), "folder-music"),
+            ("Videos", os.path.join(home, "Videos"), "folder-videos"),
+        ]
+
+        columns = 3
+        for idx, (name, path, icon_name) in enumerate(quick_folders):
+            tile = FolderTile(name, path, icon_name, on_open=self.navigate_to, on_context=self._show_folder_tile_context_menu)
+            self.folders_grid.addWidget(tile, idx // columns, idx % columns)
 
     def reload_drives(self):
-        """Fetch and populate drives."""
+        """Fetch and populate drives and folders."""
+        self.reload_folders()
+
         while self.drives_grid.count():
             item = self.drives_grid.takeAt(0)
             if item.widget():
@@ -3133,6 +3328,67 @@ class WindowsFileExplorer(QMainWindow):
         if mount and os.path.exists(mount):
             self.navigate_to(mount, label=drive["title"])
 
+    def is_in_recycle_bin(self):
+        return is_recycle_bin_path(self._current_path)
+
+    def _update_command_bar(self):
+        in_trash = self.is_in_recycle_bin()
+        selected_paths = self.get_selected_paths()
+        count = len(selected_paths)
+
+        if in_trash:
+            # Hide standard file manipulation buttons
+            self.btn_new_folder.setVisible(False)
+            self.btn_cut.setVisible(False)
+            self.btn_copy.setVisible(False)
+            self.btn_paste.setVisible(False)
+            self.btn_rename.setVisible(False)
+            self.btn_delete.setVisible(False)
+            self.btn_terminal.setVisible(False)
+            self.btn_extract.setVisible(False)
+            self.btn_compress.setVisible(False)
+
+            # Show Recycle Bin buttons
+            self.btn_empty_trash.setVisible(True)
+            self.btn_restore_all.setVisible(True)
+            self.btn_restore_selected.setVisible(True)
+            self.btn_delete_permanently.setVisible(True)
+
+            # Enable/disable based on selection and contents
+            self.btn_restore_selected.setEnabled(count > 0)
+            self.btn_delete_permanently.setEnabled(count > 0)
+
+            trash_files_dir = os.path.expanduser("~/.local/share/Trash/files")
+            has_any = os.path.exists(trash_files_dir) and bool(os.listdir(trash_files_dir))
+            self.btn_empty_trash.setEnabled(has_any)
+            self.btn_restore_all.setEnabled(has_any)
+        else:
+            # Show standard buttons
+            is_this_pc = (not self._current_path or self._current_path == "This PC")
+            self.btn_new_folder.setVisible(not is_this_pc)
+            self.btn_new_folder.setEnabled(not is_this_pc)
+            self.btn_cut.setVisible(True)
+            self.btn_cut.setEnabled(count > 0)
+            self.btn_copy.setVisible(True)
+            self.btn_copy.setEnabled(count > 0)
+            self.btn_paste.setVisible(True)
+            self.btn_paste.setEnabled(bool(self._clipboard.get("paths")))
+            self.btn_rename.setVisible(True)
+            self.btn_rename.setEnabled(count == 1)
+            self.btn_delete.setVisible(True)
+            self.btn_delete.setEnabled(count > 0)
+            self.btn_terminal.setVisible(not is_this_pc)
+
+            has_archive = bool(count == 1 and is_archive_file(selected_paths[0])) if count == 1 else False
+            self.btn_extract.setVisible(has_archive)
+            self.btn_compress.setVisible(count >= 1)
+
+            # Hide Recycle Bin buttons
+            self.btn_empty_trash.setVisible(False)
+            self.btn_restore_all.setVisible(False)
+            self.btn_restore_selected.setVisible(False)
+            self.btn_delete_permanently.setVisible(False)
+
     def navigate_to(self, path, label="", add_to_history=True):
         """Navigate to 'This PC' (empty string) or any folder path."""
         # Clean path if passed as file:// or computer:/
@@ -3150,8 +3406,11 @@ class WindowsFileExplorer(QMainWindow):
         self._current_path = path
 
         # Update sidebar highlights
+        in_trash = self.is_in_recycle_bin()
+        trash_path = os.path.expanduser("~/.local/share/Trash/files")
         for p, btn in self._side_btns.items():
-            btn.setObjectName("sideBtnSelected" if p == path else "sideBtn")
+            is_sel = (p == path) or (in_trash and p == trash_path)
+            btn.setObjectName("sideBtnSelected" if is_sel else "sideBtn")
             btn.setStyle(btn.style())
 
         self.address_bar.set_location(path, label)
@@ -3159,6 +3418,7 @@ class WindowsFileExplorer(QMainWindow):
 
         if not path or path == "This PC":
             self.setWindowTitle("This PC")
+            self.setWindowIcon(get_win_icon("this-pc", 32))
             self.search_box.setPlaceholderText("Search This PC")
             self.reload_drives()
             self.content_stack.setCurrentIndex(0)
@@ -3166,14 +3426,23 @@ class WindowsFileExplorer(QMainWindow):
             self.btn_new_folder.setEnabled(False)
             self.status_items_count.setText(f"{len(self._drives)} drives, 6 folders")
             self.status_selected_info.setText("")
+        elif in_trash:
+            self.setWindowTitle("Recycle Bin - File Explorer")
+            self.setWindowIcon(get_win_icon("recycle-bin", 32))
+            self.search_box.setPlaceholderText("Search Recycle Bin")
+            self.content_stack.setCurrentIndex(1)
+            self.btn_up.setEnabled(True)
+            self._load_folder_contents(path)
         else:
             folder_name = os.path.basename(path) or path
             self.setWindowTitle(f"{folder_name} - File Explorer")
+            self.setWindowIcon(get_win_icon("folder", 32))
             self.search_box.setPlaceholderText(f"Search {folder_name}")
             self.content_stack.setCurrentIndex(1)
             self.btn_up.setEnabled(True)
-            self.btn_new_folder.setEnabled(True)
             self._load_folder_contents(path)
+
+        self._update_command_bar()
 
     def go_back(self):
         if self._history:
@@ -3194,6 +3463,9 @@ class WindowsFileExplorer(QMainWindow):
     def go_up(self):
         if not self._current_path:
             return
+        if self.is_in_recycle_bin():
+            self.navigate_to("")
+            return
         parent = os.path.dirname(self._current_path)
         if not parent or parent == self._current_path:
             self.navigate_to("")
@@ -3208,6 +3480,12 @@ class WindowsFileExplorer(QMainWindow):
         self.table_view.setSortingEnabled(False)
         self.table_view.setRowCount(0)
         self.list_view.clear()
+
+        in_trash = self.is_in_recycle_bin()
+        if in_trash:
+            self.table_view.setHorizontalHeaderLabels(["Name", "Original location", "Date deleted", "Size"])
+        else:
+            self.table_view.setHorizontalHeaderLabels(["Name", "Date modified", "Type", "Size"])
 
         try:
             entries = os.listdir(path)
@@ -3250,6 +3528,27 @@ class WindowsFileExplorer(QMainWindow):
             item_type = get_file_type_description(full_path)
             icon = get_icon_for_file(full_path, is_dir)
 
+            if in_trash:
+                orig_loc, del_date = get_trash_info(full_path)
+                col1_text = orig_loc or "Unknown"
+                col1_val = col1_text.lower()
+                if del_date:
+                    try:
+                        dt = datetime.datetime.fromisoformat(del_date)
+                        col2_text = dt.strftime("%Y-%m-%d  %I:%M %p")
+                        col2_val = dt.timestamp()
+                    except Exception:
+                        col2_text = del_date
+                        col2_val = 0
+                else:
+                    col2_text = mtime
+                    col2_val = st.st_mtime if "st" in locals() else 0
+            else:
+                col1_text = mtime
+                col1_val = st.st_mtime if "st" in locals() else 0
+                col2_text = item_type
+                col2_val = item_type
+
             # Name Column
             name_item = ExplorerTableItem(entry)
             name_item.setIcon(icon)
@@ -3257,17 +3556,17 @@ class WindowsFileExplorer(QMainWindow):
             name_item.setData(Qt.UserRole + 1, is_dir)
             self.table_view.setItem(row, 0, name_item)
 
-            # Date Modified Column
-            date_item = ExplorerTableItem(mtime)
-            date_item.setData(Qt.UserRole, st.st_mtime if "st" in locals() else 0)
-            date_item.setData(Qt.UserRole + 1, is_dir)
-            self.table_view.setItem(row, 1, date_item)
+            # Col 1 (Date modified or Original location)
+            item1 = ExplorerTableItem(col1_text)
+            item1.setData(Qt.UserRole, col1_val)
+            item1.setData(Qt.UserRole + 1, is_dir)
+            self.table_view.setItem(row, 1, item1)
 
-            # Type Column
-            type_item = ExplorerTableItem(item_type)
-            type_item.setData(Qt.UserRole, item_type)
-            type_item.setData(Qt.UserRole + 1, is_dir)
-            self.table_view.setItem(row, 2, type_item)
+            # Col 2 (Type or Date deleted)
+            item2 = ExplorerTableItem(col2_text)
+            item2.setData(Qt.UserRole, col2_val)
+            item2.setData(Qt.UserRole + 1, is_dir)
+            self.table_view.setItem(row, 2, item2)
 
             # Size Column
             size_item = ExplorerTableItem(size_str)
@@ -3286,11 +3585,29 @@ class WindowsFileExplorer(QMainWindow):
         self.status_items_count.setText(f"{len(all_items)} items")
         self.status_selected_info.setText("")
 
+    def _prompt_trash_item_action(self, target):
+        name = os.path.basename(target)
+        orig_path, _ = get_trash_info(target)
+        loc_str = orig_path if orig_path else "Unknown"
+        msg = f"Item: {name}\nOriginal location: {loc_str}\n\nDo you want to restore this item to its original location?"
+        reply = QMessageBox.question(
+            self,
+            "Restore Item",
+            msg,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes
+        )
+        if reply == QMessageBox.Yes:
+            self._restore_paths([target])
+
     def _on_table_item_double_clicked(self, item):
         row = item.row()
         name_item = self.table_view.item(row, 0)
         target = name_item.data(Qt.UserRole)
         is_dir = name_item.data(Qt.UserRole + 1)
+        if self.is_in_recycle_bin():
+            self._prompt_trash_item_action(target)
+            return
         if is_dir:
             self.navigate_to(target)
         else:
@@ -3299,6 +3616,9 @@ class WindowsFileExplorer(QMainWindow):
     def _on_list_item_double_clicked(self, item):
         target = item.data(Qt.UserRole)
         is_dir = item.data(Qt.UserRole + 1)
+        if self.is_in_recycle_bin():
+            self._prompt_trash_item_action(target)
+            return
         if is_dir:
             self.navigate_to(target)
         else:
@@ -3320,11 +3640,7 @@ class WindowsFileExplorer(QMainWindow):
         else:
             self.status_selected_info.setText(f"{count} items selected")
 
-        has_archive = bool(count == 1 and is_archive_file(selected_paths[0]))
-        if hasattr(self, "btn_extract"):
-            self.btn_extract.setVisible(has_archive)
-        if hasattr(self, "btn_compress"):
-            self.btn_compress.setVisible(count >= 1)
+        self._update_command_bar()
 
     def _on_search_text_changed(self, text):
         query = text.strip().lower()
@@ -3556,10 +3872,24 @@ class WindowsFileExplorer(QMainWindow):
                     QMessageBox.critical(self, "Error", f"Failed to rename: {err.strerror}")
 
     def action_delete(self):
+        if self.is_in_recycle_bin():
+            self.action_delete_permanently()
+            return
+
         paths = self.get_selected_paths()
         if not paths:
             return
+        self._trash_paths(paths)
 
+    def _delete_paths(self, paths):
+        if not paths:
+            return
+        if self.is_in_recycle_bin():
+            self.action_delete_permanently()
+            return
+        self._trash_paths(paths)
+
+    def _trash_paths(self, paths):
         trash_files = os.path.expanduser("~/.local/share/Trash/files")
         trash_info = os.path.expanduser("~/.local/share/Trash/info")
         try:
@@ -3679,19 +4009,6 @@ class WindowsFileExplorer(QMainWindow):
             action_name = "Copied" if action == "copy" else "Cut"
             self.status.showMessage(f"{action_name} {len(paths)} item(s)", 2000)
 
-    def _delete_paths(self, paths):
-        if not paths:
-            return
-        trash_dir = os.path.expanduser("~/.local/share/Trash/files")
-        os.makedirs(trash_dir, exist_ok=True)
-        for p in paths:
-            try:
-                subprocess.run(["gio", "trash", p], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                if os.path.exists(p):
-                    shutil.move(p, os.path.join(trash_dir, os.path.basename(p)))
-            except Exception:
-                pass
-        self.refresh()
 
     def action_rename_path(self, target):
         if not os.path.exists(target):
@@ -3854,8 +4171,8 @@ class WindowsFileExplorer(QMainWindow):
         menu = QMenu(self)
         act_open = menu.addAction(get_win_icon("recycle-bin", 18), "Open")
         act_open.triggered.connect(lambda: self.navigate_to(trash_path))
-        act_empty = menu.addAction("Empty Recycle Bin")
-        act_empty.triggered.connect(self._empty_trash)
+        act_empty = menu.addAction(get_win_icon("recycle-bin", 16), "Empty Recycle Bin")
+        act_empty.triggered.connect(self.action_empty_recycle_bin)
         act_copy_path = menu.addAction(get_win_icon("copy-path", 16), "Copy path")
         act_copy_path.triggered.connect(lambda: self.action_copy_path(trash_path))
         menu.addSeparator()
@@ -3864,23 +4181,250 @@ class WindowsFileExplorer(QMainWindow):
         menu.exec_(global_pos)
 
     def _empty_trash(self):
+        self.action_empty_recycle_bin()
+
+    def action_empty_recycle_bin(self):
         trash_dir = os.path.expanduser("~/.local/share/Trash/files")
+        trash_info = os.path.expanduser("~/.local/share/Trash/info")
+
+        has_items = False
+        if os.path.exists(trash_dir) and os.listdir(trash_dir):
+            has_items = True
+
+        if not has_items:
+            QMessageBox.information(self, "Recycle Bin", "The Recycle Bin is already empty.")
+            return
+
+        reply = QMessageBox.warning(
+            self,
+            "Empty Recycle Bin",
+            "Are you sure you want to permanently delete all items in the Recycle Bin?\n\nThis cannot be undone.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        # Empty files
         if os.path.exists(trash_dir):
-            for f in os.listdir(trash_dir):
-                fp = os.path.join(trash_dir, f)
+            for item in os.listdir(trash_dir):
+                fp = os.path.join(trash_dir, item)
                 try:
-                    if os.path.isdir(fp):
+                    if os.path.isdir(fp) and not os.path.islink(fp):
                         shutil.rmtree(fp, ignore_errors=True)
                     else:
                         os.remove(fp)
                 except Exception:
                     pass
+
+        # Empty info
+        if os.path.exists(trash_info):
+            for item in os.listdir(trash_info):
+                fp = os.path.join(trash_info, item)
+                try:
+                    os.remove(fp)
+                except Exception:
+                    pass
+
+        sizes_file = os.path.expanduser("~/.local/share/Trash/directorysizes")
+        if os.path.exists(sizes_file):
+            try:
+                os.remove(sizes_file)
+            except OSError:
+                pass
+
         self.refresh()
+        if hasattr(self, "status"):
+            self.status.showMessage("Recycle Bin emptied", 4000)
+
+    def action_restore_selected(self):
+        paths = self.get_selected_paths()
+        if not paths:
+            return
+        self._restore_paths(paths)
+
+    def action_restore_all(self):
+        trash_dir = os.path.expanduser("~/.local/share/Trash/files")
+        if not os.path.exists(trash_dir):
+            return
+        try:
+            items = [os.path.join(trash_dir, f) for f in os.listdir(trash_dir)]
+        except OSError:
+            items = []
+        if not items:
+            QMessageBox.information(self, "Recycle Bin", "The Recycle Bin is already empty.")
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Restore All Items",
+            "Are you sure you want to restore all items in the Recycle Bin?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        if reply == QMessageBox.Yes:
+            self._restore_paths(items)
+
+    def _restore_paths(self, paths):
+        restored = 0
+        failed = 0
+        info_dir = os.path.expanduser("~/.local/share/Trash/info")
+
+        for p in paths:
+            if not os.path.exists(p):
+                continue
+            base = os.path.basename(p)
+            orig_path, _ = get_trash_info(p)
+
+            # Strip any residual trash internal paths
+            if not orig_path or is_recycle_bin_path(orig_path):
+                clean_name = re.sub(r"\s+\(\d+\)(\.[^.]+)?$", r"\1", base)
+                desktop = os.path.expanduser("~/Desktop")
+                if os.path.exists(desktop):
+                    orig_path = os.path.join(desktop, clean_name)
+                else:
+                    orig_path = os.path.expanduser(f"~/{clean_name}")
+
+            try:
+                dest_dir = os.path.dirname(orig_path)
+                if dest_dir:
+                    os.makedirs(dest_dir, exist_ok=True)
+
+                target = orig_path
+                if os.path.exists(target):
+                    stem, ext = os.path.splitext(target)
+                    c = 2
+                    while os.path.exists(target):
+                        target = f"{stem} (Restored {c}){ext}"
+                        c += 1
+
+                shutil.move(p, target)
+
+                # Clean matching trashinfo files
+                info_path = os.path.join(info_dir, f"{base}.trashinfo")
+                if os.path.exists(info_path):
+                    try:
+                        os.remove(info_path)
+                    except OSError:
+                        pass
+                clean_base = re.sub(r"\s+\(\d+\)(\.[^.]+)?$", r"\1", base)
+                clean_info = os.path.join(info_dir, f"{clean_base}.trashinfo")
+                if os.path.exists(clean_info):
+                    try:
+                        os.remove(clean_info)
+                    except OSError:
+                        pass
+
+                restored += 1
+            except Exception:
+                failed += 1
+
+        self.refresh()
+        if hasattr(self, "status"):
+            msg = f"Restored {restored} item(s)"
+            if failed > 0:
+                msg += f" ({failed} failed)"
+            self.status.showMessage(msg, 4000)
+
+    def action_delete_permanently(self):
+        paths = self.get_selected_paths()
+        if not paths:
+            return
+
+        count = len(paths)
+        if count == 1:
+            name = os.path.basename(paths[0])
+            msg = f"Are you sure you want to permanently delete '{name}'?\n\nThis item will be permanently removed and cannot be restored."
+        else:
+            msg = f"Are you sure you want to permanently delete these {count} items?\n\nThese items will be permanently removed and cannot be restored."
+
+        reply = QMessageBox.warning(
+            self,
+            "Delete Permanently",
+            msg,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        deleted = 0
+        info_dir = os.path.expanduser("~/.local/share/Trash/info")
+        for p in paths:
+            base = os.path.basename(p)
+            try:
+                if os.path.isdir(p) and not os.path.islink(p):
+                    shutil.rmtree(p, ignore_errors=True)
+                else:
+                    os.remove(p)
+                deleted += 1
+            except Exception:
+                pass
+
+            info_file = os.path.join(info_dir, f"{base}.trashinfo")
+            if os.path.exists(info_file):
+                try:
+                    os.remove(info_file)
+                except OSError:
+                    pass
+            clean_base = re.sub(r"\s+\(\d+\)(\.[^.]+)?$", r"\1", base)
+            clean_info = os.path.join(info_dir, f"{clean_base}.trashinfo")
+            if os.path.exists(clean_info):
+                try:
+                    os.remove(clean_info)
+                except OSError:
+                    pass
+
+        self.refresh()
+        if hasattr(self, "status"):
+            self.status.showMessage(f"Permanently deleted {deleted} item(s)", 4000)
 
     def _show_context_menu(self, pos):
         """Context menu for items or empty space in folder view."""
         menu = QMenu(self)
         paths = self.get_selected_paths()
+        in_trash = self.is_in_recycle_bin()
+
+        if in_trash:
+            if paths:
+                act_restore = menu.addAction(get_win_icon("restore", 16), "Restore")
+                act_restore.triggered.connect(self.action_restore_selected)
+                act_cut = menu.addAction("Cut")
+                act_cut.triggered.connect(self.action_cut)
+                act_del = menu.addAction(get_win_icon("delete-perm", 16), "Delete permanently")
+                act_del.triggered.connect(self.action_delete_permanently)
+                menu.addSeparator()
+                act_props = menu.addAction("Properties")
+                act_props.triggered.connect(lambda: self.show_properties(paths[0]))
+            else:
+                view_menu = menu.addMenu("View")
+                act_details = view_menu.addAction("Details")
+                act_details.triggered.connect(lambda: self.set_view_mode("details"))
+                act_icons = view_menu.addAction("Large icons")
+                act_icons.triggered.connect(lambda: self.set_view_mode("icons"))
+
+                sort_menu = menu.addMenu("Sort by")
+                for s in ["Name", "Original location", "Date deleted", "Size"]:
+                    act_s = sort_menu.addAction(s)
+                    act_s.triggered.connect(self.refresh)
+
+                act_refresh = menu.addAction("Refresh")
+                act_refresh.triggered.connect(self.refresh)
+                menu.addSeparator()
+
+                act_empty = menu.addAction(get_win_icon("recycle-bin", 16), "Empty Recycle Bin")
+                act_empty.triggered.connect(self.action_empty_recycle_bin)
+                act_rest_all = menu.addAction(get_win_icon("restore", 16), "Restore all items")
+                act_rest_all.triggered.connect(self.action_restore_all)
+                menu.addSeparator()
+
+                act_props = menu.addAction("Properties")
+                act_props.triggered.connect(lambda: self.show_properties(self._current_path))
+
+            sender = self.sender()
+            global_pos = sender.mapToGlobal(pos) if (sender and hasattr(sender, "mapToGlobal")) else self.mapToGlobal(pos)
+            menu.exec_(global_pos)
+            return
 
         if paths:
             target = paths[0]
@@ -4027,8 +4571,13 @@ class WindowsFileExplorer(QMainWindow):
             self.go_back()
         elif event.key() == Qt.Key_F5:
             self.refresh()
+        elif event.modifiers() == Qt.ShiftModifier and event.key() == Qt.Key_Delete:
+            self.action_delete_permanently()
         elif event.key() == Qt.Key_Delete:
-            self.action_delete()
+            if self.is_in_recycle_bin():
+                self.action_delete_permanently()
+            else:
+                self.action_delete()
         elif event.key() == Qt.Key_F2:
             self.action_rename()
         elif event.modifiers() == (Qt.ControlModifier | Qt.ShiftModifier) and event.key() == Qt.Key_C:
