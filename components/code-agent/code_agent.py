@@ -262,11 +262,41 @@ class Workspace:
     def run_command(self, command: str, timeout: Any = None) -> Dict[str, Any]:
         seconds = min(max(_int(timeout, COMMAND_TIMEOUT), 1), MAX_TIMEOUT)
         posix = os.name == "posix"
+        is_server = any(p in command.lower() for p in [
+            "artisan serve", "manage.py runserver", "http.server", "npm run dev",
+            "npm start", "yarn dev", "pnpm dev", "vite", "uvicorn", "flask run"
+        ])
         proc = subprocess.Popen(
             ["/bin/bash", "-c", command] if posix and os.path.exists("/bin/bash") else command,
             shell=not (posix and os.path.exists("/bin/bash")), cwd=self.root,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
             start_new_session=posix)
+
+        if is_server:
+            # Dev servers are persistent daemons and should not be killed with timeout
+            try:
+                time.sleep(1.8)
+                exit_code = proc.poll()
+                if exit_code is None:
+                    try:
+                        import fcntl
+                        fl = fcntl.fcntl(proc.stdout.fileno(), fcntl.F_GETFL)
+                        fcntl.fcntl(proc.stdout.fileno(), fcntl.F_SETFL, fl | os.O_NONBLOCK)
+                        raw_initial = proc.stdout.read()
+                        text = (raw_initial or b"").decode("utf-8", errors="replace")
+                    except Exception:
+                        text = ""
+                    if not text.strip():
+                        text = f"Server started and running with `{command}`."
+                    text += f"\n\n[Dev server active and running in background (PID {proc.pid})]"
+                    return {"code": 0, "output": text, "timed_out": False, "seconds": 2}
+                else:
+                    out, _ = proc.communicate(timeout=2)
+                    text = (out or b"").decode("utf-8", errors="replace")
+                    return {"code": exit_code, "output": cap_output(text), "timed_out": False, "seconds": 2}
+            except Exception:
+                pass
+
         timed_out = False
         try:
             out, _ = proc.communicate(timeout=seconds)
@@ -288,28 +318,16 @@ class Workspace:
         """Intelligently detects application type, run/serve command, port, and landing page URL."""
         root = self.root
 
-        # 1. Node / Frontend / Vite / Next.js / Express
-        pkg_json = os.path.join(root, "package.json")
-        if os.path.isfile(pkg_json):
-            try:
-                with open(pkg_json, encoding="utf-8") as f:
-                    data = json.load(f)
-                scripts = data.get("scripts") or {}
-                for s in ("dev", "start", "serve", "preview"):
-                    if s in scripts:
-                        cmd = f"npm run {s}" if s != "start" else "npm start"
-                        script_text = scripts.get(s, "")
-                        port = 5173 if "vite" in script_text else (3000 if "next" in str(data) else 3000)
-                        return {
-                            "type": "Node.js / Web Application",
-                            "command": cmd,
-                            "port": port,
-                            "url": f"http://localhost:{port}",
-                            "preview_url": f"http://localhost:{port}",
-                            "hint": f"package.json (script '{s}')"
-                        }
-            except Exception:
-                pass
+        # 1. PHP / Laravel (Prioritized: Laravel contains package.json for vite, but primary server is artisan)
+        if os.path.isfile(os.path.join(root, "artisan")):
+            return {
+                "type": "PHP / Laravel Application",
+                "command": "php artisan serve",
+                "port": 8000,
+                "url": "http://localhost:8000",
+                "preview_url": "http://localhost:8000",
+                "hint": "artisan"
+            }
 
         # 2. Django
         if os.path.isfile(os.path.join(root, "manage.py")):
@@ -369,16 +387,28 @@ class Workspace:
                 except Exception:
                     pass
 
-        # 4. PHP / Laravel
-        if os.path.isfile(os.path.join(root, "artisan")):
-            return {
-                "type": "PHP / Laravel",
-                "command": "php artisan serve",
-                "port": 8000,
-                "url": "http://localhost:8000",
-                "preview_url": "http://localhost:8000",
-                "hint": "artisan"
-            }
+        # 4. Node / Frontend / Vite / Next.js / Express
+        pkg_json = os.path.join(root, "package.json")
+        if os.path.isfile(pkg_json):
+            try:
+                with open(pkg_json, encoding="utf-8") as f:
+                    data = json.load(f)
+                scripts = data.get("scripts") or {}
+                for s in ("dev", "start", "serve", "preview"):
+                    if s in scripts:
+                        cmd = f"npm run {s}" if s != "start" else "npm start"
+                        script_text = scripts.get(s, "")
+                        port = 5173 if "vite" in script_text else (3000 if "next" in str(data) else 3000)
+                        return {
+                            "type": "Node.js / Web Application",
+                            "command": cmd,
+                            "port": port,
+                            "url": f"http://localhost:{port}",
+                            "preview_url": f"http://localhost:{port}",
+                            "hint": f"package.json (script '{s}')"
+                        }
+            except Exception:
+                pass
 
         # 5. Static HTML landing page
         for html_candidate in ("index.html", "landing.html", "public/index.html", "dist/index.html", "build/index.html"):
