@@ -336,7 +336,7 @@ QPushButton#removeAttachBtn:hover {{
     background: #450a0a;
     border-radius: 3px;
 }}
-QPushButton#attachBtn {{
+QPushButton#attachBtn, QPushButton#rerunBtn {{
     background: #111c30;
     border: 1px solid #1e2e4a;
     color: #94a3b8;
@@ -344,10 +344,14 @@ QPushButton#attachBtn {{
     padding: 6px 12px;
     font-size: 12px;
 }}
-QPushButton#attachBtn:hover {{
+QPushButton#attachBtn:hover, QPushButton#rerunBtn:hover {{
     background: #1a2a47;
     color: #38bdf8;
     border-color: #38bdf8;
+}}
+QPushButton#rerunBtn:disabled {{
+    color: #475569;
+    border-color: #1a2233;
 }}
 QPlainTextEdit#terminal {{
     font-family: 'JetBrains Mono', 'Fira Code', 'DejaVu Sans Mono', monospace;
@@ -661,6 +665,15 @@ class AgentComposer(QtWidgets.QPlainTextEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAcceptDrops(True)
+        self.history = []
+        self.history_index = -1
+        self._temp_edit = ""
+
+    def add_history(self, text: str):
+        if text and (not self.history or self.history[-1] != text):
+            self.history.append(text)
+        self.history_index = len(self.history)
+        self._temp_edit = ""
 
     def keyPressEvent(self, event: QtGui.QKeyEvent):
         if event.key() in (QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter):
@@ -671,6 +684,34 @@ class AgentComposer(QtWidgets.QPlainTextEdit):
                 event.accept()
                 self.submit_requested.emit()
                 return
+        elif event.key() == QtCore.Qt.Key_Up:
+            cursor = self.textCursor()
+            if cursor.blockNumber() == 0 or not self.toPlainText().strip():
+                if self.history:
+                    if self.history_index == len(self.history):
+                        self._temp_edit = self.toPlainText()
+                    if self.history_index > 0:
+                        self.history_index -= 1
+                        self.setPlainText(self.history[self.history_index])
+                        c = self.textCursor()
+                        c.movePosition(QtGui.QTextCursor.End)
+                        self.setTextCursor(c)
+                        event.accept()
+                        return
+        elif event.key() == QtCore.Qt.Key_Down:
+            cursor = self.textCursor()
+            if cursor.blockNumber() == self.document().blockCount() - 1 or not self.toPlainText().strip():
+                if self.history and self.history_index < len(self.history):
+                    self.history_index += 1
+                    if self.history_index < len(self.history):
+                        self.setPlainText(self.history[self.history_index])
+                    else:
+                        self.setPlainText(self._temp_edit)
+                    c = self.textCursor()
+                    c.movePosition(QtGui.QTextCursor.End)
+                    self.setTextCursor(c)
+                    event.accept()
+                    return
         super().keyPressEvent(event)
 
     def canInsertFromMimeData(self, source: QtCore.QMimeData) -> bool:
@@ -1114,6 +1155,9 @@ class AgentWindow(QtWidgets.QMainWindow):
         self.prompt_queue = []  # List of (raw_task, attached_images) for prompt queuing
         self.transcript = []  # [role, text]
         self.attached_images = []
+        self.user_prompts = []  # List of (raw_task, attached_images) for rerun
+        self.last_task = ""
+        self.last_attached = []
         self.setAcceptDrops(True)
         self.current_topic = ""
         self.active_status_text = "Idle"
@@ -1306,6 +1350,7 @@ class AgentWindow(QtWidgets.QMainWindow):
 
         self.chat = QtWidgets.QTextBrowser()
         self.chat.setOpenExternalLinks(False)
+        self.chat.anchorClicked.connect(self._on_anchor_clicked)
         self.chat.verticalScrollBar().valueChanged.connect(self._on_chat_scroll)
         chat_box_layout.addWidget(self.chat, 1)
 
@@ -1454,7 +1499,14 @@ class AgentWindow(QtWidgets.QMainWindow):
         self.attach_btn.clicked.connect(self.choose_attachment)
         actions.addWidget(self.attach_btn)
 
-        self.hint = CompactLabel("Enter to send · Shift+Enter newline · Paste/drop images")
+        self.rerun_btn = QtWidgets.QPushButton("🔄 Rerun last")
+        self.rerun_btn.setObjectName("rerunBtn")
+        self.rerun_btn.setToolTip("Rerun or recall the last submitted prompt (or press ↑ in composer)")
+        self.rerun_btn.setEnabled(False)
+        self.rerun_btn.clicked.connect(self.rerun_last_prompt)
+        actions.addWidget(self.rerun_btn)
+
+        self.hint = CompactLabel("Enter to send · Shift+Enter newline · ↑ for history")
         self.hint.setObjectName("muted")
         self.hint.setStyleSheet("font-size: 11.5px;")
         self.hint.setMinimumWidth(20)
@@ -1815,21 +1867,37 @@ class AgentWindow(QtWidgets.QMainWindow):
         self._dirty = False
         parts = []
         is_working = bool(self.worker)
+        user_prompt_idx = 0
         
         for i, (role, text) in enumerate(self.transcript):
             if role == "user":
+                p_idx = user_prompt_idx
+                user_prompt_idx += 1
                 parts.append(f'''
                 <div style="background-color: #121c30; border: 1px solid #1e3358; border-radius: 10px; padding: 12px 16px; margin: 10px 0 10px 24px; color: #f8fafc;">
-                  <div style="color: #38bdf8; font-weight: 700; font-size: 11.5px; letter-spacing: 0.5px; margin-bottom: 5px;">
-                    👤 YOU
-                  </div>
-                  <div style="font-size: 13.5px; line-height: 1.5; color: #f1f5f9;">{_prose(text)}</div>
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                      <td style="color: #38bdf8; font-weight: 700; font-size: 11.5px; letter-spacing: 0.5px;">👤 YOU</td>
+                      <td align="right">
+                        <a href="action:rerun:{p_idx}" style="color: #38bdf8; text-decoration: none; font-size: 11px; font-weight: 600; margin-right: 12px;">🔄 Rerun</a>
+                        <a href="action:edit:{p_idx}" style="color: #94a3b8; text-decoration: none; font-size: 11px; font-weight: 600;">✏️ Edit</a>
+                      </td>
+                    </tr>
+                  </table>
+                  <div style="font-size: 13.5px; line-height: 1.5; color: #f1f5f9; margin-top: 6px;">{_prose(text)}</div>
                 </div>
                 ''')
             elif role == "error":
                 parts.append(f'''
                 <div style="background-color: #450a0a; border: 1px solid #991b1b; border-radius: 8px; padding: 10px 14px; margin: 8px 0; color: #fecaca;">
-                  <b style="color: #ef4444;">✕ Error:</b> {html.escape(text)}
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                      <td><b style="color: #ef4444;">✕ Error:</b> {html.escape(text)}</td>
+                      <td align="right" width="110">
+                        <a href="action:retry" style="background-color: #dc2626; color: #ffffff; text-decoration: none; font-weight: 700; font-size: 11px; padding: 4px 10px; border-radius: 5px;">🔄 Retry</a>
+                      </td>
+                    </tr>
+                  </table>
                 </div>
                 ''')
             elif role == "note":
@@ -1864,12 +1932,21 @@ class AgentWindow(QtWidgets.QMainWindow):
                     if not body_html:
                         body_html = "<p style='color: #64748b; font-style: italic;'>Generating thoughts…</p>"
 
+                retry_action_html = ""
+                if not is_working and ("did not produce an answer" in text or "error" in text.lower()):
+                    retry_action_html = '''
+                    <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid #1e2e4a;">
+                      <a href="action:retry" style="background-color: #2563eb; color: #ffffff; text-decoration: none; font-weight: 700; font-size: 11.5px; padding: 5px 12px; border-radius: 6px; display: inline-block;">🔄 Retry Prompt</a>
+                    </div>
+                    '''
+
                 parts.append(f'''
                 <div style="background-color: #0c1322; border: 1px solid #18253c; border-radius: 10px; padding: 12px 16px; margin: 10px 24px 10px 0; color: #f1f5f9;">
                   <div style="color: #38bdf8; font-weight: 700; font-size: 12px; letter-spacing: 0.5px; margin-bottom: 6px;">
                     ⚡ DevOS AI Code Agent
                   </div>
                   <div>{body_html}</div>
+                  {retry_action_html}
                 </div>
                 ''')
 
@@ -1999,6 +2076,9 @@ class AgentWindow(QtWidgets.QMainWindow):
         if not self.capable:
             return
 
+        if raw_task:
+            self.composer.add_history(raw_task)
+
         attached = list(self.attached_images)
         self.attached_images.clear()
         self._update_attachment_bar()
@@ -2016,11 +2096,65 @@ class AgentWindow(QtWidgets.QMainWindow):
 
         self._execute_prompt(raw_task, attached)
 
+    def rerun_last_prompt(self):
+        if not self.last_task and not self.user_prompts:
+            return
+        task = self.last_task if self.last_task else self.user_prompts[-1][0]
+        att = list(self.last_attached if self.last_task else self.user_prompts[-1][1])
+        if self.worker:
+            self.composer.setPlainText(task)
+            self.composer.setFocus()
+            self.statusBar().showMessage("Copied previous prompt to composer.", 3000)
+            return
+        curr = self.composer.toPlainText().strip()
+        if not curr:
+            self._execute_prompt(task, att)
+        else:
+            self.composer.setPlainText(task)
+            self.composer.setFocus()
+
+    def _on_anchor_clicked(self, url: QtCore.QUrl):
+        href = url.toString()
+        if href in ("action:retry", "action:rerun"):
+            self.rerun_last_prompt()
+            return
+        if href.startswith("action:rerun:"):
+            try:
+                idx = int(href.split(":")[-1])
+                if 0 <= idx < len(self.user_prompts):
+                    task, att = self.user_prompts[idx]
+                    self._execute_prompt(task, list(att))
+            except Exception:
+                pass
+            return
+        if href.startswith("action:edit:"):
+            try:
+                idx = int(href.split(":")[-1])
+                if 0 <= idx < len(self.user_prompts):
+                    task, _ = self.user_prompts[idx]
+                    self.composer.setPlainText(task)
+                    self.composer.setFocus()
+                    c = self.composer.textCursor()
+                    c.movePosition(QtGui.QTextCursor.End)
+                    self.composer.setTextCursor(c)
+            except Exception:
+                pass
+            return
+        QtGui.QDesktopServices.openUrl(url)
+
     def _execute_prompt(self, raw_task, attached):
         if not self.folder:
             self.choose_folder()
             if not self.folder:
                 return
+
+        self.last_task = raw_task
+        self.last_attached = list(attached)
+        self.user_prompts.append((raw_task, list(attached)))
+        if hasattr(self, "rerun_btn"):
+            self.rerun_btn.setEnabled(True)
+            self.rerun_btn.setText("🔄 Rerun last")
+            self.rerun_btn.setStyleSheet("")
 
         task_text = raw_task if raw_task else "Please inspect the attached screenshot / image and address any issues, errors, or requests shown in it."
 
@@ -2202,6 +2336,10 @@ class AgentWindow(QtWidgets.QMainWindow):
         self.stop_btn.setEnabled(False)
         self.stop_btn.setVisible(False)
         self.send_btn.setEnabled(True)
+        if hasattr(self, "rerun_btn"):
+            self.rerun_btn.setEnabled(True)
+            self.rerun_btn.setText("🔄 Retry Failed Prompt")
+            self.rerun_btn.setStyleSheet("background: #dc2626; color: #ffffff; font-weight: bold; border-radius: 8px; padding: 6px 14px;")
         self._dirty = True
 
     def on_finished(self):
@@ -2217,6 +2355,13 @@ class AgentWindow(QtWidgets.QMainWindow):
         self.step_chip.setText("● Idle")
         self.step_chip.setStyleSheet("background: #1e1b4b; color: #c4b5fd; border: 1px solid #4338ca;")
         self._update_plan_progress()
+
+        # Check if last response was an error/failure
+        if self.transcript and any(err in self.transcript[-1][1].lower() for err in ("did not produce an answer", "failed", "error")):
+            if hasattr(self, "rerun_btn"):
+                self.rerun_btn.setEnabled(True)
+                self.rerun_btn.setText("🔄 Retry Failed Prompt")
+                self.rerun_btn.setStyleSheet("background: #2563eb; color: #ffffff; font-weight: bold; border-radius: 8px; padding: 6px 14px;")
 
         # If there are queued prompts, execute the next one in queue
         if self.prompt_queue:

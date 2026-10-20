@@ -3802,18 +3802,61 @@ class WindowsFileExplorer(QMainWindow):
             finally:
                 QApplication.restoreOverrideCursor()
 
+    def _select_path(self, target_path):
+        if not target_path:
+            return
+        for row in range(self.table_view.rowCount()):
+            item = self.table_view.item(row, 0)
+            if item and item.data(Qt.UserRole) == target_path:
+                self.table_view.setCurrentItem(item)
+                self.table_view.scrollToItem(item)
+                break
+        for idx in range(self.list_view.count()):
+            l_item = self.list_view.item(idx)
+            if l_item and l_item.data(Qt.UserRole) == target_path:
+                self.list_view.setCurrentItem(l_item)
+                self.list_view.scrollToItem(l_item)
+                break
+
     def action_new_folder(self):
         if not self._current_path or not os.path.isdir(self._current_path):
             return
         base_name = "New folder"
-        target = os.path.join(self._current_path, base_name)
         counter = 2
-        while os.path.exists(target):
-            target = os.path.join(self._current_path, f"{base_name} ({counter})")
+        suggested_name = base_name
+        while os.path.exists(os.path.join(self._current_path, suggested_name)):
+            suggested_name = f"{base_name} ({counter})"
             counter += 1
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("New Folder")
+        dlg.setMinimumWidth(320)
+        layout = QVBoxLayout(dlg)
+        layout.addWidget(QLabel("Folder name:"))
+        edit = QLineEdit(suggested_name)
+        edit.selectAll()
+        layout.addWidget(edit)
+        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btns.accepted.connect(dlg.accept)
+        btns.rejected.connect(dlg.reject)
+        layout.addWidget(btns)
+
+        if dlg.exec_() != QDialog.Accepted:
+            return
+
+        folder_name = edit.text().strip()
+        if not folder_name:
+            return
+
+        target = os.path.join(self._current_path, folder_name)
+        if os.path.exists(target):
+            QMessageBox.warning(self, "Error", f"An item named '{folder_name}' already exists.")
+            return
+
         try:
-            os.makedirs(target, exist_ok=True)
+            os.makedirs(target, exist_ok=False)
             self.refresh()
+            self._select_path(target)
         except OSError as err:
             QMessageBox.critical(self, "Error", f"Failed to create folder: {err.strerror}")
 
@@ -4577,16 +4620,46 @@ class WindowsFileExplorer(QMainWindow):
     def action_new_text_document(self):
         if not self._current_path or not os.path.exists(self._current_path):
             return
-        base = os.path.join(self._current_path, "New Text Document.txt")
+        base_name = "New Text Document.txt"
         idx = 2
-        path = base
-        while os.path.exists(path):
-            path = os.path.join(self._current_path, f"New Text Document ({idx}).txt")
+        suggested_name = base_name
+        while os.path.exists(os.path.join(self._current_path, suggested_name)):
+            suggested_name = f"New Text Document ({idx}).txt"
             idx += 1
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("New Text Document")
+        dlg.setMinimumWidth(320)
+        layout = QVBoxLayout(dlg)
+        layout.addWidget(QLabel("File name:"))
+        edit = QLineEdit(suggested_name)
+        if "." in suggested_name:
+            edit.setSelection(0, suggested_name.rfind("."))
+        else:
+            edit.selectAll()
+        layout.addWidget(edit)
+        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btns.accepted.connect(dlg.accept)
+        btns.rejected.connect(dlg.reject)
+        layout.addWidget(btns)
+
+        if dlg.exec_() != QDialog.Accepted:
+            return
+
+        file_name = edit.text().strip()
+        if not file_name:
+            return
+
+        target = os.path.join(self._current_path, file_name)
+        if os.path.exists(target):
+            QMessageBox.warning(self, "Error", f"An item named '{file_name}' already exists.")
+            return
+
         try:
-            with open(path, "w", encoding="utf-8") as f:
+            with open(target, "w", encoding="utf-8") as f:
                 f.write("")
             self.refresh()
+            self._select_path(target)
         except OSError as err:
             QMessageBox.critical(self, "Error", f"Failed to create file: {err.strerror}")
 

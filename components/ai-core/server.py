@@ -212,9 +212,14 @@ def llama_speed_kwargs(kind: str, ram_gb: float, parallel: int, gpu_layers: int,
     physical = physical if physical is not None else physical_cores(logical)
     gen, batch = thread_plan(logical, physical, parallel)
     gpu_layers = max(0, int(gpu_layers))
-    ctx = 8192 if kind == "code" else (4096 if ram_gb >= 15.5 else 2048)
-    if kind == "embedding":
+    if kind == "code":
+        ctx = 32768 if ram_gb >= 24 else (16384 if ram_gb >= 15.5 else 8192)
+    elif kind == "chat":
+        ctx = 16384 if ram_gb >= 24 else (8192 if ram_gb >= 15.5 else 2048)
+    elif kind == "embedding":
         ctx = 2048
+    else:
+        ctx = 4096
     n_batch = 2048 if batch >= 16 and ram_gb >= 16 else (1024 if batch >= 8 and ram_gb >= 8 else 512)
     n_batch = min(n_batch, ctx)
     kwargs = {
@@ -284,10 +289,49 @@ def open_llama(llama_cls, path: str, kwargs: Dict[str, Any]):
             raise
 
 
+def _handle_context_overflow(kwargs: Dict[str, Any], exc: BaseException) -> bool:
+    """Adjusts max_tokens and/or trims messages when requested tokens exceed context limit.
+    Returns True if kwargs was adjusted and call should be retried, False otherwise."""
+    msg = str(exc)
+    m = re.search(r"Requested tokens \((\d+)\) exceed(?:s)? context window of (\d+)", msg, re.I)
+    if not m:
+        return False
+    requested, limit = int(m.group(1)), int(m.group(2))
+    excess = requested - limit
+    cur_max = kwargs.get("max_tokens") or 1024
+    # 1. Try reducing max_tokens
+    if cur_max - excess >= 64:
+        kwargs["max_tokens"] = max(64, cur_max - excess - 16)
+        return True
+    # 2. Lower max_tokens to a reasonable reply size (e.g. 256) and trim messages
+    kwargs["max_tokens"] = 256
+    msgs = kwargs.get("messages")
+    if isinstance(msgs, list) and len(msgs) > 2:
+        # Drop oldest non-system message
+        for i in range(1, len(msgs) - 1):
+            msgs.pop(i)
+            return True
+    elif isinstance(msgs, list) and msgs:
+        # Longest message is trimmed
+        longest = max(range(len(msgs)), key=lambda i: len(msgs[i].get("content") or ""))
+        txt = msgs[longest].get("content") or ""
+        trim_chars = max(1000, int((excess + 128) * 4))
+        if len(txt) > trim_chars + 300:
+            part = (len(txt) - trim_chars) // 2
+            msgs[longest]["content"] = txt[:part] + "\n...[context trimmed for window limit]...\n" + txt[-part:]
+            return True
+        elif len(txt) > 300:
+            msgs[longest]["content"] = txt[:max(200, len(txt) - trim_chars)]
+            return True
+    return False
+
+
 def call_completion(llm, **kwargs):
     """create_chat_completion, dropping sampling fields this build does not accept,
-    and automatically adjusting max_tokens if prompt + completion exceeds the context window."""
-    while True:
+    and automatically adjusting max_tokens or trimming messages if context is exceeded."""
+    attempts = 0
+    while attempts < 6:
+        attempts += 1
         try:
             return llm.create_chat_completion(**kwargs)
         except TypeError as exc:
@@ -295,24 +339,31 @@ def call_completion(llm, **kwargs):
             if not key:
                 raise
             kwargs.pop(key, None)
-        except ValueError as exc:
-            msg = str(exc)
-            m = re.search(r"Requested tokens \((\d+)\) exceed(?:s)? context window of (\d+)", msg, re.I)
-            if m:
-                requested, limit = int(m.group(1)), int(m.group(2))
-                cur_max = kwargs.get("max_tokens") or 1024
-                excess = requested - limit
-                if cur_max - excess >= 64:
-                    kwargs["max_tokens"] = max(64, cur_max - excess - 16)
-                    continue
-                msgs = kwargs.get("messages")
-                if isinstance(msgs, list) and len(msgs) > 2:
-                    for i, item in enumerate(msgs):
-                        if item.get("role") != "system":
-                            msgs.pop(i)
-                            break
-                    kwargs["max_tokens"] = min(limit // 2, max(64, cur_max))
-                    continue
+        except (ValueError, Exception) as exc:
+            if _handle_context_overflow(kwargs, exc):
+                continue
+            raise
+
+
+def stream_completion(llm, **kwargs):
+    """create_chat_completion with stream=True, catching iteration errors
+    and automatically adjusting max_tokens or trimming messages if context is exceeded."""
+    attempts = 0
+    while attempts < 6:
+        attempts += 1
+        try:
+            gen = llm.create_chat_completion(**kwargs)
+            for chunk in gen:
+                yield chunk
+            return
+        except TypeError as exc:
+            key = _unexpected_keyword(exc, kwargs)
+            if not key:
+                raise
+            kwargs.pop(key, None)
+        except (ValueError, Exception) as exc:
+            if _handle_context_overflow(kwargs, exc):
+                continue
             raise
 
 
@@ -948,24 +999,13 @@ class DevOSAIEngine:
                     return
                 chat = self._build_chat(messages)
                 try:
-                    for chunk in call_completion(
+                    for chunk in stream_completion(
                             slot.llm, messages=chat, max_tokens=clamp_tokens(max_tokens), stream=True, **opts):
                         delta = chunk["choices"][0].get("delta", {}).get("content")
                         if delta:
                             yield delta
                 except Exception as exc:
                     sys.stderr.write(f"[ai-core] generation failed: {exc}\n")
-                    if "exceed" in str(exc).lower() and len(chat) > 2:
-                        try:
-                            truncated_chat = [chat[0], chat[-1]]
-                            for chunk in call_completion(
-                                    slot.llm, messages=truncated_chat, max_tokens=min(512, clamp_tokens(max_tokens)), stream=True, **opts):
-                                delta = chunk["choices"][0].get("delta", {}).get("content")
-                                if delta:
-                                    yield delta
-                            return
-                        except Exception:
-                            pass
                     yield "The local model did not produce an answer. Ask again."
         finally:
             cpu_boost.leave()

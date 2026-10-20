@@ -61,7 +61,7 @@ SEARCH_CAP = 60          # matching lines per search
 OUTPUT_CAP = 4000        # characters of command output shown to the model
 COMMAND_TIMEOUT = 120    # seconds; the model may ask for up to MAX_TIMEOUT
 MAX_TIMEOUT = 600
-HISTORY_BUDGET = 14000   # characters of conversation sent per step (8k-token window)
+HISTORY_BUDGET = 24000   # characters of conversation sent per step (supports up to 32k-token window)
 NOTES_FILE = os.path.join(".devos", "agent-notes.md")
 
 
@@ -1091,7 +1091,11 @@ class CodeAgent:
     def window(self) -> List[Dict[str, str]]:
         """System + task + the most recent turns that fit the model's window.
         Older tool results are shortened first."""
-        head, rest = self.messages[:2], self.messages[2:]
+        head = [dict(m) for m in self.messages[:2]]
+        rest = self.messages[2:]
+        if len(head) >= 2 and len(head[1].get("content", "")) > 18000:
+            c = head[1]["content"]
+            head[1]["content"] = c[:9000] + "\n... (context shortened to fit model window) ...\n" + c[-9000:]
         budget = HISTORY_BUDGET - sum(len(m["content"]) for m in head)
         kept: List[Dict[str, str]] = []
         for i, message in enumerate(reversed(rest)):
