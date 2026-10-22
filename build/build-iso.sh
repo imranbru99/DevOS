@@ -1,19 +1,19 @@
 #!/bin/bash
 # DevOS ISO Generation Pipeline (Phase 1)
-# Produces a bootable, hybrid BIOS+UEFI ISO for DevOS based on Ubuntu 24.04 LTS (Noble)
+# Produces a bootable, hybrid BIOS+UEFI ISO for DevOS based on Ubuntu 26.04 LTS (Resolute)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 DISTRO_NAME="DevOS"
-DISTRO_RELEASE="noble"
-DISTRO_VERSION="24.04"
+DISTRO_RELEASE="resolute"
+DISTRO_VERSION="26.04"
 ISO_NAME="${DEVOS_ISO_NAME:-devos-${DISTRO_VERSION}-amd64.iso}"
 OUTPUT_DIR="${ROOT_DIR}/out"
 OUTPUT_ISO="${OUTPUT_DIR}/${ISO_NAME}"
 
-WORK_DIR="${DEVOS_WORK_DIR:-${ROOT_DIR}/build_work}"
+WORK_DIR="${DEVOS_WORK_DIR:-${ROOT_DIR}/build_work/${DISTRO_RELEASE}}"
 CHROOT_DIR="${WORK_DIR}/chroot"
 ISODIR="${WORK_DIR}/iso"
 
@@ -49,10 +49,16 @@ mkdir -p "${OUTPUT_DIR}" "${WORK_DIR}" "${ISODIR}"
 if [ ! -d "${CHROOT_DIR}/etc" ]; then
     echo "==> Step 1: Bootstrapping Ubuntu ${DISTRO_RELEASE} rootfs..."
     mkdir -p "${CHROOT_DIR}"
-    TARBALL="ubuntu-base-24.04.3-base-amd64.tar.gz"
-    if [ ! -f "/tmp/${TARBALL}" ]; then
+    TARBALL="ubuntu-base-26.04.1-base-amd64.tar.gz"
+    BASE_URL="https://cdimage.ubuntu.com/ubuntu-base/releases/${DISTRO_VERSION}/release"
+    curl -fSL --retry 3 "${BASE_URL}/SHA256SUMS" -o "/tmp/devos-base-SHA256SUMS"
+    BASE_SUM="$(awk -v name="${TARBALL}" '$2 == "*" name || $2 == name {print $1}' /tmp/devos-base-SHA256SUMS)"
+    [ "${#BASE_SUM}" -eq 64 ] || { echo "ERROR: Base image checksum missing" >&2; exit 1; }
+    if ! echo "${BASE_SUM}  /tmp/${TARBALL}" | sha256sum -c - >/dev/null 2>&1; then
         echo "  Fetching Ubuntu base rootfs tarball (${TARBALL})..."
-        wget -q -c "http://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/${TARBALL}" -O "/tmp/${TARBALL}" 2>/dev/null || true
+        curl -fSL --retry 3 "${BASE_URL}/${TARBALL}" -o "/tmp/${TARBALL}.partial"
+        echo "${BASE_SUM}  /tmp/${TARBALL}.partial" | sha256sum -c -
+        mv "/tmp/${TARBALL}.partial" "/tmp/${TARBALL}"
     fi
     if [ -f "/tmp/${TARBALL}" ]; then
         echo "  Extracting base rootfs into chroot..."
@@ -66,14 +72,24 @@ if [ ! -d "${CHROOT_DIR}/etc" ]; then
     fi
 else
     echo "==> Step 1: Using existing chroot at ${CHROOT_DIR}..."
+    BASE_ID="${CHROOT_DIR}/usr/lib/os-release.ubuntu"
+    [ -f "${BASE_ID}" ] || BASE_ID="${CHROOT_DIR}/etc/os-release"
+    EXISTING_VERSION=$(. "${BASE_ID}"; printf '%s' "${VERSION_ID:-unknown}")
+    if [ "${EXISTING_VERSION}" != "${DISTRO_VERSION}" ]; then
+        echo "ERROR: Cached rootfs is ${EXISTING_VERSION}, expected ${DISTRO_VERSION}. Use a separate DEVOS_WORK_DIR." >&2
+        exit 1
+    fi
 fi
 
 # 2. Prepare chroot mount points
 echo "==> Step 2: Preparing virtual filesystems inside chroot..."
-mount --bind /dev "${CHROOT_DIR}/dev"
-mount --bind /dev/pts "${CHROOT_DIR}/dev/pts"
+# Rootless containers expose /dev/null and friends as child mounts. A plain
+# bind loses those mounts and leaves inaccessible placeholder files in chroot.
+mount --rbind /dev "${CHROOT_DIR}/dev"
+mount --make-rslave "${CHROOT_DIR}/dev"
 mount -t proc proc "${CHROOT_DIR}/proc"
-mount -t sysfs sysfs "${CHROOT_DIR}/sys"
+mount --bind /sys "${CHROOT_DIR}/sys"
+mount -o remount,bind,ro "${CHROOT_DIR}/sys"
 
 # Configure DNS
 cp -L /etc/resolv.conf "${CHROOT_DIR}/etc/resolv.conf" 2>/dev/null || echo "nameserver 1.1.1.1" > "${CHROOT_DIR}/etc/resolv.conf"
@@ -96,6 +112,11 @@ EOF
 
 # Waydroid (Android apps) is not in Ubuntu's archive. Use the project's own
 # signed repository. Without it .apk files can only report "not installed".
+# The Ubuntu base tarball has no certificate bundle. Bootstrap trust from
+# Ubuntu's signed archive before enabling third-party HTTPS repositories.
+rm -f "${CHROOT_DIR}/etc/apt/sources.list.d/waydroid.list"
+chroot "${CHROOT_DIR}" apt-get update
+chroot "${CHROOT_DIR}" env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates
 mkdir -p "${CHROOT_DIR}/usr/share/keyrings"
 if curl -fsSL --retry 3 https://repo.waydro.id/waydroid.gpg \
         -o "${CHROOT_DIR}/usr/share/keyrings/waydroid.gpg"; then
@@ -237,6 +258,12 @@ cp "$INITRD" "${ISODIR}/casper/initrd"
 
 # 8. Unmount chroot before building SquashFS
 cleanup
+for virtual in dev proc sys; do
+    if mountpoint -q "${CHROOT_DIR}/${virtual}"; then
+        echo "ERROR: ${virtual} is still mounted; refusing to package virtual filesystems." >&2
+        exit 1
+    fi
+done
 
 # Ensure critical mount points and temporary directories exist with correct permissions
 mkdir -p "${CHROOT_DIR}/dev" "${CHROOT_DIR}/proc" "${CHROOT_DIR}/sys" "${CHROOT_DIR}/tmp" "${CHROOT_DIR}/run" "${CHROOT_DIR}/mnt" "${CHROOT_DIR}/media" "${CHROOT_DIR}/var/crash"
@@ -274,7 +301,7 @@ echo "==> Step 8: Creating filesystem.squashfs (zstd level ${ZSTD_LEVEL}, 1M blo
 rm -f "${ISODIR}/casper/filesystem.squashfs"
 mksquashfs "${CHROOT_DIR}" "${ISODIR}/casper/filesystem.squashfs" \
     -comp zstd -Xcompression-level "${ZSTD_LEVEL}" \
-    -b 1048576 -processors "$(nproc)" -noappend
+    -b 1048576 -processors "$(nproc)" -noappend -one-file-system
 
 # Generate size and manifest info
 chroot "${CHROOT_DIR}" dpkg-query -W --showformat='${Package} ${Version}\n' > "${ISODIR}/casper/filesystem.manifest"

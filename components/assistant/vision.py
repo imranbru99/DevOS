@@ -85,21 +85,81 @@ def ocr_languages(runner: Optional[Callable] = None) -> List[str]:
         return []
 
 
+def _run_tesseract(img_path: str, lang: str) -> str:
+    try:
+        p = subprocess.run(["tesseract", img_path, "-", "-l", lang], stdout=subprocess.PIPE,
+                           stderr=subprocess.DEVNULL, timeout=25)
+        if p.returncode == 0:
+            return p.stdout.decode("utf-8", "replace").strip()
+    except Exception:
+        pass
+    return ""
+
+
 def ocr(path: str, which: Callable = shutil.which) -> Tuple[str, str]:
-    """(text, problem)."""
+    """(text, problem). Robust extraction with camera EXIF sanitization and multi-channel contrast."""
     if not ocr_available(which):
         return "", OCR_MISSING
     langs = ocr_languages()
     lang = "+".join(l for l in ("eng", "ben") if l in langs) or "eng"
+
+    raw_text = _run_tesseract(path, lang)
+    if len(raw_text) >= 150:
+        return raw_text, ""
+
     try:
-        p = subprocess.run(["tesseract", path, "-", "-l", lang], stdout=subprocess.PIPE,
-                           stderr=subprocess.DEVNULL, timeout=120)
-    except (OSError, subprocess.TimeoutExpired):
-        return "", "The text recognizer stopped before finishing."
-    if p.returncode != 0:
+        from PIL import Image, ImageOps
+        import numpy as np
+        im = Image.open(path)
+        im = ImageOps.exif_transpose(im)
+    except Exception:
+        im = None
+
+    if im is None:
+        if raw_text:
+            return raw_text, ""
         return "", "I couldn't read that image."
-    text = p.stdout.decode("utf-8", "replace").strip()
-    return text, ""
+
+    results = [raw_text] if raw_text else []
+    angles = [0, 90] if max(im.size) / (min(im.size) or 1) >= 1.2 else [0]
+    candidates = []
+    for angle in angles:
+        cur = im.rotate(angle, expand=True) if angle != 0 else im
+        candidates.append(cur)
+        arr = np.array(cur)
+        if len(arr.shape) == 3 and arr.shape[2] >= 3:
+            # Green channel sharply separates red ink (NIDs, stamps, serial numbers) from blue/green backgrounds
+            candidates.append(Image.fromarray(arr[:, :, 1]))
+
+    import tempfile
+    for cand in candidates:
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            tmp_name = tmp.name
+        try:
+            cand.save(tmp_name, "PNG")
+            txt = _run_tesseract(tmp_name, lang)
+            if txt:
+                results.append(txt)
+        finally:
+            if os.path.exists(tmp_name):
+                try:
+                    os.remove(tmp_name)
+                except OSError:
+                    pass
+
+    seen = set()
+    merged = []
+    for r in results:
+        for line in r.splitlines():
+            s = line.strip()
+            if len(s) >= 2 and s not in seen:
+                seen.add(s)
+                merged.append(s)
+
+    final_text = "\n".join(merged).strip()
+    if not final_text:
+        return "", "I didn't find any text in this image."
+    return final_text, ""
 
 
 # ---------------------------------------------------------------------------

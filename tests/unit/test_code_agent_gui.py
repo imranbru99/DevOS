@@ -406,7 +406,7 @@ class TestCodeAgentGUI(unittest.TestCase):
     def test_repetition_guard_prevents_stalling_loop(self):
         """When a model repeats conversational filler without tools, repetition guard must halt cleanly."""
         class MockEchoLLM:
-            def chat(self, messages, on_token=None, should_stop=None):
+            def chat(self, messages, on_token=None, should_stop=None, options=None):
                 return "I will start building the landing page and running the full application."
 
         recorded_events = []
@@ -422,9 +422,9 @@ class TestCodeAgentGUI(unittest.TestCase):
         )
         res = agent.run("so build now")
         replies = [p for k, p in recorded_events if k == "reply"]
-        # It must NOT loop 20 or 12 times; it should stop after max 2 steps!
-        self.assertLessEqual(len(replies), 2, "Agent must not repeat conversational filler across steps.")
-        self.assertIn("Note", res)
+        # It must NOT loop 20 or 12 times: two filler replies plus one forced attempt, then stop.
+        self.assertLessEqual(len(replies), 3, "Agent must not repeat conversational filler across steps.")
+        self.assertIn("did not write any files", res)
 
 
     def test_prompt_queue_lifecycle(self):
@@ -468,6 +468,120 @@ class TestCodeAgentGUI(unittest.TestCase):
         cmd_call = gui.core.ToolCall("run_command", {"command": "echo 'devos test'"})
         res = agent.execute(cmd_call)
         self.assertIn("devos test", res)
+
+    def test_empty_chat_shows_welcome_with_suggestions(self):
+        win = gui.AgentWindow(folder=self.temp_dir, capable=(True, "Ready"))
+        win._render_if_dirty()
+        text = win.chat.toPlainText()
+        self.assertIn("What should we build?", text)
+        self.assertIn("Understand this project", text)
+
+    def test_streaming_tail_render_matches_full_render(self):
+        """While the agent streams, only the last message is replaced; the result must equal a full render."""
+        class Busy:
+            pass
+        win = gui.AgentWindow(folder=self.temp_dir, capable=(True, "Ready"))
+        win.worker = Busy()
+        win.transcript = [["user", "build it"], ["agent", "Working on it."], ["agent", ""]]
+        win._dirty = True
+        win._render_if_dirty()
+        for chunk in ("```tool write_file\npath: a.py\n---\nX = 1\n", "Y = 2\n```", "\nAll done."):
+            win.transcript[-1][1] += chunk
+            win._dirty = True
+            win._render_if_dirty()
+        incremental = win.chat.toPlainText()
+
+        fresh = gui.AgentWindow(folder=self.temp_dir, capable=(True, "Ready"))
+        fresh.worker = Busy()
+        fresh.transcript = [list(item) for item in win.transcript]
+        fresh._dirty = True
+        fresh._render_if_dirty()
+        self.assertEqual(incremental, fresh.chat.toPlainText())
+        self.assertIn("a.py", incremental)
+        win.worker = fresh.worker = None
+
+    def test_tool_calls_render_as_compact_rows(self):
+        out = gui.message_html("Plan.\n```tool write_file\npath: app/x.py\n---\nA = 1\nB = 2\n```")
+        self.assertIn("Wrote", out)
+        self.assertIn("app/x.py", out)
+        self.assertIn("+2", out)
+        live = gui.message_html("```tool write_file\npath: app/x.py\n---\nA = 1\n", is_generating=True)
+        self.assertIn("Writing", live)
+
+    def test_phase_and_speed_events_update_the_window(self):
+        win = gui.AgentWindow(folder=self.temp_dir, capable=(True, "Ready"))
+        win.on_event("plan", ["Skeleton", "Models"])
+        win.on_event("phase", {"index": 2, "total": 2, "title": "Models"})
+        self.assertIn("Phase 2 of 2", win.step_chip.text())
+        win.on_event("speed", {"tokens_per_sec": 5.6, "seconds": 12.0})
+        self.assertIn("5.6 tok/s", win.speed_label.text())
+
+
+    def test_go_bar_appears_when_a_saved_brief_waits_for_approval(self):
+        brief_dir = os.path.join(self.temp_dir, ".devos")
+        os.makedirs(brief_dir)
+        with open(os.path.join(brief_dir, "brief.json"), "w") as handle:
+            json.dump({"title": "Shoply", "protocol": True, "asked": True, "next": 1,
+                       "phases": [{"n": 1, "title": "Foundation", "text": "x"}, {"n": 2, "title": "Money", "text": "y"}]}, handle)
+        win = gui.AgentWindow(folder=self.temp_dir, capable=(True, "Ready"))
+        win.show()
+        self.assertTrue(win.go_bar.isVisible())
+        self.assertIn("Phase 1 of 2", win.go_label.text())
+        sent = []
+        win.send = lambda: sent.append(win.composer.toPlainText())
+        win.go_all_btn.click()
+        self.assertEqual(sent, ["go all"])
+        win.close()
+
+    def test_go_bar_hidden_without_a_brief(self):
+        win = gui.AgentWindow(folder=self.temp_dir, capable=(True, "Ready"))
+        win.show()
+        self.assertFalse(win.go_bar.isVisible())
+        win.close()
+
+    def test_phase_report_replaces_the_empty_placeholder(self):
+        win = gui.AgentWindow(folder=self.temp_dir, capable=(True, "Ready"))
+        win.transcript = [["user", "go"], ["agent", ""]]
+        win.on_event("phase", {"index": 1, "total": 2, "title": "Foundation"})
+        self.assertEqual(win.transcript[1][0], "note")
+        win.on_event("report", "Phase 1 done.")
+        self.assertEqual(win.transcript[-1], ["agent", "Phase 1 done."])
+
+
+    def test_numbered_lists_keep_their_numbers_and_code_stars_do_not_break_bold(self):
+        out = gui._prose("**Questions**\n1. First question\n2. Second question\n- a bullet\nUse `**` and **bold** here")
+        self.assertIn(">1.<", out)
+        self.assertIn(">2.<", out)
+        self.assertIn("•", out)
+        self.assertNotIn("**", out.replace("&nbsp;**&nbsp;", ""))
+        self.assertIn("white-space:pre-wrap", gui.message_html("```php\n<?php echo 1;\n```"))
+
+    def test_done_event_works_without_an_agent_and_counts_files(self):
+        win = gui.AgentWindow(folder=self.temp_dir, capable=(True, "Ready"))
+
+        class FakeWorker:
+            agent = type("A", (), {"changed": ["a.py", "a.py", "b.py"]})()
+
+        win.worker = FakeWorker()
+        win.transcript = [["user", "go"], ["agent", ""]]
+        win.on_event("done", "Status text.")
+        self.assertEqual(win.transcript[1][1], "Status text.")
+        self.assertIn("2 files changed", win.transcript[-1][1])
+        win.worker = None
+        win.on_event("done", "again")                      # no worker at all: still no crash
+
+    def test_phase_rows_in_the_roadmap_follow_phase_events(self):
+        win = gui.AgentWindow(folder=self.temp_dir, capable=(True, "Ready"))
+        win.on_event("task_init", {"topic": "T", "task": "T", "plan": ["Phase 1 — A", "Phase 2 — B"]})
+        win.on_event("phase", {"index": 1, "total": 2, "title": "A"})
+        win.on_event("step", {"title": "Edit x.py", "kind": "edit"})          # tool steps stay out of the phase list
+        self.assertEqual(win.plan.count(), 2)
+        win.on_event("phase_done", {"index": 1, "ok": True})
+        win.on_event("phase", {"index": 2, "total": 2, "title": "B"})
+        win.on_event("phase_done", {"index": 2, "ok": False})
+        self.assertIn(gui.STEP_ICON["done"], win.plan.item(0).text())
+        self.assertIn(gui.STEP_ICON["failed"], win.plan.item(1).text())
+        self.assertEqual(win.plan_progress.value(), 50)
 
 
 if __name__ == "__main__":

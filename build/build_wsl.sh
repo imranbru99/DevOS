@@ -7,7 +7,7 @@ DEVOS_SRC="/mnt/host/c/docker/DevOS"
 WORK_DIR="/mnt/docker-desktop-disk/data/devos_work"
 ISO_DIR="/mnt/docker-desktop-disk/data/devos_iso"
 OUT_DIR="${DEVOS_SRC}/out"
-OUTPUT_ISO="${OUT_DIR}/devos-24.04-amd64.iso"
+OUTPUT_ISO="${OUT_DIR}/devos-26.04-amd64.iso"
 
 echo "=========================================================="
 echo "          DevOS Production ISO Builder 2027               "
@@ -21,24 +21,28 @@ mkdir -p "${ISO_DIR}/casper" "${ISO_DIR}/boot/grub" "${OUT_DIR}"
 
 # 1. Ensure Ubuntu Base Rootfs Exists
 if [ ! -f "${WORK_DIR}/etc/os-release" ]; then
-    echo "==> Step 1: Downloading Ubuntu 24.04 Noble base rootfs..."
+    echo "==> Step 1: Downloading Ubuntu 26.04 Resolute base rootfs..."
     mkdir -p "${WORK_DIR}"
-    TARBALL="ubuntu-base-24.04.3-base-amd64.tar.gz"
+    TARBALL="ubuntu-base-26.04.1-base-amd64.tar.gz"
     CACHE_FILE="/mnt/docker-desktop-disk/data/${TARBALL}"
     if [ ! -f "${CACHE_FILE}" ]; then
-        wget -c "http://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/${TARBALL}" -O "${CACHE_FILE}" || \
-        wget -c "http://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-24.04-base-amd64.tar.gz" -O "${CACHE_FILE}"
+        wget -c "http://cdimage.ubuntu.com/ubuntu-base/releases/26.04/release/${TARBALL}" -O "${CACHE_FILE}" || \
+        wget -c "http://cdimage.ubuntu.com/ubuntu-base/releases/26.04/release/ubuntu-base-26.04-base-amd64.tar.gz" -O "${CACHE_FILE}"
     fi
     echo "==> Extracting base rootfs into ${WORK_DIR}..."
     tar -xzf "${CACHE_FILE}" -C "${WORK_DIR}"
 fi
 
 # 2. Setup DNS and APT in Chroot
+identity="${WORK_DIR}/usr/lib/os-release.ubuntu"
+[ -f "$identity" ] || identity="${WORK_DIR}/etc/os-release"
+version=$(. "$identity"; printf '%s' "${VERSION_ID:-unknown}")
+[ "$version" = 26.04 ] || { echo "ERROR: Use a fresh 26.04 rootfs; this cache is $version." >&2; exit 1; }
 echo "nameserver 1.1.1.1" > "${WORK_DIR}/etc/resolv.conf"
 cat << 'EOF' > "${WORK_DIR}/etc/apt/sources.list"
-deb http://archive.ubuntu.com/ubuntu/ noble main restricted universe multiverse
-deb http://archive.ubuntu.com/ubuntu/ noble-updates main restricted universe multiverse
-deb http://security.ubuntu.com/ubuntu/ noble-security main restricted universe multiverse
+deb http://archive.ubuntu.com/ubuntu/ resolute main restricted universe multiverse
+deb http://archive.ubuntu.com/ubuntu/ resolute-updates main restricted universe multiverse
+deb http://security.ubuntu.com/ubuntu/ resolute-security main restricted universe multiverse
 EOF
 
 # 3. Bind virtual filesystems
@@ -195,7 +199,7 @@ fi
 set menu_color_normal=white/black
 set menu_color_highlight=black/light-gray
 
-menuentry "Try or Install DevOS (24.04 LTS)" {
+menuentry "Try or Install DevOS (26.04 LTS)" {
     set gfxpayload=keep
     search --no-floppy --set=root --file /casper/vmlinuz
     linux /casper/vmlinuz boot=casper quiet splash plymouth.theme=devos fsck.mode=skip ---

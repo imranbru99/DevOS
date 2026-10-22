@@ -440,7 +440,10 @@ def empty_password(hash_field: str) -> bool:
     try:
         import warnings
         warnings.filterwarnings("ignore", category=DeprecationWarning)
-        import crypt  # removed in Python 3.13; Ubuntu 24.04 has 3.12
+        try:
+            import crypt
+        except ImportError:  # Python 3.13+: Ubuntu ships the standalone module.
+            import legacycrypt as crypt
         return crypt.crypt("", hash_field) == hash_field
     except Exception:
         return False

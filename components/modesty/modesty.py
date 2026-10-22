@@ -30,6 +30,7 @@ import crx3  # noqa: E402
 
 EXT_DIR = os.path.join(HERE, "extension")
 KEY_PATH = os.path.join(HERE, "key.pem")
+DEVICE_KEY = "var/lib/devos-modesty/key.pem"
 
 INSTALL_DIR = "usr/share/devos/modesty"
 FLATPAK_DIR = "etc/devos/modesty"              # visible inside Flatpak browsers as /run/host/etc/...
@@ -145,12 +146,20 @@ def enable(root="/", mode="women", lock_private_modes=True):
     if mode not in MODES:
         raise ValueError("mode must be one of %s" % ", ".join(MODES))
     install = _p(root, INSTALL_DIR)
-    ext_id, version = pack(install, "/" + INSTALL_DIR)
+    key_path = _p(root, DEVICE_KEY)
+    if not os.path.exists(key_path):
+        os.makedirs(os.path.dirname(key_path), mode=0o700, exist_ok=True)
+        if os.path.isfile(KEY_PATH):  # Keep the ID of an older local installation.
+            with open(KEY_PATH, "rb") as handle:
+                _write(key_path, handle.read(), mode=0o600)
+        else:
+            crx3.generate_key(key_path)
+    ext_id, version = pack(install, "/" + INSTALL_DIR, key_path=key_path)
     browsers = detect_browsers(root)
     written = []
     if any(kind == "flatpak" for _, kind in browsers):
         # Flatpak browsers see the host's /etc (host-etc permission) but not its /usr.
-        pack(_p(root, FLATPAK_DIR), "/run/host/" + FLATPAK_DIR, update_name=FLATPAK_UPDATE_XML)
+        pack(_p(root, FLATPAK_DIR), "/run/host/" + FLATPAK_DIR, key_path=key_path, update_name=FLATPAK_UPDATE_XML)
     for b, kind in browsers:
         if kind == "flatpak":
             url = file_url("/run/host/" + FLATPAK_DIR + "/" + FLATPAK_UPDATE_XML)
@@ -204,7 +213,7 @@ def status(root="/"):
     return {
         "enabled": bool(policies) and os.path.exists(crx),
         "mode": state.get("mode"),
-        "extension_id": state.get("extension_id") or extension_id(),
+        "extension_id": state.get("extension_id") or (extension_id(_p(root, DEVICE_KEY)) if os.path.isfile(_p(root, DEVICE_KEY)) else None),
         "version": state.get("version"),
         "browsers": state.get("browsers", []),
         "policies": policies,
@@ -218,7 +227,7 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
     en = sub.add_parser("enable", help="turn the filter on for all users (locked)")
     en.add_argument("--mode", choices=MODES, default="women",
-                    help="women: blur media showing women (default); people: blur media showing any person")
+                    help="women: blur detected adult women body regions (default); people: blur detected person regions")
     en.add_argument("--keep-incognito", action="store_true",
                     help="do not disable Incognito and Guest windows (they would not be filtered)")
     sub.add_parser("disable", help="turn the filter off and remove it from the browsers")

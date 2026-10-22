@@ -177,7 +177,7 @@ class TestIdleDecisions(unittest.TestCase):
         self.assertEqual(t.candidates(14 * 60), [])
         t.update(15 * 60, {chrome["key"]: chrome})
         self.assertEqual([a["key"] for a in t.candidates(15 * 60)], ["chrome:100"])
-        self.assertIn("Chrome hasn't been used for 15 min and is using 1.2 GB",
+        self.assertIn("Chrome has been quiet in the background for 15 min and is using 1.2 GB",
                       optimizer.suggestion_text(chrome, t.idle_minutes_of("chrome:100", 15 * 60)))
 
     def test_11_cpu_activity_resets_idle(self):
@@ -293,6 +293,31 @@ class TestIdleDecisions(unittest.TestCase):
         finally:
             shutil.rmtree(fake_proc, ignore_errors=True)
 
+
+    def test_runtime_names_are_not_presented_as_idle_apps(self):
+        for name in ("python3", "python3.14", "node", "java"):
+            self.assertEqual(optimizer.resolve_app_identity(name), ("Background app", True))
+        table = {1: {"comm": "python3", "ppid": 0, "uid": 1000},
+                 2: {"comm": "python3", "ppid": 1, "uid": 1000}}
+        self.assertEqual(optimizer.app_root(2, table), 2)
+
+    def test_launcher_names_identify_python_apps_and_generic_server_is_not_ai(self):
+        with tempfile.TemporaryDirectory() as root:
+            os.makedirs(os.path.join(root, '123'))
+            cmd = os.path.join(root, '123/cmdline')
+            desktop = os.path.join(root, 'apps')
+            os.makedirs(desktop)
+            with open(os.path.join(desktop, 'photo.desktop'), 'w') as stream:
+                stream.write('[Desktop Entry]\nName=Photo Studio\nExec=python3 /opt/photos/editor.py %U\n')
+            with open(cmd, 'wb') as stream:
+                stream.write(b'python3\0/opt/photos/editor.py\0')
+            self.assertEqual(optimizer.resolve_app_identity('python3', 123, root, [desktop]), ('Photo Studio', False))
+            with open(cmd, 'wb') as stream:
+                stream.write(b'python3\0/home/me/server.py\0')
+            self.assertEqual(optimizer.resolve_app_identity('python3', 123, root, [desktop]), ('Background app', True))
+            with open(cmd, 'wb') as stream:
+                stream.write(b'python3\0/usr/local/share/devos/components/kids/kids_mode.py\0')
+            self.assertEqual(optimizer.resolve_app_identity('python3', 123, root, [desktop]), ('Kids Mode', True))
 
     def test_21_clipboard_shader_devcache_and_recent_cleanup(self):
         fake_home = tempfile.mkdtemp(prefix="fake-home-")

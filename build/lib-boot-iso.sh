@@ -303,9 +303,9 @@ devos_efi_img() {
 devos_disk_meta() {
     local stage="$1" initrd="${2:-}"
     mkdir -p "${stage}/.disk"
-    echo 'DevOS 24.04 LTS "Noble" - amd64' > "${stage}/.disk/info"
+    echo 'DevOS 26.04 LTS "Resolute" - amd64' > "${stage}/.disk/info"
     echo 'full_cd/single' > "${stage}/.disk/cd_type"
-    echo 'DevOS 24.04 LTS' > "${stage}/.disk/base_installable"
+    echo 'DevOS 26.04 LTS' > "${stage}/.disk/base_installable"
     if [ -n "$initrd" ] && [ -f "$initrd" ]; then
         local uuid
         uuid="$(devos_initrd_casper_uuid "$initrd" || true)"

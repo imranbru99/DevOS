@@ -1,15 +1,15 @@
 # DevOS Package & Component Versions Lockfile
-# Release: 24.04 LTS (Noble Numbat)
+# Release: 26.04 LTS (Resolute Raccoon)
 # Architecture: amd64
 # Generated: 2026-10-10
 
 # Base Distribution
-DISTRO_RELEASE=noble
-UBUNTU_SERIES=24.04
-KERNEL_FLAVOR=linux-generic-hwe-24.04
+DISTRO_RELEASE=resolute
+UBUNTU_SERIES=26.04
+KERNEL_FLAVOR=linux-generic
 
 # Core Components
-PACKAGE_KERNEL=linux-image-generic-hwe-24.04
+PACKAGE_KERNEL=linux-image-generic
 PACKAGE_INITRAMFS=initramfs-tools
 PACKAGE_LIVE_BOOT=casper
 PACKAGE_SYSTEMD=systemd
@@ -44,7 +44,7 @@ PACKAGE_CALAMARES_SETTINGS=calamares-settings-ubuntu
 
 # Desktop Baseline (Phase 2 reference)
 PLASMA_DESKTOP=plasma-desktop
-PLASMA_WAYLAND=plasma-workspace-wayland
+PLASMA_WAYLAND=plasma-session-wayland
 SDDM=sddm
 DOLPHIN=dolphin
 KATE=kate

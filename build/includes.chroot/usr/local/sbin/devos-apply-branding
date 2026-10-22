@@ -15,6 +15,13 @@ ensure_divert() {
         dpkg-divert --local --divert "${f}.ubuntu" --add "$f" >/dev/null 2>&1 || true
 }
 
+# Follow Ubuntu's real base version during a release upgrade. The diverted
+# upstream file is updated by base-files; never pin an installed PC to the ISO.
+base_identity=/usr/lib/os-release.ubuntu
+[ -f "$base_identity" ] || base_identity=/etc/os-release
+base_version=$(. "$base_identity" 2>/dev/null; printf '%s' "${VERSION_ID:-26.04}")
+base_codename=$(. "$base_identity" 2>/dev/null; printf '%s' "${UBUNTU_CODENAME:-${VERSION_CODENAME:-resolute}}")
+
 # Keep base-files upgrades from putting the Ubuntu name back.
 ensure_divert /usr/lib/os-release
 ensure_divert /etc/lsb-release
@@ -23,30 +30,30 @@ ensure_divert /etc/issue.net
 
 mkdir -p /usr/lib /etc/default/grub.d /usr/share/plymouth/themes/devos /etc/plymouth
 
-cat > /usr/lib/os-release << 'EOF'
+cat > /usr/lib/os-release << EOF
 NAME="DevOS"
-VERSION="24.04 LTS"
+VERSION="${base_version} LTS"
 ID=devos
 ID_LIKE="ubuntu debian"
-PRETTY_NAME="DevOS 24.04 LTS"
-VERSION_ID="24.04"
-VERSION_CODENAME=noble
-UBUNTU_CODENAME=noble
+PRETTY_NAME="DevOS ${base_version} LTS"
+VERSION_ID="${base_version}"
+VERSION_CODENAME=${base_codename}
+UBUNTU_CODENAME=${base_codename}
 HOME_URL="https://github.com/imranbru99/DevOS"
 SUPPORT_URL="https://github.com/imranbru99/DevOS/issues"
 BUG_REPORT_URL="https://github.com/imranbru99/DevOS/issues"
 EOF
 ln -sfn ../usr/lib/os-release /etc/os-release
 
-cat > /etc/lsb-release << 'EOF'
+cat > /etc/lsb-release << EOF
 DISTRIB_ID=DevOS
-DISTRIB_RELEASE=24.04
-DISTRIB_CODENAME=noble
-DISTRIB_DESCRIPTION="DevOS 24.04 LTS"
+DISTRIB_RELEASE=${base_version}
+DISTRIB_CODENAME=${base_codename}
+DISTRIB_DESCRIPTION="DevOS ${base_version} LTS"
 EOF
 
-printf '%s\n' 'DevOS 24.04 LTS \n \l' '' > /etc/issue
-printf '%s\n' 'DevOS 24.04 LTS' > /etc/issue.net
+printf '%s\n' "DevOS ${base_version} LTS \n \l" '' > /etc/issue
+printf '%s\n' "DevOS ${base_version} LTS" > /etc/issue.net
 
 cat > /etc/default/grub.d/devos.cfg << 'EOF'
 # DevOS boot-menu title. This file is read after /etc/default/grub.

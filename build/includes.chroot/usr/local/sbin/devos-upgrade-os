@@ -1,0 +1,63 @@
+#!/bin/bash
+# Interactive LTS upgrade. Does not rewrite APT suites or force development releases.
+set -euo pipefail
+if [ "$(id -u)" -ne 0 ]; then
+    echo "Run: sudo bash $0" >&2
+    exit 1
+fi
+if [ ! -t 0 ]; then
+    echo "Run this upgrade in a terminal so you can review Ubuntu's questions." >&2
+    exit 1
+fi
+exec 9>/run/lock/devos-release-upgrade.lock
+flock -n 9 || { echo "Another OS upgrade is running." >&2; exit 1; }
+base=/usr/lib/os-release.ubuntu
+[ -f "$base" ] || base=/etc/os-release
+series=$(. "$base"; echo "${VERSION_ID:-unknown}")
+if [ "$series" = 26.04 ]; then
+    echo "Ubuntu 26.04 is already installed. Use devos update for DevOS releases."
+    exit 0
+fi
+[ "$series" = 24.04 ] || { echo "Expected Ubuntu 24.04; found $series. Use Ubuntu's supported sequential upgrade path." >&2; exit 1; }
+command -v do-release-upgrade >/dev/null || { echo "Install ubuntu-release-upgrader-core first." >&2; exit 1; }
+[ -z "$(dpkg --audit)" ] || { echo "Resolve the unfinished package installation before upgrading." >&2; exit 1; }
+available=$(df --output=avail -B1 / | tail -1)
+[ "$available" -ge 21474836480 ] || { echo "Free at least 20 GiB on / before upgrading." >&2; exit 1; }
+for status in /sys/class/power_supply/*/status; do
+    [ -f "$status" ] || continue
+    if grep -qi discharging "$status"; then
+        echo "Connect this computer to power before upgrading." >&2
+        exit 1
+    fi
+done
+backup="/var/backups/devos-release-upgrade/$(date -u +%Y%m%dT%H%M%SZ)"
+mkdir -p "$backup"
+chmod 700 "$backup"
+cp -a /etc/apt "$backup/apt"
+cp -a /etc/os-release /etc/lsb-release "$backup/" 2>/dev/null || true
+dpkg-query -W > "$backup/packages.txt"
+branding="$(dirname "$(readlink -f "$0")")/devos-apply-branding"
+if [ -f "$branding" ] && [ "$branding" != /usr/local/sbin/devos-apply-branding ]; then
+    cp -a /usr/local/sbin/devos-apply-branding "$backup/branding-before" 2>/dev/null || true
+    install -m 755 "$branding" /usr/local/sbin/devos-apply-branding
+fi
+if [ "$(findmnt -n -o FSTYPE /)" = btrfs ]; then
+    command -v snapper >/dev/null || { echo "Install and configure Snapper before upgrading this Btrfs system." >&2; exit 1; }
+    snapper -c root create --type single --print-number --description "Before Ubuntu 26.04 upgrade" > "$backup/snapshot.txt"
+fi
+echo "Configuration backup: $backup"
+echo "Keep a separate backup of personal files. Ubuntu will ask before applying its upgrade plan."
+apt-get update
+apt-get full-upgrade
+if [ -e /run/reboot-required ]; then
+    echo "Restart to finish current updates, then rerun devos update --os-upgrade."
+    exit 0
+fi
+check=$(do-release-upgrade -c 2>&1) || { echo "$check"; exit 1; }
+echo "$check"
+echo "$check" | grep -q '26\.04' || { echo "Ubuntu is not offering the 26.04 upgrade. No release was forced." >&2; exit 1; }
+do-release-upgrade
+if command -v devos-apply-branding >/dev/null; then
+    devos-apply-branding
+fi
+echo "Follow Ubuntu's restart instructions to finish the upgrade."

@@ -16,10 +16,10 @@ navigation: qml
 
 strings:
     productName: DevOS
-    version: "24.04 LTS"
-    shortVersion: "24.04"
-    versionedName: DevOS 24.04 LTS
-    shortVersionedName: DevOS 24.04
+    version: "26.04 LTS"
+    shortVersion: "26.04"
+    versionedName: DevOS 26.04 LTS
+    shortVersionedName: DevOS 26.04
     bootloaderEntryName: DevOS
     productUrl: https://github.com/imranbru99/DevOS
     supportUrl: https://github.com/imranbru99/DevOS/issues

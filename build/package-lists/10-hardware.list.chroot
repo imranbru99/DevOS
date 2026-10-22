@@ -10,7 +10,7 @@ thermald
 
 # 2. Graphics, Display, and Video Acceleration
 mesa-vulkan-drivers
-mesa-va-drivers
+mesa-libgallium
 libvulkan1
 vulkan-tools
 intel-media-va-driver
@@ -27,7 +27,7 @@ systemd-resolved
 netplan.io
 wpasupplicant
 wireless-regdb
-wireless-tools
+iw
 iw
 ethtool
 iproute2

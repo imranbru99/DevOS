@@ -1,26 +1,15 @@
-/*
- * DevOS Modesty filter - content script (runs in every frame at document_start).
- *
- * content.css already blurs every <img> and <video> that does not carry
- * data-dm="ok", so nothing is shown before it has been checked. This script
- * asks the extension's detector about each media element and sets
- * data-dm="ok" only on the ones it clears. Elements with a CSS background
- * image get data-dm-bg="pending" -> "ok" | "blur".
- */
+/* DevOS Modesty filter: local body masks on media pixels.
+ * Never apply a blur to HTML containers or use a whole-image fallback. */
 (() => {
   'use strict';
   if (window.__devosModestyLoaded) return;
   window.__devosModestyLoaded = true;
 
   const R = globalThis.ModestyRules;
-  const VIDEO_SAMPLE_MS = 1500;
-  const VIDEO_HOLD_MS = 3000;          // keep a video blurred this long after an unsafe frame
-  const VIDEO_SAFE_STREAK = 2;         // consecutive safe frames needed to un-blur a playing video
+  const VIDEO_SAMPLE_MS = 750;
   const PIXEL_MAX_SIDE = 384;
   const BG_BATCH_BUDGET_MS = 8;
-  const BLUR_CSS = `
-    img:not([data-dm="ok"]), video:not([data-dm="ok"]),
-    [data-dm-bg="pending"], [data-dm-bg="blur"] { filter: blur(28px) !important; }`;
+  const BLUR_CSS = ''; // Regional SVG filters never blur a page container.
 
   let settings = R.effectiveSettings({}, {});
   const results = new Map();           // media key (URL) -> Promise<result>
@@ -52,7 +41,7 @@
       countTimer = null;
       let count = 0;
       for (const el of tracked) {
-        if (!el.isConnected) { tracked.delete(el); videos.delete(el); continue; }
+        if (!el.isConnected) { removeRender(el); tracked.delete(el); videos.delete(el); continue; }
         const st = info.get(el);
         if (st && st.blurred) count++;
       }
@@ -65,33 +54,119 @@
   // ------------------------------------------------------------ state marks
   function attrFor(el) { return (el.tagName === 'IMG' || el.tagName === 'VIDEO') ? 'data-dm' : 'data-dm-bg'; }
 
+  let filterSequence = 0;
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  const resize = new ResizeObserver((entries) => {
+    for (const entry of entries) {
+      const st = info.get(entry.target);
+      if (st && st.filterImage) positionMask(entry.target, st);
+    }
+  });
+
+  function removeRender(el) {
+    const st = info.get(el);
+    if (!st) return;
+    if (st.svg) {
+      if (el.style.filter === st.appliedFilter) {
+        if (st.originalFilter) el.style.setProperty('filter', st.originalFilter, st.filterPriority);
+        else el.style.removeProperty('filter');
+      }
+      st.svg.remove(); st.svg = null; st.filterImage = null;
+      resize.unobserve(el);
+    }
+    if (st.bgApplied) {
+      if (el.style.backgroundImage === st.bgApplied) {
+        if (st.originalInlineBG) el.style.setProperty('background-image', st.originalInlineBG, st.bgPriority);
+        else el.style.removeProperty('background-image');
+      }
+      st.bgApplied = null;
+    }
+  }
+
   function setBlurred(el, blurred) {
     const st = info.get(el) || {};
-    const attr = attrFor(el);
-    if (blurred) {
-      if (attr === 'data-dm') el.removeAttribute('data-dm'); else el.setAttribute('data-dm-bg', 'blur');
-      if (!st.blurred) newlyBlurred++;
-    } else {
-      el.setAttribute(attr, 'ok');
-    }
+    el.setAttribute(attrFor(el), blurred ? 'regional' : 'ok');
+    if (blurred && !st.blurred) newlyBlurred++;
+    if (!blurred) removeRender(el);
     st.blurred = blurred;
-    info.set(el, st);
-    tracked.add(el);
-    reportCount();
+    info.set(el, st); tracked.add(el); reportCount();
   }
 
   function resetToPending(el) {
     const st = info.get(el);
-    if (st) { st.key = null; st.result = null; st.safeStreak = 0; }
-    if (attrFor(el) === 'data-dm') el.removeAttribute('data-dm');
-    else el.setAttribute('data-dm-bg', 'pending');
+    if (st) { st.key = null; st.result = null; st.pending = false; st.generation = (st.generation || 0) + 1; }
+    setBlurred(el, false);
+  }
+
+  function positionMask(el, st) {
+    const css = getComputedStyle(el);
+    const left = parseFloat(css.borderLeftWidth) + parseFloat(css.paddingLeft);
+    const top = parseFloat(css.borderTopWidth) + parseFloat(css.paddingTop);
+    const w = el.clientWidth - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight);
+    const h = el.clientHeight - parseFloat(css.paddingTop) - parseFloat(css.paddingBottom);
+    const fit = R.fitBox(st.result.width, st.result.height, Math.max(1, w), Math.max(1, h), css.objectFit, css.objectPosition);
+    for (const [key, value] of Object.entries({ x: fit.x + left, y: fit.y + top, width: fit.w, height: fit.h })) {
+      st.filterImage.setAttribute(key, value);
+    }
+  }
+
+  function svgNode(name, attrs) {
+    const node = document.createElementNS(SVG_NS, name);
+    for (const [key, value] of Object.entries(attrs || {})) node.setAttribute(key, value);
+    return node;
+  }
+
+  async function renderRegions(el, verdict) {
+    const st = info.get(el);
+    const generation = st.generation = (st.generation || 0) + 1;
+    if (attrFor(el) === 'data-dm-bg') {
+      removeRender(el);
+      st.originalInlineBG = el.style.getPropertyValue('background-image');
+      st.bgPriority = el.style.getPropertyPriority('background-image');
+      const original = getComputedStyle(el).backgroundImage;
+      // Each mask is a separate background layer, below all HTML text.
+      if (R.cssLayers(original).length !== 1 || !/^url\(/.test(original)) { setBlurred(el, false); return; }
+      el.style.setProperty('background-image', verdict.regions.map((r) => `url("${r.blurLayer}")`).concat(original).join(','), 'important');
+      st.bgApplied = el.style.backgroundImage;
+      setBlurred(el, true); return;
+    }
+    const masks = await Promise.all(verdict.regions.map((r) => new Promise((resolve, reject) => {
+      const im = new Image(); im.onload = () => resolve(im); im.onerror = reject; im.src = r.mask;
+    })));
+    if (st.generation !== generation || !settings.enabled || !el.isConnected) return;
+    const mask = document.createElement('canvas');
+    mask.width = st.result.width; mask.height = st.result.height;
+    const ctx = mask.getContext('2d');
+    masks.forEach((im) => ctx.drawImage(im, 0, 0, mask.width, mask.height));
+    removeRender(el);
+    st.originalFilter = el.style.getPropertyValue('filter');
+    st.filterPriority = el.style.getPropertyPriority('filter');
+    const existing = getComputedStyle(el).filter;
+    const id = `devos-body-mask-${++filterSequence}`;
+    const svg = svgNode('svg', { width: 0, height: 0, 'aria-hidden': 'true', 'data-dm-internal': '' });
+    svg.style.cssText = 'position:absolute;pointer-events:none;overflow:hidden';
+    const defs = svgNode('defs');
+    const filter = svgNode('filter', { id, x: 0, y: 0, width: 1, height: 1, filterUnits: 'objectBoundingBox', 'color-interpolation-filters': 'sRGB' });
+    const image = svgNode('feImage', { href: mask.toDataURL('image/png'), preserveAspectRatio: 'none', result: 'bodyMask' });
+    filter.append(image, svgNode('feGaussianBlur', { in: 'SourceGraphic', stdDeviation: 14, result: 'soft' }),
+      svgNode('feComposite', { in: 'soft', in2: 'bodyMask', operator: 'in', result: 'softBody' }),
+      svgNode('feComposite', { in: 'SourceGraphic', in2: 'bodyMask', operator: 'out', result: 'clearArea' }));
+    const merge = svgNode('feMerge'); merge.append(svgNode('feMergeNode', { in: 'clearArea' }), svgNode('feMergeNode', { in: 'softBody' }));
+    filter.append(merge); defs.append(filter); svg.append(defs);
+    const root = el.getRootNode(); (root.nodeType === 11 ? root : document.documentElement).append(svg);
+    st.svg = svg; st.filterImage = image;
+    positionMask(el, st); resize.observe(el);
+    el.style.setProperty('filter', `${existing === 'none' ? '' : existing + ' '}url("#${id}")`, 'important');
+    st.appliedFilter = el.style.filter;
+    setBlurred(el, true);
   }
 
   function applyResult(el, result) {
     const st = info.get(el) || {};
-    st.result = result;
-    info.set(el, st);
-    setBlurred(el, R.decide(result, settings).blur);
+    st.result = result; info.set(el, st);
+    const verdict = R.decide(result, settings);
+    if (!verdict.blur) { st.generation = (st.generation || 0) + 1; setBlurred(el, false); return; }
+    renderRegions(el, verdict).catch(() => setBlurred(el, false));
   }
 
   // ------------------------------------------------------------ detection
@@ -155,8 +230,7 @@
       if (st.key !== key) return;                       // src changed meanwhile
       applyResult(img, result);
       if (!result.ok && result.error !== 'tainted' && (st.retries || 0) < 2) {
-        // Transient failure (detector still starting, network hiccup): it stays
-        // blurred meanwhile, try again a bit later.
+        // Retry transient failures without applying a whole-image blur.
         st.retries = (st.retries || 0) + 1;
         setTimeout(() => { if (st.key === key) { st.result = null; processImg(img); } }, 5000 * st.retries);
       }
@@ -168,12 +242,12 @@
     if (videos.has(v)) return;
     videos.add(v);
     tracked.add(v);
-    info.set(v, info.get(v) || { safeStreak: 0, holdUntil: 0, blurred: true });
-    const restart = () => { resetToPending(v); const st = info.get(v); st.holdUntil = 0; sampleVideo(v); };
+    info.set(v, info.get(v) || { blurred: false });
+    const restart = () => { resetToPending(v); const st = info.get(v); st.lastSample = 0; sampleVideo(v); };
     v.addEventListener('loadstart', restart);
     v.addEventListener('emptied', restart);
     v.addEventListener('loadeddata', () => sampleVideo(v));
-    v.addEventListener('seeked', () => sampleVideo(v));
+    v.addEventListener('seeked', () => { resetToPending(v); const st = info.get(v); st.lastSample = 0; sampleVideo(v); });
     v.addEventListener('play', () => sampleVideo(v));
     if (v.readyState >= 2) sampleVideo(v);
     else checkPoster(v);
@@ -196,20 +270,12 @@
     if (st.lastSample && now - st.lastSample < 400) return;
     st.lastSample = now;
     st.sampling = true;
+    const generation = st.generation || 0;
     const dataUrl = pixelsFrom(v, v.videoWidth, v.videoHeight);  // null if cross-origin without CORS
     detectPixels(dataUrl).then((result) => {
       st.sampling = false;
-      st.result = result;
-      const verdict = R.decide(result, settings);
-      const t = performance.now();
-      if (verdict.blur) {
-        st.safeStreak = 0;
-        st.holdUntil = t + VIDEO_HOLD_MS;
-        setBlurred(v, true);
-      } else {
-        st.safeStreak = (st.safeStreak || 0) + 1;
-        if (t >= (st.holdUntil || 0) && (st.safeStreak >= VIDEO_SAFE_STREAK || v.paused)) setBlurred(v, false);
-      }
+      if ((st.generation || 0) !== generation) return;
+      applyResult(v, result);
     });
   }
 
@@ -253,6 +319,8 @@
   }
 
   function checkBg(el) {
+    const existing = info.get(el);
+    if (existing && existing.bgApplied && el.style.backgroundImage === existing.bgApplied) return;
     const bg = getComputedStyle(el).backgroundImage;
     const m = bg && bg !== 'none' ? URL_RE.exec(bg) : null;
     const st = info.get(el);
@@ -261,10 +329,10 @@
       return;
     }
     const url = m[2];
-    if (st && st.key === url) return;
+    if (st && st.key === url) { if (st.result && !st.bgApplied) applyResult(el, st.result); return; }
     const rect = el.getBoundingClientRect();
     if (isSvgUrl(url) || (rect.width < settings.minMediaPx && rect.height < settings.minMediaPx)) return;
-    const s = { key: url, blurred: true };
+    const s = { key: url, blurred: false };
     info.set(el, s);
     el.setAttribute('data-dm-bg', 'pending');
     const p = /^(data|blob):/i.test(url) ? detectBgPixels(url) : detectUrl(url);
@@ -282,6 +350,7 @@
 
   // ------------------------------------------------------------ scanning
   function scanElement(el) {
+    if (el.closest('[data-dm-internal]')) return;
     if (el.tagName === 'IMG') processImg(el);
     else if (el.tagName === 'VIDEO') trackVideo(el);
     else queueBg(el);
@@ -328,6 +397,8 @@
         } else if (el.tagName === 'VIDEO' && rec.attributeName === 'poster') {
           checkPoster(el);
         } else if (rec.attributeName === 'style' || rec.attributeName === 'class') {
+          const st = info.get(el);
+          if (st && st.bgApplied && (rec.attributeName === 'class' || el.style.backgroundImage !== st.bgApplied)) removeRender(el);
           queueBg(el);
         }
       }
@@ -351,7 +422,7 @@
   // ------------------------------------------------------------ settings
   function applyEnabled() {
     if (settings.enabled) document.documentElement.removeAttribute('data-dm-off');
-    else document.documentElement.setAttribute('data-dm-off', '');
+    else { document.documentElement.setAttribute('data-dm-off', ''); for (const el of tracked) { const st = info.get(el); if (st) st.generation = (st.generation || 0) + 1; setBlurred(el, false); } }
     for (const ref of shadowStyles) { const s = ref.deref(); if (s) s.disabled = !settings.enabled; }
   }
 
@@ -359,7 +430,7 @@
     for (const el of tracked) {
       if (!el.isConnected) { tracked.delete(el); continue; }
       const st = info.get(el);
-      if (st && st.result) setBlurred(el, R.decide(st.result, settings).blur);
+      if (st && st.result) applyResult(el, st.result);
     }
   }
 

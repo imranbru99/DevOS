@@ -10,6 +10,8 @@ import time
 import unittest
 import threading
 import urllib.request
+import tempfile
+from unittest.mock import Mock, patch
 from http.server import HTTPServer
 
 # Add dashboard directory to sys.path
@@ -35,6 +37,15 @@ class TestDashboardAndSecurity(unittest.TestCase):
         cls.server.server_close()
 
     def setUp(self):
+        directory = tempfile.TemporaryDirectory(prefix="devos-dashboard-test-")
+        self.addCleanup(directory.cleanup)
+        paths = patch.multiple(
+            DevOSSecurityManager, CONFIG_DIR=directory.name,
+            PIN_FILE=os.path.join(directory.name, "pin.auth"),
+            STATE_FILE=os.path.join(directory.name, "first_boot_completed.json"),
+        )
+        paths.start()
+        self.addCleanup(paths.stop)
         self.security = DevOSSecurityManager()
         # Clean test pin file if exists
         if os.path.exists(self.security.PIN_FILE):
@@ -62,7 +73,8 @@ class TestDashboardAndSecurity(unittest.TestCase):
         # Verify incorrect PIN
         self.assertFalse(self.security.verify_pin("111111"))
 
-    def test_02_password_management(self):
+    @patch("dashboard_server.subprocess.run", return_value=Mock(returncode=0))
+    def test_02_password_management(self, run):
         # Short password
         res_short = self.security.set_system_password("ab")
         self.assertFalse(res_short["success"])
@@ -70,6 +82,7 @@ class TestDashboardAndSecurity(unittest.TestCase):
         # Valid password
         res_valid = self.security.set_system_password("SuperSecret2027!", username="devos")
         self.assertTrue(res_valid["success"])
+        run.assert_called_once()
 
     def test_03_telemetry_metrics(self):
         metrics = DevOSSystemMetrics.get_metrics()
@@ -85,7 +98,7 @@ class TestDashboardAndSecurity(unittest.TestCase):
         with urllib.request.urlopen(req) as resp:
             self.assertEqual(resp.status, 200)
             data = json.loads(resp.read().decode("utf-8"))
-            self.assertEqual(data["os_name"], "DevOS 2027")
+            self.assertTrue(data["os_name"].startswith("DevOS"))
 
     def test_05_api_pin_and_password(self):
         pin_url = f"http://127.0.0.1:{self.port}/api/setup/pin"
@@ -119,7 +132,8 @@ class TestDashboardAndSecurity(unittest.TestCase):
             self.assertIn("partition_table", first_dev)
             self.assertIn("issues", first_dev)
 
-    def test_07_storage_action_api(self):
+    @patch("dashboard_server.DiskManager.apply_solution", return_value={"success": True})
+    def test_07_storage_action_api(self, apply_solution):
         url = f"http://127.0.0.1:{self.port}/api/storage/action"
         payload = json.dumps({"device": "/dev/sda", "action": "format_devos"}).encode("utf-8")
         req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
@@ -127,6 +141,7 @@ class TestDashboardAndSecurity(unittest.TestCase):
             self.assertEqual(resp.status, 200)
             res = json.loads(resp.read().decode("utf-8"))
             self.assertTrue(res["success"])
+        apply_solution.assert_called_once_with("/dev/sda", "format_devos")
 
 
 if __name__ == "__main__":

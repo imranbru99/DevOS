@@ -233,8 +233,16 @@ class StreamHandle:
 
 
 def start_ai_service(server_py: str = AI_SERVER_PY) -> bool:
+    """Start the local AI server if it is not already running."""
     if not os.path.isfile(server_py):
         return False
+    # Don't spawn a second copy when the server is already healthy.
+    try:
+        model_obj = LocalModel(AI_URL)
+        if model_obj.health(timeout=1.5) is not None:
+            return True   # already up
+    except Exception:
+        pass
     try:
         log = open(os.path.join("/var/tmp", "devos-ai-core.log"), "ab")
     except OSError:
@@ -334,6 +342,7 @@ class Reply:
     # window understands: "download_vision", "download_voice", "open_path:<p>"
     buttons: List[Tuple[str, object]] = field(default_factory=list)
     source: str = "tool"        # tool / model / doc / image / system
+    data: Dict[str, object] = field(default_factory=dict)
 
 
 class History:
@@ -639,6 +648,7 @@ class Assistant:
         self.ctx = ctx or tools.ToolContext()
         self.which = which or self.ctx.which
         self._pc_facts: Optional[str] = None
+        self._doc_cache: Dict[str, str] = {}
 
     # -- routing ----------------------------------------------------------
 
@@ -662,18 +672,48 @@ class Assistant:
             if i > 0 and not dry_run:
                 # Smooth sequential execution so apps/browser/windows don't collide
                 time.sleep(1.0)
+            if a.name == "social_post" and not a.args.get("text") and a.args.get("topic") and not dry_run:
+                try:
+                    plat_info = getattr(tools, "SOCIAL_PLATFORMS", {}).get(
+                        str(a.args.get("platform", "")).lower(), ("Social Media", "")
+                    )
+                    draft = self.generate_post(str(a.args["topic"]), plat_info[0])
+                    if draft:
+                        a.args["text"] = draft
+                except Exception:
+                    pass
             res = tools.execute(a, self.ctx, dry_run=dry_run)
             if res.data and res.data.get("url"):
                 setattr(self.ctx, "last_website", res.data["url"])
             if a.name == "open_app" and not a.args.get("strong") and res.data.get("not_found"):
                 fallback = True
                 continue
-            replies.append(Reply(res.text, ok=res.ok, buttons=list(res.buttons), source="tool"))
+            replies.append(Reply(res.text, ok=res.ok, buttons=list(res.buttons), source="tool", data=dict(res.data or {})))
         if fallback and not replies:
             return [self.chat(original, history, on_delta=on_delta, cancel=cancel)]
         if leftover:
             replies.append(self.chat(leftover, history, on_delta=on_delta, cancel=cancel))
         return replies
+
+    def generate_post(self, topic: str, platform: str = "Social Media") -> str:
+        prompt = (
+            f"Write a short, engaging {platform} post about: {topic}.\n"
+            "Requirements:\n"
+            "- Output ONLY the final post text ready to publish.\n"
+            "- Keep it natural and concise (1-3 sentences) with 1-2 relevant hashtags.\n"
+            "- Do not include any instructions, meta text, greetings, or quotation marks."
+        )
+        try:
+            raw = self.model.chat([
+                {"role": "system", "content": "You are a professional social media writer. You output only the ready-to-publish post text itself."},
+                {"role": "user", "content": prompt}
+            ], max_tokens=200, temperature=0.6)
+            cleaned = scrub(raw).strip()
+            if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in "\"'":
+                cleaned = cleaned[1:-1].strip()
+            return cleaned
+        except Exception:
+            return ""
 
     # -- free-form chat ---------------------------------------------------
 
@@ -693,6 +733,30 @@ class Assistant:
                 self._pc_facts = ""
         return self._pc_facts
 
+    def _recent_file_context(self, history: Optional[History]) -> Optional[Dict[str, str]]:
+        """Find the most recent file attachment from chat history and extract/cache its text."""
+        if not history or not getattr(history, "messages", None):
+            return None
+        for m in reversed(history.messages):
+            paths = [p for p in (m.get("paths") or []) if os.path.isfile(p)]
+            if paths:
+                p = paths[0]
+                name = os.path.basename(p)
+                if p in self._doc_cache:
+                    text = self._doc_cache[p]
+                else:
+                    kind = documents.kind_of(p)
+                    text = ""
+                    if kind == "image":
+                        text, _ = vision.ocr(p, self.which)
+                    elif kind in ("pdf", "text", "docx"):
+                        text, _ = documents.extract_text(p, self.which)
+                    if text:
+                        self._doc_cache[p] = text
+                if text and len(text.strip()) >= 15:
+                    return {"name": name, "path": p, "text": text}
+        return None
+
     def chat(self, text: str, history: Optional[History] = None,
              on_delta: Optional[Callable[[str], None]] = None, cancel: Optional[StreamHandle] = None) -> Reply:
         """on_delta(piece) gets the answer as it is written (streaming); cancel.stop() ends it early."""
@@ -703,6 +767,14 @@ class Assistant:
             return fast
 
         system = APP_PROMPT
+        doc_ctx = self._recent_file_context(history)
+        if doc_ctx:
+            system += (
+                f"\n\n[Attached Image/Document Context]: Earlier in this conversation, the user shared an image/document "
+                f"({doc_ctx['name']}). The text extracted from it is:\n---\n{doc_ctx['text'][:3000]}\n---\n"
+                f"When the user asks questions referring to this image, document, ID card, names, numbers, or details from it, "
+                f"answer accurately using this extracted text."
+            )
         messages = [{"role": "system", "content": system}]
         if history is not None:
             past = history.for_model()
@@ -754,6 +826,8 @@ class Assistant:
         text, problem = documents.extract_text(path, which=self.which)
         if problem:
             return Reply(f"**{name}:** {problem}", ok=False, source="doc")
+        if text:
+            self._doc_cache[path] = text
         words = len(text.split())
         try:
             if documents.wants_summary(question):
@@ -780,6 +854,8 @@ class Assistant:
             ocr_text, problem = vision.ocr(path, self.which)
 
         has_text = bool(ocr_text and len(ocr_text.strip()) >= 15)
+        if has_text:
+            self._doc_cache[path] = ocr_text
 
         # 2. If it is purely a photograph without text and the user didn't ask for text:
         if vision_ready and not has_text and not wants_text:
@@ -795,13 +871,13 @@ class Assistant:
 
         # 3. If the image has readable text:
         if has_text:
-            is_scrape = bool(re.search(r"\b(?:scrape|scraping|scraper|extract|extracting|list|copy|questions?|show questions?|all questions?)\b|সবগুলো|প্রশ্ন", q, re.I)) if q else False
+            is_scrape = bool(re.search(r"\b(?:scrape all|extract all|all questions|show all questions|all text|raw text|full text|whole text|read all|everything|সবগুলো প্রশ্ন)\b", q, re.I)) if q else False
             if is_scrape:
                 # Return the accurately extracted questions and text directly without hallucination
-                body = f"**Scraped questions and text from {name}:**\n\n```text\n{ocr_text.strip()}\n```"
+                body = f"**Text in {name}:**\n\n```text\n{ocr_text.strip()}\n```"
                 return Reply(body, source="image")
 
-            if wants_text or not q:
+            if (wants_text and not q) or (not q):
                 body = f"**Text in {name}:**\n\n```text\n{ocr_text.strip()}\n```"
                 return Reply(body, source="image")
 
@@ -812,7 +888,7 @@ class Assistant:
                     f"Using it, answer: {q}"
                 )
                 answer = self.model.chat([
-                    {"role": "system", "content": "You are DevOS AI. Answer accurately and clearly using the text from the image."},
+                    {"role": "system", "content": "You are DevOS AI. Answer accurately, directly and clearly using the text from the image."},
                     {"role": "user", "content": prompt}
                 ], max_tokens=1024)
                 return Reply(f"**{name}:** {scrub(answer, os_names=False)}", source="image")

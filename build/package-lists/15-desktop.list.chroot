@@ -3,7 +3,8 @@
 plasma-desktop
 plasma-workspace
 kwin-x11
-plasma-workspace-wayland
+plasma-session-wayland
+plasma-session-x11
 kwin-wayland
 xwayland
 xserver-xorg
@@ -40,6 +41,7 @@ qml6-module-qtquick-controls
 qml6-module-qtquick-layouts
 qml6-module-qtquick-window
 qml6-module-qtquick-effects
+qml6-module-qt5compat-graphicaleffects
 qml-module-qtquick2
 qml-module-qtquick-controls2
 qml-module-qtquick-layouts
@@ -64,3 +66,9 @@ upower
 # KDE monitor hotplug, optimal native resolution detection, and display settings
 kscreen
 
+# Kids mode input overlay (X11 seat grab / Wayland layer shell)
+python3-gi
+python3-cairo
+python3-gi-cairo
+gir1.2-gtk-3.0
+gir1.2-gtklayershell-0.1

@@ -1,0 +1,31 @@
+name: Publish DevOS update bundle
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing stable release tag
+        required: true
+permissions:
+  contents: write
+jobs:
+  update-bundle:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+      - name: Test updater
+        run: python3 -m unittest discover -s tests/unit -p test_updater.py
+      - name: Package release
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: python3 tools/package-update.py "$RELEASE_TAG"
+      - name: Upload stable release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          gh release view "$RELEASE_TAG" || gh release create "$RELEASE_TAG" --verify-tag --generate-notes
+          gh release upload "$RELEASE_TAG" out/update/devos-update.tar.gz out/update/devos-update.tar.gz.sha256

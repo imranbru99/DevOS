@@ -19,3 +19,8 @@ qml-module-qtquick-dialogs
 qml-module-qtquick-layouts
 qml-module-qtquick-templates2
 qml-module-qtquick-shapes
+# Qt 6 Calamares and the Plasma 6 login theme
+qml6-module-qtquick-dialogs
+qml6-module-qtquick-templates
+qml6-module-qtquick-shapes
+qml6-module-qt5compat-graphicaleffects

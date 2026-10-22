@@ -20,6 +20,9 @@ display so it can be unit-tested. PyQt5 is imported lazily in the GUI path.
 """
 
 import argparse
+import configparser
+import functools
+import shlex
 import glob
 import json
 import os
@@ -711,9 +714,15 @@ def tree_cpu(pid, table, kids=None):
     return sum(table[p]["cpu"] for p in process_tree(pid, table, kids))
 
 
+def is_runtime(comm):
+    return bool(re.fullmatch(r"python(?:\d+(?:\.\d+)*)?|node(?:js)?|java|ruby|perl|bash|sh", comm.lower()))
+
+
 def app_root(pid, table):
     """Climb parents while they are the same program (e.g. Chrome helpers)."""
     cur = pid
+    if is_runtime(table.get(pid, {}).get("comm", "")):
+        return pid  # Two Python processes can belong to different applications.
     for _ in range(64):
         info = table.get(cur)
         parent = table.get(info["ppid"]) if info else None
@@ -731,7 +740,6 @@ DEVOS_CMD_IDENTITIES = (
     ("devos-chat", "DevOS AI Chat", True),
     ("chat_gui.py", "DevOS AI Chat", True),
     ("ai-core/server.py", "DevOS AI Core (Local Neural Engine & API)", True),
-    ("server.py", "DevOS AI Core (Local Neural Engine & API)", True),
     ("devos-ai-core", "DevOS AI Core (Local Neural Engine & API)", True),
     ("models_gui.py", "DevOS AI Models", True),
     ("models_cli.py", "DevOS AI Models", True),
@@ -745,7 +753,17 @@ DEVOS_CMD_IDENTITIES = (
     ("islamic", "DevOS Islamic", False),
     ("winlayer", "DevOS WinLayer", True),
     ("vault.py", "DevOS Vault", True),
+    ("devos-files", "This PC", False),
+    ("devos-thispc", "This PC", False),
     ("cloud_backup.py", "DevOS Cloud Backup", True),
+    ("kids_mode.py", "Kids Mode", True),
+    ("power_settings.py", "Power Settings", True),
+    ("taskman.py", "Task Manager", True),
+    ("app_manager.py", "Apps", False),
+    ("apps_manager.py", "Apps", False),
+    ("explorer.py", "Files", False),
+    ("clipboard.py", "Clipboard", True),
+    ("first_boot.py", "DevOS Setup", True),
 )
 
 
@@ -760,23 +778,59 @@ def resolve_proc_cmdline(pid, proc_root="/proc"):
 def is_ai_service_active(pid, proc_root="/proc"):
     """Check if process or its command line represents an active DevOS AI daemon."""
     cmd = resolve_proc_cmdline(pid, proc_root)
-    if "server.py" in cmd or "ai-core" in cmd or "devos-ai" in cmd or "11434" in cmd:
+    if "/ai-core/" in cmd or any(os.path.basename(token) in ("devos-ai", "devos-ai-core", "llama-server", "ollama")
+                                       for token in cmd.split()):
         return True
     return False
 
 
-def resolve_app_identity(comm, pid=None, proc_root="/proc"):
+@functools.lru_cache(maxsize=8)
+def desktop_identities(directories):
+    """Read app launcher names; never execute launcher contents."""
+    found = []
+    for directory in directories:
+        for path in sorted(glob.glob(os.path.join(directory, "*.desktop"))):
+            parser = configparser.ConfigParser(interpolation=None, strict=False)
+            try:
+                parser.read(path, encoding="utf-8")
+                entry = parser["Desktop Entry"]
+                name = entry.get("Name", "").strip()
+                argv = shlex.split(entry.get("Exec", ""))
+                if not name or not argv or entry.get("Hidden", "false").lower() == "true":
+                    continue
+                scripts = [token for token in argv[1:] if token.endswith((".py", ".js", ".jar"))]
+                key = scripts[0] if scripts else argv[0]
+                if not is_runtime(os.path.basename(key)) and os.path.basename(key) != "env":
+                    found.append((os.path.basename(key), name[:100]))
+            except (OSError, ValueError, KeyError, configparser.Error):
+                continue
+    return tuple(found)
+
+
+def resolve_app_identity(comm, pid=None, proc_root="/proc", desktop_dirs=None):
     """Identify real app name and whether it is a protected system/AI service."""
     comm_lower = comm.lower()
     if pid is not None:
         cmd = resolve_proc_cmdline(pid, proc_root)
         if cmd:
+            tokens = cmd.split()
             for pattern, name, is_prot in DEVOS_CMD_IDENTITIES:
-                if pattern in cmd:
+                if any(token == pattern or token.endswith("/" + pattern) or
+                       (pattern in ("islamic", "winlayer") and "/" + pattern + "/" in token) for token in tokens):
                     return name, is_prot
             if is_ai_service_active(pid, proc_root):
                 return "DevOS AI Core (Local Neural Engine & API)", True
+            directories = tuple(desktop_dirs) if desktop_dirs is not None else (
+                os.path.expanduser("~/.local/share/applications"), "/usr/local/share/applications", "/usr/share/applications")
+            basenames = {os.path.basename(token) for token in tokens}
+            for executable, name in desktop_identities(directories):
+                if executable in basenames:
+                    return name, False
 
+    if is_runtime(comm_lower):
+        # An unnamed interpreter may be running a download, build, or service.
+        # It is not an identifiable idle application that we should offer to close.
+        return "Background app", True
     if comm_lower in PRETTY_NAMES:
         return PRETTY_NAMES[comm_lower], comm_lower in PROTECTED_NAMES
     name = comm[:1].upper() + comm[1:]
@@ -1010,7 +1064,7 @@ class SuggestionLimiter(object):
 
 
 def suggestion_text(app, idle_min):
-    return "%s hasn't been used for %d min and is using %s. Close it to free memory?" % (
+    return "%s has been quiet in the background for %d min and is using %s of memory. Finished with it? You can close it or keep it running." % (
         app["name"], int(idle_min), human_size(app["rss"]))
 
 

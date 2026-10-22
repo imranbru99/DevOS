@@ -106,364 +106,167 @@ def record_opened_folder(folder: str) -> None:
 
 
 # ==============================================================================
-# Theme & Premium Palette (Deep Obsidian & Cyber Cyan)
+# Theme: neutral graphite surfaces, one blue-violet accent (Cursor / Codex / Antigravity feel)
 # ==============================================================================
-BG = "#080c14"
-CARD = "#0d1526"
-CARD_HOVER = "#111c33"
-LINE = "#1a263e"
-LINE_ACTIVE = "#38bdf8"
-TEXT = "#f1f5f9"
-MUTED = "#94a3b8"
-SUBTLE = "#64748b"
-ACCENT = "#38bdf8"
-ACCENT_HOVER = "#0ea5e9"
-VIOLET = "#818cf8"
-GOOD = "#10b981"
-GOOD_BG = "#064e3b"
-BAD = "#ef4444"
-BAD_BG = "#450a0a"
-AMBER = "#f59e0b"
-AMBER_BG = "#451a03"
+BG = "#0b0b0e"
+SURFACE = "#101013"
+CARD = "#111114"
+RAISED = "#17171c"
+CARD_HOVER = "#1d1d23"
+LINE = "#222228"
+LINE_STRONG = "#2e2e36"
+LINE_ACTIVE = "#6c7dff"
+TEXT = "#ececf1"
+MUTED = "#9b9ba7"
+SUBTLE = "#686874"
+ACCENT = "#7385ff"
+ACCENT_HOVER = "#8a98ff"
+ACCENT_SOFT = "#1b1d3a"
+VIOLET = "#a78bfa"
+GOOD = "#3fb97f"
+GOOD_BG = "#0f2a1e"
+BAD = "#f0616d"
+BAD_BG = "#2a1216"
+AMBER = "#e5b454"
+AMBER_BG = "#2a2110"
+MONO = "'JetBrains Mono', 'Fira Code', 'DejaVu Sans Mono', monospace"
 
 STYLE = f"""
 QWidget {{
     background: {BG};
     color: {TEXT};
-    font-family: 'Inter', 'Segoe UI', 'Noto Sans', sans-serif;
-    font-size: 13.5px;
+    font-family: 'Inter', 'SF Pro Text', 'Segoe UI', 'Noto Sans', sans-serif;
+    font-size: 13px;
 }}
 QLabel {{ background: transparent; }}
-QLabel#title {{
-    font-size: 17px;
-    font-weight: 700;
-    color: #ffffff;
-    letter-spacing: 0.3px;
-}}
-QLabel#subtitle {{
-    font-size: 11.5px;
-    color: {MUTED};
-}}
+QLabel#title {{ font-size: 14px; font-weight: 650; color: {TEXT}; letter-spacing: 0.2px; }}
+QLabel#subtitle {{ font-size: 11.5px; color: {MUTED}; }}
 QLabel#muted, QLabel#path {{ color: {MUTED}; }}
-QLabel#cardTitle {{
-    font-size: 11.5px;
-    font-weight: 700;
-    color: #7dd3fc;
-    letter-spacing: 0.8px;
-}}
-QPushButton#badge {{
-    background: #042f2e;
-    color: #2dd4bf;
-    border: 1px solid #0f766e;
-    border-radius: 12px;
-    padding: 3px 12px;
-    font-size: 12px;
-    font-weight: 600;
-}}
-QPushButton#badge[state="online"] {{
-    background: #042f2e;
-    color: #2dd4bf;
-    border: 1px solid #0f766e;
-}}
-QPushButton#badge[state="starting"] {{
-    background: #451a03;
-    color: #fde047;
-    border: 1px solid #b45309;
-}}
-QPushButton#badge[state="offline"] {{
-    background: #4c0519;
-    color: #fb7185;
-    border: 1px solid #e11d48;
-}}
-QPushButton#badge:hover {{
-    border-color: #38bdf8;
-}}
+QLabel#cardTitle {{ font-size: 11px; font-weight: 600; color: {MUTED}; letter-spacing: 0.9px; }}
+QLabel#topicLabel {{ color: {MUTED}; font-size: 12px; }}
 QLabel#chip {{
-    background: #1e1b4b;
-    color: #c4b5fd;
-    border: 1px solid #4338ca;
-    border-radius: 9px;
-    padding: 3px 11px;
-    font-size: 12px;
-    font-weight: 600;
+    background: {RAISED}; color: {MUTED};
+    border: 1px solid {LINE}; border-radius: 10px;
+    padding: 2px 10px; font-size: 11.5px; font-weight: 500;
 }}
-QLabel#topicLabel {{
-    color: #38bdf8;
-    font-size: 12.5px;
-    font-weight: 600;
+QLabel#chip[state="working"] {{ background: {ACCENT_SOFT}; color: {ACCENT_HOVER}; border: 1px solid #2c3170; }}
+QLabel#chip[state="idle"] {{ background: {RAISED}; color: {MUTED}; border: 1px solid {LINE}; }}
+QLabel#speed {{ color: {SUBTLE}; font-size: 11.5px; }}
+QLabel#timer {{ color: {MUTED}; font-size: 11.5px; font-family: {MONO}; }}
+
+QPushButton#badge {{
+    background: {RAISED}; color: {TEXT};
+    border: 1px solid {LINE}; border-radius: 13px;
+    padding: 4px 12px; font-size: 12px; font-weight: 500;
 }}
-QFrame#topbar {{
-    background: #09101f;
-    border-bottom: 1px solid {LINE};
+QPushButton#badge[state="online"] {{ color: {TEXT}; }}
+QPushButton#badge[state="starting"] {{ color: {AMBER}; border: 1px solid #4a3a16; }}
+QPushButton#badge[state="offline"], QPushButton#badge[state="warning"] {{ color: {BAD}; border: 1px solid #4a1d23; }}
+QPushButton#badge:hover {{ background: {CARD_HOVER}; border-color: {LINE_STRONG}; }}
+
+QFrame#topbar {{ background: {BG}; border-bottom: 1px solid {LINE}; }}
+QFrame#card {{ background: {SURFACE}; border: 1px solid {LINE}; border-radius: 12px; }}
+QFrame#card[attention="true"] {{ border: 1px solid #3a4090; background: #101121; }}
+QFrame#chatPane {{ background: {BG}; border: none; }}
+QFrame#thinkingCard {{ background: transparent; border: none; }}
+QFrame#gate {{ background: {SURFACE}; border: 1px solid {LINE}; border-radius: 18px; }}
+QFrame#composerBox {{
+    background: {SURFACE}; border: 1px solid {LINE_STRONG}; border-radius: 16px;
 }}
-QFrame#card {{
-    background: {CARD};
-    border: 1px solid {LINE};
-    border-radius: 12px;
-}}
-QFrame#card[attention="true"] {{
-    border: 1px solid {ACCENT};
-    background: #0f1a30;
-}}
-QFrame#thinkingCard {{
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0d1a33, stop:1 #111e3b);
-    border: 1px solid #2563eb;
-    border-radius: 10px;
-}}
-QFrame#gate {{
-    background: {CARD};
-    border: 1px solid {LINE};
-    border-radius: 18px;
-}}
+QFrame#composerBox[focused="true"] {{ border: 1px solid #4a56c9; background: #121218; }}
+QFrame#queueBar, QFrame#goBar {{ background: {ACCENT_SOFT}; border: 1px solid #2c3170; border-radius: 10px; }}
+
 QPushButton {{
-    background: #17243c;
-    border: 1px solid #253654;
-    border-radius: 8px;
-    padding: 7px 14px;
-    color: {TEXT};
-    font-weight: 500;
+    background: {RAISED}; border: 1px solid {LINE}; border-radius: 8px;
+    padding: 6px 12px; color: {TEXT}; font-weight: 500;
 }}
-QPushButton:hover {{
-    background: #203152;
-    border-color: #38bdf8;
-}}
-QPushButton:disabled {{
-    color: #475569;
-    background: #0d1627;
-    border-color: #1e293b;
-}}
+QPushButton:hover {{ background: {CARD_HOVER}; border-color: {LINE_STRONG}; }}
+QPushButton:pressed {{ background: {LINE}; }}
+QPushButton:disabled {{ color: #4a4a55; background: {SURFACE}; border-color: {LINE}; }}
+QPushButton#ghost {{ background: transparent; border: 1px solid transparent; color: {MUTED}; }}
+QPushButton#ghost:hover {{ background: {RAISED}; color: {TEXT}; border-color: {LINE}; }}
 QPushButton#primary {{
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0284c7, stop:1 #6366f1);
-    border: 1px solid #38bdf8;
-    color: #ffffff;
-    font-weight: 600;
-    padding: 8px 18px;
-    border-radius: 8px;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #6f83ff, stop:1 #8a6bff);
+    border: 1px solid #8a96ff; color: #ffffff; font-weight: 600;
+    padding: 7px 18px; border-radius: 10px;
 }}
 QPushButton#primary:hover {{
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0369a1, stop:1 #4f46e5);
-    border-color: #7dd3fc;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #8092ff, stop:1 #9a7cff);
+    border-color: #b3bbff;
 }}
-QPushButton#primary:disabled {{
-    background: #1e293b;
-    border-color: #334155;
-    color: #64748b;
-}}
-QPushButton#stopBtn {{
-    background: #450a0a;
-    border: 1px solid #991b1b;
-    color: #fecaca;
-    font-weight: 600;
-    border-radius: 8px;
-}}
-QPushButton#stopBtn:hover {{
-    background: #7f1d1d;
-    border-color: #ef4444;
-}}
-QPushButton#accept {{
-    background: #064e3b;
-    border: 1px solid #059669;
-    color: #d1fae5;
-    font-weight: 600;
-    border-radius: 8px;
-}}
-QPushButton#accept:hover {{
-    background: #047857;
-    border-color: #10b981;
-}}
-QPushButton#reject {{
-    background: #450a0a;
-    border: 1px solid #b91c1c;
-    color: #fee2e2;
-    border-radius: 8px;
-}}
-QPushButton#reject:hover {{
-    background: #7f1d1d;
-    border-color: #ef4444;
-}}
+QPushButton#primary:disabled {{ background: {RAISED}; border-color: {LINE}; color: #55555f; }}
+QPushButton#stopBtn {{ background: {BAD_BG}; border: 1px solid #5a232b; color: #ffb4bb; font-weight: 600; border-radius: 10px; padding: 7px 16px; }}
+QPushButton#stopBtn:hover {{ background: #3a171c; border-color: {BAD}; }}
+QPushButton#accept {{ background: {GOOD_BG}; border: 1px solid #1f5a40; color: #b8f0d4; font-weight: 600; border-radius: 8px; }}
+QPushButton#accept:hover {{ background: #143a29; border-color: {GOOD}; }}
+QPushButton#reject {{ background: {BAD_BG}; border: 1px solid #5a232b; color: #ffc9ce; border-radius: 8px; }}
+QPushButton#reject:hover {{ background: #3a171c; border-color: {BAD}; }}
 QPushButton#quickPill {{
-    background: #111c30;
-    border: 1px solid #1e2e4a;
-    color: #94a3b8;
-    border-radius: 12px;
-    padding: 3px 10px;
-    font-size: 11.5px;
+    background: transparent; border: 1px solid {LINE}; color: {MUTED};
+    border-radius: 12px; padding: 3px 11px; font-size: 11.5px; font-weight: 500;
 }}
-QPushButton#quickPill:hover {{
-    background: #1a2a47;
-    color: #38bdf8;
-    border-color: #38bdf8;
-}}
-QTextBrowser, QPlainTextEdit, QListWidget {{
-    background: #070e1c;
-    border: 1px solid {LINE};
-    border-radius: 9px;
-    padding: 8px;
-    selection-background-color: #1d4ed8;
-}}
-QPlainTextEdit#composer {{
-    background: #0a1324;
-    border: 1px solid #223452;
-    border-radius: 10px;
-    padding: 9px;
-    font-size: 13.5px;
-}}
-QPlainTextEdit#composer:focus {{
-    border: 1px solid {ACCENT};
-    background: #0c172d;
-}}
-QFrame#attachmentBar {{
-    background: #0b1528;
-    border: 1px dashed #1e3a6a;
-    border-radius: 8px;
-    padding: 3px 6px;
-}}
-QFrame#attachmentChip {{
-    background: #101e38;
-    border: 1px solid #1e3c70;
-    border-radius: 6px;
-}}
-QPushButton#removeAttachBtn {{
-    background: transparent;
-    border: none;
-    color: #ef4444;
-    font-size: 11px;
-    font-weight: bold;
-    padding: 0 4px;
-}}
-QPushButton#removeAttachBtn:hover {{
-    color: #fca5a5;
-    background: #450a0a;
-    border-radius: 3px;
-}}
+QPushButton#quickPill:hover {{ background: {RAISED}; color: {TEXT}; border-color: {LINE_STRONG}; }}
 QPushButton#attachBtn, QPushButton#rerunBtn {{
-    background: #111c30;
-    border: 1px solid #1e2e4a;
-    color: #94a3b8;
-    border-radius: 8px;
-    padding: 6px 12px;
-    font-size: 12px;
+    background: transparent; border: 1px solid transparent; color: {MUTED};
+    border-radius: 8px; padding: 5px 10px; font-size: 12px;
 }}
-QPushButton#attachBtn:hover, QPushButton#rerunBtn:hover {{
-    background: #1a2a47;
-    color: #38bdf8;
-    border-color: #38bdf8;
-}}
-QPushButton#rerunBtn:disabled {{
-    color: #475569;
-    border-color: #1a2233;
-}}
-QPlainTextEdit#terminal {{
-    font-family: 'JetBrains Mono', 'Fira Code', 'DejaVu Sans Mono', monospace;
-    font-size: 12px;
-    color: #cbd5e1;
-    background: #040812;
-}}
-QListWidget {{
-    background: #070e1c;
-    border: 1px solid {LINE};
-    border-radius: 9px;
-}}
-QListWidget::item {{
-    padding: 7px 6px;
-    border-radius: 7px;
-    margin-bottom: 2px;
-}}
-QListWidget::item:selected {{
-    background: #132442;
-    color: #ffffff;
-}}
-QCheckBox {{
-    background: transparent;
-    color: {MUTED};
-    spacing: 7px;
-    font-size: 12.5px;
-}}
-QCheckBox::indicator {{
-    width: 28px;
-    height: 15px;
-    border-radius: 7px;
-    background: #23334d;
-}}
-QCheckBox::indicator:checked {{
-    background: {ACCENT};
-}}
-QProgressBar {{
-    border: 1px solid #1e293b;
-    border-radius: 4px;
-    text-align: center;
-    background: #0a1222;
-    color: #7dd3fc;
-    font-size: 11px;
-    font-weight: 600;
-}}
-QProgressBar::chunk {{
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0284c7, stop:1 #38bdf8);
-    border-radius: 3px;
-}}
-QSplitter::handle {{ background: {BG}; }}
-QScrollBar:vertical {{
-    background: transparent;
-    width: 9px;
-    margin: 2px;
-}}
-QScrollBar::handle:vertical {{
-    background: #253654;
-    border-radius: 4px;
-    min-height: 28px;
-}}
-QScrollBar::handle:vertical:hover {{
-    background: #38bdf8;
-}}
+QPushButton#attachBtn:hover, QPushButton#rerunBtn:hover {{ background: {RAISED}; color: {TEXT}; }}
+QPushButton#rerunBtn:disabled {{ color: #4a4a55; }}
+QPushButton#removeAttachBtn {{ background: transparent; border: none; color: {BAD}; font-size: 11px; font-weight: bold; padding: 0 4px; }}
+QPushButton#removeAttachBtn:hover {{ color: #ffb4bb; background: {BAD_BG}; border-radius: 3px; }}
 QPushButton#jumpBtn {{
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0284c7, stop:1 #6366f1);
-    color: #ffffff;
-    border: 1px solid #38bdf8;
-    border-radius: 12px;
-    padding: 4px 14px;
-    font-size: 11.5px;
-    font-weight: 700;
+    background: {RAISED}; color: {TEXT}; border: 1px solid {LINE_STRONG};
+    border-radius: 13px; padding: 4px 14px; font-size: 11.5px; font-weight: 600;
 }}
-QPushButton#jumpBtn:hover {{
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0369a1, stop:1 #4f46e5);
-    border-color: #7dd3fc;
+QPushButton#jumpBtn:hover {{ background: {CARD_HOVER}; border-color: {ACCENT}; color: {ACCENT_HOVER}; }}
+
+QTextBrowser, QPlainTextEdit, QListWidget {{
+    background: {BG}; border: none; border-radius: 10px; padding: 8px;
+    selection-background-color: #34408f;
 }}
-QTabWidget::pane {{
-    border: 1px solid #1a263e;
-    background: #080c14;
-    border-radius: 9px;
-    top: -1px;
-}}
+QTextBrowser#chat {{ background: {BG}; padding: 4px 8px 4px 4px; }}
+QTextBrowser#diff, QPlainTextEdit#terminal {{ background: #08080a; border: 1px solid {LINE}; }}
+QPlainTextEdit#composer {{ background: transparent; border: none; padding: 6px 8px; font-size: 13.5px; }}
+QPlainTextEdit#terminal {{ font-family: {MONO}; font-size: 12px; color: #cfcfd8; }}
+QFrame#attachmentBar {{ background: {SURFACE}; border: 1px dashed {LINE_STRONG}; border-radius: 10px; padding: 3px 6px; }}
+QFrame#attachmentChip {{ background: {RAISED}; border: 1px solid {LINE_STRONG}; border-radius: 6px; }}
+
+QListWidget {{ background: {SURFACE}; border: none; }}
+QListWidget::item {{ padding: 7px 6px; border-radius: 7px; margin-bottom: 1px; }}
+QListWidget::item:selected {{ background: {RAISED}; color: #ffffff; }}
+QCheckBox {{ background: transparent; color: {MUTED}; spacing: 7px; font-size: 12px; }}
+QCheckBox:hover {{ color: {TEXT}; }}
+QCheckBox::indicator {{ width: 26px; height: 15px; border-radius: 7px; background: #2a2a31; }}
+QCheckBox::indicator:checked {{ background: {ACCENT}; }}
+QProgressBar {{ border: none; border-radius: 2px; text-align: center; background: {RAISED}; color: {MUTED}; font-size: 10.5px; }}
+QProgressBar::chunk {{ background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #6f83ff, stop:1 #a78bfa); border-radius: 2px; }}
+QSplitter::handle {{ background: {BG}; }}
+QScrollBar:vertical {{ background: transparent; width: 10px; margin: 2px; }}
+QScrollBar::handle:vertical {{ background: #2c2c34; border-radius: 4px; min-height: 30px; }}
+QScrollBar::handle:vertical:hover {{ background: #44444f; }}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+QScrollBar:horizontal {{ background: transparent; height: 10px; margin: 2px; }}
+QScrollBar::handle:horizontal {{ background: #2c2c34; border-radius: 4px; min-width: 30px; }}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
+QTabWidget::pane {{ border: 1px solid {LINE}; background: {SURFACE}; border-radius: 12px; top: -1px; }}
+QTabBar {{ background: transparent; }}
 QTabBar::tab {{
-    background: #0d1526;
-    color: #94a3b8;
-    border: 1px solid #1a263e;
-    border-bottom: none;
-    border-top-left-radius: 8px;
-    border-top-right-radius: 8px;
-    padding: 7px 15px;
-    margin-right: 4px;
-    font-weight: 600;
-    font-size: 12px;
+    background: transparent; color: {MUTED}; border: none;
+    border-bottom: 2px solid transparent; padding: 8px 14px; margin-right: 2px;
+    font-weight: 500; font-size: 12.5px;
 }}
-QTabBar::tab:selected {{
-    background: #141f36;
-    color: #38bdf8;
-    border: 1px solid #283a5c;
-    border-bottom: 2px solid #38bdf8;
-}}
-QTabBar::tab:hover:!selected {{
-    background: #10192e;
-    color: #cbd5e1;
-}}
-QStatusBar, QLabel#status {{
-    color: {MUTED};
-    font-size: 12px;
-}}
+QTabBar::tab:selected {{ color: {TEXT}; border-bottom: 2px solid {ACCENT}; }}
+QTabBar::tab:hover:!selected {{ color: {TEXT}; }}
+QStatusBar, QLabel#status {{ color: {SUBTLE}; font-size: 11.5px; }}
+QToolTip {{ background: {RAISED}; color: {TEXT}; border: 1px solid {LINE_STRONG}; padding: 5px 8px; border-radius: 6px; }}
+QMenu {{ background: {RAISED}; color: {TEXT}; border: 1px solid {LINE_STRONG}; border-radius: 10px; padding: 6px; }}
+QMenu::item {{ padding: 7px 18px; border-radius: 6px; }}
+QMenu::item:selected {{ background: {CARD_HOVER}; color: {ACCENT_HOVER}; }}
+QMenu::separator {{ height: 1px; background: {LINE}; margin: 4px 6px; }}
 """
 
-STEP_ICON = {"running": "⚡", "done": "✓", "denied": "✕", "failed": "!", "plan": "○"}
-STEP_COLOR = {"running": ACCENT, "done": GOOD, "denied": BAD, "failed": "#fbbf24", "plan": MUTED}
+STEP_ICON = {"running": "◉", "done": "✓", "denied": "✕", "failed": "!", "plan": "○"}
+STEP_COLOR = {"running": ACCENT, "done": GOOD, "denied": BAD, "failed": AMBER, "plan": MUTED}
 
 
 class CompactLabel(QtWidgets.QLabel):
@@ -500,53 +303,106 @@ def card(title: str, subtitle: str = ""):
 
 def diff_html(diff: str) -> str:
     if not diff or not diff.strip():
-        return ("<div style=\"color:#94a3b8; font-family:'JetBrains Mono','Fira Code',monospace; "
-                "font-size:12px; padding:14px; font-style:italic;\">(New empty file or no content changes)</div>")
+        return (f"<div style=\"color:{MUTED}; font-family:{MONO}; font-size:12px; padding:14px;\">"
+                "No content changes.</div>")
     rows = []
-    lines = diff.splitlines()
-    for i, line in enumerate(lines):
-        text = html.escape(line) or "&nbsp;"
+    old_no = new_no = 0
+    for line in diff.splitlines():
+        text = html.escape(line.rstrip("\n")) or "&nbsp;"
+        gutter_old = gutter_new = ""
         if line.startswith("+++") or line.startswith("---"):
-            style = f"color:{MUTED}; font-weight: 600;"
-        elif line.startswith("+"):
-            style = "background-color:#063520; color:#a7f3d0;"
-        elif line.startswith("-"):
-            style = "background-color:#3d0d17; color:#fecaca;"
+            bg, fg = BG, SUBTLE
         elif line.startswith("@@"):
-            style = f"color:{VIOLET}; font-weight: 600;"
+            bg, fg = "#14152b", VIOLET
+            m = re.match(r"@@ -(\d+)(?:,\d+)? \+(\d+)", line)
+            if m:
+                old_no, new_no = int(m.group(1)), int(m.group(2))
+        elif line.startswith("+"):
+            bg, fg = "#0e2418", "#9be9c0"
+            gutter_new, new_no = str(new_no), new_no + 1
+        elif line.startswith("-"):
+            bg, fg = "#2a1217", "#ffb4bb"
+            gutter_old, old_no = str(old_no), old_no + 1
         else:
-            style = "color:#cbd5e1;"
-        rows.append(f'<tr><td width="36" style="color:#475569; padding:0 6px; text-align:right; user-select:none;">{i+1}</td>'
-                    f'<td style="{style} padding:0 8px; white-space:pre;">{text}</td></tr>')
-    return ("<table width='100%' cellspacing='0' cellpadding='0' style=\"font-family:'JetBrains Mono',"
-            "'Fira Code',monospace; font-size:12px; line-height: 1.4;\">" + "".join(rows) + "</table>")
+            bg, fg = BG, "#c9c9d3"
+            if old_no or new_no:
+                gutter_old, gutter_new = str(old_no), str(new_no)
+                old_no, new_no = old_no + 1, new_no + 1
+        rows.append(
+            f'<tr><td width="34" align="right" bgcolor="{bg}" style="color:#5a5a66; padding:0 6px;">{gutter_old}</td>'
+            f'<td width="34" align="right" bgcolor="{bg}" style="color:#5a5a66; padding:0 6px;">{gutter_new}</td>'
+            f'<td bgcolor="{bg}" style="color:{fg}; padding:0 10px; white-space:pre;">{text}</td></tr>')
+    return (f"<table width='100%' cellspacing='0' cellpadding='0' style=\"font-family:{MONO}; font-size:12px;\">"
+            + "".join(rows) + "</table>")
 
 
 _TOOL_BLOCK = re.compile(r"```[ \t]*tool[ \t]*([^\n]*)\n(.*?)(?:\n```|\Z)|<tool_call>(.*?)(?:</tool_call>|\Z)", re.S)
 _CODE_BLOCK = re.compile(r"```([^\n]*)\n(.*?)(?:\n```|\Z)", re.S)
 _THINK_BLOCK = re.compile(r"<think>(.*?)(?:</think>|\Z)", re.S)
 
+TOOL_VERBS = {  # tool -> (while running, when done)
+    "write_file": ("Writing", "Wrote"), "apply_patch": ("Editing", "Edited"),
+    "read_file": ("Reading", "Read"), "list_files": ("Listing", "Listed"),
+    "search": ("Searching", "Searched"), "run_command": ("Running", "Ran"),
+}
+
+
+def _gap(px: int = 8) -> str:
+    return f'<table width="100%" cellspacing="0" cellpadding="0"><tr><td height="{px}"></td></tr></table>'
+
+
+def _tool_row(name: str, target: str, content: str, running: bool) -> str:
+    verb = TOOL_VERBS.get(name, ("Running", "Ran"))[0 if running else 1]
+    dot = f'<span style="color:{ACCENT};">◉</span>' if running else f'<span style="color:{GOOD};">●</span>'
+    stats = ""
+    lines = content.strip("\n").splitlines() if content.strip() else []
+    if name == "write_file" and lines:
+        stats = f' &nbsp;<span style="color:{GOOD};">+{len(lines)}</span>'
+    elif name == "apply_patch" and lines:
+        add = sum(1 for ln in lines if ln.startswith("+") and not ln.startswith("+++"))
+        rem = sum(1 for ln in lines if ln.startswith("-") and not ln.startswith("---"))
+        stats = f' &nbsp;<span style="color:{GOOD};">+{add}</span> <span style="color:{BAD};">−{rem}</span>'
+    if name == "run_command":
+        first = (content or target).strip().splitlines()
+        shown = html.escape(first[0][:110] if first else "")
+    else:
+        shown = html.escape(target)
+    ellipsis = "…" if running else ""
+    row = (f'<p style="margin:3px 0;">{dot}&nbsp;&nbsp;<span style="color:{MUTED};">{verb}{ellipsis}</span> '
+           f'<span style="font-family:{MONO}; font-size:12px; color:{TEXT};">{shown}</span>{stats}</p>')
+    if name in ("write_file", "apply_patch") and lines:
+        limit = 14 if running else 8
+        preview = html.escape("\n".join(lines[:limit]))
+        more = (f'<br><span style="color:{SUBTLE};">… {len(lines) - limit} more lines · open the Changes tab for the full diff</span>'
+                if len(lines) > limit else "")
+        row += (f'<table width="100%" cellspacing="0" cellpadding="0"><tr>'
+                f'<td bgcolor="#09090c" style="background-color:#09090c; border:1px solid {LINE}; padding:8px 12px;">'
+                f'<pre style="margin:0; font-family:{MONO}; font-size:12px; color:#c9c9d3; white-space:pre-wrap;">{preview}</pre>{more}'
+                f'</td></tr></table>')
+    return row
+
+
+def _code_block(lang: str, code: str) -> str:
+    label = html.escape(lang or "code")
+    return (f'<table width="100%" cellspacing="0" cellpadding="0"><tr><td bgcolor="#09090c" '
+            f'style="background-color:#09090c; border:1px solid {LINE}; padding:8px 12px;">'
+            f'<span style="color:{SUBTLE}; font-size:11px;">{label}</span>'
+            f'<pre style="margin:4px 0 0 0; font-family:{MONO}; font-size:12px; color:#d4d4dc; white-space:pre-wrap;">{html.escape(code)}</pre>'
+            f'</td></tr></table>' + _gap(6))
+
 
 def message_html(text: str, is_generating: bool = False) -> str:
-    """Format AI text into rich markdown, live code previews, and reasoning cards."""
+    """Format agent text: prose, code blocks, reasoning, and compact tool-call rows."""
     if not text:
         return ""
-
     out = []
-    
-    # 1. Format reasoning <think> tags if present
+
     think_match = _THINK_BLOCK.search(text)
     if think_match:
-        think_content = think_match.group(1).strip()
-        if think_content:
-            out.append(f'''
-            <div style="background:#091224; border:1px solid #1e3a6a; border-left:3px solid #818cf8; border-radius:8px; padding:8px 12px; margin:6px 0;">
-              <div style="color:#a5b4fc; font-weight:700; font-size:11px; letter-spacing:0.5px; margin-bottom:4px;">
-                🧠 NEURAL REASONING & THOUGHT PROCESS
-              </div>
-              <div style="color:#cbd5e1; font-size:12px; line-height:1.4;">{html.escape(think_content)}</div>
-            </div>
-            ''')
+        think = think_match.group(1).strip()
+        if think:
+            out.append(f'<table width="100%" cellspacing="0" cellpadding="0"><tr><td style="border-left:2px solid #34343e; '
+                       f'padding:2px 12px; color:{MUTED}; font-size:12px;"><i>{html.escape(think)}</i></td></tr></table>' + _gap(6))
         text = _THINK_BLOCK.sub("", text)
 
     pieces = []
@@ -555,10 +411,8 @@ def message_html(text: str, is_generating: bool = False) -> str:
         pieces.append(("text", text[pos:match.start()]))
         raw_call = match.group(0)
         call = core.parse_tool_call(raw_call)
-        
         tool_name = call.name if call else "tool"
-        target = ""
-        content = ""
+        target = content = ""
         if call:
             target = str(call.args.get("path") or call.args.get("pattern") or call.args.get("command") or "")
             if call.name == "apply_patch":
@@ -568,64 +422,47 @@ def message_html(text: str, is_generating: bool = False) -> str:
                 content = str(call.args.get("content", ""))
             elif call.name == "run_command":
                 content = str(call.args.get("command", ""))
-        else:
-            # Check if streaming tool call
+        else:  # still streaming in: the block is not complete enough to parse
             first_line = raw_call.splitlines()[0] if raw_call else ""
-            tool_name = first_line.replace("```tool", "").strip() or "tool"
+            tool_name = core.normalize_tool_name(first_line.replace("```tool", "").strip()) or "tool"
             m_path = re.search(r"(?:path|file|target)[:\s]*([^\n]+)", raw_call, re.I)
             if m_path:
                 target = m_path.group(1).strip()
-            # Extract content after ---
             if "---" in raw_call:
                 content = raw_call.split("---", 1)[1]
-
-        pieces.append(("tool", (tool_name, target, content)))
+        closed = raw_call.rstrip().endswith("```") and raw_call.count("```") >= 2 or raw_call.rstrip().endswith("</tool_call>")
+        pieces.append(("tool", (tool_name, target, content, not closed)))
         pos = match.end()
     pieces.append(("text", text[pos:]))
 
     for kind, value in pieces:
         if kind == "tool":
-            tool_name, target, content = value
-            tool_title = f"{tool_name.replace('_', ' ').upper()}"
-            if target:
-                tool_title += f" · {html.escape(target)}"
-            
-            if content.strip():
-                lines = content.strip().splitlines()
-                preview = "\n".join(lines[:30])
-                more = f"\n... ({len(lines) - 30} more lines)" if len(lines) > 30 else ""
-                live_badge = ' &nbsp;<span style="color:#38bdf8; font-size:11px;">(Generating...)</span>' if is_generating else ''
-                out.append(f'''
-                <div style="background:#071224; border:1px solid #1e3a6a; border-radius:9px; margin:8px 0; overflow:hidden;">
-                  <div style="background:#0e1e3b; padding:6px 12px; color:#38bdf8; font-size:12px; font-weight:700; border-bottom:1px solid #1e3a6a;">
-                    ⚡ {tool_title}{live_badge}
-                  </div>
-                  <pre style="background:#040914; color:#e2e8f0; font-family:'JetBrains Mono','Fira Code',monospace; font-size:12px; padding:10px; margin:0; white-space:pre-wrap; line-height:1.4;">{html.escape(preview + more)}</pre>
-                </div>
-                ''')
-            else:
-                out.append(f'''
-                <div style="background:#09152b; border:1px solid #1e2c45; border-radius:7px; padding:5px 12px; margin:6px 0; display:inline-block;">
-                  <span style="color:#7dd3fc; font-weight:600; font-size:12px;">⚡ {tool_title}</span>
-                </div>
-                ''')
+            tool_name, target, content, streaming = value
+            out.append(_tool_row(tool_name, target, content, is_generating and streaming))
             continue
-
         last = 0
         for code in _CODE_BLOCK.finditer(value):
             out.append(_prose(value[last:code.start()]))
-            lang = (code.group(1) or "code").strip()
-            out.append(f'''
-            <div style="background:#050c18; border:1px solid #1a273e; border-radius:8px; margin:6px 0; overflow:hidden;">
-              <div style="background:#091426; padding:4px 10px; color:#64748b; font-size:11px; font-family:sans-serif; border-bottom:1px solid #152238;">
-                {html.escape(lang)}
-              </div>
-              <pre style="color:#e2e8f0; font-family:'JetBrains Mono','Fira Code',monospace; font-size:12px; padding:10px; margin:0; white-space:pre-wrap; line-height:1.4;">{html.escape(code.group(2))}</pre>
-            </div>
-            ''')
+            out.append(_code_block((code.group(1) or "").strip(), code.group(2)))
             last = code.end()
         out.append(_prose(value[last:]))
     return "".join(out)
+
+
+def _inline(escaped: str) -> str:
+    """`code` and **bold** in already-escaped text. Code spans are set aside first, so a '*' inside one
+    never pairs up with a bold marker."""
+    spans: List[str] = []
+
+    def stash(m):
+        spans.append(m.group(1))
+        return f"\x00{len(spans) - 1}\x00"
+
+    text = re.sub(r"`([^`\n]+)`", stash, escaped)
+    text = re.sub(r"\*\*([^*\n]+)\*\*", r"<b style='color:#ffffff;'>\1</b>", text)
+    return re.sub(r"\x00(\d+)\x00", lambda m: (
+        f'<span style="background-color:{RAISED}; color:#c4cbff; font-family:{MONO}; font-size:12px;">&nbsp;'
+        f'{spans[int(m.group(1))]}&nbsp;</span>'), text)
 
 
 def _prose(text: str) -> str:
@@ -634,24 +471,33 @@ def _prose(text: str) -> str:
         return ""
     img_matches = list(re.finditer(r'\[Attached image: ([^\]]+)\]', text))
     clean_text = re.sub(r'\[Attached image: [^\]]+\]', '', text).strip()
-    escaped = html.escape(clean_text)
-    escaped = re.sub(r"`([^`\n]+)`", r'<code style="background:#111e33; color:#7dd3fc; padding:2px 5px; border-radius:4px; font-family:\'JetBrains Mono\',monospace; font-size:12px;">\1</code>', escaped)
-    escaped = re.sub(r"\*\*([^*\n]+)\*\*", r"<b style='color:#ffffff;'>\1</b>", escaped)
-    rendered = "<p style='margin:4px 0; line-height: 1.5;'>" + escaped.replace("\n", "<br>") + "</p>" if clean_text else ""
-
+    rendered = ""
+    if clean_text:
+        paras = []
+        for line in clean_text.splitlines():
+            esc = html.escape(line.rstrip())
+            heading = re.match(r"^\s{0,3}#{1,4}\s+(.*)$", esc)
+            bullet = re.match(r"^(\s*)(?:([-*•])|(\d+[.)]))\s+(.*)$", esc)
+            if not esc.strip():
+                paras.append("<div style='font-size:6px;'>&nbsp;</div>")
+            elif heading:
+                paras.append(f"<div style='font-size:14.5px; font-weight:600; color:#ffffff; margin-top:4px;'>{_inline(heading.group(1))}</div>")
+            elif bullet:
+                marker = bullet.group(3) or "•"
+                left = 6 + (18 if len(bullet.group(1)) >= 2 else 0)
+                paras.append(f"<div style='margin-left:{left}px;'><span style='color:{SUBTLE};'>{marker}</span>&nbsp; "
+                             f"{_inline(bullet.group(4))}</div>")
+            else:
+                paras.append(f"<div>{_inline(esc)}</div>")
+        rendered = f"<div style='line-height:150%; color:#e4e4ea;'>{''.join(paras)}</div>"
     if img_matches:
         img_html = ""
         for m in img_matches:
             ipath = m.group(1).strip()
-            iname = os.path.basename(ipath)
-            img_html += f'''
-            <div style="margin: 6px 0; background: #081120; border: 1px solid #1a2c4e; border-radius: 8px; padding: 6px; display: inline-block;">
-                <img src="{html.escape(ipath)}" width="240" style="border-radius: 6px;"><br>
-                <span style="font-size: 11px; color: #94a3b8; font-family: monospace;">📷 {html.escape(iname)}</span>
-            </div><br>
-            '''
+            img_html += (f'<table cellspacing="0" cellpadding="0"><tr><td bgcolor="{SURFACE}" style="border:1px solid {LINE}; padding:6px;">'
+                         f'<img src="{html.escape(ipath)}" width="240"><br>'
+                         f'<span style="font-size:11px; color:{MUTED};">{html.escape(os.path.basename(ipath))}</span></td></tr></table>' + _gap(4))
         rendered = img_html + rendered
-
     return rendered
 
 
@@ -661,6 +507,15 @@ def _prose(text: str) -> str:
 class AgentComposer(QtWidgets.QPlainTextEdit):
     submit_requested = QtCore.pyqtSignal()
     image_attached = QtCore.pyqtSignal(str)
+    focus_changed = QtCore.pyqtSignal(bool)
+
+    def focusInEvent(self, event):
+        super().focusInEvent(event)
+        self.focus_changed.emit(True)
+
+    def focusOutEvent(self, event):
+        super().focusOutEvent(event)
+        self.focus_changed.emit(False)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1165,6 +1020,10 @@ class AgentWindow(QtWidgets.QMainWindow):
         self._dirty = False
         self._auto_scroll_to_bottom = True
         self._last_rendered_html = ""
+        self._item_cache = {}
+        self._phase_mode = False
+        self._rendered_items = []
+        self._tail_pos = None
         self._capable_override = capable
         self._inhibit_cookie = None
 
@@ -1212,38 +1071,47 @@ class AgentWindow(QtWidgets.QMainWindow):
         bar = QtWidgets.QFrame()
         bar.setObjectName("topbar")
         row = QtWidgets.QHBoxLayout(bar)
-        row.setContentsMargins(12, 6, 12, 6)
-        row.setSpacing(8)
+        row.setContentsMargins(16, 8, 14, 8)
+        row.setSpacing(10)
 
-        # Brand Emblem & Title
         mark = QtWidgets.QLabel()
-        mark.setFixedSize(30, 30)
+        mark.setFixedSize(26, 26)
         app_icon = get_app_icon()
         if not app_icon.isNull():
-            mark.setPixmap(app_icon.pixmap(28, 28))
+            mark.setPixmap(app_icon.pixmap(24, 24))
             mark.setStyleSheet("background: transparent;")
         else:
-            mark.setStyleSheet("border-radius: 8px; background: qlineargradient(x1:0, y1:0, x2:1, y2:1, "
-                               "stop:0 #0ea5e9, stop:1 #6366f1); color: white; font-weight: 800; font-size: 13px;")
-            mark.setText("⚡")
+            mark.setStyleSheet("border-radius: 7px; background: qlineargradient(x1:0, y1:0, x2:1, y2:1, "
+                               "stop:0 #6f83ff, stop:1 #8a6bff); color: white; font-weight: 800; font-size: 12px;")
+            mark.setText("D")
         mark.setAlignment(QtCore.Qt.AlignCenter)
         row.addWidget(mark)
 
-        names = QtWidgets.QVBoxLayout()
-        names.setSpacing(0)
-        title = CompactLabel("DevOS AI Code Agent")
+        title = CompactLabel("DevOS Code")
         title.setObjectName("title")
         title.setMinimumWidth(30)
+        row.addWidget(title)
+
+        divider = QtWidgets.QLabel("/")
+        divider.setStyleSheet(f"color: {LINE_STRONG}; font-size: 16px;")
+        row.addWidget(divider)
+
+        # Project chip: shows the open folder, click for recent projects
         self.path_label = CompactLabel("No folder open")
         self.path_label.setObjectName("path")
-        self.path_label.setStyleSheet("color: #38bdf8; font-weight: 500;")
+        self.path_label.setStyleSheet(f"color: {TEXT}; font-weight: 500;")
         self.path_label.setMinimumWidth(30)
-        names.addWidget(title)
-        names.addWidget(self.path_label)
-        row.addLayout(names)
-        row.addSpacing(6)
+        row.addWidget(self.path_label)
 
-        # Model Beacon Pill (Interactive Status)
+        self.recent_btn = QtWidgets.QPushButton("⌄")
+        self.recent_btn.setObjectName("ghost")
+        self.recent_btn.setFixedWidth(26)
+        self.recent_btn.setToolTip("Switch to a recent project…")
+        self.recent_btn.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        self.recent_btn.clicked.connect(lambda: self._show_recent_menu(self.recent_btn.mapToGlobal(self.recent_btn.rect().bottomLeft())))
+        row.addWidget(self.recent_btn)
+
+        # Model beacon pill (interactive status)
         self.ai_badge = QtWidgets.QPushButton("●  devos-ai-code")
         self.ai_badge.setObjectName("badge")
         self.ai_badge.setMinimumWidth(30)
@@ -1254,48 +1122,40 @@ class AgentWindow(QtWidgets.QMainWindow):
 
         row.addStretch(1)
 
-        # Policy Toggles
+        # Autonomy toggles
         self.auto_reads = QtWidgets.QCheckBox("Reads")
-        self.auto_reads.setToolTip("Auto-approve reads: Automatically inspect project files without confirmation")
+        self.auto_reads.setToolTip("Auto-approve reads: inspect project files without asking")
         self.auto_reads.setChecked(True)
         self.auto_reads.setMinimumWidth(20)
         self.auto_reads.toggled.connect(self._policy_changed)
 
         self.auto_edits = QtWidgets.QCheckBox("Edits")
-        self.auto_edits.setToolTip("Auto-approve edits: Automatically apply file edits without confirmation")
+        self.auto_edits.setToolTip("Auto-approve edits: apply file changes without asking")
         self.auto_edits.setMinimumWidth(20)
         self.auto_edits.toggled.connect(self._policy_changed)
 
         self.auto_commands = QtWidgets.QCheckBox("Commands")
-        self.auto_commands.setToolTip("Auto-run commands: Automatically run terminal commands without confirmation")
+        self.auto_commands.setToolTip("Auto-run commands: run terminal commands without asking")
         self.auto_commands.setMinimumWidth(20)
         self.auto_commands.toggled.connect(self._policy_changed)
 
-        row.addWidget(self.auto_reads)
-        row.addWidget(self.auto_edits)
-        row.addWidget(self.auto_commands)
+        for box in (self.auto_reads, self.auto_edits, self.auto_commands):
+            row.addWidget(box)
+        row.addSpacing(6)
 
-        # Quick Project Buttons
-        folder_box = QtWidgets.QHBoxLayout()
-        folder_box.setSpacing(2)
-        self.open_btn = QtWidgets.QPushButton("📁 Open…")
-        self.open_btn.setToolTip("Open project folder…")
+        self.open_btn = QtWidgets.QPushButton("Open folder")
+        self.open_btn.setToolTip("Open project folder… (right-click for recent projects)")
         self.open_btn.setMinimumWidth(30)
+        self.open_btn.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
         self.open_btn.clicked.connect(self.choose_folder)
         self.open_btn.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.open_btn.customContextMenuRequested.connect(lambda pos: self._show_recent_menu(self.open_btn.mapToGlobal(pos)))
-        folder_box.addWidget(self.open_btn)
+        row.addWidget(self.open_btn)
 
-        self.recent_btn = QtWidgets.QPushButton("▾")
-        self.recent_btn.setFixedWidth(24)
-        self.recent_btn.setToolTip("Switch to recent project…")
-        self.recent_btn.clicked.connect(lambda: self._show_recent_menu(self.recent_btn.mapToGlobal(self.recent_btn.rect().bottomLeft())))
-        folder_box.addWidget(self.recent_btn)
-        row.addLayout(folder_box)
-
-        self.new_btn = QtWidgets.QPushButton("🧹 New")
-        self.new_btn.setToolTip("Reset the chat canvas for a new objective")
+        self.new_btn = QtWidgets.QPushButton("New chat")
+        self.new_btn.setToolTip("Reset the conversation for a new objective")
         self.new_btn.setMinimumWidth(30)
+        self.new_btn.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
         self.new_btn.clicked.connect(self.new_task)
         row.addWidget(self.new_btn)
 
@@ -1305,13 +1165,7 @@ class AgentWindow(QtWidgets.QMainWindow):
         cfg = get_persisted_config()
         recents = [r for r in cfg.get("recent_folders", []) if os.path.isdir(r)]
         menu = QtWidgets.QMenu(self)
-        menu.setStyleSheet(f"""
-            QMenu {{ background: #0d1526; color: #f1f5f9; border: 1px solid {LINE}; border-radius: 8px; padding: 6px; }}
-            QMenu::item {{ padding: 6px 18px; border-radius: 6px; }}
-            QMenu::item:selected {{ background: #1e293b; color: {ACCENT}; }}
-            QMenu::separator {{ height: 1px; background: {LINE}; margin: 4px 6px; }}
-        """)
-        choose_act = menu.addAction("📁 Browse folder…")
+        choose_act = menu.addAction("Browse folder…")
         choose_act.triggered.connect(self.choose_folder)
         if recents:
             menu.addSeparator()
@@ -1320,7 +1174,7 @@ class AgentWindow(QtWidgets.QMainWindow):
             for rpath in recents:
                 rname = os.path.basename(rpath) or rpath
                 prefix = "✓ " if rpath == self.folder else "   "
-                act = menu.addAction(f"{prefix}📦 {rname}  ({rpath})")
+                act = menu.addAction(f"{prefix}{rname}  ({rpath})")
                 act.triggered.connect(lambda _, p=rpath: self.set_folder(p))
         menu.exec_(global_pos)
 
@@ -1329,19 +1183,32 @@ class AgentWindow(QtWidgets.QMainWindow):
     def _main_panel(self):
         panel = QtWidgets.QWidget()
         layout = QtWidgets.QHBoxLayout(panel)
-        layout.setContentsMargins(10, 8, 10, 6)
+        layout.setContentsMargins(14, 10, 14, 6)
         split = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
-        split.setHandleWidth(8)
+        split.setHandleWidth(12)
         split.setChildrenCollapsible(False)
         layout.addWidget(split)
 
-        # Left Column: Conversation & Execution Canvas
-        chat_card, chat_layout, chat_header = card("Conversation & Agent Execution")
-        chat_card.setMinimumWidth(240)
-        
-        self.step_chip = QtWidgets.QLabel("● Idle")
+        # ---- Left: conversation (no card chrome; the stream is the page)
+        chat_card = QtWidgets.QFrame()
+        chat_card.setObjectName("chatPane")
+        chat_card.setMinimumWidth(260)
+        chat_layout = QtWidgets.QVBoxLayout(chat_card)
+        chat_layout.setContentsMargins(0, 0, 0, 0)
+        chat_layout.setSpacing(8)
+
+        status_row = QtWidgets.QHBoxLayout()
+        status_row.setContentsMargins(4, 0, 4, 0)
+        self.step_chip = QtWidgets.QLabel("Idle")
         self.step_chip.setObjectName("chip")
-        chat_header.addWidget(self.step_chip)
+        self.step_chip.setProperty("state", "idle")
+        status_row.addWidget(self.step_chip)
+        status_row.addStretch(1)
+        self.speed_label = CompactLabel("")
+        self.speed_label.setObjectName("speed")
+        self.speed_label.setMinimumWidth(20)
+        status_row.addWidget(self.speed_label)
+        chat_layout.addLayout(status_row)
 
         chat_container = QtWidgets.QWidget()
         chat_box_layout = QtWidgets.QVBoxLayout(chat_container)
@@ -1349,7 +1216,9 @@ class AgentWindow(QtWidgets.QMainWindow):
         chat_box_layout.setSpacing(2)
 
         self.chat = QtWidgets.QTextBrowser()
+        self.chat.setObjectName("chat")
         self.chat.setOpenExternalLinks(False)
+        self.chat.setOpenLinks(False)
         self.chat.anchorClicked.connect(self._on_anchor_clicked)
         self.chat.verticalScrollBar().valueChanged.connect(self._on_chat_scroll)
         chat_box_layout.addWidget(self.chat, 1)
@@ -1357,36 +1226,34 @@ class AgentWindow(QtWidgets.QMainWindow):
         jump_row = QtWidgets.QHBoxLayout()
         jump_row.setContentsMargins(0, 0, 8, 2)
         jump_row.addStretch(1)
-        self.jump_to_latest_btn = QtWidgets.QPushButton("↓ Jump to latest")
+        self.jump_to_latest_btn = QtWidgets.QPushButton("↓  Latest")
         self.jump_to_latest_btn.setObjectName("jumpBtn")
         self.jump_to_latest_btn.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
-        self.jump_to_latest_btn.setToolTip("Scroll down to the latest message and responses")
+        self.jump_to_latest_btn.setToolTip("Scroll down to the latest message")
         self.jump_to_latest_btn.setVisible(False)
         self.jump_to_latest_btn.clicked.connect(self.scroll_to_bottom)
         jump_row.addWidget(self.jump_to_latest_btn)
         chat_box_layout.addLayout(jump_row)
-
         chat_layout.addWidget(chat_container, 1)
 
-        # Active Thinking & Execution Banner (Above Composer)
+        # ---- Live work banner (status, timer, thin progress)
         self.thinking_banner = QtWidgets.QFrame()
         self.thinking_banner.setObjectName("thinkingCard")
         tb_layout = QtWidgets.QVBoxLayout(self.thinking_banner)
-        tb_layout.setContentsMargins(10, 8, 10, 8)
-        tb_layout.setSpacing(4)
+        tb_layout.setContentsMargins(6, 0, 6, 0)
+        tb_layout.setSpacing(5)
 
         tb_top = QtWidgets.QHBoxLayout()
-        self.tb_icon = QtWidgets.QLabel("🧠")
-        self.tb_icon.setStyleSheet("font-size: 15px;")
+        tb_top.setSpacing(8)
+        self.tb_icon = QtWidgets.QLabel("●")
+        self.tb_icon.setStyleSheet(f"color: {ACCENT}; font-size: 10px;")
         tb_top.addWidget(self.tb_icon)
-
-        self.tb_status = CompactLabel("Analyzing task & project files...")
-        self.tb_status.setStyleSheet("color: #f1f5f9; font-weight: 600; font-size: 12.5px;")
+        self.tb_status = CompactLabel("Analyzing task & project files…")
+        self.tb_status.setStyleSheet(f"color: {TEXT}; font-size: 12.5px;")
         self.tb_status.setMinimumWidth(20)
         tb_top.addWidget(self.tb_status, 1)
-
-        self.tb_timer = QtWidgets.QLabel("00:00s")
-        self.tb_timer.setStyleSheet("background: #1e1b4b; color: #a78bfa; border: 1px solid #4338ca; border-radius: 6px; padding: 2px 8px; font-weight: 700; font-size: 11px;")
+        self.tb_timer = QtWidgets.QLabel("00:00")
+        self.tb_timer.setObjectName("timer")
         tb_top.addWidget(self.tb_timer)
         tb_layout.addLayout(tb_top)
 
@@ -1396,33 +1263,77 @@ class AgentWindow(QtWidgets.QMainWindow):
         tb_layout.addWidget(self.tb_topic)
 
         self.tb_progress = QtWidgets.QProgressBar()
-        self.tb_progress.setFixedHeight(4)
+        self.tb_progress.setFixedHeight(2)
         self.tb_progress.setTextVisible(False)
-        self.tb_progress.setRange(0, 0)  # Shimmer / pulsating mode
+        self.tb_progress.setRange(0, 0)  # shimmer
         tb_layout.addWidget(self.tb_progress)
-
         self.thinking_banner.setVisible(False)
         chat_layout.addWidget(self.thinking_banner)
 
-        # Composer & Quick Prompts
+        # ---- Queue bar
+        self.queue_bar = QtWidgets.QFrame()
+        self.queue_bar.setObjectName("queueBar")
+        self.queue_layout = QtWidgets.QHBoxLayout(self.queue_bar)
+        self.queue_layout.setContentsMargins(12, 6, 10, 6)
+        self.queue_layout.setSpacing(10)
+        self.queue_label = QtWidgets.QLabel("")
+        self.queue_label.setStyleSheet(f"color: {ACCENT_HOVER}; font-size: 12px; font-weight: 500; background: transparent;")
+        self.queue_layout.addWidget(self.queue_label)
+        self.queue_layout.addStretch(1)
+        self.queue_run_btn = QtWidgets.QPushButton("Interrupt & run now")
+        self.queue_run_btn.setStyleSheet(f"QPushButton {{ background: {ACCENT}; color: #fff; border: none; border-radius: 6px; "
+                                         f"padding: 3px 10px; font-size: 11.5px; font-weight: 600; }} "
+                                         f"QPushButton:hover {{ background: {ACCENT_HOVER}; }}")
+        self.queue_run_btn.clicked.connect(self.run_next_queued_now)
+        self.queue_layout.addWidget(self.queue_run_btn)
+        self.queue_clear_btn = QtWidgets.QPushButton("Clear")
+        self.queue_clear_btn.setObjectName("ghost")
+        self.queue_clear_btn.clicked.connect(self.clear_queue)
+        self.queue_layout.addWidget(self.queue_clear_btn)
+        self.queue_bar.setVisible(False)
+        chat_layout.addWidget(self.queue_bar)
+
+        # ---- "go" bar: the saved brief is waiting for the user's approval of the next phase
+        self.go_bar = QtWidgets.QFrame()
+        self.go_bar.setObjectName("goBar")
+        go_row = QtWidgets.QHBoxLayout(self.go_bar)
+        go_row.setContentsMargins(12, 6, 10, 6)
+        go_row.setSpacing(8)
+        self.go_label = QtWidgets.QLabel("")
+        self.go_label.setStyleSheet(f"color: {TEXT}; font-size: 12.5px; background: transparent;")
+        self.go_label.setWordWrap(True)
+        go_row.addWidget(self.go_label, 1)
+        self.go_btn = QtWidgets.QPushButton("Go")
+        self.go_btn.setObjectName("primary")
+        self.go_btn.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        self.go_btn.setToolTip("Build the next phase of your brief, then stop and report")
+        self.go_btn.clicked.connect(lambda: self._send_quick("go"))
+        go_row.addWidget(self.go_btn)
+        self.go_all_btn = QtWidgets.QPushButton("Go all")
+        self.go_all_btn.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        self.go_all_btn.setToolTip("Build every remaining phase without stopping")
+        self.go_all_btn.clicked.connect(lambda: self._send_quick("go all"))
+        go_row.addWidget(self.go_all_btn)
+        self.go_bar.setVisible(False)
+        chat_layout.addWidget(self.go_bar)
+
+        # ---- Quick actions
         quick_row = QtWidgets.QHBoxLayout()
+        quick_row.setContentsMargins(4, 0, 4, 0)
         quick_row.setSpacing(6)
-        quick_lbl = QtWidgets.QLabel("Quick:")
-        quick_lbl.setStyleSheet("color: #64748b; font-size: 11.5px; font-weight: 600;")
-        quick_row.addWidget(quick_lbl)
-        
         for label, prompt, tip in [
-            ("⚡ Plan", "Analyze the repository and create an architectural plan in docs/PHASE_1.md for the next phase.", "Plan Architecture — Analyze repository and create architectural plan"),
-            ("🚀 Run App", "quick_run_app", "Run App — Automatically detect and launch the application dev server"),
-            ("🌐 Preview", "quick_open_preview", "Live Preview — Open landing page or localhost web server in browser"),
-            ("🧪 Tests", "Inspect tests and run the test suite to verify code integrity and reporting status.", "Run Tests — Inspect and run test suite"),
-            ("🔍 Scan", "List key directories and read core entrypoints to understand project architecture.", "Scan Structure — List key directories and inspect core entrypoints"),
-            ("📝 Patch", "Implement the next requested feature cleanly with minimal, high-cohesion changes.", "Implement & Patch — Implement next feature cleanly with minimal changes")
+            ("Plan", "Analyze the repository and create an architectural plan in docs/PHASE_1.md for the next phase.", "Analyze the repository and write an architectural plan"),
+            ("Run app", "quick_run_app", "Detect the app entrypoint and start its dev server"),
+            ("Preview", "quick_open_preview", "Open the landing page or localhost server in a browser"),
+            ("Tests", "Inspect tests and run the test suite to verify code integrity and reporting status.", "Inspect and run the test suite"),
+            ("Scan", "List key directories and read core entrypoints to understand project architecture.", "Map the project structure and entrypoints"),
+            ("Patch", "Implement the next requested feature cleanly with minimal, high-cohesion changes.", "Implement the next feature with minimal changes"),
         ]:
             pill = QtWidgets.QPushButton(label)
             pill.setObjectName("quickPill")
             pill.setToolTip(tip)
             pill.setMinimumWidth(20)
+            pill.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
             if prompt == "quick_run_app":
                 pill.clicked.connect(self.quick_run_app)
             elif prompt == "quick_open_preview":
@@ -1433,110 +1344,83 @@ class AgentWindow(QtWidgets.QMainWindow):
         quick_row.addStretch(1)
         chat_layout.addLayout(quick_row)
 
-        # Prompt Queue Bar (Cursor/Antigravity style)
-        self.queue_bar = QtWidgets.QFrame()
-        self.queue_bar.setObjectName("queueBar")
-        self.queue_bar.setStyleSheet("""
-            QFrame#queueBar {
-                background: #0f172a;
-                border: 1px solid #3b82f6;
-                border-radius: 8px;
-            }
-        """)
-        self.queue_layout = QtWidgets.QHBoxLayout(self.queue_bar)
-        self.queue_layout.setContentsMargins(10, 5, 10, 5)
-        self.queue_layout.setSpacing(10)
-        self.queue_label = QtWidgets.QLabel("")
-        self.queue_label.setStyleSheet("color: #93c5fd; font-size: 12px; font-weight: 600;")
-        self.queue_layout.addWidget(self.queue_label)
-        self.queue_layout.addStretch(1)
+        # ---- Composer: one rounded box holding attachments, input and actions
+        self.composer_box = QtWidgets.QFrame()
+        self.composer_box.setObjectName("composerBox")
+        self.composer_box.setProperty("focused", "false")
+        box = QtWidgets.QVBoxLayout(self.composer_box)
+        box.setContentsMargins(10, 8, 10, 8)
+        box.setSpacing(4)
 
-        self.queue_run_btn = QtWidgets.QPushButton("⚡ Interrupt & Run Now")
-        self.queue_run_btn.setStyleSheet("""
-            QPushButton {
-                background: #2563eb; color: #ffffff; border-radius: 4px;
-                padding: 3px 10px; font-size: 11px; font-weight: bold; border: none;
-            }
-            QPushButton:hover { background: #1d4ed8; }
-        """)
-        self.queue_run_btn.clicked.connect(self.run_next_queued_now)
-        self.queue_layout.addWidget(self.queue_run_btn)
-
-        self.queue_clear_btn = QtWidgets.QPushButton("✕ Clear")
-        self.queue_clear_btn.setStyleSheet("""
-            QPushButton {
-                background: transparent; color: #94a3b8; border: none;
-                padding: 3px 6px; font-size: 12px;
-            }
-            QPushButton:hover { color: #f87171; }
-        """)
-        self.queue_clear_btn.clicked.connect(self.clear_queue)
-        self.queue_layout.addWidget(self.queue_clear_btn)
-        self.queue_bar.setVisible(False)
-        chat_layout.addWidget(self.queue_bar)
-
-        # Attachment Bar
         self.attachment_bar = QtWidgets.QFrame()
         self.attachment_bar.setObjectName("attachmentBar")
         self.attachment_layout = QtWidgets.QHBoxLayout(self.attachment_bar)
         self.attachment_layout.setContentsMargins(6, 4, 6, 4)
         self.attachment_layout.setSpacing(6)
         self.attachment_bar.setVisible(False)
-        chat_layout.addWidget(self.attachment_bar)
+        box.addWidget(self.attachment_bar)
 
         self.composer = AgentComposer()
         self.composer.setObjectName("composer")
-        self.composer.setPlaceholderText("Describe your development objective… (Enter to run, Shift+Enter for newline, paste/drop images)")
-        self.composer.setFixedHeight(86)
+        self.composer.setPlaceholderText("Describe what to build or fix…   Enter to run · Shift+Enter for a new line · paste or drop images")
+        self.composer.setFixedHeight(60)
         self.composer.submit_requested.connect(self.send)
         self.composer.image_attached.connect(self.add_attachment)
-        chat_layout.addWidget(self.composer)
+        self.composer.focus_changed.connect(self._composer_focus)
+        self.composer.textChanged.connect(self._grow_composer)
+        box.addWidget(self.composer)
 
         actions = QtWidgets.QHBoxLayout()
-        self.attach_btn = QtWidgets.QPushButton("📷 Attach")
+        actions.setSpacing(4)
+        self.attach_btn = QtWidgets.QPushButton("Attach")
         self.attach_btn.setObjectName("attachBtn")
-        self.attach_btn.setToolTip("Attach screenshot or image file (or paste Ctrl+V / drag-and-drop)")
+        self.attach_btn.setToolTip("Attach a screenshot or image (or paste with Ctrl+V / drag and drop)")
+        self.attach_btn.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
         self.attach_btn.clicked.connect(self.choose_attachment)
         actions.addWidget(self.attach_btn)
 
-        self.rerun_btn = QtWidgets.QPushButton("🔄 Rerun last")
+        self.rerun_btn = QtWidgets.QPushButton("Rerun last")
         self.rerun_btn.setObjectName("rerunBtn")
-        self.rerun_btn.setToolTip("Rerun or recall the last submitted prompt (or press ↑ in composer)")
+        self.rerun_btn.setToolTip("Rerun the last prompt (or press ↑ in the box)")
+        self.rerun_btn.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
         self.rerun_btn.setEnabled(False)
         self.rerun_btn.clicked.connect(self.rerun_last_prompt)
         actions.addWidget(self.rerun_btn)
 
-        self.hint = CompactLabel("Enter to send · Shift+Enter newline · ↑ for history")
+        self.hint = CompactLabel("")
         self.hint.setObjectName("muted")
-        self.hint.setStyleSheet("font-size: 11.5px;")
+        self.hint.setStyleSheet(f"font-size: 11.5px; color: {SUBTLE};")
         self.hint.setMinimumWidth(20)
-        actions.addWidget(self.hint)
-        actions.addStretch(1)
+        actions.addWidget(self.hint, 1)
 
-        self.stop_btn = QtWidgets.QPushButton("✕ Stop")
+        self.stop_btn = QtWidgets.QPushButton("Stop")
         self.stop_btn.setObjectName("stopBtn")
         self.stop_btn.setEnabled(False)
         self.stop_btn.setVisible(False)
+        self.stop_btn.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
         self.stop_btn.clicked.connect(self.stop)
         actions.addWidget(self.stop_btn)
 
-        self.send_btn = QtWidgets.QPushButton("⚡ Run agent")
+        self.send_btn = QtWidgets.QPushButton("Run agent  ↑")
         self.send_btn.setObjectName("primary")
         self.send_btn.setMinimumWidth(30)
+        self.send_btn.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
         self.send_btn.clicked.connect(self.send)
         actions.addWidget(self.send_btn)
+        box.addLayout(actions)
+        chat_layout.addWidget(self.composer_box)
 
-        chat_layout.addLayout(actions)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Return"), self.composer, activated=self.send)
         QtWidgets.QShortcut(QtGui.QKeySequence.Paste, self, activated=self._handle_paste)
         split.addWidget(chat_card)
 
-        # 1. Plan & Steps Card
-        plan_card, plan_layout, plan_header = card("Roadmap & Planned Steps")
+        # ---- Right: inspector (Changes / Terminal / Roadmap)
+        plan_card, plan_layout, plan_header = card("Roadmap")
         plan_card.setMinimumWidth(80)
         self.plan_progress = QtWidgets.QProgressBar()
-        self.plan_progress.setFixedHeight(14)
-        self.plan_progress.setFixedWidth(50)
+        self.plan_progress.setFixedHeight(8)
+        self.plan_progress.setFixedWidth(70)
+        self.plan_progress.setTextVisible(False)
         self.plan_progress.setValue(0)
         plan_header.addWidget(self.plan_progress)
 
@@ -1544,8 +1428,7 @@ class AgentWindow(QtWidgets.QMainWindow):
         self.plan.setFocusPolicy(QtCore.Qt.NoFocus)
         plan_layout.addWidget(self.plan)
 
-        # 2. Changes / Diffs Card
-        self.diff_card, diff_layout, diff_header = card("Code Changes & Unified Diff")
+        self.diff_card, diff_layout, diff_header = card("Diff")
         self.diff_card.setMinimumWidth(80)
         self.diff_title = CompactLabel("No pending changes")
         self.diff_title.setObjectName("muted")
@@ -1553,16 +1436,17 @@ class AgentWindow(QtWidgets.QMainWindow):
         diff_header.addWidget(self.diff_title)
 
         self.diff = QtWidgets.QTextBrowser()
+        self.diff.setObjectName("diff")
         diff_layout.addWidget(self.diff, 1)
 
         self.diff_btn_box = QtWidgets.QWidget()
         diff_buttons = QtWidgets.QHBoxLayout(self.diff_btn_box)
         diff_buttons.setContentsMargins(0, 4, 0, 0)
         diff_buttons.addStretch(1)
-        self.reject_btn = QtWidgets.QPushButton("✕ Reject")
+        self.reject_btn = QtWidgets.QPushButton("Reject")
         self.reject_btn.setObjectName("reject")
         self.reject_btn.setMinimumWidth(30)
-        self.accept_btn = QtWidgets.QPushButton("✓ Accept")
+        self.accept_btn = QtWidgets.QPushButton("Accept")
         self.accept_btn.setObjectName("accept")
         self.accept_btn.setMinimumWidth(30)
         self.reject_btn.clicked.connect(lambda: self.respond(False))
@@ -1572,11 +1456,10 @@ class AgentWindow(QtWidgets.QMainWindow):
         diff_layout.addWidget(self.diff_btn_box)
         self.diff_btn_box.setVisible(False)
 
-        # 3. Terminal Card
-        self.term_card, term_layout, term_header = card("Terminal Execution")
+        self.term_card, term_layout, term_header = card("Terminal")
         self.term_card.setMinimumWidth(80)
         self.command_label = CompactLabel("")
-        self.command_label.setStyleSheet("color: #fde68a; font-family: 'JetBrains Mono', monospace; font-size: 11.5px;")
+        self.command_label.setStyleSheet(f"color: {AMBER}; font-family: {MONO}; font-size: 11.5px;")
         self.command_label.setMinimumWidth(20)
         term_header.addWidget(self.command_label)
 
@@ -1588,17 +1471,16 @@ class AgentWindow(QtWidgets.QMainWindow):
         self.term_btn_box = QtWidgets.QWidget()
         term_buttons = QtWidgets.QHBoxLayout(self.term_btn_box)
         term_buttons.setContentsMargins(0, 4, 0, 0)
-        term_note = CompactLabel("Executed inside project root")
+        term_note = CompactLabel("Runs inside the project folder")
         term_note.setObjectName("muted")
         term_note.setStyleSheet("font-size: 11.5px;")
         term_note.setMinimumWidth(20)
         term_buttons.addWidget(term_note)
         term_buttons.addStretch(1)
-
-        self.deny_btn = QtWidgets.QPushButton("✕ Deny")
+        self.deny_btn = QtWidgets.QPushButton("Deny")
         self.deny_btn.setObjectName("reject")
         self.deny_btn.setMinimumWidth(30)
-        self.run_btn = QtWidgets.QPushButton("⚡ Run")
+        self.run_btn = QtWidgets.QPushButton("Run")
         self.run_btn.setObjectName("accept")
         self.run_btn.setMinimumWidth(30)
         self.deny_btn.clicked.connect(lambda: self.respond(False))
@@ -1608,21 +1490,57 @@ class AgentWindow(QtWidgets.QMainWindow):
         term_layout.addWidget(self.term_btn_box)
         self.term_btn_box.setVisible(False)
 
-        # Right Column: Unified Tabbed Inspector (Cursor / Antigravity Grade)
         self.tabs = QtWidgets.QTabWidget()
         self.tabs.setObjectName("inspectorTabs")
         self.tabs.setMinimumWidth(260)
-        self.tabs.addTab(self.diff_card, "⚡ Changes (0)")
-        self.tabs.addTab(self.term_card, "🖥️ Terminal")
-        self.tabs.addTab(plan_card, "📋 Roadmap")
+        self.tabs.setDocumentMode(True)
+        self.tabs.addTab(self.diff_card, "Changes (0)")
+        self.tabs.addTab(self.term_card, "Terminal")
+        self.tabs.addTab(plan_card, "Roadmap")
         split.addWidget(self.tabs)
 
-        left_w = max(300, int(self.width() * 0.58))
-        right_w = max(240, int(self.width() * 0.42))
+        left_w = max(300, int(self.width() * 0.60))
+        right_w = max(240, int(self.width() * 0.40))
         split.setSizes([left_w, right_w])
 
         self._set_pending(None)
         return panel
+
+    def _update_go_bar(self):
+        """Show Go / Go all when a brief is saved in this folder and its next phase awaits approval."""
+        state = None
+        if self.folder and not self.worker:
+            try:
+                state = core.brief.BriefState.load(self.folder)
+            except Exception:
+                state = None
+        nxt = state.phase(state.next) if state and state.awaiting else None
+        self.go_bar.setVisible(bool(nxt))
+        if nxt:
+            self.go_label.setText(f"Phase {nxt['n']} of {state.total} is ready: {nxt['title']}")
+            self.go_label.setToolTip(f"{state.title}\nNext: Phase {nxt['n']} — {nxt['title']}")
+
+    def _send_quick(self, text: str):
+        if self.worker:
+            return
+        self.composer.setPlainText(text)
+        self.send()
+
+    def _composer_focus(self, focused: bool):
+        self.composer_box.setProperty("focused", "true" if focused else "false")
+        self.composer_box.style().unpolish(self.composer_box)
+        self.composer_box.style().polish(self.composer_box)
+
+    def _grow_composer(self):
+        """The input grows with what is typed (up to ~8 lines), like Cursor and Codex."""
+        doc_h = int(self.composer.document().size().height()) + 14
+        self.composer.setFixedHeight(max(60, min(170, doc_h)))
+
+    def _set_chip(self, text: str, state: str = "working"):
+        self.step_chip.setText(text)
+        self.step_chip.setProperty("state", state)
+        self.step_chip.style().unpolish(self.step_chip)
+        self.step_chip.style().polish(self.step_chip)
 
     # ---------------------------------------------------------------- capabilities
     def check_capable(self):
@@ -1660,23 +1578,21 @@ class AgentWindow(QtWidgets.QMainWindow):
         else:
             self.folder = ""
         short_name = os.path.basename(self.folder) or self.folder
-        self.path_label.setText(f"📁 {short_name}" if self.folder else "No folder open — choose one to start")
+        self.path_label.setText(short_name if self.folder else "No folder open")
         self.path_label.setToolTip(self.folder or "")
         self.transcript = []
-        if self.folder:
-            intro = (f"Ready to work in **{short_name}**. Tell me what to build or fix;\n"
-                     "I will plan it, read the codebase, write changes, and execute verification tests.")
-            self.transcript.append(["agent", intro])
-        else:
-            self.transcript.append(["agent", "Open a project folder to start. I work autonomously inside your chosen workspace."])
+        self._rendered_items = []
         self._dirty = True
         self._update_status()
+        if hasattr(self, "go_bar"):
+            self._update_go_bar()
 
 
     def new_task(self):
         if self.worker:
             self.stop()
         self.transcript = []
+        self._phase_mode = False
         self.attached_images.clear()
         self._update_attachment_bar()
         self.composer.clear()
@@ -1725,7 +1641,7 @@ class AgentWindow(QtWidgets.QMainWindow):
             self.attachment_bar.setVisible(False)
             return
 
-        lbl = QtWidgets.QLabel(f"📷 Attached ({len(self.attached_images)}):")
+        lbl = QtWidgets.QLabel(f"Attached ({len(self.attached_images)})")
         lbl.setStyleSheet("color: #38bdf8; font-weight: 600; font-size: 11.5px;")
         self.attachment_layout.addWidget(lbl)
 
@@ -1828,7 +1744,7 @@ class AgentWindow(QtWidgets.QMainWindow):
             return
         elapsed = int(time.time() - self.start_time)
         mins, secs = divmod(elapsed, 60)
-        self.tb_timer.setText(f"{mins:02d}:{secs:02d}s")
+        self.tb_timer.setText(f"{mins:02d}:{secs:02d}")
         # Every 20 seconds of active work, reset system idle timer so screen does not sleep while user watches
         if elapsed > 0 and elapsed % 20 == 0:
             try:
@@ -1861,105 +1777,120 @@ class AgentWindow(QtWidgets.QMainWindow):
         QtCore.QTimer.singleShot(25, lambda: self.chat.verticalScrollBar().setValue(self.chat.verticalScrollBar().maximum()))
         QtCore.QTimer.singleShot(75, lambda: self.chat.verticalScrollBar().setValue(self.chat.verticalScrollBar().maximum()))
 
+    SUGGESTIONS = [
+        ("Understand this project", "Scan the project: list key folders, read the main entrypoints, and explain the architecture and how to run it."),
+        ("Build the landing page", "Build a modern, responsive landing page for this application with hero, feature cards and navigation, and connect its route."),
+        ("Fix what is broken", "Run the app and tests, find what fails, and fix the root causes with minimal changes."),
+        ("Plan the next phase", "Analyze the repository and write an architectural plan in docs/PHASE_1.md, then start phase 1."),
+    ]
+
+    def _hero_html(self) -> str:
+        name = html.escape(os.path.basename(self.folder) or self.folder) if self.folder else ""
+        sub = (f"Working in <span style='color:{TEXT};'>{name}</span> &nbsp;·&nbsp; runs fully offline on this PC"
+               if self.folder else "Open a project folder to begin &nbsp;·&nbsp; runs fully offline on this PC")
+        rows = ""
+        if self.folder:
+            for i, (title, _prompt) in enumerate(self.SUGGESTIONS):
+                rows += (f'<tr><td bgcolor="{SURFACE}" style="background-color:{SURFACE}; border:1px solid {LINE}; padding:11px 16px;">'
+                         f'<a href="action:suggest:{i}" style="color:{TEXT}; text-decoration:none; font-size:13px;">{html.escape(title)}'
+                         f'</a> <span style="color:{SUBTLE};">&nbsp;→</span></td></tr><tr><td height="6"></td></tr>')
+        else:
+            rows = (f'<tr><td align="center"><a href="action:open" style="color:{ACCENT_HOVER}; text-decoration:none;">'
+                    f'Open folder…</a></td></tr>')
+        return (f'<table width="100%" cellspacing="0" cellpadding="0"><tr><td height="40"></td></tr>'
+                f'<tr><td align="center" style="color:{ACCENT}; font-size:26px;">◆</td></tr>'
+                f'<tr><td align="center" style="color:#ffffff; font-size:22px; font-weight:600; padding:8px 0 4px 0;">What should we build?</td></tr>'
+                f'<tr><td align="center" style="color:{MUTED}; font-size:12.5px; padding-bottom:22px;">{sub}</td></tr></table>'
+                f'<table width="78%" align="center" cellspacing="0" cellpadding="0">{rows}</table>')
+
+    def _item_html(self, role: str, text: str, p_idx: int, live: bool, working: bool) -> str:
+        if role == "user":
+            shown = text
+            if len(shown) > 900:
+                shown = shown[:700].rstrip() + f"\n… (+{len(text) - 700:,} more characters; the full brief was sent to the agent)"
+            return (f'<table width="100%" cellspacing="0" cellpadding="0"><tr><td bgcolor="{RAISED}" '
+                    f'style="background-color:{RAISED}; border:1px solid {LINE_STRONG}; padding:10px 14px;">'
+                    f'<table width="100%" cellspacing="0" cellpadding="0"><tr>'
+                    f'<td style="color:{SUBTLE}; font-size:11px; font-weight:600; letter-spacing:1px;">YOU</td>'
+                    f'<td align="right"><a href="action:rerun:{p_idx}" style="color:{MUTED}; text-decoration:none; font-size:11px;">Rerun</a>'
+                    f'&nbsp;&nbsp;<a href="action:edit:{p_idx}" style="color:{MUTED}; text-decoration:none; font-size:11px;">Edit</a></td></tr></table>'
+                    f'{_prose(shown)}</td></tr></table>' + _gap(14))
+        if role == "error":
+            return (f'<table width="100%" cellspacing="0" cellpadding="0"><tr><td bgcolor="{BAD_BG}" '
+                    f'style="background-color:{BAD_BG}; border:1px solid #5a232b; padding:10px 14px; color:#ffc9ce;">'
+                    f'<b style="color:{BAD};">Something went wrong</b><br>{html.escape(text)}<br>'
+                    f'<a href="action:retry" style="color:#ffffff; font-weight:600; text-decoration:none;">Retry &nbsp;↻</a>'
+                    f'</td></tr></table>' + _gap(10))
+        if role == "note":
+            if text.startswith("Phase "):
+                return (_gap(6) + f'<table width="100%" cellspacing="0" cellpadding="0"><tr>'
+                        f'<td width="22" style="color:{ACCENT}; font-size:12px;">◆</td>'
+                        f'<td style="color:#ffffff; font-weight:600; font-size:13px; border-top:1px solid {LINE}; padding-top:8px;">'
+                        f'{html.escape(text)}</td></tr></table>' + _gap(6))
+            return (f'<table width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" '
+                    f'style="color:{SUBTLE}; font-size:11.5px; padding:4px 0;">{html.escape(text)}</td></tr></table>' + _gap(6))
+        if not text.strip() and live and working:
+            body = (f'<span style="color:{ACCENT};">●</span> '
+                    f'<span style="color:{MUTED};">{html.escape(self.active_status_text)}</span>')
+        else:
+            body = message_html(text, is_generating=(live and working))
+            if not body:
+                body = f"<span style='color:{SUBTLE};'>No response.</span>"
+        retry = ""
+        if not working and ("did not produce an answer" in text or "error" in text.lower()):
+            retry = (f'<br><a href="action:retry" style="color:{ACCENT_HOVER}; text-decoration:none; font-weight:600;">'
+                     f'Retry prompt &nbsp;↻</a>')
+        return (f'<table width="100%" cellspacing="0" cellpadding="0"><tr>'
+                f'<td width="22" valign="top" style="color:{ACCENT}; padding-top:2px;">◆</td>'
+                f'<td>{body}{retry}</td></tr></table>' + _gap(14))
+
     def _render_if_dirty(self):
+        """Render the transcript. While the agent streams only the last message changes, so
+        only that tail is replaced; re-parsing the whole chat 16 times a second made long
+        sessions lag."""
         if not self._dirty:
             return
         self._dirty = False
-        parts = []
-        is_working = bool(self.worker)
-        user_prompt_idx = 0
-        
+        working = bool(self.worker)
+        items = []
+        user_idx = 0
+        last = len(self.transcript) - 1
         for i, (role, text) in enumerate(self.transcript):
+            p_idx = user_idx
             if role == "user":
-                p_idx = user_prompt_idx
-                user_prompt_idx += 1
-                parts.append(f'''
-                <div style="background-color: #121c30; border: 1px solid #1e3358; border-radius: 10px; padding: 12px 16px; margin: 10px 0 10px 24px; color: #f8fafc;">
-                  <table width="100%" cellpadding="0" cellspacing="0" border="0">
-                    <tr>
-                      <td style="color: #38bdf8; font-weight: 700; font-size: 11.5px; letter-spacing: 0.5px;">👤 YOU</td>
-                      <td align="right">
-                        <a href="action:rerun:{p_idx}" style="color: #38bdf8; text-decoration: none; font-size: 11px; font-weight: 600; margin-right: 12px;">🔄 Rerun</a>
-                        <a href="action:edit:{p_idx}" style="color: #94a3b8; text-decoration: none; font-size: 11px; font-weight: 600;">✏️ Edit</a>
-                      </td>
-                    </tr>
-                  </table>
-                  <div style="font-size: 13.5px; line-height: 1.5; color: #f1f5f9; margin-top: 6px;">{_prose(text)}</div>
-                </div>
-                ''')
-            elif role == "error":
-                parts.append(f'''
-                <div style="background-color: #450a0a; border: 1px solid #991b1b; border-radius: 8px; padding: 10px 14px; margin: 8px 0; color: #fecaca;">
-                  <table width="100%" cellpadding="0" cellspacing="0" border="0">
-                    <tr>
-                      <td><b style="color: #ef4444;">✕ Error:</b> {html.escape(text)}</td>
-                      <td align="right" width="110">
-                        <a href="action:retry" style="background-color: #dc2626; color: #ffffff; text-decoration: none; font-weight: 700; font-size: 11px; padding: 4px 10px; border-radius: 5px;">🔄 Retry</a>
-                      </td>
-                    </tr>
-                  </table>
-                </div>
-                ''')
-            elif role == "note":
-                parts.append(f'''
-                <div style="background-color: #0c182c; border: 1px solid #1a2942; border-radius: 8px; padding: 8px 12px; margin: 6px 0; color: #94a3b8; font-size: 12px;">
-                  ℹ️ {html.escape(text)}
-                </div>
-                ''')
-            else:
-                is_last_agent = (i == len(self.transcript) - 1)
-                
-                # If text is empty and agent is actively working, show rich thinking card
-                if not text.strip() and is_working and is_last_agent:
-                    body_html = f'''
-                    <div style="background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0d1a33, stop:1 #111e3b); border: 1px solid #2563eb; border-radius: 10px; padding: 12px 16px; margin: 4px 0;">
-                      <table width="100%">
-                        <tr>
-                          <td width="28"><span style="font-size: 18px;">🧠</span></td>
-                          <td>
-                            <div style="color: #38bdf8; font-weight: 700; font-size: 13px;">NEURAL REASONING & TASK PLANNING</div>
-                            <div style="color: #cbd5e1; font-size: 12.5px; margin-top: 3px;">{html.escape(self.active_status_text)}</div>
-                          </td>
-                          <td align="right" width="80">
-                            <span style="background: #1e1b4b; color: #c4b5fd; border: 1px solid #4338ca; border-radius: 6px; padding: 3px 8px; font-size: 11px; font-weight: 700;">THINKING</span>
-                          </td>
-                        </tr>
-                      </table>
-                    </div>
-                    '''
-                else:
-                    body_html = message_html(text, is_generating=(is_working and is_last_agent))
-                    if not body_html:
-                        body_html = "<p style='color: #64748b; font-style: italic;'>Generating thoughts…</p>"
+                user_idx += 1
+            live = (i == last)
+            key = (role, text, p_idx, live and working, self.active_status_text if (live and working and not text.strip()) else "")
+            html_item = self._item_cache.get(key)
+            if html_item is None:
+                if len(self._item_cache) > 300:
+                    self._item_cache.clear()
+                html_item = self._item_cache[key] = self._item_html(role, text, p_idx, live, working)
+            items.append(html_item)
+        if not items:
+            items = [self._hero_html()]
 
-                retry_action_html = ""
-                if not is_working and ("did not produce an answer" in text or "error" in text.lower()):
-                    retry_action_html = '''
-                    <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid #1e2e4a;">
-                      <a href="action:retry" style="background-color: #2563eb; color: #ffffff; text-decoration: none; font-weight: 700; font-size: 11.5px; padding: 5px 12px; border-radius: 6px; display: inline-block;">🔄 Retry Prompt</a>
-                    </div>
-                    '''
-
-                parts.append(f'''
-                <div style="background-color: #0c1322; border: 1px solid #18253c; border-radius: 10px; padding: 12px 16px; margin: 10px 24px 10px 0; color: #f1f5f9;">
-                  <div style="color: #38bdf8; font-weight: 700; font-size: 12px; letter-spacing: 0.5px; margin-bottom: 6px;">
-                    ⚡ DevOS AI Code Agent
-                  </div>
-                  <div>{body_html}</div>
-                  {retry_action_html}
-                </div>
-                ''')
-
-        new_html = "".join(parts)
-        if getattr(self, "_last_rendered_html", "") == new_html:
+        prev = self._rendered_items
+        if prev and len(prev) == len(items) and prev[-1] == items[-1] and prev[:-1] == items[:-1]:
             return
-        self._last_rendered_html = new_html
-
         bar = self.chat.verticalScrollBar()
         was_at_bottom = self._auto_scroll_to_bottom or (bar.value() >= bar.maximum() - 70)
         old_val = bar.value()
 
-        self.chat.setHtml(new_html)
+        doc = self.chat.document()
+        if prev and len(prev) == len(items) and prev[:-1] == items[:-1] and self._tail_pos is not None:
+            cursor = QtGui.QTextCursor(doc)
+            cursor.setPosition(self._tail_pos)
+            cursor.movePosition(QtGui.QTextCursor.End, QtGui.QTextCursor.KeepAnchor)
+            cursor.removeSelectedText()
+            cursor.insertHtml(items[-1])
+        else:
+            self.chat.setHtml("".join(items[:-1]))
+            self._tail_pos = max(0, doc.characterCount() - 1)
+            cursor = QtGui.QTextCursor(doc)
+            cursor.movePosition(QtGui.QTextCursor.End)
+            cursor.insertHtml(items[-1])
+        self._rendered_items = items
 
         if was_at_bottom:
             self.scroll_to_bottom()
@@ -1980,12 +1911,12 @@ class AgentWindow(QtWidgets.QMainWindow):
                     self.ai_badge.setProperty("state", "online")
                     self.ai_badge.setToolTip("DevOS AI Core (Local Offline Engine) is active on 127.0.0.1:11434.\nClick to change model or speed acceleration settings.")
                 else:
-                    self.ai_badge.setText("⚠  Offline · Click to Setup ▾")
+                    self.ai_badge.setText("▲  Offline · click to set up ▾")
                     self.ai_badge.setProperty("state", "offline")
                     self.ai_badge.setToolTip("DevOS AI Core is offline.\nClick to start local engine or switch to Gemini/Groq.")
             else:
                 has_key = bool(engine.get("api_key"))
-                status_icon = "⚡" if has_key else "⚠"
+                status_icon = "●" if has_key else "▲"
                 self.ai_badge.setText(f"{status_icon}  {engine['badge']} ▾")
                 self.ai_badge.setProperty("state", "cloud" if has_key else "warning")
                 self.ai_badge.setToolTip(f"Active Provider: {engine['name']}\nModel: {engine['model']}\nSpeed: {engine['speed']}\nClick to configure AI engines and API keys.")
@@ -2118,6 +2049,15 @@ class AgentWindow(QtWidgets.QMainWindow):
         if href in ("action:retry", "action:rerun"):
             self.rerun_last_prompt()
             return
+        if href == "action:open":
+            self.choose_folder()
+            return
+        if href.startswith("action:suggest:"):
+            try:
+                self.insert_prompt(self.SUGGESTIONS[int(href.split(":")[-1])][1])
+            except (ValueError, IndexError):
+                pass
+            return
         if href.startswith("action:rerun:"):
             try:
                 idx = int(href.split(":")[-1])
@@ -2153,7 +2093,7 @@ class AgentWindow(QtWidgets.QMainWindow):
         self.user_prompts.append((raw_task, list(attached)))
         if hasattr(self, "rerun_btn"):
             self.rerun_btn.setEnabled(True)
-            self.rerun_btn.setText("🔄 Rerun last")
+            self.rerun_btn.setText("Rerun last")
             self.rerun_btn.setStyleSheet("")
 
         task_text = raw_task if raw_task else "Please inspect the attached screenshot / image and address any issues, errors, or requests shown in it."
@@ -2183,6 +2123,7 @@ class AgentWindow(QtWidgets.QMainWindow):
 
         self.transcript.append(["user", display_text])
         self.transcript.append(["agent", ""])
+        self._phase_mode = False
         self.plan.clear()
         self.plan_progress.setValue(0)
         self._auto_scroll_to_bottom = True
@@ -2196,7 +2137,7 @@ class AgentWindow(QtWidgets.QMainWindow):
         self.current_topic = core.extract_task_topic(agent_task)
         self.active_status_text = "Analyzing project context & task requirements..."
         self.tb_status.setText(self.active_status_text)
-        self.tb_topic.setText(f"🎯 Target: {self.current_topic}")
+        self.tb_topic.setText(self.current_topic)
         self.thinking_banner.setVisible(True)
         # Collect previous conversation turns for multi-turn context
         history_turns = []
@@ -2216,8 +2157,8 @@ class AgentWindow(QtWidgets.QMainWindow):
         self.send_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
         self.stop_btn.setVisible(True)
-        self.step_chip.setText("🧠 Thinking…")
-        self.step_chip.setStyleSheet("background: #1e1b4b; color: #c4b5fd; border: 1px solid #4338ca;")
+        self.go_bar.setVisible(False)
+        self._set_chip("Thinking…")
         self._inhibit_sleep()
         self.worker.start()
 
@@ -2225,7 +2166,7 @@ class AgentWindow(QtWidgets.QMainWindow):
         self._uninhibit_sleep()
         if self.worker:
             self.worker.cancel()
-            self.step_chip.setText("Stopping…")
+            self._set_chip("Stopping…", "idle")
             self.tb_status.setText("Aborting active operation...")
             QtCore.QTimer.singleShot(1200, self._force_cleanup_worker)
         self.stop_btn.setEnabled(False)
@@ -2247,7 +2188,7 @@ class AgentWindow(QtWidgets.QMainWindow):
     def on_event(self, kind, payload):
         if kind == "task_init":
             self.current_topic = payload.get("topic", "")
-            self.tb_topic.setText(f"🎯 Target: {self.current_topic}")
+            self.tb_topic.setText(self.current_topic)
             initial_plan = payload.get("plan", [])
             if initial_plan:
                 for step in initial_plan:
@@ -2256,11 +2197,10 @@ class AgentWindow(QtWidgets.QMainWindow):
             self.active_status_text = payload.get("status", "")
             self.tb_status.setText(self.active_status_text)
             step_num = payload.get("step", 1)
-            self.step_chip.setText(f"🧠 Step {step_num} · Thinking")
+            self._set_chip(f"Step {step_num} · thinking")
             self._dirty = True
         elif kind == "thinking":
-            self.step_chip.setText(f"🧠 Step {payload} · Working")
-            self.step_chip.setStyleSheet("background: #1e1b4b; color: #a78bfa; border: 1px solid #6366f1;")
+            self._set_chip(f"Step {payload} · working")
             last = self.transcript[-1] if self.transcript else None
             if last is None or last[0] != "agent" or last[1]:
                 self.transcript.append(["agent", ""])
@@ -2274,13 +2214,34 @@ class AgentWindow(QtWidgets.QMainWindow):
             for step in payload:
                 self._add_step(step, "plan")
             self._update_plan_progress()
+        elif kind == "phase":
+            self._phase_mode = True
+            self._set_chip(f"Phase {payload['index']} of {payload['total']}")
+            if self.transcript and self.transcript[-1] == ["agent", ""]:
+                self.transcript.pop()            # the empty placeholder: the phase header goes first
+            self.transcript.append(["note", f"Phase {payload['index']} of {payload['total']}: {payload['title']}"])
+            self.transcript.append(["agent", ""])
+            self._set_phase_row(payload["index"], "running")
+            self._dirty = True
+        elif kind == "report":
+            if self.transcript and self.transcript[-1] == ["agent", ""]:
+                self.transcript[-1][1] = payload
+            else:
+                self.transcript.append(["agent", payload])
+            self._dirty = True
+        elif kind == "speed":
+            self.speed_label.setText(f"{payload['tokens_per_sec']} tok/s · last reply {payload['seconds']}s")
         elif kind == "step":
-            self._add_step(payload["title"], "running")
-            self.step_chip.setText(f"⚡ {payload['title'][:32]}")
-            self._update_plan_progress()
+            self._set_chip(payload['title'][:34])
+            if not self._phase_mode:
+                self._add_step(payload["title"], "running")
+                self._update_plan_progress()
         elif kind == "step_status":
-            self._mark_last_step(payload)
-            self._update_plan_progress()
+            if not self._phase_mode:
+                self._mark_last_step(payload)
+                self._update_plan_progress()
+        elif kind == "phase_done":
+            self._set_phase_row(payload["index"], "done" if payload.get("ok") else "failed")
         elif kind == "change":
             self._show_change(payload)
         elif kind == "change_status":
@@ -2293,15 +2254,17 @@ class AgentWindow(QtWidgets.QMainWindow):
             suffix = " · timed out" if payload["timed_out"] else ""
             self.terminal.appendPlainText(f"[exit {payload['code']}{suffix}]\n")
         elif kind == "done":
+            self._dirty = True
             if self.transcript and self.transcript[-1] == ["agent", ""]:
                 self.transcript[-1][1] = payload or "Task completed successfully."
-            if self.agent and getattr(self.agent, "changed", None):
-                count = len(self.agent.changed)
-                self.transcript.append(["note", f"Mission accomplished. {count} file{'s' if count != 1 else ''} updated."])
+            agent = getattr(self.worker, "agent", None)
+            changed = getattr(agent, "changed", None) or []
+            count = len(set(changed))
+            if count:
+                self.transcript.append(["note", f"Done · {count} file{'s' if count != 1 else ''} changed"])
             else:
                 self.transcript.append(["note", "Execution completed."])
             self.thinking_banner.setVisible(False)
-            self._dirty = True
 
     def on_approval(self, action):
         self.pending = action
@@ -2315,8 +2278,7 @@ class AgentWindow(QtWidgets.QMainWindow):
             self.command_label.setText("$ " + action.command[:80])
             self.terminal.appendPlainText(f"$ {action.command}")
         self._set_pending(action)
-        self.step_chip.setText("⏳ Waiting for you")
-        self.step_chip.setStyleSheet("background: #451a03; color: #fde047; border: 1px solid #d97706;")
+        self._set_chip("Waiting for you", "idle")
         QtWidgets.QApplication.alert(self)
 
     def respond(self, ok: bool):
@@ -2327,8 +2289,7 @@ class AgentWindow(QtWidgets.QMainWindow):
         self.pending = None
         self._set_pending(None)
         if self.worker:
-            self.step_chip.setText("⚡ Working…")
-            self.step_chip.setStyleSheet("background: #022c22; color: #5eead4; border: 1px solid #0f766e;")
+            self._set_chip("Working…")
 
     def on_failed(self, message):
         self.transcript.append(["error", message])
@@ -2338,8 +2299,7 @@ class AgentWindow(QtWidgets.QMainWindow):
         self.send_btn.setEnabled(True)
         if hasattr(self, "rerun_btn"):
             self.rerun_btn.setEnabled(True)
-            self.rerun_btn.setText("🔄 Retry Failed Prompt")
-            self.rerun_btn.setStyleSheet("background: #dc2626; color: #ffffff; font-weight: bold; border-radius: 8px; padding: 6px 14px;")
+            self.rerun_btn.setText("Retry failed prompt")
         self._dirty = True
 
     def on_finished(self):
@@ -2352,16 +2312,16 @@ class AgentWindow(QtWidgets.QMainWindow):
         self.send_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
         self.stop_btn.setVisible(False)
-        self.step_chip.setText("● Idle")
-        self.step_chip.setStyleSheet("background: #1e1b4b; color: #c4b5fd; border: 1px solid #4338ca;")
+        self._set_chip("Idle", "idle")
+        self.speed_label.setText("")
+        self._update_go_bar()
         self._update_plan_progress()
 
         # Check if last response was an error/failure
         if self.transcript and any(err in self.transcript[-1][1].lower() for err in ("did not produce an answer", "failed", "error")):
             if hasattr(self, "rerun_btn"):
                 self.rerun_btn.setEnabled(True)
-                self.rerun_btn.setText("🔄 Retry Failed Prompt")
-                self.rerun_btn.setStyleSheet("background: #2563eb; color: #ffffff; font-weight: bold; border-radius: 8px; padding: 6px 14px;")
+                self.rerun_btn.setText("Retry failed prompt")
 
         # If there are queued prompts, execute the next one in queue
         if self.prompt_queue:
@@ -2372,11 +2332,11 @@ class AgentWindow(QtWidgets.QMainWindow):
 
     # ---------------------------------------------------------------- helpers
     def _show_change(self, action):
-        self.diff_title.setText(f"📄 {action.title}")
+        self.diff_title.setText(action.title)
         self.diff.setHtml(diff_html(action.diff))
         if hasattr(self, "tabs"):
             self.tabs.setCurrentWidget(self.diff_card)
-            self.tabs.setTabText(0, "⚡ Changes (Pending)")
+            self.tabs.setTabText(0, "Changes · Pending")
 
     def _set_pending(self, action):
         edit = bool(action and action.kind == "edit")
@@ -2404,6 +2364,20 @@ class AgentWindow(QtWidgets.QMainWindow):
         self.plan.addItem(item)
         self.plan.scrollToBottom()
 
+    def _set_phase_row(self, number: int, state: str):
+        """Roadmap row of a brief phase: the row whose title starts 'Phase <number>', else the number-th row."""
+        row = next((r for r in range(self.plan.count())
+                    if (self.plan.item(r).data(QtCore.Qt.UserRole) or "").startswith(f"Phase {number} ")), None)
+        if row is None and 0 < number <= self.plan.count():
+            row = number - 1
+        if row is None:
+            return
+        item = self.plan.item(row)
+        title = item.data(QtCore.Qt.UserRole) or ""
+        item.setText(f"{row + 1:02d}. {STEP_ICON.get(state, '?')}  {title[:85]}")
+        item.setForeground(QtGui.QColor(STEP_COLOR.get(state, MUTED)))
+        self._update_plan_progress()
+
     def _mark_last_step(self, state):
         for row in range(self.plan.count() - 1, -1, -1):
             item = self.plan.item(row)
@@ -2419,13 +2393,13 @@ class AgentWindow(QtWidgets.QMainWindow):
         if total == 0:
             self.plan_progress.setValue(0)
             if hasattr(self, "tabs"):
-                self.tabs.setTabText(2, "📋 Roadmap")
+                self.tabs.setTabText(2, "Roadmap")
             return
         done_count = sum(1 for row in range(total) if STEP_ICON["done"] in self.plan.item(row).text())
         pct = int((done_count / total) * 100)
         self.plan_progress.setValue(pct)
         if hasattr(self, "tabs"):
-            self.tabs.setTabText(2, f"📋 Roadmap ({pct}%)")
+            self.tabs.setTabText(2, f"Roadmap · {pct}%")
         self.plan_progress.setToolTip(f"{done_count}/{total} steps completed ({pct}%)")
 
     def _policy_changed(self):
@@ -2441,7 +2415,7 @@ class AgentWindow(QtWidgets.QMainWindow):
         rg = "Ripgrep Accelerated" if shutil.which("rg") else "Built-in Search"
         cmd_str = "Auto-commands: ON" if getattr(self.policy, "auto_commands", False) else "Commands: Ask First"
         self.status.setText(
-            f"⚡ Local Neural Engine · {'Auto-reads: ON' if self.policy.auto_reads else 'Auto-reads: OFF'} · "
+            f"Local Neural Engine · {'Auto-reads: ON' if self.policy.auto_reads else 'Auto-reads: OFF'} · "
             f"{'Auto-edits: ON' if self.policy.auto_edits else 'Auto-edits: OFF'} · {cmd_str} · {rg} · 100% Private Offline")
         if hasattr(self, "hint"):
             auto_c = getattr(self.policy, "auto_commands", False)

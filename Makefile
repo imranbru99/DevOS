@@ -2,13 +2,13 @@
 .PHONY: help setup iso iso-docker test-qemu-bios test-qemu-uefi test-usb-bios test-usb-uefi verify-iso clean lint check-size
 
 SHELL := /bin/bash
-IMAGE_NAME := devos-builder
-ISO_OUTPUT := out/devos-24.04-amd64.iso
+IMAGE_NAME := devos-builder:26.04
+ISO_OUTPUT := out/devos-26.04-amd64.iso
 
 help:
 	@echo "DevOS Build System"
 	@echo "=================="
-	@echo "  make setup            - Install host build tools (Ubuntu 24.04 required)"
+	@echo "  make setup            - Install host build tools (Ubuntu 26.04 required)"
 	@echo "  make iso              - Build DevOS live hybrid ISO natively (requires root)"
 	@echo "  make iso-docker       - Build DevOS live ISO inside containerized environment"
 	@echo "  make verify-iso       - Verify an existing ISO boots on real hardware"
@@ -22,23 +22,23 @@ help:
 
 setup:
 	@echo "==> Running host environment setup..."
-	sudo ./build/setup-build-env.sh
+	sudo bash ./build/setup-build-env.sh
 
 iso:
 	@echo "==> Building DevOS ISO natively..."
-	sudo ./build/build-iso.sh
+	sudo bash ./build/build-iso.sh
 	@echo "==> Verifying ISO real-hardware boot layout..."
-	./tests/boot/verify-iso-bootability.sh "$(ISO_OUTPUT)"
+	bash ./tests/boot/verify-iso-bootability.sh "$(ISO_OUTPUT)"
 
 iso-docker:
 	@echo "==> Building containerized build environment..."
 	docker build -t $(IMAGE_NAME) -f build/docker/Dockerfile.build .
 	@echo "==> Building DevOS ISO inside container..."
 	docker run --rm --privileged \
-		-e DEVOS_WORK_DIR="/tmp/build_work" \
+		-e DEVOS_WORK_DIR="/workspace/build_work/resolute" \
 		-e DEVOS_ZSTD_LEVEL="15" \
 		-v "$(CURDIR):/workspace" \
-		$(IMAGE_NAME) bash -c './build/build-iso.sh && ./tests/boot/verify-iso-bootability.sh out/devos-24.04-amd64.iso'
+		$(IMAGE_NAME) bash -c 'bash ./build/build-iso.sh && bash ./tests/boot/verify-iso-bootability.sh out/devos-26.04-amd64.iso'
 
 verify-iso:
 	@echo "==> Verifying ISO real-hardware boot layout..."

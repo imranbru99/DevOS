@@ -34,8 +34,10 @@ DevOS exists to give people — especially Windows users and developers — **an
 |---|---|
 | 🪟 **Windows apps** | `.exe` / `.msi` open with a double-click (32- and 64-bit). Popular apps such as AnyDesk, Zoom, Discord, Spotify and Steam get their **native DevOS version** offered instead. |
 | 🤖 **Android apps** | `.apk` files install into a built-in Android system (downloaded once on first use, ~850 MB). WhatsApp, Telegram, Spotify and similar APKs are offered as native DevOS apps — no Android download needed. |
-| ✨ **DevOS AI** | Private on-device assistant: PC questions, actions, notes, web search, reminders, PDFs, text-in-images, photos, voice (Bangla + English), **Meta+H** push-to-talk and optional **“Hey DevOS”**. |
-| 🧹 **DevOS Optimizer** | Finds apps you haven't used for 15+ minutes and offers to close them; cleans temp files, caches, the Recycle Bin and Windows-app leftovers. |
+| ✨ **DevOS AI** | Private on-device assistant: PC questions, actions, notes, web search, reminders, PDFs, text-in-images, photos, voice (Bangla + English), Islamic daily Ayah & Hadith with Muhiuddin Khan Bangla translation, **Meta+H** push-to-talk and optional **“Hey DevOS”**. |
+| 🌙 **Islamic & Modesty** | Authentic Quran & Hadith with verified **Muhiuddin Khan Bangla translation** & Arabic, offline prayer times & Qibla. Intelligent on-device modesty filter for Chrome/Brave/Edge that blurs **only women's bodies** while keeping text-based images, memes, and documents sharp and readable. |
+| 🧹 **DevOS Optimizer** | Finds apps you haven't used for 15+ minutes and offers to close them (with real app names like *This PC*, *Notepad*); cleans temp files, caches, the Recycle Bin and Windows-app leftovers. |
+| 🚀 **Kids Mode** | Safe cosmic playground with interactive mouse-play physics (`devos-kids-mode`); children can play safely while background jobs keep running. |
 | 📦 **Apps window** | Windows-style *Installed apps*: uninstall Linux, Windows and Android apps, clear cache, reset data and browser cookies. |
 | 📝 **Notepad** | Windows 11-style tabs; **unsaved text survives crashes and power cuts**. |
 | 💻 **Developer ready** | VS Code, Git, Node.js, Python, PHP + Composer, MariaDB, PostgreSQL, Redis, SQLite, Podman (Docker-compatible). |
@@ -116,6 +118,7 @@ Open **DevOS AI** from the desktop, or press **Win + H** and just speak.
 | “Open my Downloads” / “Make a folder called Projects on the desktop” | Files and folders |
 | “Open Wi-Fi settings”, “Volume up”, “Brightness down”, “Take a screenshot”, “Lock the screen” | Settings and system actions |
 | “Close Chrome”, “Free up space”, “Open Apps” | App and cleanup actions |
+| “Today's Islamic” / “Today's ayah” / “আজকের আয়াত” | Shows authentic Quran Ayah & Hadith of the day with Arabic, English, and **Muhiuddin Khan Bangla translation** directly from verified local datasets with zero AI hallucination |
 | “Help me, Wi-Fi is not working”, “Is my PC safe?”, “Is this link safe?” plus the address | Checks this PC and does the safe next step |
 
 Shut down, restart and uninstall always ask for confirmation first.
@@ -132,6 +135,7 @@ Shut down, restart and uninstall always ask for confirmation first.
 
 **Experience**
 - Modern chat window: conversation history sidebar with search, rename and delete; answers stream in word by word; Stop button; copy and regenerate; drag-and-drop files.
+- **Starter Cards:** One-click suggestion cards for common actions on new chats (*Today's Islamic*, *What's my PC config?*, *How many apps are installed?*, *Start kids mode*).
 - **Fast and light:** the built-in model is small (0.5B, ~490 MB); the first words usually appear in under a second, and its memory is **released after 5 idle minutes**.
 - **Smarter DevOS AI:** one click adds a larger model (1.1 GB) for better free-form answers; one click removes it again.
 - **Private:** runs only on your PC; chats, files and voice never leave it.
@@ -139,6 +143,7 @@ Shut down, restart and uninstall always ask for confirmation first.
 
 ### 5. DevOS Optimizer
 - Tray app that watches for apps you haven't used for 15+ minutes and that use a lot of memory, and offers **Close / Keep / Don't ask again** (never touches system processes).
+- **Real app name resolution:** Accurately identifies applications by their desktop launcher and command line (e.g., *This PC*, *DevOS Notepad*, *DevOS Notes*) instead of generic runtime names like `python3`.
 - **Clean up**: temporary files, app and browser caches, Recycle Bin, Windows-app temp files, old crash logs, and (optionally) old downloads — with sizes shown first and a confirmation.
 - Low disk space warnings, and an **Ask DevOS AI** button for tips based on what's using your PC.
 
@@ -355,9 +360,13 @@ Shut down, restart and uninstall always ask for confirmation first.
   - **Account & device:** warns about admin accounts without a password, shows whether the disk is encrypted.
 
 ### 15. Islamic DevOS & family safety (optional — "Islamic family" preset)
-- **Prayer times, Quran & Hadith:** prayer reminders (Karachi method / Hanafi Asr by default, 100+ cities incl. all of Bangladesh), Hijri date, Qibla compass, and a daily **ayah and hadith from verified published texts** (Arabic + বাংলা + English, always with the reference). DevOS AI only adds clearly labelled reflections and never generates the texts themselves.
+- **Prayer times, Quran & Hadith:** prayer reminders (Karachi method / Hanafi Asr by default, 100+ cities incl. all of Bangladesh), Hijri date, Qibla compass, and daily **authentic ayah and hadith from verified published datasets** (Arabic original + verified **মুহিউদ্দীন খান Bangla translation** + Saheeh International English, always with exact chapter & verse references). DevOS AI chat connects directly to this authentic offline dataset with zero AI hallucinations.
 - **Family Safety:** blocks adult content for every app and browser, forces SafeSearch and YouTube Restricted mode, turns off private browsing, and stops DNS bypass tricks. Set a password on the parent account so children can't switch it off.
-- **Modesty filter:** on-device AI in Chrome/Edge/Brave blurs images and videos showing women (or all people, stricter). AI is imperfect: it can miss some images or blur some men.
+- **Intelligent Modesty filter (`devos-modesty`):** on-device computer vision in Chrome/Edge/Brave/Chromium that blurs **only adult women's bodies** using TinyFaceDetector and BodyPix. Features cross-ethnicity **skin-tone color verification (`hasSkinTone`)** and **anatomical body pose validation (`hasAnatomicalBody`)** so that text-based images, memes, documents, news graphics, code snippets, and infographics are **never falsely blurred**.
+
+### 15b. Kids Mode (`devos-kids-mode`)
+- **Cosmic interactive playground:** A full-screen space-themed canvas with glowing star constellations, shooting star trails, interactive floating celestial bodies, and dynamic mouse gravity physics.
+- **Safe computing:** Keeps background developer servers, long-running downloads, and open desktop windows completely protected while children play safely. Start with the desktop shortcut or ask DevOS AI *"Start kids mode"*. Exit easily with `Esc`.
 
 ### 16. Built-in productivity & AI everywhere
 - **DevOS Notes** — notebooks, sticky notes on the desktop, voice notes, AI summarize / to-do / translate; saved in Documents.
@@ -467,21 +476,25 @@ Then open **http://localhost:8006** in your browser. The VM uses a virtual disk 
 
 ## Build the ISO from source
 
-Requirements: Docker (Linux or Docker Desktop) or an Ubuntu 24.04 host, ~25 GB free space, internet.
+The current source targets **Ubuntu 26.04 LTS (Resolute)**. Existing download links
+above refer to previously published releases until a new ISO is released.
+See [DevOS updates and the Ubuntu upgrade helper](docs/UPDATES.md).
+
+Requirements: Docker or Podman, or an Ubuntu 26.04 host, ~25 GB free space, internet.
 
 ```bash
 git clone https://github.com/imranbru99/DevOS.git
 cd DevOS
-make iso-docker          # containerized build -> out/devos-24.04-amd64.iso
+make iso-docker          # containerized build -> out/devos-26.04-amd64.iso
 ```
 
 Manual container build (keeps a reusable build cache so rebuilds take ~25 minutes):
 ```bash
-docker build -t devos-builder -f build/docker/Dockerfile.build .
+docker build -t devos-builder:26.04 -f build/docker/Dockerfile.build .
 docker run --rm --privileged \
   -e DEVOS_WORK_DIR=/build_work -e DEVOS_ZSTD_LEVEL=19 \
   -v devos-work:/build_work -v "$PWD:/workspace" -w /workspace \
-  devos-builder ./build/build-iso.sh
+  devos-builder:26.04 bash ./build/build-iso.sh
 ```
 
 Useful options: `DEVOS_ISO_NAME` (output file name), `DEVOS_ZSTD_LEVEL` (15 = faster build, 19 = smaller ISO), `UBUNTU_MIRROR`. The build fails on purpose if the ISO exceeds 4 GB or if any system file is world-writable.
@@ -496,6 +509,10 @@ python3 -m unittest discover -s tests/unit
 ## Command line
 
 ```bash
+devos update                                # latest stable DevOS release from GitHub
+devos update --check                        # check for a new DevOS component release
+devos update --version TAG                  # choose a published stable release
+devos update --os-upgrade                   # interactive Ubuntu LTS upgrade
 devos app install <file.exe|file.apk|file.deb>   # install / run any app
 devos app search <name>                          # search the app catalog
 devos win launch <app.exe>                       # run a Windows program
@@ -522,6 +539,9 @@ devos restore                                    # btrfs restore points
 devos-security check https://example.com         # look-alike and scam check
 devos-clipboard                                  # clipboard history (Win+V)
 devos-emoji                                      # emoji panel (Win+.)
+devos-islamic today                              # today's prayer times, Hijri date, ayah & hadith
+sudo devos-modesty enable --mode women           # smart modesty filter (blurs only women's bodies; text stays clear)
+devos-kids-mode                                  # launch safe interactive kids mode
 ```
 
 ---

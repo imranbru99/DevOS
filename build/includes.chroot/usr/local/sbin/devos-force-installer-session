@@ -6,6 +6,9 @@ set -u
 grep -q 'boot=casper' /proc/cmdline || exit 0
 
 mkdir -p /etc/sddm.conf.d /run/devos-hidden-sessions
+# The installer starts X11 applications, not a Wayland compositor. A same-named
+# Wayland entry takes precedence in SDDM and starts the script without Xorg.
+rm -f /usr/share/wayland-sessions/devos-install.desktop
 # Hide every normal desktop session on this boot only.
 # Ensure any fallback entry (plasma.desktop, plasmax11.desktop) maps to devos-install.desktop
 # so casper or SDDM autologin can never spawn an empty session on real hardware.
@@ -15,7 +18,7 @@ for session in /usr/share/xsessions/*.desktop /usr/share/wayland-sessions/*.desk
     [ "$name" = "devos-install.desktop" ] && continue
     hidden="/run/devos-hidden-sessions/$name"
     cp -a "$session" "$hidden" 2>/dev/null || true
-    if [ "$name" = "plasma.desktop" ] || [ "$name" = "plasmax11.desktop" ]; then
+    if [[ "$session" == /usr/share/xsessions/* ]] && { [ "$name" = "plasma.desktop" ] || [ "$name" = "plasmax11.desktop" ]; }; then
         mount --bind /usr/share/xsessions/devos-install.desktop "$session" 2>/dev/null || cp -f /usr/share/xsessions/devos-install.desktop "$session" 2>/dev/null || true
     else
         mount --bind /dev/null "$session" 2>/dev/null || rm -f "$session"

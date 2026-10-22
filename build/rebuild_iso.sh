@@ -3,7 +3,7 @@ set -euo pipefail
 
 DEVOS_OUT="${DEVOS_OUT:-/workspace/out}"
 STAGE_DIR="${DEVOS_OUT}/iso_stage"
-OUTPUT_ISO="${DEVOS_OUT}/devos-24.04-amd64.iso"
+OUTPUT_ISO="${DEVOS_OUT}/devos-26.04-amd64.iso"
 TMP_DIR="${DEVOS_OUT}/tmp_build"
 
 echo "=========================================================="
@@ -17,6 +17,12 @@ if [ ! -f "${STAGE_DIR}/casper/vmlinuz" ]; then
     echo "ERROR: ${STAGE_DIR}/casper/vmlinuz not found!"
     exit 1
 fi
+
+identity=$(unsquashfs -cat "${STAGE_DIR}/casper/filesystem.squashfs" etc/os-release)
+echo "$identity" | grep -qE '^VERSION_ID="?26\.04"?$' || {
+    echo "ERROR: Fast rebuild requires an existing 26.04 filesystem; build a fresh ISO first." >&2
+    exit 1
+}
 
 chmod -R u+w "${STAGE_DIR}"
 

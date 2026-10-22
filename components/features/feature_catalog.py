@@ -385,9 +385,9 @@ FEATURES += [
       builtin={"optin": True,
                "enable": [[DEVOS + "devos-familysafe", "enable", "--level", "family"]],
                "disable": [[DEVOS + "devos-familysafe", "disable"]]}),
-    F("modesty", "family", "Modesty filter: blur women in images & videos",
-      "On-device AI blurs photos and videos showing women in Chrome, Edge and Brave (\"blur all people\" is "
-      "stricter). AI can miss some or blur some men.", 1, presets=("islamic",), min_ram_gb=4,
+    F("modesty", "family", "Modesty filter: blur adult women body regions",
+      "Local AI masks detected body regions in Chrome, Edge and Brave while keeping page text clear. "
+      "Age, gender and body estimates can be wrong or missed. An all-people mode is also available.", 1, presets=("islamic",), min_ram_gb=4,
       builtin={"optin": True,
                "enable": [["/usr/local/sbin/devos-modesty", "enable", "--mode", "women"]],
                "disable": [["/usr/local/sbin/devos-modesty", "disable"]]}),

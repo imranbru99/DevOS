@@ -110,7 +110,10 @@ h = sys.argv[1]
 if h in ("", "!", "*", "!*", "!!"):
     sys.exit(0)
 try:
-    import crypt
+    try:
+        import crypt
+    except ImportError:
+        import legacycrypt as crypt
     sys.exit(0 if crypt.crypt("", h) == h else 1)
 except Exception:
     sys.exit(1)
@@ -119,7 +122,7 @@ PY
         echo "==> ${owner} has no password: enabling automatic sign-in"
         passwd -d "$owner" >/dev/null 2>&1 || true
         mkdir -p /etc/sddm.conf.d
-        printf '[Autologin]\nUser=%s\nSession=plasma\nRelogin=false\n' "$owner" \
+        printf '[Autologin]\nUser=%s\nSession=%s\nRelogin=false\n' "$owner" "${plasma_session##*/}" \
             > /etc/sddm.conf.d/zz-devos-autologin.conf
     fi
 fi

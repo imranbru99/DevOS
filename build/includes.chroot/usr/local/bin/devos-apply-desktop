@@ -45,12 +45,18 @@ for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
 done
 
 kw_bin=""
-for candidate in kwriteconfig5 kwriteconfig6; do
+for candidate in kwriteconfig6 kwriteconfig5; do
     if command -v "${candidate}" >/dev/null 2>&1; then
         kw_bin="${candidate}"
         break
     fi
 done
+
+# Register the launcher for existing accounts as well as fresh installations.
+if [ -n "${kw_bin}" ]; then
+    "${kw_bin}" --file kglobalshortcutsrc --group devos-kids-mode.desktop --key _k_friendly_name "Kids Mode"
+    "${kw_bin}" --file kglobalshortcutsrc --group devos-kids-mode.desktop --key _launch "Meta+K,Meta+K,Kids Mode"
+fi
 
 stamp="${HOME}/.config/devos-ui.stamp"
 if [ ! -f "${stamp}" ]; then

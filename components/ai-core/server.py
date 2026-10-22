@@ -93,7 +93,7 @@ def clamp_tokens(value) -> int:
     """Callers may ask for longer answers (the code agent writes whole files),
     within what a local model finishes in reasonable time."""
     try:
-        return max(16, min(2048, int(value)))
+        return max(16, min(4096, int(value)))
     except (TypeError, ValueError):
         return 1024
 
@@ -115,14 +115,22 @@ def parallel_slots(ram_gb: float, threads: int, configured: int = 0) -> int:
 
 def configured_parallel(path: str = "/etc/devos/ai.conf") -> int:
     value = os.environ.get("DEVOS_AI_PARALLEL", "")
-    try:
-        with open(path, encoding="utf-8") as handle:
-            for line in handle:
-                key, _, val = line.partition("=")
-                if key.strip() == "parallel":
-                    value = val.strip()
-    except OSError:
-        pass
+    targets = [path]
+    user_conf = os.path.expanduser("~/.config/devos/ai.conf")
+    if os.path.isfile(user_conf):
+        targets.insert(0, user_conf)
+    for target in targets:
+        try:
+            with open(target, encoding="utf-8") as handle:
+                for line in handle:
+                    key, _, val = line.partition("=")
+                    if key.strip() == "parallel":
+                        value = val.strip()
+                        break
+            if value:
+                break
+        except OSError:
+            pass
     try:
         return int(value)
     except ValueError:
@@ -765,8 +773,12 @@ class DevOSAIEngine:
         elif "install" in p_lower:
             return ("To install an app, double-click the downloaded file: Windows programs (.exe, .msi) "
                     "and Android apps (.apk) open directly in DevOS. To remove one, open the Apps window.")
-        elif "optimize" in p_lower or "speed" in p_lower:
-            return "Open DevOS Optimizer to clean temporary files and see apps you have not used for a while."
+        elif ("optimize" in p_lower or "speed" in p_lower
+              or "free up" in p_lower or "clean" in p_lower
+              or "storage" in p_lower or "disk space" in p_lower
+              or "junk" in p_lower or "cache" in p_lower):
+            return ("Open **DevOS Optimizer** to clean temporary files, clear the cache, and see apps "
+                    "you have not used for a while. Nothing is deleted until you confirm.")
         else:
             return ("DevOS AI is still being set up on this PC, so it cannot answer that yet. "
                     "Questions about this PC, apps and settings already work in the DevOS AI window.")
@@ -938,6 +950,10 @@ class DevOSAIEngine:
             chat.append({"role": role, "content": content})
         total_chars = sum(len(m.get("content") or "") for m in chat)
         max_chars = 12000 if (ram and ram >= 15.5) else 5000
+        # A specialized agent (Code Agent) manages its own history budget and needs its
+        # tool results intact; the context-overflow handler is the safety net for it.
+        if callers:
+            max_chars = max(max_chars, 60000)
         if total_chars > max_chars and len(chat) > 2:
             for msg in chat[1:-1]:
                 c = msg.get("content") or ""
@@ -976,7 +992,7 @@ class DevOSAIEngine:
         return "The local model is installed, but it did not produce an answer. Ask again.", {}
 
     def stream_chat(self, messages: List[Dict[str, str]], model: str = "devos-ai", max_tokens: int = 1024,
-                    options: Optional[Dict[str, Any]] = None):
+                    options: Optional[Dict[str, Any]] = None, info: Optional[Dict[str, Any]] = None):
         """Yield the answer in small pieces as the model writes it, so the
         window shows words within a second instead of after the whole reply."""
         self.last_activity = time.time()
@@ -1002,11 +1018,43 @@ class DevOSAIEngine:
                     for chunk in stream_completion(
                             slot.llm, messages=chat, max_tokens=clamp_tokens(max_tokens), stream=True, **opts):
                         delta = chunk["choices"][0].get("delta", {}).get("content")
+                        if info is not None and chunk["choices"][0].get("finish_reason"):
+                            info["finish_reason"] = chunk["choices"][0]["finish_reason"]
                         if delta:
                             yield delta
                 except Exception as exc:
                     sys.stderr.write(f"[ai-core] generation failed: {exc}\n")
                     yield "The local model did not produce an answer. Ask again."
+        finally:
+            cpu_boost.leave()
+            self._release(slot)
+
+
+    def stream_batch(self, messages: List[Dict[str, str]], branches: List[Dict[str, str]], model: str = "devos-ai-code",
+                     max_tokens: int = 1800, options: Optional[Dict[str, Any]] = None,
+                     on_event=None, should_stop=None) -> Dict[str, Any]:
+        """Several independent answers from one shared prompt, written at the same time (see batch_decode.py).
+        On a CPU this is the one way to write faster than the memory allows for a single stream."""
+        import batch_decode
+        self.last_activity = time.time()
+        kind = self.kind_for(model)
+        slot = self._acquire(kind)               # EngineBusy propagates to the caller
+        opts = dict(options or {})
+        kw = self.speed_kwargs(kind)
+        cpu_boost.enter()
+        try:
+            with slot.lock:
+                self._load(slot, kind)
+                if slot.llm is None:
+                    raise RuntimeError("no local model is installed")
+                chat = self._build_chat(messages)
+                # 12 threads for reading the prompt AND for each step: more (the "batch" count) oversubscribes this
+                # CPU's efficiency cores and measured 20% slower per step.
+                generator = batch_decode.BatchGenerator(slot.llm, kw["n_threads"], kw["n_threads"])
+                return generator.generate(
+                    chat, branches, max_tokens=max_tokens, temperature=float(opts.get("temperature", 0.15)),
+                    top_p=float(opts.get("top_p", 0.95)), max_ctx=int(kw["n_ctx"]),
+                    on_event=on_event, should_stop=should_stop)
         finally:
             cpu_boost.leave()
             self._release(slot)
@@ -1253,6 +1301,9 @@ def openapi_spec() -> Dict[str, Any]:
     }
 
 
+MAX_BATCH_BRANCHES = 8
+
+
 class OpenAIHandler(BaseHTTPRequestHandler):
     """HTTP request handler implementing the OpenAI API specification."""
 
@@ -1296,8 +1347,9 @@ class OpenAIHandler(BaseHTTPRequestHandler):
             self.wfile.write(b"data: " + json.dumps(payload).encode("utf-8") + b"\n\n")
             self.wfile.flush()
 
+        info: Dict[str, Any] = {}
         try:
-            for piece in engine.stream_chat(messages, model, max_tokens, options):
+            for piece in engine.stream_chat(messages, model, max_tokens, options, info):
                 if legacy:
                     choice = {"index": 0, "text": piece, "finish_reason": None}
                     kind = "text_completion"
@@ -1306,11 +1358,12 @@ class OpenAIHandler(BaseHTTPRequestHandler):
                     kind = "chat.completion.chunk"
                 event({"id": chat_id, "object": kind, "created": int(time.time()),
                        "model": shown, "choices": [choice]})
+            reason = info.get("finish_reason") or "stop"
             if legacy:
-                done = {"index": 0, "text": "", "finish_reason": "stop"}
+                done = {"index": 0, "text": "", "finish_reason": reason}
                 kind = "text_completion"
             else:
-                done = {"index": 0, "delta": {}, "finish_reason": "stop"}
+                done = {"index": 0, "delta": {}, "finish_reason": reason}
                 kind = "chat.completion.chunk"
             event({"id": chat_id, "object": kind, "created": int(time.time()),
                    "model": shown, "choices": [done]})
@@ -1357,6 +1410,7 @@ class OpenAIHandler(BaseHTTPRequestHandler):
                 "uptime_seconds": round(time.time() - engine.start_time, 1),
                 "slots": engine.status(),
                 "speed": engine.speed_info(),
+                "batch": {"endpoint": "/v1/devos/batch", "max_branches": MAX_BATCH_BRANCHES},
                 "docs": f"http://127.0.0.1:{PORT}/docs",
             })
         elif path in ("/v1/models", "/models"):
@@ -1379,6 +1433,57 @@ class OpenAIHandler(BaseHTTPRequestHandler):
         except Exception:
             return {}
         return data if isinstance(data, dict) else {}
+
+    def _finish_batch(self, req: Dict[str, Any]):
+        """POST /v1/devos/batch: {messages, branches:[{id,prompt}], max_tokens, temperature}. Streams server-sent
+        events: start, delta (one branch's new text), end (one branch finished), done."""
+        messages = req.get("messages")
+        branches = req.get("branches")
+        if not isinstance(messages, list) or not messages or not isinstance(branches, list) or not branches:
+            self._send_json(400, {"error": {"message": "Send 'messages' and a non-empty 'branches' list.",
+                                            "type": "invalid_request_error"}})
+            return
+        messages = [{"role": str(m.get("role") or "user"), "content": str(m.get("content") or "")}
+                    for m in messages if isinstance(m, dict)][:40]
+        clean = []
+        for i, item in enumerate(branches[:MAX_BATCH_BRANCHES]):
+            if isinstance(item, dict):
+                clean.append({"id": str(item.get("id", i))[:200], "prompt": str(item.get("prompt") or "")[:6000]})
+        try:
+            max_tokens = max(64, min(4096, int(req.get("max_tokens") or 1800)))
+        except (TypeError, ValueError):
+            max_tokens = 1800
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        gone = {"value": False}
+
+        def event(payload: Dict[str, Any]) -> None:
+            if gone["value"]:
+                return
+            try:
+                self.wfile.write(b"data: " + json.dumps(payload).encode("utf-8") + b"\n\n")
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                gone["value"] = True               # the caller went away: stop writing
+
+        try:
+            result = engine.stream_batch(messages, clean, str(req.get("model") or "devos-ai-code"), max_tokens,
+                                         sampling_kwargs(req), on_event=event, should_stop=lambda: gone["value"])
+            event({"type": "done", "tokens": result.get("tokens", 0), "tokens_per_sec": result.get("tokens_per_sec", 0),
+                   "prefill_seconds": result.get("prefill_seconds", 0), "decode_seconds": result.get("decode_seconds", 0),
+                   "status": result.get("status", "done")})
+        except EngineBusy:
+            event({"type": "error", "message": "DevOS AI is busy answering other apps right now."})
+        except Exception as exc:                   # a failed generation must not take the server down
+            sys.stderr.write(f"[ai-core] batch generation failed: {exc}\n")
+            event({"type": "error", "message": str(exc)[:300]})
+        try:
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
 
     def _finish_chat(self, req: Dict[str, Any], legacy: bool = False):
         if legacy:
@@ -1422,6 +1527,8 @@ class OpenAIHandler(BaseHTTPRequestHandler):
             self._finish_chat(req_data)
         elif path in ("/v1/completions", "/completions"):
             self._finish_chat(req_data, legacy=True)
+        elif path in ("/v1/devos/batch", "/devos/batch"):
+            self._finish_batch(req_data)
         elif path in ("/v1/embeddings", "/embeddings"):
             inputs = req_data.get("input", [])
             if isinstance(inputs, str):
@@ -1439,6 +1546,36 @@ class OpenAIHandler(BaseHTTPRequestHandler):
 def run_server():
     API_SETTINGS.update(read_api_conf())
     host = "0.0.0.0" if API_SETTINGS["listen"] == "lan" else HOST
+
+    # If a previous instance left the port occupied, check whether it is still
+    # alive (i.e. returns /health). If so, exit quietly — one server is enough.
+    # If not (zombie bind), wait briefly for the OS to release it, then retry.
+    import socket
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    for attempt in range(5):
+        try:
+            sock.bind((host, PORT))
+            sock.close()
+            break
+        except OSError:
+            # Port is occupied — check whether a live server is there.
+            try:
+                import urllib.request as _ur
+                with _ur.urlopen(f"http://127.0.0.1:{PORT}/health", timeout=2):
+                    pass
+                # A healthy server already answered: no need to start another one.
+                sys.stderr.write(f"[ai-core] server already running on port {PORT}; exiting.\n")
+                return
+            except Exception:
+                pass
+            if attempt < 4:
+                import time as _t
+                _t.sleep(2)
+    else:
+        sys.stderr.write(f"[ai-core] port {PORT} still busy after retries; giving up.\n")
+        return
+
     # Threads: /health answers at once even while a long reply is generating.
     server = ThreadingHTTPServer((host, PORT), OpenAIHandler)
     server.daemon_threads = True

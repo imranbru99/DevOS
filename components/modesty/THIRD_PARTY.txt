@@ -29,3 +29,19 @@ TensorFlow.js 4.22.0  (Apache-2.0) - bundled inside dist/face-api.js
 
 Not shipped: the test portraits used by tests/modesty-chrome/ are downloaded at
 test time from Wikimedia Commons (public domain); see tests/modesty-chrome/images.txt.
+
+TensorFlow BodyPix 2.2.1 (Apache-2.0)
+  Source: https://github.com/tensorflow/tfjs-models/tree/master/body-pix
+  npm: https://registry.npmjs.org/@tensorflow-models/body-pix/-/body-pix-2.2.1.tgz
+  npm archive SHA-512 verified against the registry integrity before extraction.
+  Shares the bundled TensorFlow.js 4.22.0 runtime; no CDN scripts are loaded.
+  Runtime: vendor/body-pix/body-pix.js (dist/body-pix.min.umd.js)
+  License: vendor/body-pix/LICENSE
+
+  BodyPix MobileNetV1 0.50, stride 16, 1-byte quantized weights:
+  https://storage.googleapis.com/tfjs-models/savedmodel/bodypix/mobilenet/quant1/050/model-stride16.json
+  Model files are bundled locally in models/body-pix/.
+  SHA-256:
+    group1-shard1of1.bin: 839ea607edcb271ae135e7ce605a7f4a9941c1521e3831f230da473e00b4574c
+    model.json: b1afef51f5de7235a3e6644e710af8e6f698804fa3e29f55e4482675aa319f90
+    vendor/body-pix/body-pix.js: 0a69d66f872845ddc899a36951f083f2de3da08068aa2557bc1bc417b1e2d25a

@@ -37,6 +37,12 @@ class TestInstalledSystemBoot(unittest.TestCase):
         self.assertNotIn("packages", steps)
         self.assertIn("- finished", settings)
 
+    def test_live_installer_has_only_an_x11_session(self):
+        self.assertTrue(os.path.isfile(os.path.join(ROOT, "build/includes.chroot/usr/share/xsessions/devos-install.desktop")))
+        self.assertFalse(os.path.exists(os.path.join(ROOT, "build/includes.chroot/usr/share/wayland-sessions/devos-install.desktop")))
+        session = read("build/includes.chroot/usr/local/sbin/devos-force-installer-session")
+        self.assertIn("rm -f /usr/share/wayland-sessions/devos-install.desktop", session)
+
     def test_unpack_and_bootloader_targets_are_explicit(self):
         unpackfs = read("build/includes.chroot/etc/calamares/modules/unpackfs.conf")
         bootloader = read("build/includes.chroot/etc/calamares/modules/bootloader.conf")
@@ -60,7 +66,7 @@ class TestInstalledSystemBoot(unittest.TestCase):
         branding = read("build/includes.chroot/etc/calamares/branding/devos/branding.desc")
         script = read("build/includes.chroot/usr/local/sbin/devos-apply-branding")
 
-        self.assertIn('PRETTY_NAME="DevOS 24.04 LTS"', os_release)
+        self.assertIn('PRETTY_NAME="DevOS 26.04 LTS"', os_release)
         self.assertNotIn("Ubuntu", os_release)
         self.assertEqual(os_release, lib_release)
         self.assertIn("DISTRIB_ID=DevOS", lsb)
@@ -79,7 +85,8 @@ class TestInstalledSystemBoot(unittest.TestCase):
         self.assertIn('productIcon: "logo.png"', branding)
         self.assertIn("sidebar: qml", branding)
         self.assertNotIn("welcome.png", branding)
-        self.assertIn('PRETTY_NAME="DevOS 24.04 LTS"', script)
+        self.assertIn('PRETTY_NAME="DevOS ${base_version} LTS"', script)
+        self.assertIn('/usr/lib/os-release.ubuntu', script)
         self.assertIn('GRUB_DISTRIBUTOR="DevOS"', script)
 
     def test_storage_step_and_complete_desktop(self):

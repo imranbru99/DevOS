@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 MODE="${1:-bios}"
-ISO_PATH="${ROOT_DIR}/out/devos-24.04-amd64.iso"
+ISO_PATH="${ROOT_DIR}/out/devos-26.04-amd64.iso"
 DISK_IMAGE="${ROOT_DIR}/tests/qemu/test-disk.qcow2"
 RAM_MB="${QEMU_RAM:-4096}"
 CPUS="${QEMU_CPUS:-2}"

@@ -106,6 +106,11 @@ CODER_MODELS = {
         "url": "https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
         "size_mb": 1120,
     },
+    "medium": {
+        "file": "qwen2.5-coder-3b-instruct-q4_k_m.gguf",
+        "url": "https://huggingface.co/Qwen/Qwen2.5-Coder-3B-Instruct-GGUF/resolve/main/qwen2.5-coder-3b-instruct-q4_k_m.gguf",
+        "size_mb": 2100,
+    },
     "large": {
         "file": "Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf",
         "url": "https://huggingface.co/bartowski/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf",
@@ -125,8 +130,14 @@ def chat_model(model_id: str) -> Optional[Dict]:
 
 
 def coder_for(chat_id: str) -> Dict:
-    """The coding model follows the chat size: a 7B coder only next to 7B+ chat."""
-    return CODER_MODELS["large"] if chat_id in ("large", "xl") else CODER_MODELS["small"]
+    """Choose the configured coder, or a modest default for local hardware."""
+    choice = read_choice()
+    coder_size = choice.get("coder_size")
+    if coder_size and coder_size in CODER_MODELS:
+        return CODER_MODELS[coder_size]
+    if chat_id in ("medium", "large", "xl"):
+        return CODER_MODELS["medium"]
+    return CODER_MODELS["small"]
 
 
 def fits(model: Dict, ram_gb: float, threads: int, disk_free_gb: Optional[float] = None) -> bool:
@@ -204,8 +215,11 @@ def all_choice_values() -> List[str]:
 
 
 def installed_file(name: str, dirs: Optional[List[str]] = None) -> Optional[str]:
-    for directory in dirs or [MODELS_DIR, "/usr/share/devos/models"]:
-        path = os.path.join(directory, name)
-        if os.path.isfile(path) and os.path.getsize(path) > 100_000_000:
-            return path
+    candidates = [name]
+    # Never substitute the chat model for the coder solely because both are 3B.
+    for directory in dirs or [MODELS_DIR, "/usr/share/devos/models", os.path.expanduser("~/.local/share/DevOS/models")]:
+        for cand in candidates:
+            path = os.path.join(directory, cand)
+            if os.path.isfile(path) and os.path.getsize(path) > 100_000_000:
+                return path
     return None

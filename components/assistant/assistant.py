@@ -15,6 +15,7 @@ All slow work (tools, model, OCR, voice, downloads) runs in QThreads.
 
 import math
 import os
+import re
 import sys
 import threading
 import time
@@ -80,10 +81,12 @@ MAX_ATTACH = 5
 
 # (prompt, description, icon)
 SUGGESTIONS = [
+    ("Today's Islamic", "Ayah and Hadith of the day with translation", "moon"),
     ("What's my PC config?", "Processor, memory, disks and graphics", "chip"),
     ("How many apps are installed?", "Linux, Windows and Android apps", "grid"),
     ("Go to Chrome and search HP latest laptop", "Opens the results in your browser", "globe"),
     ("Free up space", "See what can be cleaned safely", "drive"),
+    ("Start kids mode", "Mouse-play cosmos; background apps keep working", "game"),
 ]
 
 STYLE = f"""
@@ -366,6 +369,14 @@ def draw_icon(p, kind, rect, color, stroke=1.7):
     elif kind == "spark":
         fill(_star(11, 12.5, 8.5, 1.9))
         fill(_star(18.5, 5, 3, 0.7))
+    elif kind == "game":
+        p.drawRoundedRect(R(3, 7, 18, 11), 3.5, 3.5)
+        # d-pad
+        line(7, 12.5, 11, 12.5)
+        line(9, 10.5, 9, 14.5)
+        # buttons
+        fill(R(14.5, 12.8, 1.8, 1.8))
+        fill(R(16.8, 10.5, 1.8, 1.8))
     elif kind == "download":
         line(12, 4, 12, 15)
         poly((7, 10), (12, 15), (17, 10))
@@ -389,6 +400,14 @@ def draw_icon(p, kind, rect, color, stroke=1.7):
         path.arcTo(R(8, 4, 8, 8), 180, -180)
         path.lineTo(16, 11)
         p.drawPath(path)
+    elif kind == "moon":
+        path = QtGui.QPainterPath()
+        path.arcMoveTo(R(4, 3, 17, 17), 90)
+        path.arcTo(R(4, 3, 17, 17), 90, 260)
+        path.arcTo(R(9, 4.5, 12, 14), 350, -240)
+        path.closeSubpath()
+        p.drawPath(path)
+        fill(path)
     p.restore()
 
 
@@ -2062,9 +2081,29 @@ class ChatListDelegate(QtWidgets.QStyledItemDelegate):
         p.setFont(f)
         p.setPen(qcolor(TEXT_STRONG if sel else "#c3cbd8"))
         fm = QtGui.QFontMetrics(f)
-        p.drawText(r.adjusted(10, 0, -10, 0), Qt.AlignLeft | Qt.AlignVCenter,
-                   fm.elidedText(text, Qt.ElideRight, int(r.width() - 20)))
+        inset = 10
+        checked = index.data(Qt.CheckStateRole)
+        if checked is not None:
+            box = QtCore.QRectF(r.left() + 10, r.center().y() - 8, 16, 16)
+            p.setPen(QtGui.QPen(qcolor(ACCENT if checked == Qt.Checked else MUTED), 1.2))
+            p.setBrush(qcolor(ACCENT) if checked == Qt.Checked else Qt.NoBrush)
+            p.drawRoundedRect(box, 4, 4)
+            if checked == Qt.Checked:
+                draw_icon(p, "check", box.adjusted(1, 1, -1, -1), qcolor(BG), 2)
+            inset = 36
+        p.drawText(r.adjusted(inset, 0, -10, 0), Qt.AlignLeft | Qt.AlignVCenter,
+                   fm.elidedText(text, Qt.ElideRight, int(r.width() - inset - 10)))
         p.restore()
+
+    def editorEvent(self, event, model, option, index):
+        if index.data(Qt.CheckStateRole) is not None:
+            click = event.type() == QtCore.QEvent.MouseButtonRelease and event.button() == Qt.LeftButton
+            key = event.type() == QtCore.QEvent.KeyPress and event.key() == Qt.Key_Space
+            if click or key:
+                state = Qt.Unchecked if index.data(Qt.CheckStateRole) == Qt.Checked else Qt.Checked
+                return model.setData(index, state, Qt.CheckStateRole)
+            return False
+        return super().editorEvent(event, model, option, index)
 
     def createEditor(self, parent, option, index):
         e = QtWidgets.QLineEdit(parent)
@@ -2335,9 +2374,12 @@ class Sidebar(QtWidgets.QWidget):
     chat_selected = QtCore.pyqtSignal(str)
     rename_requested = QtCore.pyqtSignal(str, str)
     delete_requested = QtCore.pyqtSignal(str)
+    delete_many_requested = QtCore.pyqtSignal(list)
 
     def __init__(self):
         super().__init__()
+        self.selecting = False
+        self.selected_ids = set()
         v = QtWidgets.QVBoxLayout(self)
         v.setContentsMargins(12, 12, 13, 12)
         v.setSpacing(8)
@@ -2370,6 +2412,29 @@ class Sidebar(QtWidgets.QWidget):
         pal.setColor(QtGui.QPalette.PlaceholderText, qcolor(FAINT))
         self.search.setPalette(pal)
         v.addWidget(self.search)
+        selection = QtWidgets.QHBoxLayout()
+        self.select_btn = QtWidgets.QPushButton("Select chats")
+        self.select_btn.setObjectName("textBtn")
+        self.select_btn.setCursor(Qt.PointingHandCursor)
+        self.select_btn.clicked.connect(lambda: self.set_selecting(not self.selecting))
+        selection.addWidget(self.select_btn)
+        selection.addStretch(1)
+        self.select_all_btn = QtWidgets.QPushButton("Select all")
+        self.select_all_btn.setObjectName("textBtn")
+        self.select_all_btn.setCursor(Qt.PointingHandCursor)
+        self.select_all_btn.clicked.connect(self.select_all)
+        self.select_all_btn.hide()
+        selection.addWidget(self.select_all_btn)
+        v.addLayout(selection)
+        self.delete_selected_btn = QtWidgets.QPushButton("Delete selected")
+        self.delete_selected_btn.setObjectName("pill")
+        self.delete_selected_btn.setIcon(make_icon("trash", DANGER, 16))
+        self.delete_selected_btn.setCursor(Qt.PointingHandCursor)
+        self.delete_selected_btn.setEnabled(False)
+        self.delete_selected_btn.hide()
+        self.delete_selected_btn.clicked.connect(
+            lambda: self.delete_many_requested.emit(sorted(self.selected_ids)))
+        v.addWidget(self.delete_selected_btn)
         v.addSpacing(4)
         self.list = QtWidgets.QListWidget()
         self.list.setObjectName("chatList")
@@ -2383,6 +2448,7 @@ class Sidebar(QtWidgets.QWidget):
         self.list.viewport().setAutoFillBackground(False)
         self.list.customContextMenuRequested.connect(self._menu)
         self.list.itemClicked.connect(self._clicked)
+        self.list.itemChanged.connect(self._selection_changed)
         self.list.itemDelegate().commitData.connect(self._commit)
         v.addWidget(self.list, 1)
         self.empty = QtWidgets.QLabel("No chats yet")
@@ -2415,6 +2481,7 @@ class Sidebar(QtWidgets.QWidget):
         p.end()
 
     def populate(self, groups, current=None, query=""):
+        self._groups, self._query = groups, query
         self.current = current
         self.list.blockSignals(True)
         self.list.clear()
@@ -2429,6 +2496,9 @@ class Sidebar(QtWidgets.QWidget):
                 it.setData(Qt.UserRole, c["id"])
                 it.setToolTip(str(c.get("title") or ""))
                 it.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsEditable)
+                if self.selecting:
+                    it.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsUserCheckable)
+                    it.setCheckState(Qt.Checked if c["id"] in self.selected_ids else Qt.Unchecked)
                 self.list.addItem(it)
                 if c["id"] == current:
                     sel = it
@@ -2442,13 +2512,55 @@ class Sidebar(QtWidgets.QWidget):
         self.list.setVisible(has)
         self.empty.setVisible(not has)
         self.empty.setText("No matching chats" if query else "No chats yet")
+        self._update_selection()
+
+    def set_selecting(self, enabled):
+        self.selecting = bool(enabled)
+        if not self.selecting:
+            self.selected_ids.clear()
+        self.select_btn.setText("Cancel" if self.selecting else "Select chats")
+        self.select_all_btn.setVisible(self.selecting)
+        self.delete_selected_btn.setVisible(self.selecting)
+        self.populate(getattr(self, "_groups", []), self.current, getattr(self, "_query", ""))
+
+    def _selection_changed(self, item):
+        cid = item.data(Qt.UserRole)
+        if not self.selecting or not cid:
+            return
+        if item.checkState() == Qt.Checked:
+            self.selected_ids.add(cid)
+        else:
+            self.selected_ids.discard(cid)
+        self._update_selection()
+
+    def _update_selection(self):
+        count = len(self.selected_ids)
+        self.delete_selected_btn.setText(f"Delete selected ({count})" if count else "Delete selected")
+        self.delete_selected_btn.setEnabled(count > 0)
+        visible = [self.list.item(i) for i in range(self.list.count())
+                   if self.list.item(i).data(Qt.UserRole)]
+        all_checked = bool(visible) and all(it.checkState() == Qt.Checked for it in visible)
+        self.select_all_btn.setEnabled(bool(visible))
+        self.select_all_btn.setText("Deselect all" if all_checked else (
+            "Select all results" if getattr(self, "_query", "").strip() else "Select all"))
+
+    def select_all(self):
+        items = [self.list.item(i) for i in range(self.list.count())
+                 if self.list.item(i).data(Qt.UserRole)]
+        state = Qt.Unchecked if items and all(it.checkState() == Qt.Checked for it in items) else Qt.Checked
+        for item in items:
+            item.setCheckState(state)
 
     def _clicked(self, item):
+        if self.selecting:
+            return
         cid = item.data(Qt.UserRole)
         if cid:
             self.chat_selected.emit(cid)
 
     def _menu(self, pos):
+        if self.selecting:
+            return
         item = self.list.itemAt(pos)
         if item is None or not item.data(Qt.UserRole):
             return
@@ -2688,6 +2800,7 @@ class AssistantWindow(QtWidgets.QWidget):
         self.sidebar.chat_selected.connect(self.open_chat)
         self.sidebar.rename_requested.connect(self.rename_chat)
         self.sidebar.delete_requested.connect(self.delete_chat)
+        self.sidebar.delete_many_requested.connect(self.delete_chats)
         self.sidebar.smart.clicked.connect(self.smarter_ai)
         self.sidebar.hands_free.set_on(listen.hands_free_enabled())
         self.sidebar.hands_free.toggled.connect(self.set_hands_free)
@@ -3170,6 +3283,8 @@ class AssistantWindow(QtWidgets.QWidget):
 
     def _save(self, history=None):
         h = history or self.history
+        if self._chat_id(h) in getattr(self, "_deleted_chat_ids", set()):
+            return
         h.save()
         if self.store is not None:
             self.store.touch(h)
@@ -3218,6 +3333,14 @@ class AssistantWindow(QtWidgets.QWidget):
             self._close_drawer()
             return
         self.stop_listening()
+        # Wait for any in-flight worker on the current chat to save its reply
+        # before switching, so nothing is lost from the history file.
+        if self.busy and self.workers:
+            for w in list(self.workers):
+                try:
+                    w.wait(300)   # up to 300 ms; tool actions finish in < 5 ms
+                except Exception:
+                    pass
         self._clear_rows()
         self.history = self.store.open(cid)
         self._restore()
@@ -3253,11 +3376,33 @@ class AssistantWindow(QtWidgets.QWidget):
         if not self.confirm(f"“{title}” will be deleted from this PC. This can't be undone.", "Delete chat?",
                             yes="Delete"):
             return
-        self.store.delete(cid)
-        if cid == self._chat_id():
+        self._delete_chats([cid])
+
+    def delete_chats(self, ids):
+        if self.store is None:
+            return
+        ids = list(dict.fromkeys(cid for cid in ids if self.store.get(cid) is not None))
+        if not ids:
+            return
+        count = len(ids)
+        label = "conversation" if count == 1 else "conversations"
+        if not self.confirm(f"Delete {count} selected {label} from this PC? This can't be undone.",
+                            f"Delete {count} {label}?", yes="Delete"):
+            return
+        self._delete_chats(ids)
+
+    def _delete_chats(self, ids):
+        if not hasattr(self, "_deleted_chat_ids"):
+            self._deleted_chat_ids = set()
+        self._deleted_chat_ids.update(ids)
+        if self._chat_id() in ids:
+            self.stop_generation()
             self._clear_rows()
             self.history = self.store.new_history()
             self.pages.setCurrentWidget(self.hero)
+        for cid in ids:
+            self.store.delete(cid)
+        self.sidebar.set_selecting(False)
         self.refresh_sidebar()
 
     # -- attachments --------------------------------------------------------
@@ -3348,13 +3493,31 @@ class AssistantWindow(QtWidgets.QWidget):
         self.input.clear()
         self.clear_files()
         self.add_user(text, files)
-        self._dispatch(text, files)
+        try:
+            self._dispatch(text, files)
+        except Exception as exc:
+            self._worker_failed(str(exc) or exc.__class__.__name__)
+
+    def _recent_paths(self, hist):
+        if not hist or not getattr(hist, "messages", None):
+            return []
+        for m in reversed(hist.messages):
+            paths = [p for p in (m.get("paths") or []) if os.path.isfile(p)]
+            if paths:
+                return paths
+        return []
 
     def _dispatch(self, text, files):
         hist = self.history
         on_replies = self._replies_for(hist)
         handle = engine.StreamHandle()
         on_delta = self._delta_for(hist)
+        if not files and text:
+            # If the user asks to reread or check the image/document from history
+            if re.search(r"\b(?:re-?read|read\s+again|check\s+again|look\s+again|from\s+history|re-?process)\b", text, re.I):
+                recent = self._recent_paths(hist)
+                if recent:
+                    files = recent
         if files:
             label = "Reading " + (os.path.basename(files[0]) if len(files) == 1 else f"{len(files)} files")
             self.show_thinking(label)
@@ -3406,6 +3569,11 @@ class AssistantWindow(QtWidgets.QWidget):
         streamed = self._end_stream()
         replies = list(replies or [])
         for i, r in enumerate(replies):
+            if hasattr(r, "data") and isinstance(r.data, dict) and r.data.get("clipboard"):
+                try:
+                    QtWidgets.QApplication.clipboard().setText(str(r.data["clipboard"]))
+                except Exception:
+                    pass
             # the streamed answer is swapped for its final form in place, without a second fade-in
             still = streamed and i == len(replies) - 1 and getattr(r, "source", "") == "model"
             self.add_bot(r.text, ok=r.ok, buttons=r.buttons, animate=not still,

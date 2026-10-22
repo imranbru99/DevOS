@@ -4,7 +4,7 @@ set -euo pipefail
 DEVOS_OUT="${DEVOS_OUT:-/mnt/host/c/docker/DevOS/out}"
 DEVOS_SRC="${DEVOS_SRC:-/mnt/host/c/docker/DevOS}"
 STAGE_DIR="${DEVOS_OUT}/iso_stage"
-OUTPUT_ISO="${DEVOS_OUT}/devos-24.04-amd64.iso"
+OUTPUT_ISO="${DEVOS_OUT}/devos-26.04-amd64.iso"
 TMP_DIR="${DEVOS_OUT}/tmp_build"
 IMG="${DEVOS_IMG:-/mnt/host/c/docker/build_rootfs.img}"
 MNT="${DEVOS_MNT:-/mnt/rootfs}"
@@ -36,6 +36,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
+check_base() {
+    local identity="${MNT}/usr/lib/os-release.ubuntu" version
+    [ -f "$identity" ] || identity="${MNT}/etc/os-release"
+    version=$(. "$identity"; printf '%s' "${VERSION_ID:-unknown}")
+    [ "$version" = 26.04 ] || { echo "ERROR: Remaster requires a 26.04 rootfs, found $version. Build a fresh ISO first." >&2; exit 1; }
+}
+
 # DEVOS_RESUME=1 skips steps 1-4 and squashes the rootfs already prepared in
 # ${IMG}. Use it when a run failed after the chroot work finished.
 if [ "${DEVOS_RESUME:-0}" = "1" ]; then
@@ -43,6 +50,7 @@ if [ "${DEVOS_RESUME:-0}" = "1" ]; then
     e2fsck -fp "${IMG}" || true
     mkdir -p "${MNT}"
     mount "${IMG}" "${MNT}"
+    check_base
     echo "==> Syncing updated includes.chroot and components into rootfs..."
     cp -r "${DEVOS_SRC}/build/includes.chroot/." "${MNT}/" || true
     mkdir -p "${MNT}/usr/local/share/devos/components"
@@ -123,6 +131,7 @@ if [ ! -f "${SRC_SQUASHFS}" ]; then
 fi
 echo "  Source: ${SRC_SQUASHFS}"
 unsquashfs -d "${MNT}" -f "${SRC_SQUASHFS}"
+check_base
 
 # 3. Bind virtual filesystems for chroot operations
 echo "==> Step 3: Binding kernel virtual filesystems..."
@@ -133,9 +142,9 @@ mount -t sysfs sysfs "${MNT}/sys"
 
 echo "nameserver 1.1.1.1" > "${MNT}/etc/resolv.conf"
 cat << 'EOF' > "${MNT}/etc/apt/sources.list"
-deb http://archive.ubuntu.com/ubuntu/ noble main restricted universe multiverse
-deb http://archive.ubuntu.com/ubuntu/ noble-updates main restricted universe multiverse
-deb http://security.ubuntu.com/ubuntu/ noble-security main restricted universe multiverse
+deb http://archive.ubuntu.com/ubuntu/ resolute main restricted universe multiverse
+deb http://archive.ubuntu.com/ubuntu/ resolute-updates main restricted universe multiverse
+deb http://security.ubuntu.com/ubuntu/ resolute-security main restricted universe multiverse
 EOF
 
 # 4. Install Google Chrome, VLC, Codecs, X11 Fallbacks, and Window Decorations

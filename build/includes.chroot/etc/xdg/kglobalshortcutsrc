@@ -76,3 +76,10 @@ _launch=Meta+.
 [devos-emoji.desktop]
 _k_friendly_name=Emoji
 _launch=Meta+.,none,Emoji
+
+[services][devos-kids-mode.desktop]
+_launch=Meta+K
+
+[devos-kids-mode.desktop]
+_k_friendly_name=Kids Mode
+_launch=Meta+K,Meta+K,Kids Mode

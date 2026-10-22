@@ -3,14 +3,14 @@
 #   .\tests\docker-vm\run-devos-vm.ps1 -Legacy    # legacy BIOS boot
 #   .\tests\docker-vm\run-devos-vm.ps1 -Reset     # wipe the virtual disk first
 #   .\tests\docker-vm\run-devos-vm.ps1 -Stop
-#   .\tests\docker-vm\run-devos-vm.ps1 -Iso out\devos-24.04-amd64-v6.iso -Reset
+#   .\tests\docker-vm\run-devos-vm.ps1 -Iso out\devos-26.04-amd64-v6.iso -Reset
 param([switch]$Legacy, [switch]$Reset, [switch]$Stop, [string]$Iso = "")
 
 # Docker writes progress to stderr. With "Stop", Windows PowerShell 5.1
 # turns that into a fatal NativeCommandError, so check exit codes instead.
 $ErrorActionPreference = "Continue"
 $here = $PSScriptRoot
-$iso = Join-Path $here "..\..\out\devos-24.04-amd64.iso"
+$iso = Join-Path $here "..\..\out\devos-26.04-amd64.iso"
 if ($Iso) {
     $iso = (Resolve-Path $Iso -ErrorAction SilentlyContinue).Path
     if (-not $iso) { Write-Host "ISO not found: $Iso" -ForegroundColor Red; exit 1 }

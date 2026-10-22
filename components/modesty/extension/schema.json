@@ -12,11 +12,11 @@
     "mode": {
       "type": "string",
       "enum": ["women", "people"],
-      "description": "women: blur media showing a face classified as female. people: blur media showing any face."
+      "description": "women: blur body regions matched to a face estimated as an adult woman. people: blur detected person regions."
     },
     "femaleThreshold": {
       "type": "number",
-      "description": "Blur when the probability of a female face is at least this value (0-1, default 0.35)."
+      "description": "Female classification threshold (default 0.75; values below 0.65 are ignored to avoid broad uncertain matches)."
     }
   }
 }

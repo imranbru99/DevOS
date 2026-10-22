@@ -13,7 +13,9 @@ rename_session() {
         -e 's/^Comment=.*/Comment=DevOS desktop/' "$file"
 }
 rename_session /usr/share/xsessions/plasma.desktop "DevOS"
+rename_session /usr/share/xsessions/plasmax11.desktop "DevOS"
 rename_session /usr/share/wayland-sessions/plasmawayland.desktop "DevOS (Wayland)"
+rename_session /usr/share/wayland-sessions/plasma.desktop "DevOS (Wayland)"
 # Weston is only the window Android apps open in, not a desktop to sign in to.
 rm -f /usr/share/wayland-sessions/weston.desktop
 
@@ -250,9 +252,8 @@ cat > /etc/xdg/kcm-about-distrorc << 'EOF'
 Name=DevOS
 LogoPath=/usr/share/pixmaps/devos-logo.png
 Website=https://github.com/imranbru99/DevOS
-Version=24.04 LTS
 Variant=Desktop
-UseOSReleaseVersion=false
+UseOSReleaseVersion=true
 EOF
 
 # The stock login splash is the upstream logo. DevOS opens straight to the

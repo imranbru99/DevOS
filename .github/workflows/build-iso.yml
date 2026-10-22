@@ -38,11 +38,11 @@ jobs:
 
       - name: Build DevOS ISO
         run: |
-          sudo DEVOS_ZSTD_LEVEL=15 ./build/build-iso.sh
+          sudo DEVOS_ZSTD_LEVEL=15 bash ./build/build-iso.sh
 
       - name: Verify ISO Size and Checksum
         run: |
-          ISO_FILE="out/devos-24.04-amd64.iso"
+          ISO_FILE="out/devos-26.04-amd64.iso"
           test -f "$ISO_FILE"
           ISO_BYTES=$(stat -c%s "$ISO_FILE")
           MAX_BYTES=$((4 * 1024 * 1024 * 1024))
@@ -58,7 +58,7 @@ jobs:
           timeout 60s qemu-system-x86_64 \
             -m 2048 \
             -smp 2 \
-            -cdrom out/devos-24.04-amd64.iso \
+            -cdrom out/devos-26.04-amd64.iso \
             -display none \
             -vga virtio \
             -serial stdio || true
@@ -69,6 +69,6 @@ jobs:
         with:
           name: devos-iso-build
           path: |
-            out/devos-24.04-amd64.iso.sha256
+            out/devos-26.04-amd64.iso.sha256
             build_work/iso/casper/filesystem.manifest
             build_work/iso/casper/filesystem.size

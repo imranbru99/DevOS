@@ -56,6 +56,8 @@ def main():
         print("  finger    Fingerprint sign-in")
         print("  domain    Join an Active Directory domain")
         print("  updates   Security updates and Flatpak updates, after a restore point")
+        print("  update    Get the latest DevOS release from GitHub (--check, --version TAG, --os-upgrade)")
+        print("  kids      Mouse-play overlay; apps keep running (Win+K)")
         print("  task      Task Manager: processes, performance, startup apps, services")
         sys.exit(0)
 
@@ -67,6 +69,7 @@ def main():
     disk_script = os.path.join(COMPONENTS_DIR, "settings", "disk_manager.py")
 
     dispatch_map = {
+        "kids": os.path.join(COMPONENTS_DIR, "kids", "kids_mode.py"),
         "dashboard": dashboard_script,
         "setup": dashboard_script,
         "app": os.path.join(COMPONENTS_DIR, "apphub", "hub.py"),
@@ -97,6 +100,7 @@ def main():
         "fingerprint": os.path.join(COMPONENTS_DIR, "settings", "fingerprint.py"),
         "domain": os.path.join(COMPONENTS_DIR, "settings", "domain.py"),
         "updates": os.path.join(COMPONENTS_DIR, "security", "updates.py"),
+        "update": os.path.join(COMPONENTS_DIR, "updater", "updater.py"),
         "task": os.path.join(COMPONENTS_DIR, "taskman", "taskman.py"),
         "tasks": os.path.join(COMPONENTS_DIR, "taskman", "taskman.py"),
     }
@@ -121,7 +125,7 @@ def main():
         target_script = dispatch_map[sub]
         cmd = [sys.executable, target_script] + args
         try:
-            subprocess.run(cmd)
+            sys.exit(subprocess.run(cmd).returncode)
         except KeyboardInterrupt:
             pass
     else:

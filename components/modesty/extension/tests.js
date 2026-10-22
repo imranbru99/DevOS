@@ -1,51 +1,54 @@
-/* Rule tests that run inside Chrome (no Node needed): open
- * chrome-extension://<id>/tests.html; the title becomes "PASS n" or "FAIL ...". */
+/* Pure rule/geometry regression tests, runnable in a browser or Node. */
 'use strict';
 (function () {
-  const R = ModestyRules;
-  const out = [];
-  let failed = 0, passed = 0;
+  const R = ModestyRules, out = []; let failed = 0, passed = 0;
   function eq(name, got, want) {
-    const ok = JSON.stringify(got) === JSON.stringify(want);
-    ok ? passed++ : failed++;
-    out.push((ok ? 'ok   ' : 'FAIL ') + name + (ok ? '' : ' got=' + JSON.stringify(got) + ' want=' + JSON.stringify(want)));
+    const ok = JSON.stringify(got) === JSON.stringify(want); ok ? passed++ : failed++;
+    out.push((ok ? 'ok ' : 'FAIL ') + name + (ok ? '' : ` got=${JSON.stringify(got)} want=${JSON.stringify(want)}`));
   }
   const S = (m, l) => R.effectiveSettings(m, l);
-  const F = (g, p, extra) => Object.assign({ score: 0.9, gender: g, genderProbability: p, w: 80, h: 80 }, extra || {});
-  const women = S({}, {});
-  const people = S({}, { mode: 'people' });
-
-  eq('defaults', [women.enabled, women.mode, women.femaleThreshold, women.locked], [true, 'women', 0.35, false]);
-  eq('female face blurred', R.decide({ ok: true, faces: [F('female', 0.9)] }, women).blur, true);
-  eq('confident male not blurred', R.decide({ ok: true, faces: [F('male', 0.95)] }, women).blur, false);
-  eq('uncertain male (p=0.6 -> female 0.4) blurred', R.decide({ ok: true, faces: [F('male', 0.6)] }, women).blur, true);
-  eq('male p=0.7 (female 0.3) not blurred', R.decide({ ok: true, faces: [F('male', 0.7)] }, women).blur, false);
-  eq('mixed group blurred', R.decide({ ok: true, faces: [F('male', 0.99), F('female', 0.7)] }, women).blur, true);
-  eq('no face not blurred', R.decide({ ok: true, faces: [] }, women).blur, false);
-  eq('weak detection ignored', R.decide({ ok: true, faces: [F('female', 0.9, { score: 0.2 })] }, women).blur, false);
-  eq('tiny face blurred in women mode', R.decide({ ok: true, faces: [F('male', 0.99, { w: 12, h: 14 })] }, women).blur, true);
-  eq('failed check stays blurred', R.decide({ ok: false, error: 'tainted' }, women).blur, true);
-  eq('null result stays blurred', R.decide(null, women).blur, true);
-  eq('people mode blurs men', R.decide({ ok: true, faces: [F('male', 0.99)] }, people).blur, true);
-  eq('people mode keeps landscape', R.decide({ ok: true, faces: [] }, people).blur, false);
-  eq('disabled shows everything', R.decide({ ok: true, faces: [F('female', 0.99)] }, S({}, { enabled: false })).blur, false);
-
-  const locked = S({ locked: true, mode: 'women' }, { enabled: false, mode: 'people', femaleThreshold: 0.9 });
-  eq('locked: cannot disable', locked.enabled, true);
-  eq('locked: can go stricter', locked.mode, 'people');
-  eq('locked: threshold cannot be raised', locked.femaleThreshold, 0.35);
-  const locked2 = S({ locked: true, mode: 'people' }, { mode: 'women' });
-  eq('locked: cannot go looser', locked2.mode, 'people');
-  eq('locked: lower threshold allowed', S({ locked: true }, { femaleThreshold: 0.2 }).femaleThreshold, 0.2);
-  eq('unlocked: managed mode is default', S({ mode: 'people' }, {}).mode, 'people');
-  eq('unlocked: user overrides', S({ mode: 'people' }, { mode: 'women' }).mode, 'women');
-  eq('bad values ignored', S({ mode: 'x', femaleThreshold: 'y' }, { mode: 7 }).mode, 'women');
-
-  eq('icon natural 32x32', R.isIconSized(32, 32, 0, 0, 64), true);
-  eq('big image shown small (40px avatar)', R.isIconSized(400, 400, 40, 40, 64), true);
-  eq('normal photo', R.isIconSized(400, 300, 400, 300, 64), false);
-  eq('not laid out yet', R.isIconSized(400, 300, 0, 0, 64), false);
-
+  const F = (gender, p, extra) => Object.assign({ score: .95, gender, genderProbability: p, age: 30, x: 10, y: 10, w: 80, h: 80 }, extra || {});
+  const P = (faceIndex) => ({ faceIndex, mask: 'mask', blurLayer: 'layer' });
+  const D = (faces, people) => ({ ok: true, faces, people: people || faces.map((_, i) => P(i)) });
+  const women = S({}, {}), people = S({}, { mode: 'people' });
+  eq('default adult women threshold', women.femaleThreshold, .75);
+  eq('adult woman body selected', R.decide(D([F('female', .95)]), women).blur, true);
+  eq('male body stays clear', R.decide(D([F('male', .95)]), women).blur, false);
+  eq('uncertain classification stays clear', R.decide(D([F('male', .6)]), women).blur, false);
+  eq('child stays clear', R.decide(D([F('female', .95, { age: 17 })]), women).blur, false);
+  eq('missing age stays clear', R.decide(D([F('female', .95, { age: undefined })]), women).blur, false);
+  eq('adult boundary', R.decide(D([F('female', .95, { age: 18 })]), women).blur, true);
+  eq('weak face ignored', R.decide(D([F('female', .99, { score: .2 })]), women).blur, false);
+  eq('small uncertain face ignored', R.decide(D([F('female', .99, { w: 12 })]), women).blur, false);
+  eq('face without body mask is never whole-image blur', R.decide(D([F('female', .99)], []), women).blur, false);
+  eq('unmatched body stays clear in women mode', R.decide(D([], [P(-1)]), women).blur, false);
+  eq('strict people mode selects unmatched body', R.decide(D([], [P(-1)]), people).blur, true);
+  eq('failed detection leaves text readable', R.decide({ ok: false }, women).blur, false);
+  eq('missing detection has no whole-image fallback', R.decide(null, women).regions, []);
+  const group = D([F('male', .99), F('female', .95), F('female', .99, { age: 12 })]);
+  eq('mixed group only adult woman selected', R.decide(group, women).regions.map(p => p.faceIndex), [1]);
+  eq('strict people mode selects each detected body', R.decide(group, people).regions.length, 3);
+  eq('disabled has no masks', R.decide(group, S({}, { enabled: false })).regions, []);
+  const locked = S({ locked: true }, { enabled: false, mode: 'people', femaleThreshold: .9 });
+  eq('lock stays enabled', locked.enabled, true);
+  eq('lock can select people', locked.mode, 'people');
+  eq('lock cannot raise threshold', locked.femaleThreshold, .75);
+  eq('lock cannot weaken people mode', S({ locked: true, mode: 'people' }, { mode: 'women' }).mode, 'people');
+  eq('old broad threshold cannot select uncertain men', R.decide(D([F('male', .6)]), S({ femaleThreshold: .35 }, {})).blur, false);
+  eq('no body in text image', R.decide(D([], []), women).regions, []);
+  const faces = [F('male', .99), F('female', .99, { x: 150 })];
+  const pose = { keypoints: [{ part: 'nose', score: .9, position: { x: 190, y: 50 } }] };
+  eq('pose matches its own face', R.matchFace(pose, faces), 1);
+  eq('already assigned face is not reused', R.matchFace(pose, faces, new Set([1])), -1);
+  eq('body with no face anchors stays unmatched', R.matchFace({ keypoints: [] }, faces), -1);
+  eq('contain placement', R.fitBox(400, 200, 300, 300, 'contain'), { x: 0, y: 75, w: 300, h: 150 });
+  eq('cover crop placement', R.fitBox(400, 200, 300, 300, 'cover'), { x: -150, y: 0, w: 600, h: 300 });
+  eq('object position placement', R.fitBox(400, 200, 300, 300, 'cover', '0% 50%'), { x: 0, y: 0, w: 600, h: 300 });
+  eq('fill placement', R.fitBox(400, 200, 300, 300, 'fill'), { x: 0, y: 0, w: 300, h: 300 });
+  eq('data URL comma is not a second background', R.cssLayers('url("data:image/png;base64,abc")').length, 1);
+  eq('gradient and photo are separate layers', R.cssLayers('linear-gradient(red,blue), url("a.png")').length, 2);
+  eq('icon skipped', R.isIconSized(32, 32, 0, 0), true);
+  eq('normal photo not skipped', R.isIconSized(400, 300, 400, 300), false);
   document.getElementById('out').textContent = out.join('\n');
-  document.title = failed ? 'FAIL ' + failed + '/' + (passed + failed) : 'PASS ' + passed;
+  document.title = failed ? `FAIL ${failed}/${passed + failed}` : `PASS ${passed}`;
 })();

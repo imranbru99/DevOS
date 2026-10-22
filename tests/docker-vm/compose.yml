@@ -22,7 +22,7 @@ services:
     ports:
       - "8006:8006"
     volumes:
-      - ${DEVOS_ISO:-../../out/devos-24.04-amd64.iso}:/boot.iso
+      - ${DEVOS_ISO:-../../out/devos-26.04-amd64.iso}:/boot.iso
       - ./storage:/storage
       - ./start.sh:/run/start.sh:ro
     restart: "no"

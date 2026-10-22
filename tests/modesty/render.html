@@ -1,0 +1,27 @@
+<!doctype html><meta charset="utf-8"><title>WAIT</title>
+<style>body{margin:20px;font:18px sans-serif;background:white;color:black}#photo{width:400px;height:200px;object-fit:contain}#hero{width:400px;height:200px;position:relative;margin-top:20px;background-size:400px 200px}h2{margin:0;padding:8px;background:rgba(255,255,255,.9);position:relative}#caption{margin:0}</style>
+<img id="photo"><p id="caption">This caption must stay sharp.</p><div id="hero"><h2>HTML text stays readable</h2></div>
+<script src="/rules.js"></script>
+<script>
+const source=document.createElement('canvas');source.width=400;source.height=200;
+const ctx=source.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,400,200);
+ctx.fillStyle='#111';ctx.font='bold 20px sans-serif';ctx.fillText('OUTSIDE TEXT',8,120);
+for(let y=50;y<180;y+=4)for(let x=210;x<280;x+=4){ctx.fillStyle=(x+y)%8?'#f00':'#00f';ctx.fillRect(x,y,4,4);}
+const mask=document.createElement('canvas');mask.width=400;mask.height=200;
+const mc=mask.getContext('2d');mc.fillStyle='black';mc.fillRect(210,50,70,130);
+const layer=document.createElement('canvas');layer.width=400;layer.height=200;
+const lc=layer.getContext('2d');lc.filter='blur(14px)';lc.drawImage(source,0,0);lc.filter='none';lc.globalCompositeOperation='destination-in';lc.drawImage(mask,0,0);
+const result={ok:true,width:400,height:200,faces:[{score:.99,gender:'female',genderProbability:.99,age:30,x:210,y:50,w:70,h:70}],people:[{faceIndex:0,mask:mask.toDataURL(),blurLayer:layer.toDataURL()}]};
+let enabled=true;const listeners=[];
+window.chrome={runtime:{sendMessage:async(msg)=>msg.type==='get-settings'?ModestyRules.effectiveSettings({}, {enabled}):msg.type==='detect-pixels'||msg.type==='detect-url'?result:null},storage:{onChanged:{addListener(fn){listeners.push(fn);}}}};
+window.disableForComparison=()=>{enabled=false;listeners.forEach(fn=>fn({settings:{}},'local'));};
+document.getElementById('photo').src=source.toDataURL();document.getElementById('hero').style.backgroundImage=`url("${source.toDataURL()}")`;
+setInterval(()=>{
+ if(!enabled)return;
+ const photo=document.getElementById('photo'),hero=document.getElementById('hero');
+ if(photo.dataset.dm==='regional'&&hero.dataset.dmBg==='regional'){
+  const safe=getComputedStyle(hero).filter==='none'&&getComputedStyle(document.getElementById('caption')).filter==='none'&&getComputedStyle(hero.querySelector('h2')).filter==='none';
+  document.title=safe?'PASS region rendering':'FAIL text container filtered';
+ }
+},100);
+</script><script src="/content.js"></script>

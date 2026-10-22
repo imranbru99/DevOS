@@ -1,6 +1,6 @@
 #!/bin/bash
 # DevOS Build Environment Setup Script
-# Installs required host dependencies on Ubuntu 24.04 LTS (Noble) to build DevOS ISO
+# Installs required host dependencies on Ubuntu 26.04 LTS (Resolute) to build DevOS ISO
 set -euo pipefail
 
 echo "=========================================================="

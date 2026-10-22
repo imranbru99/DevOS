@@ -44,6 +44,7 @@ OPTIMIZER_PY = os.path.join(COMPONENTS, "optimizer", "optimizer.py")
 SECURITY_PY = os.path.join(COMPONENTS, "security", "security_center.py")
 CLIPBOARD_PY = os.path.join(COMPONENTS, "clipboard", "clipboard.py")
 EMOJI_PY = os.path.join(COMPONENTS, "emoji", "emoji.py")
+KIDS_MODE_PY = os.path.join(COMPONENTS, "kids", "kids_mode.py")
 NOTEPAD_PY = os.path.join(COMPONENTS, "notepad", "notepad.py")
 APP_RESOLVER_PY = os.path.join(COMPONENTS, "apphub", "app_resolver.py")
 POWER_PY = os.path.join(COMPONENTS, "power", "power_settings.py")
@@ -257,7 +258,7 @@ wifi bluetooth display sound printer remind reminder timer minutes minute hours 
 directions maps wikipedia youtube chrome firefox browser notepad terminal calculator files explorer
 downloads documents pictures photos desktop videos editor text code store apps optimizer dashboard camera kate
 libreoffice writer konsole uninstall install quit exit increase decrease mute unmute gmail facebook whatsapp
-github system manager
+github system manager post tweet share publish linkedin reddit
 """.split())
 _CORRECTION_TARGETS = COMMAND_VOCAB | {"can", "could", "please", "you"}
 
@@ -395,12 +396,24 @@ KNOWN_SITES = {
     "linkedin": "https://www.linkedin.com",
     "instagram": "https://www.instagram.com",
     "twitter": "https://x.com",
+    "x": "https://x.com",
     "netflix": "https://www.netflix.com",
     "amazon": "https://www.amazon.com",
     "bing": "https://www.bing.com",
     "stack overflow": "https://stackoverflow.com",
     "stackoverflow": "https://stackoverflow.com",
     "reddit": "https://www.reddit.com",
+}
+
+SOCIAL_PLATFORMS = {
+    "facebook": ("Facebook", "https://www.facebook.com"),
+    "fb": ("Facebook", "https://www.facebook.com"),
+    "twitter": ("Twitter", "https://x.com"),
+    "x": ("X", "https://x.com"),
+    "linkedin": ("LinkedIn", "https://www.linkedin.com"),
+    "reddit": ("Reddit", "https://www.reddit.com"),
+    "threads": ("Threads", "https://www.threads.net"),
+    "instagram": ("Instagram", "https://www.instagram.com"),
 }
 
 KNOWN_QUERY_SITES = {
@@ -536,7 +549,7 @@ def _browser_for(t: str) -> str:
 
 
 _BROWSER_ONLY_CLAUSE = re.compile(
-    r"^(?:(?:open|launch|start|go to|goto|go|visit|switch to|use|in|on|the|my|a|new|tab|window|web|"
+    r"^(?:(?:open|launch|start|go to|goto|go|visit|switch to|use|in|on|from|using|with|via|the|my|a|new|tab|window|web|"
     r"browser|chrome|firefox|google|youtube|website|site|page|to|and|then)\s*)+$")
 
 
@@ -709,6 +722,61 @@ def _search_action(engine: str, query: str, browser: str) -> Action:
     app = {"chrome": "Chrome", "firefox": "Firefox"}.get(browser, "the browser")
     label = f"Directions to “{query}”" if engine == "directions" else f"Search {where} for “{query}” in {app}"
     return Action("web_search", {"engine": engine, "query": query, "url": url, "browser": browser}, label=label)
+
+
+_PLAT_RE = r"(?:facebook|fb|twitter|x|linkedin|reddit|threads|instagram)"
+
+_SOC_PAT_A = re.compile(
+    r"^(?:.*?\b(?:go\s+to|open|visit|launch)\s+)?(?P<plat>" + _PLAT_RE + r")\b.*?"
+    r"\b(?:write|create|make|share|put|publish)?\s*(?:a\s+)?(?:post|tweet|status|update)\b"
+    r"(?:\s+(?:about|on|saying|of|for|regarding|with))\s+(?P<topic>.+?)"
+    r"(?:\s*(?:,|\band\b|\bthen\b)?\s*(?:then\s+)?(?:publish|post|submit|send)(?:\s+it)?)?$",
+    re.I
+)
+
+_SOC_PAT_B = re.compile(
+    r"^(?:(?:please|can you|could you)\s+)?(?:write|create|make|share|publish)?\s*(?:a\s+)?(?:post|status|update)\s+"
+    r"(?:on|to|in|at)\s+(?P<plat>" + _PLAT_RE + r")\b"
+    r"(?:\s+(?:about|on|saying|of|for|regarding))\s+(?P<topic>.+?)"
+    r"(?:\s*(?:,|\band\b|\bthen\b)?\s*(?:then\s+)?(?:publish|post|submit|send)(?:\s+it)?)?$",
+    re.I
+)
+
+_SOC_PAT_C = re.compile(
+    r"^(?:(?:please|can you|could you)\s+)?(?:write\s+a\s+tweet|tweet|post\s+(?:on|to)\s+(?P<plat>" + _PLAT_RE + r"))\s+"
+    r"(?:about|on|saying|regarding)\s+(?P<topic>.+?)"
+    r"(?:\s*(?:,|\band\b|\bthen\b)?\s*(?:then\s+)?(?:publish|post|submit|send)(?:\s+it)?)?$",
+    re.I
+)
+
+_SOC_PAT_D = re.compile(
+    r"^(?:(?:please|can you|could you)\s+)?(?:write|create|make|share|publish)?\s*(?:a\s+)?(?:post|status|update)\s+"
+    r"(?:about|on|saying|regarding)\s+(?P<topic>.+?)\s+(?:on|to|in|at)\s+(?P<plat>" + _PLAT_RE + r")"
+    r"(?:\s*(?:,|\band\b|\bthen\b)?\s*(?:then\s+)?(?:publish|post|submit|send)(?:\s+it)?)?$",
+    re.I
+)
+
+
+def parse_social_post(text: str) -> Optional[Action]:
+    t = (text or "").strip()
+    m = _SOC_PAT_B.match(t) or _SOC_PAT_C.match(t) or _SOC_PAT_D.match(t) or _SOC_PAT_A.match(t)
+    if not m:
+        return None
+    plat_key = (m.group("plat") if "plat" in m.groupdict() and m.group("plat") else "twitter").lower()
+    topic = m.group("topic").strip().strip("\",'\".")
+    topic = re.sub(r"\s*(?:,|\band\b|\bthen\b)?\s*(?:then\s+)?(?:publish|post|submit|send)(?:\s+it)?$", "", topic, flags=re.I).strip()
+    if not topic:
+        return None
+    browser = _browser_for(t)
+    plat_info = SOCIAL_PLATFORMS.get(plat_key, (plat_key.title(), "https://" + plat_key + ".com"))
+    return Action("social_post", {
+        "platform": plat_key,
+        "topic": topic,
+        "browser": browser,
+        "url": plat_info[1],
+        "publish": bool(re.search(r"\b(?:publish|submit|send)\b", t, re.I)),
+    }, label=f"Draft post for {plat_info[0]}")
+
 
 
 def browser_command(browser: str, url: str, which: Callable) -> List[str]:
@@ -1235,7 +1303,7 @@ HELP_TEXT = (
     "“open the file report.pdf”, “close Chrome”, “play music”, “next song”\n"
     "- **Settings:** “open Wi-Fi settings”, “Bluetooth”, “display”, “printers”\n"
     "- **Quick actions:** volume up/down/mute, brightness, take a screenshot, lock the screen, open Downloads\n"
-    "- **Everyday:** “open clipboard” (Win+V), “open emoji” (Win+.)\n"
+    "- **Everyday:** “open clipboard” (Win+V), “open emoji” (Win+.), “start kids mode” (Win+K)\n"
     "- **Clean up:** “free up space” shows what can be cleaned (nothing is deleted without you)\n"
     "- **Problems:** “help me, wifi is not working”, “is my PC safe”, “scan for viruses”, "
     "“is this link safe” plus the address — I check this PC and do the safe next step\n"
@@ -1326,7 +1394,34 @@ def _media_action(t: str) -> Optional[Action]:
     return None
 
 
-def route_clause(c: str, ctx: Optional[ToolContext] = None) -> Optional[List[Action]]:
+def _islamic_action(c: str, context: Optional[List[str]] = None) -> Optional[Action]:
+    t = c.strip().lower()
+    if t in ("tell me bangla", "tell me bangla this", "in bangla", "bangla", "bangla please",
+             "বাংলা", "বাংলায় বলো", "বাংলা অনুবাদ", "translate to bangla", "show bangla"):
+        if any(re.search(r"\b(?:islamic|ayah|hadith|quran|surah)\b|(?:আয়াত|হাদিস|ইসলামিক)", m.lower()) for m in (context or [])):
+            return Action("islamic", {"topic": "all"}, label="Today's Islamic")
+
+    patterns = [
+        r"\b(?:today(?:['’]s)?\s+)?islamic(?:\s+(?:ayah|hadith|quote|reminder|prayer))?\b",
+        r"\b(?:today(?:['’]s)?\s+)?(?:daily\s+)?(?:ayah|hadith|surah)\b",
+        r"\b(?:show|tell|read|give)\s+(?:me\s+)?(?:today(?:['’]s)?\s+)?(?:islamic\s+)?(?:ayah|hadith)\b",
+        r"\b(?:quran|hadith|ayah)\s+of\s+the\s+day\b",
+        r"\b(?:prayer\s+times?|namaz\s+times?|salat\s+times?)\b",
+        r"(?:আজকের\s+)?(?:ইসলামিক|আয়াত|হাদিস|নামাজের\s*সময়|কুরআনের\s*আয়াত)",
+    ]
+    if any(re.search(p, t) for p in patterns):
+        topic = "all"
+        if re.search(r"\b(?:prayer|namaz|salat)\b|নামাজ", t):
+            topic = "prayer"
+        elif re.search(r"\b(?:hadith|হাদিস)\b", t) and not re.search(r"\b(?:ayah|quran|আয়াত)\b", t):
+            topic = "hadith"
+        elif re.search(r"\b(?:ayah|quran|আয়াত)\b", t) and not re.search(r"\b(?:hadith|হাদিস)\b", t):
+            topic = "ayah"
+        return Action("islamic", {"topic": topic, "query": c}, label="Today's Islamic")
+    return None
+
+
+def route_clause(c: str, ctx: Optional[ToolContext] = None, context: Optional[List[str]] = None) -> Optional[List[Action]]:
     if not c:
         return None
     if _has(r"^(?:help|\?|what can you do|what can u do|how (?:do i|to) use (?:you|this)|commands|what are your (?:features|commands))$", c) \
@@ -1360,17 +1455,20 @@ def route_clause(c: str, ctx: Optional[ToolContext] = None) -> Optional[List[Act
     if _has(r"\b(?:go to sleep|sleep mode|suspend|put (?:the |my |this )?(?:pc|computer|laptop) to sleep)\b|^sleep$", c):
         return [Action("power", {"op": "suspend"}, confirm="Put this PC to sleep now?", label="Sleep")]
 
-    m = re.match(r"^(?:please\s+)?(?:uninstall|remove|delete)(?:\s+(?:the|my|this))?"
+    m = re.match(r"^(?P<guide>how\s+(?:to|do i|can i)\s+)?(?:please\s+)?"
+                 r"(?:uninstall|uninstal|unistall|unstall|unstal|remove|delete)(?:\s+(?:the|my|this))?"
                  r"(?:\s+(?:app|program|application|software))?\s+(.+)$", c)
     if m:
-        name = re.sub(r"\b(?:app|application|program|software)$", "", m.group(1)).strip()
+        name = re.sub(r"\s+from\s+(?:(?:our|my|the|this)\s+)?(?:software|apps?|applications?|programs?)(?:\s+list)?[?.!]*$", "", m.group(2)).strip()
+        name = re.sub(r"\b(?:app|application|program|software)$", "", name).strip()
         name = _PLACE_TAIL.sub("", name).strip(" :,.?!-–\"'")
         name = _APP_TAIL.sub("", name).strip()
         if name and not re.search(
                 r"\b(?:folder|directory|wallpaper|note|reminder|virus|history|cache|password)\b", name) \
                 and not re.fullmatch(r"(?:my |the |a )?(?:files?|folders?)", name) \
                 and not re.search(r"\.\w{1,5}$", name):
-            return [Action("uninstall", {"name": name}, confirm=f"Uninstall “{name}”?",
+            return [Action("uninstall", {"name": name, **({"guide": True} if m.group("guide") else {})},
+                           confirm="" if m.group("guide") else f"Uninstall “{name}”?",
                            label=f"Uninstall {name}")]
 
     name = install_request(c)
@@ -1445,6 +1543,10 @@ def route_clause(c: str, ctx: Optional[ToolContext] = None) -> Optional[List[Act
             or _has(r"\b(?:tell|show|check|get)\s+(?:me\s+)?(?:the\s+)?time\b", c):
         return [Action("time", label="Tell the time")]
 
+    ia = _islamic_action(c, context=context)
+    if ia:
+        return [ia]
+
     try:
         _here = os.path.dirname(os.path.abspath(__file__))
         if _here not in sys.path:
@@ -1459,6 +1561,8 @@ def route_clause(c: str, ctx: Optional[ToolContext] = None) -> Optional[List[Act
         return [Action("open_tool", {"tool": "clipboard"}, label="Open clipboard history")]
     if _has(r"\b(?:emoji panel|emoji picker|open emoji|show emoji)\b", c) or c.strip() in ("emoji", "emojis"):
         return [Action("open_tool", {"tool": "emoji"}, label="Open emoji")]
+    if _has(r"\b(?:kids?\s*mode|child(?:ren)?\s*mode|kid\s*play|start\s+kids?\s*mode|open\s+kids?\s*mode|turn\s+on\s+kids?\s*mode|run\s+kids?\s*mode)\b|বাচ্চাদের\s*মোড", c):
+        return [Action("open_tool", {"tool": "kids"}, label="Start Kids Mode")]
 
     m = _RANK_NAV_RE.match(c)
     if m:
@@ -1473,14 +1577,16 @@ def route_clause(c: str, ctx: Optional[ToolContext] = None) -> Optional[List[Act
         return [Action("open_web_page", {"page": page, "browser": _browser_for(c)},
                        label=f"Go to the {page} page")]
 
-    m = re.match(r"^(?:open|go to|visit|browse|navigate to|take me to|load)\s+(?:the\s+)?(?:website\s+|site\s+|page\s+)?(\S+?)(?:\s+(?:website|site|page|in chrome|in the browser|on chrome))?$", c)
+    _BROWSER_TAIL = r"(?:\s+(?:website|site|page|(?:in|on|from|using|with|via)\s+(?:the\s+)?(?:chrome|firefox|browser|web browser|internet)))?"
+
+    m = re.match(r"^(?:open|go to|visit|browse|navigate to|take me to|load)\s+(?:the\s+)?(?:website\s+|site\s+|page\s+)?(\S+?)" + _BROWSER_TAIL + r"$", c)
     if m:
         target = m.group(1)
         if _URLISH.match(target):
             url = normalize_url(target)
             if url:
                 return [Action("open_url", {"url": url, "browser": _browser_for(c)}, label=f"Open {target}")]
-    m = re.match(r"^(?:open|go to|visit|take me to|load)\s+(?:the\s+)?(.+?)(?:\s+(?:website|site|page|in chrome|in the browser|on chrome))?$", c)
+    m = re.match(r"^(?:open|go to|visit|take me to|load)\s+(?:the\s+)?(.+?)" + _BROWSER_TAIL + r"$", c)
     if m and m.group(1).strip() in KNOWN_SITES:
         site = m.group(1).strip()
         return [Action("open_url", {"url": KNOWN_SITES[site], "browser": _browser_for(c)},
@@ -2027,13 +2133,18 @@ def route_single_clause(c: str, ctx: Optional[ToolContext] = None, context: Opti
         _pre, act, _rest = ws
         return [act]
 
+    # 2.5 Social Post
+    sp = parse_social_post(c)
+    if sp:
+        return [sp]
+
     # 3. Route content
     cnt = route_content(c, ctx)
     if cnt and cnt.actions:
         return cnt.actions
 
     # 4. Standard route_clause
-    r = route_clause(c, ctx)
+    r = route_clause(c, ctx, context=context)
     if r:
         return r
 
@@ -2064,9 +2175,12 @@ def route(text: str, ctx: Optional[ToolContext] = None, context: Optional[List[s
     t = normalize(raw)
     if not t:
         return RouteResult()
-    whole = route_clause(t, ctx)
-    if whole and whole[0].name == "open_url":
-        return RouteResult(whole)          # "open google maps" is a site, not a search
+    sp = parse_social_post(raw) or parse_social_post(t)
+    if sp:
+        return RouteResult([sp])
+    whole = route_clause(t, ctx, context=context)
+    if whole and whole[0].name in ("open_url", "islamic"):
+        return RouteResult(whole)          # "open google maps" is a site, not a search; islamic is direct
     ws = parse_web_search(t)
     if ws:
         pre, action, rest = ws
@@ -2227,6 +2341,70 @@ def _x_web_search(a, ctx, dry):
     where = "YouTube" if a.args.get("engine") == "youtube" else "Google"
     return _done(ok, f"Searching {where} for **{a.args['query']}** — the results are opening in your browser.",
                  "I couldn't open the browser.", [argv], data={"url": url})
+
+
+def copy_to_clipboard(text: str, ctx: ToolContext) -> bool:
+    """Copies text to the system clipboard using wl-copy or xclip if available."""
+    if not text:
+        return False
+    if ctx.which("wl-copy"):
+        rc, _ = ctx.runner(["wl-copy"], input_text=text, timeout=2.0)
+        if rc == 0:
+            return True
+    if ctx.which("xclip"):
+        rc, _ = ctx.runner(["xclip", "-i", "-selection", "clipboard"], input_text=text, timeout=2.0)
+        return rc == 0
+    return False
+
+
+def _x_social_post(a: Action, ctx: ToolContext, dry: bool) -> ToolResult:
+    plat_key = str(a.args.get("platform", "facebook")).lower()
+    plat_info = SOCIAL_PLATFORMS.get(plat_key, (plat_key.title(), "https://" + plat_key + ".com"))
+    plat_name, base_url = plat_info
+    topic = str(a.args.get("topic", "")).strip()
+    browser = str(a.args.get("browser", "default"))
+    text = str(a.args.get("text", "")).strip()
+
+    if not text:
+        if topic:
+            text = f"Exploring {topic} on DevOS — built for smooth performance, developer power, and privacy!"
+        else:
+            text = "Excited to build on DevOS — the developer-first OS!"
+
+    # For X / Twitter, open tweet composer intent with text pre-filled
+    if plat_key in ("twitter", "x"):
+        target_url = "https://twitter.com/intent/tweet?text=" + urllib.parse.quote(text)
+    else:
+        target_url = base_url
+
+    argv = browser_command(browser, target_url, ctx.which)
+    plan = [argv]
+    if ctx.which("xclip") or ctx.which("wl-copy"):
+        plan.append(["xclip", "-i", "-selection", "clipboard", text])
+
+    if dry:
+        return ToolResult(
+            f"Opening **{plat_name}** with your draft post ready.",
+            plan=plan,
+            data={"url": target_url, "platform": plat_key, "draft": text, "clipboard": text}
+        )
+
+    copy_to_clipboard(text, ctx)
+    ok = _launch(ctx, argv, dry)
+
+    b_label = "Chrome" if browser == "chrome" else ("Firefox" if browser == "firefox" else "your browser")
+    msg = (
+        f"Opening **{plat_name}** in {b_label} with your draft post ready.\n\n"
+        f"**Draft Post:**\n"
+        f"> {text}\n\n"
+        f"📋 *The draft has been copied to your clipboard. Paste (**Ctrl+V**) into the post box and review before publishing!*"
+    )
+    buttons = [
+        ("Open " + plat_name, Action("open_url", {"url": target_url, "browser": browser}, label=f"Open {plat_name}"))
+    ]
+    return _done(ok, msg, f"I couldn't open {plat_name} in the browser.", plan,
+                 buttons=buttons, data={"url": target_url, "platform": plat_key, "draft": text, "clipboard": text})
+
 
 
 def _link_verdict(url):
@@ -2481,6 +2659,11 @@ def _x_power(a, ctx, dry):
 
 def _x_uninstall(a, ctx, dry):
     name = str(a.args.get("name", "")).strip()
+    if a.args.get("guide"):
+        return ToolResult(f"To uninstall **{name}**, open **Apps**, select the app, and choose **Uninstall**. "
+                          "You can also use the button below; I will ask you to confirm before removal.",
+                          buttons=[(f"Uninstall {name}", Action("uninstall", {"name": name},
+                                   confirm=f"Uninstall “{name}”?", label=f"Uninstall {name}"))])
     resolver = ctx.app_resolver()
     feature = None
     if resolver is not None and name:
@@ -2537,6 +2720,9 @@ def _x_open_tool(a, ctx, dry):
     elif tool == "emoji":
         argv = [py, EMOJI_PY]
         title = "Emoji"
+    elif tool == "kids":
+        argv = [py, KIDS_MODE_PY]
+        title = "Kids Mode"
     else:
         return ToolResult("Unknown tool.", ok=False)
     ok = _launch(ctx, argv, dry)
@@ -2607,6 +2793,81 @@ def _x_solve(a, ctx, dry):
 def _x_time(a, ctx, dry):
     now = ctx.now()
     return ToolResult(f"It's **{now.strftime('%I:%M %p').lstrip('0')}** on {now.strftime('%A, %d %B %Y')}.")
+
+
+def _x_islamic(a: Action, ctx: ToolContext, dry: bool) -> ToolResult:
+    buttons = [("Open DevOS Islamic", Action("open_app", {"name": "devos-islamic"}))]
+    if dry:
+        return ToolResult("Islamic texts and prayer times.", ok=True, buttons=buttons)
+
+    topic = str(a.args.get("topic") or "all").lower()
+    islamic_dir = os.path.join(COMPONENTS, "islamic")
+    if islamic_dir not in sys.path:
+        sys.path.insert(0, islamic_dir)
+    try:
+        import content as islamic_content
+        import notifier as islamic_notifier
+        import prayer_times as islamic_pt
+    except Exception as exc:
+        return ToolResult(f"DevOS Islamic could not be loaded: {exc}", ok=False, buttons=buttons)
+
+    now_dt = ctx.now() if hasattr(ctx, "now") else datetime.datetime.now()
+    day = now_dt.date()
+
+    ayah = islamic_content.ayah_of_the_day(day)
+    hadith = islamic_content.hadith_of_the_day(day)
+
+    if not ayah and not hadith:
+        return ToolResult(
+            "Authentic Islamic texts have not been downloaded yet. You can download and turn them on via DevOS Islamic.",
+            ok=False, buttons=buttons
+        )
+
+    lines = []
+    if topic == "prayer":
+        try:
+            settings = islamic_notifier.load_settings()
+            loc = islamic_pt.resolve_location(settings)
+            local_now = datetime.datetime.now(datetime.timezone.utc).astimezone(loc["tz"])
+            times = islamic_pt.times_for_settings(day, settings)
+            lines.append(f"### 🕌 Prayer Times ({loc.get('name', 'Local')})")
+            lines.append(f"*{local_now.strftime('%A, %d %B %Y')}*")
+            lines.append("")
+            for p_name in islamic_pt.PRAYERS:
+                t_str = times[p_name].strftime("%I:%M %p").lstrip("0")
+                p_label = islamic_pt.PRAYER_LABELS.get(p_name, p_name.capitalize())
+                lines.append(f"- **{p_label}:** {t_str}")
+            return ToolResult("\n".join(lines), ok=True, buttons=buttons)
+        except Exception:
+            pass
+
+    if topic in ("all", "ayah") and ayah:
+        lines.append("### 📖 Ayah of the Day")
+        ref = ayah.get("reference", "")
+        if ref:
+            lines.append(f"**{ref}**\n")
+        if ayah.get("ar"):
+            lines.append(f"**{ayah['ar']}**\n")
+        if ayah.get("en"):
+            lines.append(f"- **English:** {ayah['en']} *(Saheeh International)*")
+        if ayah.get("bn"):
+            lines.append(f"- **বাংলা:** {ayah['bn']} *(মুহিউদ্দীন খান)*")
+        lines.append("")
+
+    if topic in ("all", "hadith") and hadith:
+        lines.append("### 📜 Hadith of the Day")
+        ref = hadith.get("reference", "")
+        if ref:
+            lines.append(f"**{ref}**\n")
+        if hadith.get("ar"):
+            lines.append(f"**{hadith['ar']}**\n")
+        if hadith.get("en"):
+            lines.append(f"- **English:** {hadith['en']}")
+        if hadith.get("bn"):
+            lines.append(f"- **বাংলা:** {hadith['bn']}")
+        lines.append("")
+
+    return ToolResult("\n".join(lines).strip(), ok=True, buttons=buttons)
 
 
 
@@ -3213,10 +3474,11 @@ _EXECUTORS = {
     "open_settings": _x_open_settings, "open_folder": _x_open_folder, "volume": _x_volume,
     "brightness": _x_brightness, "screenshot": _x_screenshot, "lock": _x_lock, "power": _x_power,
     "uninstall": _x_uninstall, "open_tool": _x_open_tool, "cleanup_scan": _x_cleanup_scan,
-    "solve": _x_solve, "time": _x_time,
+    "solve": _x_solve, "time": _x_time, "islamic": _x_islamic,
     "write_note": _x_write_note, "type_text": _x_type_text, "open_app_and_type": _x_open_app_and_type,
     "compose_email": _x_compose_email, "reminder": _x_reminder, "create_folder": _x_create_folder,
     "open_path": _x_open_path, "media": _x_media, "close_app": _x_close_app,
+    "social_post": _x_social_post,
 }
 
 ACTION_NAMES = frozenset(_EXECUTORS)

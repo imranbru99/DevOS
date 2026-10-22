@@ -5,7 +5,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-ISO_PATH="${ROOT_DIR}/out/devos-24.04-amd64.iso"
+ISO_PATH="${ROOT_DIR}/out/devos-26.04-amd64.iso"
 
 MODE="${1:-bios}"
 TMP_DIR="${ROOT_DIR}/tests/qemu/usb-test-tmp"

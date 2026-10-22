@@ -142,6 +142,10 @@ class TestIntentRouter(unittest.TestCase):
         self.assertEqual((a.name, a.args["url"]), ("open_url", "https://maps.google.com"))
         a = first("visit https://github.com/devos")
         self.assertEqual(a.args["url"], "https://github.com/devos")
+        a = first("go to facebook from chrome")
+        self.assertEqual((a.name, a.args["url"], a.args["browser"]), ("open_url", "https://www.facebook.com", "chrome"))
+        a = first("go to facebook using chrome")
+        self.assertEqual((a.name, a.args["url"], a.args["browser"]), ("open_url", "https://www.facebook.com", "chrome"))
         a = first("ক্রোম খোলো")
         self.assertEqual((a.name, a.args["name"]), ("open_app", "chrome"))
 
@@ -188,6 +192,24 @@ class TestIntentRouter(unittest.TestCase):
         self.assertEqual((a.name, a.args["name"]), ("uninstall", "vlc"))
         self.assertTrue(a.confirm)
 
+    def test_uninstall_wording_and_help_do_not_list_or_remove_apps(self):
+        for text in ('how to unstal claude from our software list',
+                     'how do i uninstall claude', 'how can i remove claude from my apps'):
+            with self.subTest(text=text):
+                action = first(text)
+                self.assertEqual(action.name, 'uninstall')
+                self.assertEqual(action.args, {'name': 'claude', 'guide': True})
+                result = tools.execute(action, dry_run=True)
+                self.assertTrue(result.ok)
+                self.assertEqual(result.plan, [])
+                self.assertTrue(result.buttons[0][1].confirm)
+        for text in ('uninstal vlc', 'unstall vlc', 'unistall vlc', 'remove vlc from my software list'):
+            action = first(text)
+            self.assertEqual(action.args['name'], 'vlc')
+            self.assertTrue(action.confirm)
+        self.assertEqual(first('list my software').name, 'list_apps')
+        self.assertNotEqual(getattr(first('delete my files'), 'name', None), 'uninstall')
+
     def test_11_multi_step(self):
         r = tools.route("open notepad and then take a screenshot")
         self.assertEqual([a.name for a in r.actions], ["open_app", "screenshot"])
@@ -213,6 +235,61 @@ class TestIntentRouter(unittest.TestCase):
         for s in samples:
             for a in tools.route(s).actions:
                 self.assertIn(a.name, tools.ACTION_NAMES)
+
+    def test_14_social_posting(self):
+        # User's exact prompt
+        r = tools.route("go to facebook from chrome, then write a post about Dev OS what's the best feature of our Dev OS then publish")
+        self.assertEqual(len(r.actions), 1)
+        a = r.actions[0]
+        self.assertEqual(a.name, "social_post")
+        self.assertEqual(a.args["platform"], "facebook")
+        self.assertEqual(a.args["browser"], "chrome")
+        self.assertEqual(a.args["topic"], "Dev OS what's the best feature of our Dev OS")
+        self.assertTrue(a.args["publish"])
+
+        # Direct variants
+        cases = {
+            "post on facebook about Dev OS": ("facebook", "Dev OS", "default"),
+            "write a post on facebook about new features": ("facebook", "new features", "default"),
+            "write a post about Dev OS on facebook": ("facebook", "Dev OS", "default"),
+            "share a post about Dev OS on facebook": ("facebook", "Dev OS", "default"),
+            "tweet about Dev OS is awesome": ("twitter", "Dev OS is awesome", "default"),
+            "write a tweet about Dev OS": ("twitter", "Dev OS", "default"),
+            "post to linkedin about hiring developers then publish": ("linkedin", "hiring developers", "default"),
+            "go to x and write a post about new features": ("x", "new features", "default"),
+        }
+        for prompt, (plat, topic, browser) in cases.items():
+            with self.subTest(prompt=prompt):
+                r = tools.route(prompt)
+                self.assertTrue(r.handled, prompt)
+                act = r.actions[0]
+                self.assertEqual(act.name, "social_post")
+                self.assertEqual(act.args["platform"], plat)
+                self.assertEqual(act.args["topic"], topic)
+                self.assertEqual(act.args["browser"], browser)
+
+    def test_15_islamic_routing(self):
+        cases = [
+            ("Today's Islamic", "all"),
+            ("today's ayah", "ayah"),
+            ("show me today's islamic ayah", "ayah"),
+            ("show me today's islamic hadith", "hadith"),
+            ("hadith of the day", "hadith"),
+            ("prayer times", "prayer"),
+            ("আজকের আয়াত", "ayah"),
+            ("আজকের হাদিস", "hadith"),
+        ]
+        for text, exp_topic in cases:
+            with self.subTest(text=text):
+                r = tools.route(text)
+                self.assertTrue(r.actions, f"No action for {text}")
+                self.assertEqual(r.actions[0].name, "islamic")
+                self.assertEqual(r.actions[0].args.get("topic"), exp_topic)
+
+        # Context follow-up test (user asked for bangla after ayah)
+        r_ctx = tools.route("tell me bangla", context=["show me today's islamic ayah"])
+        self.assertTrue(r_ctx.actions)
+        self.assertEqual(r_ctx.actions[0].name, "islamic")
 
 
 class TestUrls(unittest.TestCase):
@@ -357,6 +434,15 @@ class TestToolsDryRun(unittest.TestCase):
         self.assertEqual(res[0].plan, [["google-chrome-stable", "https://www.google.com/search?q=hp+latest+laptop"]])
         self.assertEqual(self.launched, [])
 
+    def test_social_posting_dry_run_plan(self):
+        res = self.run_action("go to facebook from chrome, then write a post about Dev OS what's the best feature of our Dev OS then publish")
+        self.assertTrue(res[0].ok)
+        self.assertEqual(res[0].plan[0], ["google-chrome-stable", "https://www.facebook.com"])
+        self.assertEqual(res[0].data["platform"], "facebook")
+        self.assertIn("Dev OS", res[0].data["draft"])
+        self.assertEqual(res[0].data["clipboard"], res[0].data["draft"])
+        self.assertEqual(self.launched, [])
+
     def test_open_app_fuzzy(self):
         cases = {"open chrome": "devos-browser", "open notepad": "devos-notepad",
                  "open terminal": "org.kde.konsole", "launch vlc": "vlc", "open calculator": "org.kde.kcalc",
@@ -425,6 +511,12 @@ class TestToolsDryRun(unittest.TestCase):
 
     def test_time(self):
         self.assertIn("9:05 AM", self.run_action("what time is it")[0].text)
+
+    def test_islamic_dry_run(self):
+        res = tools._x_islamic(tools.Action("islamic", {"topic": "all"}), self.ctx, dry=True)
+        self.assertTrue(res.ok)
+        self.assertEqual(res.text, "Islamic texts and prayer times.")
+        self.assertTrue(any("devos-islamic" in str(b[1].args) for b in res.buttons))
 
 
 class FakeModel:
@@ -1940,6 +2032,96 @@ class TestChatWindowLayout(unittest.TestCase):
         self.assertFalse(w.sidebar.hands_free.switch.isChecked())
         self.assertFalse(w.sidebar.hands_free.hint.isHidden())
         self.assertTrue(w.toast.isVisible())
+
+    def test_send_reaches_model_and_saves_reply(self):
+        from unittest.mock import Mock
+        self.win.assistant.model = Mock()
+        self.win.assistant.model.chat.return_value = "Hello from the local model."
+        self.win.send("hi")
+        for _ in range(100):
+            self.pump(10)
+            if not self.win.busy:
+                break
+        self.assertFalse(self.win.busy)
+        self.win.assistant.model.chat.assert_called_once()
+        self.assertEqual(self.win.history.messages[-1]["role"], "assistant")
+        self.assertEqual(self.win.history.messages[-1]["text"], "Hello from the local model.")
+
+    def test_dispatch_error_is_shown_in_chat(self):
+        from unittest.mock import patch
+        with patch.object(self.win.assistant, "plan", side_effect=RuntimeError("Routing failed")):
+            self.win.send("hi")
+        self.assertEqual(self.win.history.messages[-1]["role"], "assistant")
+        self.assertIn("Routing failed", self.win.history.messages[-1]["text"])
+        self.assertFalse(self.win.history.messages[-1]["ok"])
+
+    def _seed_chats(self):
+        histories = []
+        for title in ("First conversation", "Second conversation", "Third conversation"):
+            history = self.win.store.new_history()
+            history.add("user", title)
+            self.win._save(history)
+            histories.append(history)
+        self.win.open_chat(histories[0].chat_id)
+        return histories
+
+    def test_select_all_delete_requires_confirmation(self):
+        from unittest.mock import patch
+        histories = self._seed_chats()
+        side = self.win.sidebar
+        side.select_btn.click()
+        side.select_all_btn.click()
+        self.assertEqual(side.selected_ids, {h.chat_id for h in histories})
+        self.assertEqual(side.delete_selected_btn.text(), "Delete selected (3)")
+        with patch.object(self.win, "confirm", return_value=False) as confirm:
+            side.delete_selected_btn.click()
+        confirm.assert_called_once()
+        self.assertEqual(len(self.win.store.chats), 3)
+        self.assertTrue(all(os.path.isfile(h.path) for h in histories))
+        with patch.object(self.win, "confirm", return_value=True) as confirm:
+            side.delete_selected_btn.click()
+        confirm.assert_called_once()
+        self.assertEqual(self.win.store.chats, [])
+        self.assertTrue(all(not os.path.exists(h.path) for h in histories))
+        self.assertEqual(self.win.history.messages, [])
+        self.assertFalse(side.selecting)
+        # A delayed worker must never recreate a deleted conversation.
+        histories[0].add("assistant", "Late reply")
+        self.win._save(histories[0])
+        self.assertFalse(os.path.exists(histories[0].path))
+        self.assertEqual(self.win.store.chats, [])
+
+    def test_selection_clicks_filtering_and_cancel(self):
+        from PyQt5 import QtCore, QtTest
+        from unittest.mock import patch
+        histories = self._seed_chats()
+        side = self.win.sidebar
+        side.select_btn.click()
+        item = next(side.list.item(i) for i in range(side.list.count())
+                    if side.list.item(i).data(QtCore.Qt.UserRole) == histories[0].chat_id)
+        with patch.object(side, "chat_selected") as chat_selected:
+            QtTest.QTest.mouseClick(side.list.viewport(), QtCore.Qt.LeftButton,
+                                   pos=side.list.visualItemRect(item).center())
+            chat_selected.emit.assert_not_called()
+        self.assertEqual(side.selected_ids, {histories[0].chat_id})
+        side.search.setText("Second")
+        self.assertEqual(side.select_all_btn.text(), "Select all results")
+        side.select_all_btn.click()
+        self.assertEqual(side.selected_ids, {h.chat_id for h in histories[:2]})
+        side.search.clear()
+        self.assertEqual(side.delete_selected_btn.text(), "Delete selected (2)")
+        with patch.object(self.win, "confirm", return_value=True):
+            side.delete_selected_btn.click()
+        self.assertEqual([c["id"] for c in self.win.store.chats], [histories[2].chat_id])
+        self.assertTrue(os.path.isfile(histories[2].path))
+        side.select_btn.click()
+        side.select_all_btn.click()
+        side.select_all_btn.click()
+        self.assertFalse(side.selected_ids)
+        self.assertFalse(side.delete_selected_btn.isEnabled())
+        side.select_btn.click()
+        self.assertFalse(side.selecting)
+        self.assertTrue(side.delete_selected_btn.isHidden())
 
 
 class TestMultiStepChaining(unittest.TestCase):
