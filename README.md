@@ -16,7 +16,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/devos_dashboard_overview.png" alt="DevOS Opening Dashboard" width="900">
+  <img src="docs/images/devos_desktop.png" alt="DevOS Desktop Environment" width="950">
 </p>
 
 ---
