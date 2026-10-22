@@ -37,11 +37,13 @@ def main():
     wayland = 'Wayland' in type(display).__name__
     layer = None
     if wayland:
-        gi.require_version('GtkLayerShell', '0.1')
-        from gi.repository import GtkLayerShell as layer
-        if not layer.is_supported():
-            print('This desktop does not support the kids input overlay.', file=sys.stderr)
-            return 1
+        try:
+            gi.require_version('GtkLayerShell', '0.1')
+            from gi.repository import GtkLayerShell as layer_candidate
+            if layer_candidate.is_supported():
+                layer = layer_candidate
+        except (ValueError, ImportError, AttributeError):
+            layer = None
     windows = []
     seat = display.get_default_seat()
     grabbed = False
@@ -416,11 +418,16 @@ def main():
                 layer.set_anchor(window, edge, True)
             layer.set_keyboard_mode(window, layer.KeyboardMode.EXCLUSIVE)
         else:
+            window.set_keep_above(True)
             geometry = monitor.get_geometry()
             window.move(geometry.x, geometry.y)
             window.set_default_size(geometry.width, geometry.height)
-            window.fullscreen_on_monitor(display.get_default_screen(),
-                                         next(i for i in range(display.get_n_monitors()) if display.get_monitor(i) == monitor))
+            try:
+                screen = display.get_default_screen()
+                monitor_idx = next(i for i in range(display.get_n_monitors()) if display.get_monitor(i) == monitor)
+                window.fullscreen_on_monitor(screen, monitor_idx)
+            except Exception:
+                window.fullscreen()
         windows.append(window)
         window.show_all()
         window.get_window().set_cursor(Gdk.Cursor.new_from_name(display, 'default'))
