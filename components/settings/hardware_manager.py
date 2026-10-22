@@ -13,6 +13,7 @@ import os
 import shutil
 import json
 import argparse
+import csv
 import subprocess
 from typing import Dict, Any, List
 
@@ -70,15 +71,16 @@ class HardwareManager:
         networks = []
         if shutil.which("nmcli"):
             try:
-                cmd = ["nmcli", "-t", "-f", "SSID,BSSID,SIGNAL,SECURITY", "device", "wifi", "list"]
+                cmd = ["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "device", "wifi", "list"]
                 out = subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL)
                 for line in out.strip().splitlines():
-                    parts = line.split(":")
-                    if len(parts) >= 4 and parts[0]:
+                    # nmcli escapes colons and backslashes in terse fields.
+                    parts = next(csv.reader([line], delimiter=":", escapechar="\\", quoting=csv.QUOTE_NONE))
+                    if len(parts) == 3 and parts[0]:
                         networks.append({
                             "ssid": parts[0],
-                            "signal": parts[2] + "%",
-                            "security": parts[3] or "Open"
+                            "signal": parts[1] + "%",
+                            "security": parts[2] or "Open"
                         })
                 if networks:
                     return networks

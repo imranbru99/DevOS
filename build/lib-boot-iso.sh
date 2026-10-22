@@ -6,7 +6,7 @@
 set -euo pipefail
 
 DEVOS_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEVOS_ISO_LABEL="${DEVOS_ISO_LABEL:-DEVOS_2404}"
+DEVOS_ISO_LABEL="${DEVOS_ISO_LABEL:-DEVOS_2604}"
 
 # Show a fatal error and stop the build.
 _devos_die() { echo "FATAL: $*" >&2; exit 1; }
@@ -133,7 +133,7 @@ function devos_root {
         return
     fi
     # Remastered/Ventoy fallbacks: find by label or scan everything.
-    search --no-floppy --set=root --label DEVOS_2404
+    search --no-floppy --set=root --label DEVOS_2604
 }
 
 set bootargs="boot=casper username=devos hostname=devos ignore_uuid nopersistent fsck.mode=skip"

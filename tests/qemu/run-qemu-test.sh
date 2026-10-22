@@ -7,6 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 MODE="${1:-bios}"
+case "$MODE" in bios|uefi) ;; *) echo "Usage: $0 [bios|uefi]" >&2; exit 2 ;; esac
 ISO_PATH="${ROOT_DIR}/out/devos-26.04-amd64.iso"
 DISK_IMAGE="${ROOT_DIR}/tests/qemu/test-disk.qcow2"
 RAM_MB="${QEMU_RAM:-4096}"
@@ -49,24 +50,16 @@ fi
 
 if [ "$MODE" = "uefi" ]; then
     echo "==> Configuring UEFI (OVMF) firmware..."
-    OVMF_PATH=""
-    for candidate in \
-        /usr/share/OVMF/OVMF_CODE.fd \
-        /usr/share/qemu/OVMF.fd \
-        /usr/share/edk2/ovmf/OVMF_CODE.fd \
-        /usr/share/edk2-ovmf/x64/OVMF_CODE.fd; do
-        if [ -f "$candidate" ]; then
-            OVMF_PATH="$candidate"
-            break
-        fi
-    done
-
-    if [ -z "$OVMF_PATH" ]; then
-        echo "ERROR: OVMF UEFI firmware not found. Please install ovmf / qemu-efi." >&2
-        exit 1
+    source "${SCRIPT_DIR}/firmware.sh"
+    devos_find_ovmf
+    # Preserve the VM's boot entries across reboots, separate from host firmware.
+    OVMF_VARS="${DISK_IMAGE%.qcow2}-$(basename "$OVMF_VARS_TEMPLATE")"
+    if [ ! -f "$OVMF_VARS" ]; then
+        cp "$OVMF_VARS_TEMPLATE" "$OVMF_VARS"
     fi
-    echo "  Using OVMF firmware: ${OVMF_PATH}"
-    QEMU_ARGS+=(-bios "${OVMF_PATH}")
+    echo "  Using OVMF firmware: ${OVMF_CODE}"
+    QEMU_ARGS+=(-drive "if=pflash,format=raw,readonly=on,file=${OVMF_CODE}")
+    QEMU_ARGS+=(-drive "if=pflash,format=raw,file=${OVMF_VARS}")
     echo "==> Booting DevOS in UEFI mode..."
 else
     echo "==> Booting DevOS in Legacy BIOS mode..."

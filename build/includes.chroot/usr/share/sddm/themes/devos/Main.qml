@@ -1,549 +1,238 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
-import Qt5Compat.GraphicalEffects
 
-Item {
+// Keep the greeter independent of effects modules and GPU compositing.
+Pane {
     id: root
     width: 1366
     height: 768
-
-    property string currentUserName: (userModel && userModel.lastUser) ? userModel.lastUser : "devos"
-    property string currentRealName: currentUserName
-    property int selectedSessionIndex: (sessionModel && sessionModel.lastIndex >= 0) ? sessionModel.lastIndex : 0
-    property bool showPassword: false
+    padding: 0
+    font.family: "Inter"
+    palette.text: "#f1f5f9"
+    palette.windowText: "#f1f5f9"
+    palette.buttonText: "#f1f5f9"
+    palette.button: "#172337"
+    palette.base: "#101b2d"
+    palette.window: "#101b2d"
+    palette.highlight: "#38bdf8"
+    palette.highlightedText: "#07121f"
     property bool loggingIn: false
+    property string failure: ""
     property var currentTime: new Date()
+    readonly property bool compact: height < 700
+    readonly property string userName: users.currentIndex >= 0 ? users.currentValue : manualUser.text
+    readonly property string displayName: users.currentIndex >= 0 ? users.displayText : qsTr("Welcome back")
 
-    Timer {
-        interval: 1000
-        running: true
-        repeat: true
-        onTriggered: root.currentTime = new Date()
-    }
-
-    // 1. Wallpaper Background
+    background: Rectangle { color: "#080f1d" }
     Image {
-        id: bgImage
         anchors.fill: parent
         source: config.background || "background.png"
         fillMode: Image.PreserveAspectCrop
         asynchronous: true
-        cache: true
-
-        // Soft dark gradient overlay for contrast and depth
-        Rectangle {
-            anchors.fill: parent
-            gradient: Gradient {
-                GradientStop { position: 0.0; color: Qt.rgba(0.04, 0.06, 0.10, 0.45) }
-                GradientStop { position: 0.5; color: Qt.rgba(0.04, 0.06, 0.10, 0.55) }
-                GradientStop { position: 1.0; color: Qt.rgba(0.02, 0.03, 0.06, 0.75) }
-            }
+    }
+    Rectangle {
+        anchors.fill: parent
+        gradient: Gradient {
+            GradientStop { position: 0; color: "#99080f1d" }
+            GradientStop { position: 1; color: "#ed080f1d" }
         }
     }
-
-    // 2. Header Bar (Top)
+    Timer {
+        interval: 1000; running: true; repeat: true
+        onTriggered: root.currentTime = new Date()
+    }
     RowLayout {
         anchors.top: parent.top
         anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.margins: 24
-        spacing: 16
-
-        // DevOS Branding Pill
-        Rectangle {
-            height: 38
-            width: brandRow.width + 24
-            radius: 19
-            color: Qt.rgba(0.08, 0.12, 0.20, 0.60)
-            border.color: Qt.rgba(1, 1, 1, 0.12)
-            border.width: 1
-
-            RowLayout {
-                id: brandRow
-                anchors.centerIn: parent
-                spacing: 8
-
-                Image {
-                    source: config.logo || "logo.png"
-                    width: 22
-                    height: 22
-                    fillMode: Image.PreserveAspectFit
-                    asynchronous: true
-                }
-
-                Text {
-                    text: "DevOS"
-                    color: "#ffffff"
-                    font.pixelSize: 14
-                    font.weight: Font.DemiBold
-                    font.family: config.fontFamily || "sans-serif"
-                }
-            }
+        anchors.margins: 28
+        spacing: 10
+        Image {
+            source: config.logo || "logo.png"
+            Layout.preferredWidth: 30; Layout.preferredHeight: 30
+            fillMode: Image.PreserveAspectFit
         }
-
-        Item { Layout.fillWidth: true }
-
-        // Session Selector Pill (if multiple sessions exist)
-        Rectangle {
-            id: sessionPill
-            visible: sessionModel && sessionModel.count > 1
-            height: 38
-            width: sessionText.width + 36
-            radius: 19
-            color: sessionMouse.containsMouse ? Qt.rgba(0.12, 0.18, 0.30, 0.85) : Qt.rgba(0.08, 0.12, 0.20, 0.60)
-            border.color: sessionMouse.containsMouse ? "#38bdf8" : Qt.rgba(1, 1, 1, 0.12)
-            border.width: 1
-
-            Text {
-                id: sessionText
-                anchors.centerIn: parent
-                text: (sessionModel && sessionModel.count > 0 && root.selectedSessionIndex < sessionModel.count)
-                      ? sessionModel.data(sessionModel.index(root.selectedSessionIndex, 0), Qt.DisplayRole) || "Plasma"
-                      : "Plasma"
-                color: "#e2e8f0"
-                font.pixelSize: 13
-                font.family: config.fontFamily || "sans-serif"
-            }
-
-            MouseArea {
-                id: sessionMouse
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: {
-                    if (sessionModel && sessionModel.count > 1) {
-                        root.selectedSessionIndex = (root.selectedSessionIndex + 1) % sessionModel.count
-                    }
-                }
-            }
-        }
-
-        // Keyboard Layout Pill
-        Rectangle {
-            id: kbdPill
-            visible: keyboard && keyboard.layouts && keyboard.layouts.length > 0
-            height: 38
-            width: kbdText.width + 24
-            radius: 19
-            color: kbdMouse.containsMouse ? Qt.rgba(0.12, 0.18, 0.30, 0.85) : Qt.rgba(0.08, 0.12, 0.20, 0.60)
-            border.color: kbdMouse.containsMouse ? "#38bdf8" : Qt.rgba(1, 1, 1, 0.12)
-            border.width: 1
-
-            Text {
-                id: kbdText
-                anchors.centerIn: parent
-                text: (keyboard && keyboard.layouts && keyboard.currentLayout < keyboard.layouts.length)
-                      ? (keyboard.layouts[keyboard.currentLayout].shortName || keyboard.layouts[keyboard.currentLayout].name || "EN")
-                      : "EN"
-                color: "#e2e8f0"
-                font.pixelSize: 13
-                font.weight: Font.Medium
-                font.family: config.fontFamily || "sans-serif"
-            }
-
-            MouseArea {
-                id: kbdMouse
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: {
-                    if (keyboard && keyboard.layouts && keyboard.layouts.length > 1) {
-                        keyboard.currentLayout = (keyboard.currentLayout + 1) % keyboard.layouts.length
-                    }
-                }
-            }
-        }
+        Text { text: "DevOS"; color: "#ffffff"; font.pixelSize: 20; font.weight: Font.DemiBold }
     }
 
-    // 3. Center Section: Clock + Login Card
     ColumnLayout {
-        id: centerColumn
         anchors.centerIn: parent
-        spacing: 28
-
-        // Modern Clock & Date
+        width: Math.min(400, root.width - 48)
+        spacing: root.compact ? 14 : 24
         ColumnLayout {
             Layout.alignment: Qt.AlignHCenter
             spacing: 4
-
             Text {
                 Layout.alignment: Qt.AlignHCenter
                 text: Qt.formatTime(root.currentTime, config.clockFormat || "hh:mm")
-                color: "#ffffff"
-                font.pixelSize: 64
-                font.weight: Font.Light
-                font.family: config.fontFamily || "sans-serif"
-                style: Text.Raised
-                styleColor: Qt.rgba(0, 0, 0, 0.35)
+                color: "#ffffff"; font.pixelSize: root.compact ? 40 : 64; font.weight: Font.Light
             }
-
             Text {
                 Layout.alignment: Qt.AlignHCenter
                 text: Qt.formatDate(root.currentTime, config.dateFormat || "dddd, MMMM d")
-                color: "#94a3b8"
-                font.pixelSize: 16
-                font.weight: Font.Normal
-                font.family: config.fontFamily || "sans-serif"
-                style: Text.Raised
-                styleColor: Qt.rgba(0, 0, 0, 0.35)
+                color: "#cbd5e1"; font.pixelSize: 14
             }
         }
-
-        // Modern Glassmorphism Login Card
-        Item {
-            id: cardWrapper
-            width: 370
-            height: loginCard.height
-            Layout.alignment: Qt.AlignHCenter
-
-            Rectangle {
-                id: loginCard
-                width: 370
-                height: cardContent.height + 48
-                radius: 24
-                color: Qt.rgba(0.08, 0.10, 0.16, 0.78)
-                border.color: Qt.rgba(1, 1, 1, 0.14)
-                border.width: 1
-
-                // Subtle inner highlight line
+        Rectangle {
+            Layout.fillWidth: true
+            implicitHeight: form.implicitHeight + (root.compact ? 32 : 48)
+            radius: 24
+            color: "#f2101b2d"
+            border.color: "#3b4b63"
+            ColumnLayout {
+                id: form
+                anchors.fill: parent
+                anchors.margins: root.compact ? 16 : 24
+                spacing: 14
                 Rectangle {
-                    anchors.top: parent.top
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    height: 1
-                    radius: 24
-                    color: Qt.rgba(1, 1, 1, 0.25)
-                }
-
-                // Shake animation on wrong password
-                SequentialAnimation {
-                    id: shakeAnimation
-                    loops: 1
-                    NumberAnimation { target: loginCard; property: "x"; to: -14; duration: 45; easing.type: Easing.InOutQuad }
-                    NumberAnimation { target: loginCard; property: "x"; to: 14; duration: 45; easing.type: Easing.InOutQuad }
-                    NumberAnimation { target: loginCard; property: "x"; to: -10; duration: 45; easing.type: Easing.InOutQuad }
-                    NumberAnimation { target: loginCard; property: "x"; to: 10; duration: 45; easing.type: Easing.InOutQuad }
-                    NumberAnimation { target: loginCard; property: "x"; to: -4; duration: 45; easing.type: Easing.InOutQuad }
-                    NumberAnimation { target: loginCard; property: "x"; to: 0; duration: 45; easing.type: Easing.InOutQuad }
-                }
-
-                ColumnLayout {
-                    id: cardContent
-                    anchors.top: parent.top
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.topMargin: 24
-                    anchors.leftMargin: 28
-                    anchors.rightMargin: 28
-                    spacing: 14
-
-                    // User Avatar with Gradient Glow Ring
-                    Rectangle {
-                        Layout.alignment: Qt.AlignHCenter
-                        width: 82
-                        height: 82
-                        radius: 41
-                        color: "transparent"
-                        border.color: "#38bdf8"
-                        border.width: 2.5
-
-                        Rectangle {
-                            anchors.fill: parent
-                            anchors.margins: 4
-                            radius: 37
-                            color: Qt.rgba(0.12, 0.16, 0.26, 0.90)
-
-                            Text {
-                                anchors.centerIn: parent
-                                text: root.currentUserName.length > 0 ? root.currentUserName.charAt(0).toUpperCase() : "U"
-                                color: "#38bdf8"
-                                font.pixelSize: 32
-                                font.weight: Font.Bold
-                                font.family: config.fontFamily || "sans-serif"
-                            }
-                        }
-                    }
-
-                    // User Name & Subtitle
-                    ColumnLayout {
-                        Layout.alignment: Qt.AlignHCenter
-                        spacing: 2
-
-                        Text {
-                            Layout.alignment: Qt.AlignHCenter
-                            text: root.currentRealName
-                            color: "#ffffff"
-                            font.pixelSize: 18
-                            font.weight: Font.DemiBold
-                            font.family: config.fontFamily || "sans-serif"
-                        }
-
-                        Text {
-                            Layout.alignment: Qt.AlignHCenter
-                            text: config.welcomeText || "Welcome back"
-                            color: "#94a3b8"
-                            font.pixelSize: 12
-                            font.family: config.fontFamily || "sans-serif"
-                        }
-                    }
-
-                    Item { height: 4; Layout.fillWidth: true }
-
-                    // Password Input Pill Container
-                    Rectangle {
-                        id: passwordBox
-                        Layout.fillWidth: true
-                        height: 48
-                        radius: 24
-                        color: Qt.rgba(1, 1, 1, 0.08)
-                        border.color: passwordInput.activeFocus ? "#38bdf8" : Qt.rgba(1, 1, 1, 0.16)
-                        border.width: passwordInput.activeFocus ? 2 : 1
-
-                        Behavior on border.color {
-                            ColorAnimation { duration: 150 }
-                        }
-
-                        RowLayout {
-                            anchors.fill: parent
-                            anchors.leftMargin: 16
-                            anchors.rightMargin: 6
-                            spacing: 8
-
-                            // Lock Glyph
-                            Text {
-                                text: "🔒"
-                                font.pixelSize: 14
-                                opacity: 0.65
-                            }
-
-                            // Password Text Input
-                            TextInput {
-                                id: passwordInput
-                                Layout.fillWidth: true
-                                echoMode: root.showPassword ? TextInput.Normal : TextInput.Password
-                                passwordCharacter: "•"
-                                color: "#ffffff"
-                                font.pixelSize: 15
-                                font.family: config.fontFamily || "sans-serif"
-                                focus: true
-                                selectByMouse: true
-                                clip: true
-
-                                Text {
-                                    anchors.fill: parent
-                                    text: config.promptText || "Password"
-                                    color: "#64748b"
-                                    font.pixelSize: 15
-                                    font.family: config.fontFamily || "sans-serif"
-                                    visible: !passwordInput.text && !passwordInput.inputMethodComposing
-                                }
-
-                                onAccepted: root.doLogin()
-                                onTextChanged: {
-                                    if (errorMessage.text.length > 0) {
-                                        errorMessage.text = ""
-                                    }
-                                }
-                            }
-
-                            // Show/Hide Password Eye Button
-                            Rectangle {
-                                width: 28
-                                height: 28
-                                radius: 14
-                                color: eyeMouse.containsMouse ? Qt.rgba(1, 1, 1, 0.12) : "transparent"
-                                visible: passwordInput.text.length > 0
-
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: root.showPassword ? "👁" : "👁‍🗨"
-                                    font.pixelSize: 13
-                                    opacity: 0.75
-                                }
-
-                                MouseArea {
-                                    id: eyeMouse
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: root.showPassword = !root.showPassword
-                                }
-                            }
-
-                            // Submit Login Button (illuminates when password entered)
-                            Rectangle {
-                                id: submitBtn
-                                width: 36
-                                height: 36
-                                radius: 18
-                                color: passwordInput.text.length > 0 ? (submitMouse.containsMouse ? "#0284c7" : "#38bdf8") : Qt.rgba(1, 1, 1, 0.10)
-                                opacity: root.loggingIn ? 0.5 : 1.0
-
-                                Behavior on color {
-                                    ColorAnimation { duration: 150 }
-                                }
-
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: root.loggingIn ? "…" : "➔"
-                                    color: passwordInput.text.length > 0 ? "#0f172a" : "#64748b"
-                                    font.pixelSize: 16
-                                    font.weight: Font.Bold
-                                }
-
-                                MouseArea {
-                                    id: submitMouse
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: passwordInput.text.length > 0 ? Qt.PointingHandCursor : Qt.ArrowCursor
-                                    onClicked: root.doLogin()
-                                }
-                            }
-                        }
-                    }
-
-                    // Error Message Display
+                    Layout.alignment: Qt.AlignHCenter
+                    width: root.compact ? 48 : 64; height: width; radius: width / 2
+                    color: "#1e3650"; border.color: "#7dd3fc"
                     Text {
-                        id: errorMessage
-                        Layout.alignment: Qt.AlignHCenter
-                        text: ""
-                        color: "#f87171"
-                        font.pixelSize: 12
-                        font.family: config.fontFamily || "sans-serif"
-                        font.weight: Font.Medium
-                        visible: text.length > 0
-                        wrapMode: Text.WordWrap
+                        anchors.centerIn: parent
+                        text: root.displayName.charAt(0).toUpperCase()
+                        color: "#bae6fd"; font.pixelSize: 26; font.weight: Font.DemiBold
                     }
+                }
+                Text {
+                    Layout.fillWidth: true
+                    text: root.displayName
+                    horizontalAlignment: Text.AlignHCenter
+                    elide: Text.ElideRight
+                    color: "#ffffff"; font.pixelSize: 22; font.weight: Font.DemiBold
+                }
+                Text {
+                    Layout.fillWidth: true
+                    text: qsTr("Sign in to your workspace")
+                    horizontalAlignment: Text.AlignHCenter
+                    color: "#bccbde"; font.pixelSize: 14
+                }
+                ComboBox {
+                    id: users
+                    Layout.fillWidth: true
+                    visible: count > 1
+                    model: userModel
+                    textRole: "realName"; valueRole: "name"
+                    currentIndex: userModel.lastIndex >= 0 ? userModel.lastIndex : (count ? 0 : -1)
+                    displayText: currentIndex >= 0 ? (currentText || currentValue) : ""
+                    enabled: !root.loggingIn
+                    Accessible.name: qsTr("User account")
+                    onActivated: {
+                        password.clear()
+                        reveal.checked = false
+                        root.failure = ""
+                        password.forceActiveFocus()
+                    }
+                }
+                TextField {
+                    id: manualUser
+                    Layout.fillWidth: true
+                    visible: users.count === 0
+                    placeholderText: qsTr("Username")
+                    enabled: !root.loggingIn
+                    Accessible.name: qsTr("Username")
+                }
+                TextField {
+                    id: password
+                    Layout.fillWidth: true
+                    implicitHeight: 48
+                    placeholderText: config.promptText || qsTr("Password")
+                    placeholderTextColor: "#a9bad0"
+                    color: "#ffffff"
+                    font.pixelSize: 16
+                    leftPadding: 14
+                    echoMode: reveal.checked ? TextInput.Normal : TextInput.Password
+                    inputMethodHints: Qt.ImhSensitiveData | Qt.ImhNoPredictiveText
+                    selectByMouse: true
+                    enabled: !root.loggingIn
+                    Accessible.name: qsTr("Password")
+                    background: Rectangle {
+                        radius: 12; color: "#0a1322"
+                        border.color: password.activeFocus ? "#7dd3fc" : "#53647d"
+                        border.width: password.activeFocus ? 2 : 1
+                    }
+                    onAccepted: root.doLogin()
+                    onTextChanged: root.failure = ""
+                }
+                CheckBox {
+                    id: reveal
+                    text: qsTr("Show password")
+                    enabled: !root.loggingIn
+                }
+                Text {
+                    Layout.fillWidth: true
+                    visible: keyboard.capsLock
+                    text: qsTr("Caps Lock is on")
+                    color: "#fcd34d"; font.pixelSize: 13
+                }
+                Text {
+                    Layout.fillWidth: true
+                    visible: root.failure.length > 0
+                    text: root.failure
+                    color: "#fda4af"; font.pixelSize: 13
+                    wrapMode: Text.WordWrap
+                    Accessible.role: Accessible.AlertMessage
+                    Accessible.name: text
+                }
+                ActionButton {
+                    Layout.fillWidth: true
+                    primary: true
+                    text: root.loggingIn ? qsTr("Signing in…") : qsTr("Sign in")
+                    enabled: !root.loggingIn && root.userName.length > 0
+                    onClicked: root.doLogin()
                 }
             }
         }
     }
-
-    // 4. Footer Bar (Bottom Power Actions)
     RowLayout {
+        anchors.left: parent.left
         anchors.bottom: parent.bottom
-        anchors.right: parent.right
         anchors.margins: 24
         spacing: 12
-
-        // Sleep / Suspend Button
-        Rectangle {
-            id: sleepBtn
-            visible: sddm ? sddm.canSuspend : true
-            width: 42
-            height: 42
-            radius: 21
-            color: sleepMouse.containsMouse ? Qt.rgba(0.12, 0.18, 0.30, 0.85) : Qt.rgba(0.08, 0.12, 0.20, 0.60)
-            border.color: sleepMouse.containsMouse ? "#38bdf8" : Qt.rgba(1, 1, 1, 0.12)
-            border.width: 1
-
-            Text {
-                anchors.centerIn: parent
-                text: "🌙"
-                font.pixelSize: 15
-            }
-
-            ToolTip.visible: sleepMouse.containsMouse
-            ToolTip.text: "Sleep"
-
-            MouseArea {
-                id: sleepMouse
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: if (sddm) sddm.suspend()
-            }
+        ComboBox {
+            id: sessions
+            implicitWidth: Math.min(240, root.width * 0.3)
+            model: sessionModel; textRole: "name"
+            currentIndex: sessionModel.lastIndex >= 0 ? sessionModel.lastIndex : 0
+            Accessible.name: qsTr("Desktop session")
+            enabled: !root.loggingIn
         }
-
-        // Reboot Button
-        Rectangle {
-            id: rebootBtn
-            visible: sddm ? sddm.canReboot : true
-            width: 42
-            height: 42
-            radius: 21
-            color: rebootMouse.containsMouse ? Qt.rgba(0.12, 0.18, 0.30, 0.85) : Qt.rgba(0.08, 0.12, 0.20, 0.60)
-            border.color: rebootMouse.containsMouse ? "#38bdf8" : Qt.rgba(1, 1, 1, 0.12)
-            border.width: 1
-
-            Text {
-                anchors.centerIn: parent
-                text: "🔄"
-                font.pixelSize: 15
-            }
-
-            ToolTip.visible: rebootMouse.containsMouse
-            ToolTip.text: "Restart"
-
-            MouseArea {
-                id: rebootMouse
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: if (sddm) sddm.reboot()
-            }
-        }
-
-        // Shut Down Button
-        Rectangle {
-            id: powerBtn
-            visible: sddm ? sddm.canPowerOff : true
-            width: 42
-            height: 42
-            radius: 21
-            color: powerMouse.containsMouse ? Qt.rgba(0.80, 0.20, 0.20, 0.75) : Qt.rgba(0.08, 0.12, 0.20, 0.60)
-            border.color: powerMouse.containsMouse ? "#ef4444" : Qt.rgba(1, 1, 1, 0.12)
-            border.width: 1
-
-            Text {
-                anchors.centerIn: parent
-                text: "⏻"
-                color: powerMouse.containsMouse ? "#ffffff" : "#f87171"
-                font.pixelSize: 16
-                font.weight: Font.Bold
-            }
-
-            ToolTip.visible: powerMouse.containsMouse
-            ToolTip.text: "Shut Down"
-
-            MouseArea {
-                id: powerMouse
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: if (sddm) sddm.powerOff()
-            }
+        ComboBox {
+            implicitWidth: 100
+            model: keyboard.layouts; textRole: "shortName"
+            currentIndex: keyboard.currentLayout
+            visible: count > 1
+            Accessible.name: qsTr("Keyboard layout")
+            onActivated: keyboard.currentLayout = currentIndex
         }
     }
-
-    // Login Action Handler
+    RowLayout {
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.margins: 24
+        spacing: 8
+        ActionButton { text: qsTr("Sleep"); visible: sddm.canSuspend && root.width >= 1000; onClicked: sddm.suspend() }
+        ActionButton { text: qsTr("Restart"); visible: sddm.canReboot; onClicked: sddm.reboot() }
+        ActionButton { text: qsTr("Shut down"); visible: sddm.canPowerOff; onClicked: sddm.powerOff() }
+    }
     function doLogin() {
-        if (passwordInput.text.length === 0 || root.loggingIn) return;
-        errorMessage.text = "";
-        root.loggingIn = true;
-        if (sddm) {
-            sddm.login(root.currentUserName, passwordInput.text, root.selectedSessionIndex);
-        }
+        if (loggingIn || !userName || sessions.currentIndex < 0) return
+        failure = ""
+        loggingIn = true
+        sddm.login(userName, password.text, sessions.currentIndex)
     }
-
-    // SDDM Signal Connections
     Connections {
         target: sddm
-        ignoreUnknownSignals: true
         function onLoginFailed() {
-            root.loggingIn = false;
-            errorMessage.text = qsTr("Incorrect password. Please try again.");
-            shakeAnimation.start();
-            passwordInput.selectAll();
-            passwordInput.forceActiveFocus();
+            root.loggingIn = false
+            password.clear()
+            root.failure = qsTr("Sign-in failed. Check your password and try again.")
+            password.forceActiveFocus()
         }
-        function onLoginSucceeded() {
-            errorMessage.text = "";
-        }
+        function onLoginSucceeded() { password.clear() }
     }
-
     Component.onCompleted: {
-        passwordInput.forceActiveFocus()
+        if (users.count === 0) manualUser.forceActiveFocus()
+        else password.forceActiveFocus()
     }
 }

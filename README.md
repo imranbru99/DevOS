@@ -5,30 +5,71 @@
 <h1 align="center">DevOS</h1>
 
 <p align="center">
-  <b>One fast desktop for your Linux, Windows and Android apps — with a private AI assistant built in.</b><br>
-  Based on Ubuntu 26.04 LTS · Open source (MIT) · Made by <a href="https://imrandev.bd/">Imran Ahmed (Imran Dev)</a>
+  <b>A familiar Linux desktop with Windows and Android compatibility tools, developer apps and local AI.</b><br>
+  Source targets Ubuntu 26.04 LTS · Open source (MIT) · Made by <a href="https://imrandev.bd/">Imran Ahmed (Imran Dev)</a>
 </p>
 
 <p align="center">
   <a href="https://drive.google.com/drive/folders/1RHM8niXwkPsqzOkiMxxp4tpf41bnyJ01?usp=sharing">
-    <img src="https://img.shields.io/badge/%E2%AC%87%EF%B8%8F_Download_DevOS_ISO-3.4_GB_(Google_Drive)-2563eb?style=for-the-badge&logo=googledrive&logoColor=white" alt="Download DevOS ISO">
+    <img src="https://img.shields.io/badge/%E2%AC%87%EF%B8%8F_Published_ISO-Releases_(Google_Drive)-2563eb?style=for-the-badge&logo=googledrive&logoColor=white" alt="Download DevOS ISO">
   </a>
 </p>
 
 <p align="center">
   <img src="docs/images/devos_desktop.png" alt="DevOS Desktop Environment" width="950">
+  <br><em>DevOS Desktop featuring Sapphire Waves wallpaper, centered taskbar with AI Assistant, Start launcher, system tray, and Windows-familiar workflow.</em>
 </p>
 
 ---
+
+## Current source — October 22, 2026
+
+The source targets **Ubuntu 26.04 LTS (Resolute Raccoon), amd64**. Ubuntu's
+26.04.1 point release is available; standard support for the Ubuntu base runs
+through May 2031. That schedule does not extend automatically to DevOS tools or
+third-party apps. See [Ubuntu's release list](https://ubuntu.com/project/docs/release-team/list-of-releases/).
+
+Read the [complete current feature inventory](docs/FEATURES.md),
+[latest changes](CHANGELOG.md), and [update guide](docs/UPDATES.md).
+The Google Drive link is for previously published images; source screenshots and
+features below do not certify that an older download contains the latest changes.
+Build output is `out/devos-26.04-amd64.iso`; verify the checksum supplied with the image.
+
+**Recently added and improved**
+
+- **Sign-in screen:** centered dark card, readable password field, show-password control,
+  account/session selection, clock/date, login feedback and restart/shutdown controls.
+- **Broadband Connection:** connect or disconnect a direct ONU/modem with ISP PPPoE
+  credentials; NetworkManager configuration prevents duplicate automatic wired profiles.
+- **Files and storage:** Windows-style This PC, tabs, properties, new file/folder dialogs,
+  ZIP/7z context menus, unformatted drive discovery and partition formatting in Storage Doctor.
+- **Display and Power & sleep:** resolution/refresh controls, display scaling, separate
+  battery/plugged-in timeouts and power profiles. Available controls depend on the session
+  and hardware; native Plasma settings remain useful for Wayland-specific controls.
+- **AI Code Agent:** prompt queue, cancellation, retry/rerun, project runner and preview,
+  persistent development servers, repository context, and optional cloud providers.
+- **Desktop polish:** DevOS Start-menu branding, compact fonts/taskbar, Sapphire Waves
+  and additional wallpapers, dashboard onboarding, improved application names in Optimizer,
+  and an emoji panel that stays closed until requested.
+
+<p align="center">
+  <img src="docs/images/devos_login_preview.png" alt="Rendered preview of the DevOS dark sign-in screen" width="900">
+  <br><em>Rendered SDDM theme preview with sample account/session data; not an installed-system boot screenshot.</em>
+</p>
+
+<p align="center">
+  <img src="tools/wallpapers/preview.jpg" alt="Preview grid of the DevOS wallpaper collection" width="900">
+  <br><em>DevOS wallpaper collection. Desktop and dashboard screenshots elsewhere in this README show earlier source builds.</em>
+</p>
 
 ## Our aim
 
 DevOS exists to give people — especially Windows users and developers — **an operating system that feels familiar on day one, stays fast on ordinary laptops, and respects their privacy**:
 
-- **Run what you already use.** Double-click a Windows `.exe`, an Android `.apk` or a Linux app and it opens. When a better native version of the app exists, DevOS offers it.
-- **Stay fast on modest hardware.** A 3.4 GB ISO, a small on-device AI that gives its memory back when idle, compressed memory and storage, and a built-in optimizer.
-- **AI that works for you, privately.** DevOS AI runs entirely on your PC: it answers questions about your computer, does things for you (open apps, search, save notes, set reminders…), reads PDFs and images, and understands your voice in Bangla and English — nothing is sent to the cloud.
-- **Premium, simple, and yours.** A polished dark design, one-click install with no account required, and no telemetry.
+- **Run what you already use.** Open supported Windows `.exe`, Android `.apk` and Linux apps from one desktop; compatibility varies by application. When a better native version of the app exists, DevOS offers it.
+- **Stay fast on modest hardware.** A size-limited ISO build, a small on-device AI that gives its memory back when idle, compressed memory and storage, and a built-in optimizer.
+- **AI that works for you, privately.** DevOS AI runs entirely on your PC: it answers questions about your computer, does things for you (open apps, search, save notes, set reminders…), reads PDFs and images, and understands your voice in Bangla and English using local processing. Optional web searches, backups and cloud code-agent providers use the network.
+- **Premium, simple, and yours.** A polished dark design, a guided installer with no online account required, and no telemetry.
 
 ---
 
@@ -39,28 +80,29 @@ DevOS exists to give people — especially Windows users and developers — **an
 | 🪟 **Windows apps** | `.exe` / `.msi` open with a double-click (32- and 64-bit). Popular apps such as AnyDesk, Zoom, Discord, Spotify and Steam get their **native DevOS version** offered instead. |
 | 🤖 **Android apps** | `.apk` files install into a built-in Android system (downloaded once on first use, ~850 MB). WhatsApp, Telegram, Spotify and similar APKs are offered as native DevOS apps — no Android download needed. |
 | ✨ **DevOS AI** | Private on-device assistant: PC questions, actions, notes, web search, reminders, PDFs, text-in-images, photos, voice (Bangla + English), Islamic daily Ayah & Hadith with Muhiuddin Khan Bangla translation, **Meta+H** push-to-talk and optional **“Hey DevOS”**. |
-| 🌙 **Islamic & Modesty** | Authentic Quran & Hadith with verified **Muhiuddin Khan Bangla translation** & Arabic, offline prayer times & Qibla. Intelligent on-device modesty filter for Chrome/Brave/Edge that blurs **only women's bodies** while keeping text-based images, memes, and documents sharp and readable. |
+| 🌙 **Islamic & Modesty** | Authentic Quran & Hadith with verified **Muhiuddin Khan Bangla translation** & Arabic, offline prayer times & Qibla. Intelligent on-device modesty filter for Chrome/Brave/Edge with selectable detection modes and text-image exclusions. Detection can miss content or blur it incorrectly. |
 | 🧹 **DevOS Optimizer** | Finds apps you haven't used for 15+ minutes and offers to close them (with real app names like *This PC*, *Notepad*); cleans temp files, caches, the Recycle Bin and Windows-app leftovers. |
 | 🚀 **Kids Mode** | Safe cosmic playground with interactive mouse-play physics (`devos-kids-mode`); children can play safely while background jobs keep running. |
 | 📦 **Apps window** | Windows-style *Installed apps*: uninstall Linux, Windows and Android apps, clear cache, reset data and browser cookies. |
 | 📝 **Notepad** | Windows 11-style tabs; **unsaved text survives crashes and power cuts**. |
 | 💻 **Developer ready** | VS Code, Git, Node.js, Python, PHP + Composer, MariaDB, PostgreSQL, Redis, SQLite, Podman (Docker-compatible). |
 | 🎨 **Premium look** | Dark DevOS theme, icons-only taskbar, **25+ wallpapers**, a modern installer, DevOS names everywhere (Files, Terminal, Settings…). |
-| ⚡ **Small & fast** | 3.4 GB ISO, boots straight to the desktop, compressed RAM swap, btrfs + zstd storage, memory-hog protection. |
+| ⚡ **Small & fast** | ISO size checked during build; boots straight to the desktop, compressed RAM swap, btrfs + zstd storage, memory-hog protection. |
 
 ---
 
 ## What you get
 
 ### 1. Installer
-- Modern full-screen installer: welcome page, location, keyboard, disk, account, summary, progress.
+- Guided Calamares installer: welcome, location, keyboard, disk, local account, AI model, user type, apps, summary and progress.
 - **Erase disk** creates an EFI partition plus a btrfs system (subvolumes for `/`, `/home`, `/.snapshots`, `/var/log`, `/var/cache`; zstd compression). Manual partitioning and full-disk encryption (LUKS) are available too.
-- **The account is optional.** Name, sign-in name and computer name are pre-filled; leave the password empty and DevOS signs in automatically (you can add a password later).
+- **A local account is created; no online account is needed.** Account details are pre-filled; leave the password empty and DevOS signs in automatically (you can add a password later).
 - Boots on **UEFI and legacy BIOS** PCs, from USB or DVD. After install it starts **straight to the desktop** — no boot menu wait (the menu still appears when Windows is installed alongside).
 
 ### 2. Desktop that feels like Windows
-- Start menu with the DevOS logo, **icons-only taskbar** (many apps fit; windows of one app are grouped), system tray and clock.
+- Start menu with the DevOS logo, **icons-only taskbar** with separate entries for open windows, system tray and clock.
 - Desktop shortcuts: Apps, Chrome, DevOS AI, DevOS Code, Documents, Notepad, Settings, Terminal, This PC, VLC and more.
+- **Files & This PC (`devos-files`, `devos-archive`)**: Windows-style drive overview, multi-tab navigation, quick access, breadcrumb path bar, properties dialog, and one-click ZIP/7z context menu archive creation & extraction.
 - **Windows keyboard shortcuts**
 
   | Keys | Action |
@@ -84,7 +126,7 @@ DevOS exists to give people — especially Windows users and developers — **an
 - **Your work comes back.** After a restart or shutdown, DevOS opens the same applications again. Browsers reopen their tabs, Notepad and DevOS Code reopen the same files (including unsaved text), and Files, Terminal, Kate and the other KDE apps reopen the documents that were on screen.
 - Everything is called **DevOS**: the sign-in session, “About this PC”, and apps named by what they do — *Files, Terminal, Text Editor, Photos, Document Viewer, Settings, Task Manager*.
 
-### 3. Run any app
+### 3. Application compatibility
 
 #### Windows programs (`.exe`, `.msi`)
 - Double-click to run. Each app gets its own isolated Windows environment, prepared **silently** the first time (no technical pop-ups) and copied instantly for every new app on btrfs.
@@ -103,6 +145,11 @@ DevOS exists to give people — especially Windows users and developers — **an
 - One list of every installed app (Linux, Windows, Android) with search, sort by size and type filter.
 - **Uninstall**, **Clear cache**, and **Reset data & cookies** (for browsers: cookies and cache, optionally history, passwords and bookmarks). System parts are protected from removal.
 - Right-click any app shortcut → **Uninstall…**
+
+<p align="center">
+  <img src="docs/images/devos_apps.png" alt="DevOS Installed Apps Manager" width="850">
+  <br><em>DevOS Installed Apps: unified management, cache cleanup, and storage & cookie reset for Linux, Windows, and Android applications.</em>
+</p>
 
 ### 4. DevOS AI — your private assistant
 Open **DevOS AI** from the desktop, or press **Win + H** and just speak.
@@ -130,7 +177,7 @@ Shut down, restart and uninstall always ask for confirmation first.
 **Documents & images**
 - Attach a **PDF**, Word file or text file and ask “Summarize this” or a question about it.
 - **Read text in images** (English + Bangla) instantly, no download.
-- **Describe photos** (“What's in this picture?”) with an optional one-time 296 MB download.
+- **Describe photos** (“What's in this picture?”) with an optional one-time download (about 520 MB including the vision model assets).
 
 **Voice**
 - Offline speech recognition for **Bangla and English** (included in the ISO).
@@ -140,9 +187,9 @@ Shut down, restart and uninstall always ask for confirmation first.
 **Experience**
 - Modern chat window: conversation history sidebar with search, rename and delete; answers stream in word by word; Stop button; copy and regenerate; drag-and-drop files.
 - **Starter Cards:** One-click suggestion cards for common actions on new chats (*Today's Islamic*, *What's my PC config?*, *How many apps are installed?*, *Start kids mode*).
-- **Fast and light:** the built-in model is small (0.5B, ~490 MB); the first words usually appear in under a second, and its memory is **released after 5 idle minutes**.
+- **Fast and light:** the built-in model is small (0.5B, ~490 MB); response speed depends on your hardware, and its memory is **released after 5 idle minutes**.
 - **Smarter DevOS AI:** one click adds a larger model (1.1 GB) for better free-form answers; one click removes it again.
-- **Private:** runs only on your PC; chats, files and voice never leave it.
+- **Local assistant:** chat, speech and document processing run on this PC. Web actions open online services; the separate Code Agent can use configured cloud providers.
 - Also available to apps: an OpenAI-compatible local API at `http://127.0.0.1:11434/v1` (used by DevOS Code's AI features). Reference: `http://127.0.0.1:11434/docs` and [`docs/LOCAL_AI.md`](docs/LOCAL_AI.md).
 
 ### 5. DevOS Optimizer
@@ -156,11 +203,17 @@ Shut down, restart and uninstall always ask for confirmation first.
 - **Never lose text:** every tab (including unsaved *Untitled* ones) is saved automatically and restored after a crash, a forced close or a power cut.
 
 ### 7. For developers & AI Engineers
-- **DevOS AI Code Agent**: Autonomous pair programming and development agent with repo planning, interactive diff reviews, and multi-agent workflows (`devos-ai-code-agent` or desktop shortcut).
+- **DevOS AI Code Agent**: Autonomous pair programming and development agent with repository planning, interactive diff reviews, prompt queuing, cancellation, retry/rerun, live dev server preview, and terminal execution (`devos-ai-code-agent` or desktop shortcut). Supports both local offline LLMs and optional cloud providers (Google Gemini, Groq, DeepSeek, OpenAI).
+
+<p align="center">
+  <img src="docs/images/devos_code_agent.png" alt="DevOS AI Code Agent" width="880">
+  <br><em>DevOS AI Code Agent: autonomous pair programming, step-by-step execution plans, interactive diff review, terminal execution, and local/cloud LLM routing.</em>
+</p>
+
 - **Local AI Code Agent & Engine**: Hardware-accelerated local inference API listening at `http://127.0.0.1:11434/v1` (OpenAI & Ollama compatible). Zero telemetry, 0 token costs, 100% offline. Pre-wired into VS Code via Continue (Ctrl+L).
 - **Windows 11 Fluent Task Manager**: Modernized system performance and resource monitor (`Ctrl + Shift + Esc`) with anti-aliased gradient utilization curves, clean KPI cards, friendly network interface mapping (`Ethernet`, `Wi-Fi`, `Virtual Bridge`), and colored status badges.
 - **Self-Hosting Day-by-Day OS Development**: Develop and customize DevOS directly while using it as your daily operating system. Native Python/Qt components live directly under `/usr/local/share/devos/components/` — edit code in VS Code, hit Save, and your changes take effect instantly. Backed by automatic Btrfs/Snapper instant rollback snapshots.
-- **Full Developer Stack**: VS Code (“DevOS Code”), Git, Git LFS, GitHub CLI, Node.js + npm, Python 3 + pip/venv/pipx, PHP 8.3 (FPM + common extensions) + Composer, MariaDB, PostgreSQL, Redis, SQLite, Podman / podman-compose (Docker-compatible), Neovim, tmux, ripgrep, fzf, btop, jq.
+- **Full Developer Stack**: VS Code (“DevOS Code”), Git, Git LFS, GitHub CLI, Node.js + npm, Python 3 + pip/venv/pipx, Ubuntu-provided PHP (FPM + common extensions) + Composer, MariaDB, PostgreSQL, Redis, SQLite, Podman / podman-compose (Docker-compatible), Neovim, tmux, ripgrep, fzf, btop, jq.
 - `devos serve` scaffolds Laravel, Next.js and FastAPI projects and shows the status of local services.
 
 ### 8. Performance and reliability
@@ -169,20 +222,41 @@ Shut down, restart and uninstall always ask for confirmation first.
 - **btrfs with zstd compression** saves disk space and is snapshot-ready (Snapper installed).
 - Unneeded services (snapd, apport, telemetry) are removed or masked; boots straight to the desktop.
 
-### 9. Hardware
-- Wi-Fi and Ethernet (NetworkManager), Bluetooth, PipeWire audio, printers and scanners (CUPS / IPP), Intel and AMD graphics (Mesa + Vulkan), NVIDIA via the driver manager, broad firmware support.
+### 9. Hardware, Networking & Display
+- **Broadband Connection (`devos-broadband`)**: Dedicated dial-up app for direct ONU / fiber modems requiring ISP PPPoE credentials. Includes automatic reconnection, service name and MTU customization, live connection state monitoring, and automated NetworkManager configuration that prevents duplicate wired connections.
+
+<p align="center">
+  <img src="docs/images/devos_broadband.png" alt="DevOS Broadband PPPoE Connection" width="480">
+  <br><em>DevOS Broadband Connection: direct ONU/modem PPPoE dial-up configuration with credentials, MTU tuning, and connection monitoring.</em>
+</p>
+
+- **Display & Scale (`devos-display`)**: Resolution selection, refresh rate controls (up to 144Hz+), and display UI scaling (100%, 125%, 150%, 200%) with a safety keep/revert countdown timer.
+- **Power & Sleep Management (`devos-power`)**: Separate battery vs plugged-in idle timeouts, power modes (Performance, Balanced, Power Saver), screen blanking, sleep, hibernate, and shutdown.
+- **Peripherals & Drivers**: Wi-Fi and Ethernet (NetworkManager), Bluetooth integration, PipeWire low-latency audio, printers and scanners (CUPS / IPP), Intel and AMD graphics (Mesa + Vulkan), NVIDIA proprietary drivers via driver manager, and broad hardware firmware.
 
 ### 10. Choose your DevOS AI (at install time)
 - A **“Choose your DevOS AI”** page in the installer measures the PC (RAM, processor, disk) and pre-selects the model that fits: **Tiny 0.5B** (built in) · **Small 1.5B** (1.1 GB, 4 GB RAM) · **Medium 3B** (2.1 GB, 8 GB RAM) · **Large 7B** (4.7 GB, 16 GB RAM) · **Extra large 14B** (9 GB, 32 GB RAM). Models that would make the PC slow are greyed out.
 - Extras: **Photo understanding** (520 MB) and a **Coding model** (`devos-ai-code`). Reading PDFs and text in images (Bangla + English) and voice work with every choice.
 - The ISO stays small: the chosen model downloads by itself after install once the PC is online (resumes after interruptions). Change it any time in **DevOS AI Models** or with `devos-ai-models`.
 
+<p align="center">
+  <img src="docs/images/devos_ai_models.png" alt="DevOS AI Models Manager" width="850">
+  <br><em>DevOS AI Models Manager: choose on-device AI models, manage vision/coding weights, and share local OpenAI API across the network.</em>
+</p>
+
 ### 10b. Choose your apps (at install time) — and DevOS Features afterwards
-- An installer page **“Choose your apps”** works like Windows’ optional features plus an app bundle installer. Start from a preset — **Recommended for this PC**, **Premium** (every app, for people coming from Windows or Linux), **Windows-like**, **Student**, **Developer**, **Creator**, **Gamer**, **Islamic family** or **Minimal** — then tick or untick anything. Family Safety and the modesty filter stay off until chosen.
+- An installer page **“Choose your apps”** works like Windows’ optional features plus an app bundle installer. Start with **Normal**, **Professional**, **Student**, **Development**, **Creator**, **Gamer**, **Business**, **Family**, **Normal + Islamic**, or **Premium**, then tick or untick apps. **Windows-like**, **Minimal**, and **Choose later** are also available as feature presets. Family Safety and the modesty filter stay off until chosen.
 - Unticked built-ins are removed during install (no internet needed); ticked apps download on the first online boot, with a notification when they’re ready. Office files then open with a double-click in the suite you picked.
 - **DevOS Features** (Start menu) adds or removes any of these later and sets **Default apps** (browser, email, documents, spreadsheets, PDF, music, video, photos). From the terminal: `devos-features list`, `sudo devos-features set --add zoom,gimp`.
-- **Islamic family** includes the Windows-like set, plus prayer times, Family Safety and the modesty filter.
-- **Recommended for this PC** is the Windows-like set, minus apps this PC’s memory or disk cannot run smoothly.
+- **Normal + Islamic** includes the everyday set, prayer times, Family Safety and the modesty filter.
+- **Normal** filters heavier downloads by RAM and disk size and selects a lighter office suite when appropriate.
+
+<p align="center">
+  <img src="docs/images/devos_features.png" alt="DevOS Features and Default Apps Manager" width="880">
+  <br><em>DevOS Features: Windows-style optional components, bundled app selection, and default application associations in one view.</em>
+</p>
+
+**Availability:** preset selections are not an offline bundle. Apps in the tables below download after installation unless explicitly identified as built in. Chrome and VS Code are fetched during the build, with online installation helpers available if absent. Web-app shortcuts require internet and their provider accounts. The [feature inventory](docs/FEATURES.md) lists delivery for every catalog entry.
 
 **Office**
 
@@ -203,7 +277,7 @@ Shut down, restart and uninstall always ask for confirmation first.
 
 | Feature | What it does | Included with |
 |---|---|---|
-| Google Chrome | Chrome with Google sign-in. Installed on the first online boot | Every everyday preset |
+| Google Chrome | Chrome with Google sign-in. Build-time download; online helper if absent | Every everyday preset |
 | Microsoft Edge | Edge with a Microsoft account | Windows-like (4 GB RAM) |
 | Firefox | Private, open-source browser | Add in DevOS Features |
 | Brave | Browser with built-in ad blocking | Add in DevOS Features (4 GB RAM) |
@@ -366,27 +440,32 @@ Shut down, restart and uninstall always ask for confirmation first.
 ### 15. Islamic DevOS & family safety (optional — "Islamic family" preset)
 - **Prayer times, Quran & Hadith:** prayer reminders (Karachi method / Hanafi Asr by default, 100+ cities incl. all of Bangladesh), Hijri date, Qibla compass, and daily **authentic ayah and hadith from verified published datasets** (Arabic original + verified **মুহিউদ্দীন খান Bangla translation** + Saheeh International English, always with exact chapter & verse references). DevOS AI chat connects directly to this authentic offline dataset with zero AI hallucinations.
 - **Family Safety:** blocks adult content for every app and browser, forces SafeSearch and YouTube Restricted mode, turns off private browsing, and stops DNS bypass tricks. Set a password on the parent account so children can't switch it off.
-- **Intelligent Modesty filter (`devos-modesty`):** on-device computer vision in Chrome/Edge/Brave/Chromium that blurs **only adult women's bodies** using TinyFaceDetector and BodyPix. Features cross-ethnicity **skin-tone color verification (`hasSkinTone`)** and **anatomical body pose validation (`hasAnatomicalBody`)** so that text-based images, memes, documents, news graphics, code snippets, and infographics are **never falsely blurred**.
+- **Modesty filter (`devos-modesty`):** on-device computer vision in Chrome/Edge/Brave/Chromium masks detected body regions using local face and body models. Text-image exclusions reduce unwanted blurring, and an all-people mode is available. Age, gender and body estimates can be wrong or missed; the filter cannot guarantee complete or accurate coverage.
 
 ### 15b. Kids Mode (`devos-kids-mode`)
 - **Cosmic interactive playground:** A full-screen space-themed canvas with glowing star constellations, shooting star trails, interactive floating celestial bodies, and dynamic mouse gravity physics.
-- **Safe computing:** Keeps background developer servers, long-running downloads, and open desktop windows completely protected while children play safely. Start with the desktop shortcut or ask DevOS AI *"Start kids mode"*. Exit easily with `Esc`.
+- **Play without closing your work:** Background developer servers, downloads and desktop applications continue running. Kids Mode is an interactive full-screen activity, not a restricted account or security lock. Start with the desktop shortcut or ask DevOS AI *"Start kids mode"*. Exit easily with `Esc`.
 
 ### 15c. Opening Dashboard & System Control (`devos-dashboard`)
-DevOS greets you with an ultra-sleek, luxury dark dashboard designed for zero friction, instant hardware insight, and first-boot onboarding:
+DevOS includes a dark dashboard for hardware status, storage tools, local runtimes and first-boot onboarding:
 
 <p align="center">
   <img src="docs/images/devos_dashboard_overview.png" alt="DevOS Opening Dashboard" width="850">
 </p>
 
-- **Real-Time Hardware Telemetry:** Live stats for CPU threads, RAM allocation, ultra-fast memory compression (**zRAM with zstd**, achieving up to 69x compression), and Btrfs storage health.
+- **Real-Time Hardware Telemetry:** Live stats for CPU threads, RAM allocation, memory compression (**zRAM with zstd**, with the measured ratio shown), and Btrfs storage health.
 - **First-Boot 3-Step Wizard:** Step-by-step guidance to inspect disks, configure fast PIN or password unlock, and select English or Bengali.
-- **Storage & Boot Doctor:** Interactive partition manager detecting UEFI vs MBR standards, checking EFI health, and solving storage problems with one click.
+- **Storage & Boot Doctor:** Interactive partition manager detecting UEFI vs MBR standards, checking EFI health, discovering unformatted volumes, formatting partitions (btrfs, ext4, ntfs, fat32, exfat), and solving storage problems with one click.
 - **Subsystem & Runtime Center:** Monitor and launch local PHP/MariaDB web dev stacks, the Windows `.exe` Wine layer, Android `.apk` subsystem, and local AI coding assistants.
 
 <p align="center">
   <img src="docs/images/devos_dashboard_storage.png" alt="Storage & Boot Doctor" width="420">&nbsp;&nbsp;
   <img src="docs/images/devos_dashboard_subsystems.png" alt="DevOS Subsystems & Runtime Manager" width="420">
+</p>
+
+<p align="center">
+  <img src="docs/images/devos_storage_doctor.png" alt="DevOS Storage & Boot Doctor" width="750">
+  <br><em>DevOS Storage & Boot Doctor: partition health diagnostics, unformatted volume discovery, filesystem formatting, and Btrfs snapshot management.</em>
 </p>
 
 ### 16. Built-in productivity & AI everywhere
@@ -426,7 +505,7 @@ You do **not** need to be a developer or Linux expert to install and run DevOS. 
 
 ### Step 1: Download the DevOS ISO File
 - 🔗 **Google Drive Direct Download:** [**Click here to Download DevOS ISO (Google Drive)**](https://drive.google.com/drive/folders/1RHM8niXwkPsqzOkiMxxp4tpf41bnyJ01?usp=sharing)
-- **File size:** ~3.4 GB
+- **File size:** varies by release; use the size and checksum published with that ISO.
 - **What you need:** A USB flash drive (8 GB or larger). *Note: Back up any important files on the USB drive, as flashing will erase it.*
 
 ---
@@ -473,15 +552,15 @@ Choose whichever tool is easiest for you:
 
 ### Step 4: Try or Install DevOS
 
-- **Try it first without touching your hard drive (Live Session):** DevOS boots directly to the desktop. You can test Wi-Fi, audio, the browser, and DevOS AI risk-free before installing anything.
+- **Try it first without touching your hard drive (Live Session):** DevOS boots directly to the desktop. You can test Wi-Fi, audio, the browser, and DevOS AI before installing.
 - **Install permanently to your PC:**
   1. The **DevOS Installer** opens automatically on the desktop.
-  2. Follow the friendly prompts: **Welcome → Location & Language → Keyboard → Partitions**.
+  2. Follow the friendly prompts: **Welcome → Location & Language → Keyboard → Partitions → Account → AI → User type → Apps → Summary**.
   3. Under *Partitions*, select:
      - **Erase disk:** Best for a clean system; sets up high-speed compressed storage automatically.
-     - **Install alongside:** Keeps your existing Windows installation intact and lets you choose your OS at startup.
+     - **Manual partitioning / alongside (when offered):** Choose an appropriate dual-boot layout and review the summary before writing changes. Back up existing data first.
   4. Create your account name (password is optional; if left blank, DevOS signs in automatically).
-  5. Click **Install**. The setup completes in about 5–8 minutes.
+  5. Review the summary, then click **Install**. Installation time depends on the drive, hardware and selected downloads.
   6. When finished, restart your PC and remove the USB drive when the screen turns off.
 
 ---
@@ -561,8 +640,16 @@ devos-security check https://example.com         # look-alike and scam check
 devos-clipboard                                  # clipboard history (Win+V)
 devos-emoji                                      # emoji panel (Win+.)
 devos-islamic today                              # today's prayer times, Hijri date, ayah & hadith
-sudo devos-modesty enable --mode women           # smart modesty filter (blurs only women's bodies; text stays clear)
-devos-kids-mode                                  # launch safe interactive kids mode
+sudo devos-modesty enable --mode women           # optional local body-region filter (estimates may be wrong)
+devos-kids-mode                                  # launch the full-screen space playground
+devos-broadband                                  # PPPoE / direct ONU broadband connection
+devos-disk-gui                                   # Storage & Boot Doctor
+devos-display                                    # display resolution, refresh and scale
+devos-power                                      # power profiles and sleep timeouts
+devos-files                                      # Files / This PC
+devos-archive                                    # archive helper; see --help
+devos-ai-code-agent                              # DevOS AI Code Agent GUI
+devos-familysafe                                 # Family safety and content guard
 ```
 
 ---
@@ -600,25 +687,27 @@ DevOS/
 
 ## Known limitations
 
-- **Secure Boot** can stay on when the ISO is built with Ubuntu's signed shim (the normal build). A rebuild that cannot find those signed files still needs Secure Boot off.
+- **Secure Boot:** keep it disabled for this custom image unless that exact release has a verified signed boot chain. Including Ubuntu signed packages alone does not establish Secure Boot support.
 - **Android apps** need the one-time ~850 MB download and an installed system (not the live USB). Play Services are a separate first-time choice (`devos android setup-play`). ARM-only apps may not run.
 - **Windows apps:** most everyday programs work; games with kernel anti-cheat, drivers and some remote-control tools don't (DevOS offers native versions where they exist).
 - **DevOS AI's built-in model is small:** great for commands and PC questions, simpler for open conversation — turn on *Smarter DevOS AI* for better answers. Voice recognition quality depends on your microphone.
 - Window title bars still show some programs' own names.
 - Google Chrome asks you to accept Google's terms on first launch.
 
+For prototype status and implementation limits, see [architecture and roadmap](docs/MODERN_2027_OS_ARCHITECTURE.md).
+
 ## Roadmap
 
-- NPU / GPU acceleration for DevOS AI on supported laptops
+- Verified NPU inference backends (current NPU code detects hardware and recommends routing)
 - ARM-app translation for Android APKs that only contain ARM code
-- Wayland session with native multi-window Android apps
+- Broader Wayland coverage for display, input and power helpers
 - More native-version matches
 
 ---
 
 ## Privacy & licensing
 
-- **No telemetry.** DevOS AI, voice and document features run locally; nothing is uploaded.
+- **Local by default:** DevOS assistant, voice and document features process locally. The Code Agent supports cloud providers and can select one when a supported API key is configured; prompts and relevant code then go to that provider. Web searches, public sharing, optional cloud backup, downloads and third-party apps have their own network behavior and terms.
 - DevOS's own code is released under the **MIT License** ([`LICENSE`](LICENSE)).
 - DevOS includes open-source components under their own licenses (Ubuntu packages, KDE Plasma, Calamares, Wine, Waydroid, llama.cpp, whisper.cpp, and the open-weight Qwen2.5 and SmolVLM models), plus **Google Chrome** and **Microsoft Visual Studio Code**, which are distributed under their vendors' terms. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) and [`LICENSES/`](LICENSES/).
 - DevOS is not affiliated with Microsoft, Google or Canonical. The Android system is open-source LineageOS without Google services.

@@ -8,6 +8,8 @@ Unit tests for DevOS 2027 Era Features:
 import sys
 import os
 import unittest
+import tempfile
+from unittest.mock import patch
 
 SYS_PATH_AI = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../components/ai-core"))
 SYS_PATH_AGENT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../components/ai-agent"))
@@ -48,6 +50,11 @@ class Test2027Features(unittest.TestCase):
         self.assertIn("sudo", diag["suggested_fix"])
 
     def test_06_semantic_vector_memory(self):
+        directory = self.enterContext(tempfile.TemporaryDirectory(prefix="devos-memory-test-"))
+        self.enterContext(patch("semantic_memory.MEMORY_DB_FILE", os.path.join(directory, "memory.enc")))
+        self.enterContext(patch("semantic_memory.LEGACY_DB_FILE", os.path.join(directory, "legacy.json")))
+        # Exercise the local fallback without reading a user's running AI service.
+        self.enterContext(patch("semantic_memory.urllib.request.urlopen", side_effect=OSError("offline test")))
         mem = SemanticMemoryIndex()
         mem.index_document("Payment Config", "STRIPE_KEY=pk_test_12345", "/test/.env")
         mem.index_document("Database Docker", "postgres: image postgres:16", "/test/compose.yml")

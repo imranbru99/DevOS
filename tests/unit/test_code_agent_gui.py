@@ -9,6 +9,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 CODE_AGENT_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../components/code-agent"))
 sys.path.insert(0, CODE_AGENT_PATH)
@@ -178,7 +179,10 @@ class TestCodeAgentGUI(unittest.TestCase):
         mime = QtCore.QMimeData()
         mime.setImageData(img)
         self.assertTrue(composer.canInsertFromMimeData(mime))
-        composer.insertFromMimeData(mime)
+        # The real image encoder still runs, but never writes into the user's
+        # clipboard-image archive when the unit suite is executed.
+        with patch.object(gui.os.path, "expanduser", return_value=self.temp_dir):
+            composer.insertFromMimeData(mime)
         self.assertEqual(len(attached), 1)
         self.assertTrue(os.path.exists(attached[0]))
 

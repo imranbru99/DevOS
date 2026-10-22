@@ -248,7 +248,7 @@ mcopy -s -i "${ISO_DIR}/boot/grub/efi.img" /tmp/devos_efi/EFI :: || true
 # 12. Assemble Hybrid ISO with xorriso
 echo "==> Step 10: Assembling final hybrid BIOS+UEFI ISO..."
 xorriso -as mkisofs \
-    -r -V "DEVOS_2404" \
+    -r -V "DEVOS_2604" \
     -J -joliet-long \
     -partition_offset 16 \
     --eltorito-alt-boot \

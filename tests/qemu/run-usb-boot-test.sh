@@ -8,6 +8,7 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 ISO_PATH="${ROOT_DIR}/out/devos-26.04-amd64.iso"
 
 MODE="${1:-bios}"
+case "$MODE" in bios|uefi) ;; *) echo "Usage: $0 [bios|uefi]" >&2; exit 2 ;; esac
 TMP_DIR="${ROOT_DIR}/tests/qemu/usb-test-tmp"
 USB_IMG="${TMP_DIR}/usb.img"
 LOG="${TMP_DIR}/usb-${MODE}.log"
@@ -40,7 +41,8 @@ QEMU_ARGS=(
     -m "${RAM_MB}"
     -smp "${CPUS}"
     -drive "file=${USB_IMG},format=raw,if=none,id=usbstick"
-    -device "usb-storage,drive=usbstick"
+    -device qemu-xhci,id=usb
+    -device "usb-storage,bus=usb.0,drive=usbstick,bootindex=1"
     -net nic,model=virtio
     -net user
     -nographic
@@ -54,26 +56,9 @@ else
 fi
 
 if [ "$MODE" = "uefi" ]; then
-    OVMF_CODE=""
-    OVMF_VARS_TEMPLATE=""
-    for cand in \
-        /usr/share/OVMF/OVMF_CODE.fd \
-        /usr/share/qemu/OVMF.fd \
-        /usr/share/edk2/ovmf/OVMF_CODE.fd \
-        /usr/share/edk2-ovmf/x64/OVMF_CODE.fd; do
-        [ -f "$cand" ] && OVMF_CODE="$cand" && break
-    done
-    for cand in \
-        /usr/share/OVMF/OVMF_VARS.fd \
-        /usr/share/edk2/ovmf/OVMF_VARS.fd \
-        /usr/share/edk2-ovmf/x64/OVMF_VARS.fd; do
-        [ -f "$cand" ] && OVMF_VARS_TEMPLATE="$cand" && break
-    done
-    if [ -z "$OVMF_CODE" ]; then
-        echo "ERROR: OVMF firmware not found." >&2
-        exit 1
-    fi
-    cp -f "${OVMF_VARS_TEMPLATE:-${OVMF_CODE}}" "${TMP_DIR}/ovmf_vars.fd" 2>/dev/null || true
+    source "${SCRIPT_DIR}/firmware.sh"
+    devos_find_ovmf
+    cp -f "${OVMF_VARS_TEMPLATE}" "${TMP_DIR}/ovmf_vars.fd"
     QEMU_ARGS+=(-drive "if=pflash,format=raw,readonly=on,file=${OVMF_CODE}")
     QEMU_ARGS+=(-drive "if=pflash,format=raw,file=${TMP_DIR}/ovmf_vars.fd")
 fi

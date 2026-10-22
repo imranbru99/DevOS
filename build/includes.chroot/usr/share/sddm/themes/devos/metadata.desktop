@@ -1,11 +1,12 @@
 [SddmGreeterTheme]
 Name=DevOS Modern
-Description=Modern glassmorphism login screen for DevOS
+Description=Accessible DevOS sign-in with a centered workspace card
 Author=DevOS Team
 Copyright=(c) 2026 DevOS Team
 License=GPL-3.0
 Type=sddm-theme
-Version=1.0
+Version=1.1
 MainScript=Main.qml
 ConfigFile=theme.conf
 TranslationsDirectory=translations
+QtVersion=6

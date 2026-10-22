@@ -88,7 +88,8 @@ echo "==> Step 2: Preparing virtual filesystems inside chroot..."
 mount --rbind /dev "${CHROOT_DIR}/dev"
 mount --make-rslave "${CHROOT_DIR}/dev"
 mount -t proc proc "${CHROOT_DIR}/proc"
-mount --bind /sys "${CHROOT_DIR}/sys"
+mount --rbind /sys "${CHROOT_DIR}/sys"
+mount --make-rslave "${CHROOT_DIR}/sys"
 mount -o remount,bind,ro "${CHROOT_DIR}/sys"
 
 # Configure DNS

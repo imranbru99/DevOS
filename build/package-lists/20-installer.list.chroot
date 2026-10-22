@@ -5,6 +5,8 @@ rsync
 gdisk
 btrfs-progs
 cryptsetup
+# Required to unlock an encrypted root filesystem during early boot.
+cryptsetup-initramfs
 snapper
 ntfs-3g
 os-prober
