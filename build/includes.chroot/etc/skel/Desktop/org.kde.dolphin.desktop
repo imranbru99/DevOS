@@ -7,3 +7,5 @@ Icon=computer
 Type=Application
 Terminal=false
 Categories=Qt;KDE;System;FileTools;FileManager;
+StartupNotify=true
+StartupWMClass=devos-thispc

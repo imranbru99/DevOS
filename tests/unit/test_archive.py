@@ -72,6 +72,19 @@ class TestArchiveFeatures(unittest.TestCase):
             self.assertIn("action_compress_zip", content)
             self.assertIn("action_compress_7z", content)
 
+    def test_file_explorer_drag_drop_and_app_id(self):
+        with open(FILES_BIN, "r", encoding="utf-8") as f:
+            content = f.read()
+            self.assertIn("ExplorerTableWidget", content)
+            self.assertIn("ExplorerListWidget", content)
+            self.assertIn("QDrag", content)
+            self.assertIn("start_file_drag", content)
+            self.assertIn("setDesktopFileName", content)
+            self.assertIn("devos-thispc.desktop", content)
+            self.assertIn("Hidden items", content)
+            self.assertIn("toggle_hidden_files", content)
+            self.assertIn("explorer_settings.json", content)
+
 
 if __name__ == "__main__":
     unittest.main()

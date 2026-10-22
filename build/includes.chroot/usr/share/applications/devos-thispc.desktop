@@ -1,11 +1,12 @@
 [Desktop Entry]
 Type=Application
-Name=This PC
+Name=File Explorer
 GenericName=Files
 Comment=Drives and free space
 Exec=python3 /usr/local/bin/devos-files %U
-Icon=computer
+Icon=system-file-manager
 Terminal=false
 Categories=Qt;System;FileTools;FileManager;
 Keywords=files;thispc;computer;drives;folders;
 StartupNotify=true
+StartupWMClass=devos-thispc

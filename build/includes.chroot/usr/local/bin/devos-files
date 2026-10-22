@@ -27,6 +27,8 @@ from urllib.parse import unquote
 try:
     from PyQt5.QtCore import (
         QEvent,
+        QItemSelection,
+        QItemSelectionModel,
         QMimeData,
         QPoint,
         QPointF,
@@ -41,6 +43,7 @@ try:
     from PyQt5.QtGui import (
         QBrush,
         QColor,
+        QDrag,
         QFont,
         QIcon,
         QKeySequence,
@@ -73,6 +76,7 @@ try:
         QMessageBox,
         QProgressBar,
         QPushButton,
+        QRubberBand,
         QScrollArea,
         QSizePolicy,
         QSplitter,
@@ -537,6 +541,14 @@ def get_file_type_description(path):
         return "File folder"
     ext = os.path.splitext(path)[1].lower()
     ext_map = {
+        ".env": "Environment Configuration",
+        ".gitignore": "Git Ignore File",
+        ".dockerignore": "Docker Ignore File",
+        ".editorconfig": "EditorConfig File",
+        ".yml": "YAML Document",
+        ".yaml": "YAML Document",
+        ".conf": "Configuration File",
+        ".ini": "Configuration File",
         ".txt": "Text Document",
         ".pdf": "PDF Document",
         ".py": "Python Source File",
@@ -1597,6 +1609,353 @@ class ExplorerTableItem(QTableWidgetItem):
         return self.text().lower() < other.text().lower()
 
 
+class ExplorerTableWidget(QTableWidget):
+    """Table widget supporting native OS drag-out, drop-in, and rubber-band marquee selection."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
+        self.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.setDefaultDropAction(Qt.CopyAction)
+
+        self._drag_start_pos = None
+        self._drag_item_was_selected = False
+        self._rubber_origin = None
+        self._rubber_band = QRubberBand(QRubberBand.Rectangle, self.viewport())
+
+    def _is_on_item_content(self, pos):
+        item = self.itemAt(pos)
+        if not item:
+            return False
+        if item.column() == 0:
+            index = self.model().index(item.row(), 0)
+            rect = self.visualRect(index)
+            text_w = self.fontMetrics().horizontalAdvance(item.text())
+            content_w = 40 + text_w + 20
+            return (rect.left() <= pos.x() <= rect.left() + content_w)
+        return False
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            pos = event.pos()
+            item = self.itemAt(pos)
+            on_content = self._is_on_item_content(pos)
+
+            if not on_content or item is None:
+                # Clicked empty space or blank area of cell -> start marquee selection box
+                if not (event.modifiers() & (Qt.ControlModifier | Qt.ShiftModifier)):
+                    self.clearSelection()
+                self._rubber_origin = pos
+                self._rubber_band.setGeometry(QRect(pos, QSize()))
+                self._rubber_band.show()
+                self._drag_start_pos = None
+                self._drag_item_was_selected = False
+                return
+            else:
+                self._drag_start_pos = pos
+                self._drag_item_was_selected = bool(item and item.isSelected())
+
+                if self._drag_item_was_selected and not (event.modifiers() & (Qt.ControlModifier | Qt.ShiftModifier)):
+                    self._rubber_origin = None
+                    return
+                else:
+                    self._rubber_origin = pos
+                    self._rubber_band.setGeometry(QRect(pos, QSize()))
+
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        pos = event.pos()
+
+        # 1. Marquee rubber band selection
+        if self._rubber_origin is not None and (event.buttons() & Qt.LeftButton):
+            if (pos - self._rubber_origin).manhattanLength() >= 3:
+                self._rubber_band.show()
+                rect = QRect(self._rubber_origin, pos).normalized()
+                self._rubber_band.setGeometry(rect)
+
+                selection = QItemSelection()
+                col_max = max(0, self.columnCount() - 1)
+                viewport_w = self.viewport().width()
+
+                for row in range(self.rowCount()):
+                    row_rect = self.visualRect(self.model().index(row, 0))
+                    row_rect.setWidth(viewport_w)
+                    if rect.intersects(row_rect):
+                        top_left = self.model().index(row, 0)
+                        bottom_right = self.model().index(row, col_max)
+                        selection.select(top_left, bottom_right)
+
+                flags = QItemSelectionModel.ClearAndSelect
+                if event.modifiers() & Qt.ControlModifier:
+                    flags = QItemSelectionModel.Select
+                self.selectionModel().select(selection, flags)
+                return
+
+        # 2. File drag to external app (Chrome) or another folder
+        if (event.buttons() & Qt.LeftButton) and self._drag_start_pos is not None:
+            if (pos - self._drag_start_pos).manhattanLength() >= QApplication.startDragDistance():
+                if self._drag_item_was_selected:
+                    self.start_file_drag()
+                    self._drag_start_pos = None
+                    return
+
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if self._rubber_origin is not None:
+            self._rubber_band.hide()
+            self._rubber_origin = None
+
+        if event.button() == Qt.LeftButton and self._drag_start_pos is not None:
+            item = self.itemAt(self._drag_start_pos)
+            if item is not None and self._drag_item_was_selected and not (event.modifiers() & (Qt.ControlModifier | Qt.ShiftModifier)):
+                selected_rows = self.selectionModel().selectedRows()
+                if len(selected_rows) > 1:
+                    self.clearSelection()
+                    self.selectRow(item.row())
+            self._drag_start_pos = None
+            self._drag_item_was_selected = False
+
+        super().mouseReleaseEvent(event)
+
+    def startDrag(self, supportedActions):
+        self.start_file_drag()
+
+    def start_file_drag(self):
+        window = self.window()
+        if not hasattr(window, "get_selected_paths"):
+            return
+        paths = window.get_selected_paths()
+        if not paths:
+            return
+        valid_paths = [os.path.abspath(p) for p in paths if p and os.path.exists(p)]
+        if not valid_paths:
+            return
+
+        drag = QDrag(self)
+        mime = QMimeData()
+        urls = [QUrl.fromLocalFile(p) for p in valid_paths]
+        mime.setUrls(urls)
+        mime.setText("\n".join(valid_paths))
+        drag.setMimeData(mime)
+
+        selected = self.selectedItems()
+        if selected:
+            for it in selected:
+                if it.column() == 0 and not it.icon().isNull():
+                    drag.setPixmap(it.icon().pixmap(32, 32))
+                    drag.setHotSpot(QPoint(16, 16))
+                    break
+
+        self._drag_start_pos = None
+        drag.exec_(Qt.CopyAction | Qt.MoveAction)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dropEvent(self, event):
+        if event.mimeData().hasUrls():
+            window = self.window()
+            target_dir = getattr(window, "_current_path", "")
+            item = self.itemAt(event.pos())
+            if item:
+                row = item.row()
+                row_item = self.item(row, 0)
+                if row_item:
+                    p = row_item.data(Qt.UserRole)
+                    if p and os.path.isdir(p):
+                        target_dir = p
+
+            if target_dir and os.path.isdir(target_dir):
+                for url in event.mimeData().urls():
+                    src = url.toLocalFile()
+                    if src and os.path.exists(src):
+                        try:
+                            dst = os.path.join(target_dir, os.path.basename(src))
+                            if os.path.abspath(src) != os.path.abspath(dst):
+                                if os.path.isdir(src):
+                                    shutil.copytree(src, dst, dirs_exist_ok=True)
+                                else:
+                                    shutil.copy2(src, dst)
+                        except Exception as err:
+                            print(f"Error copying dropped item: {err}")
+                if hasattr(window, "refresh"):
+                    window.refresh()
+                event.acceptProposedAction()
+                return
+        super().dropEvent(event)
+
+
+class ExplorerListWidget(QListWidget):
+    """Icon list widget supporting native OS drag-out, drop-in, and rubber-band marquee selection."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
+        self.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.setDefaultDropAction(Qt.CopyAction)
+
+        self._drag_start_pos = None
+        self._drag_item_was_selected = False
+        self._rubber_origin = None
+        self._rubber_band = QRubberBand(QRubberBand.Rectangle, self.viewport())
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            pos = event.pos()
+            item = self.itemAt(pos)
+
+            if item is None:
+                if not (event.modifiers() & (Qt.ControlModifier | Qt.ShiftModifier)):
+                    self.clearSelection()
+                self._rubber_origin = pos
+                self._rubber_band.setGeometry(QRect(pos, QSize()))
+                self._rubber_band.show()
+                self._drag_start_pos = None
+                self._drag_item_was_selected = False
+                return
+            else:
+                self._drag_start_pos = pos
+                self._drag_item_was_selected = bool(item and item.isSelected())
+                if self._drag_item_was_selected and not (event.modifiers() & (Qt.ControlModifier | Qt.ShiftModifier)):
+                    self._rubber_origin = None
+                    return
+                else:
+                    self._rubber_origin = pos
+                    self._rubber_band.setGeometry(QRect(pos, QSize()))
+
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        pos = event.pos()
+
+        if self._rubber_origin is not None and (event.buttons() & Qt.LeftButton):
+            if (pos - self._rubber_origin).manhattanLength() >= 3:
+                self._rubber_band.show()
+                rect = QRect(self._rubber_origin, pos).normalized()
+                self._rubber_band.setGeometry(rect)
+
+                if not (event.modifiers() & Qt.ControlModifier):
+                    self.clearSelection()
+
+                for idx in range(self.count()):
+                    it = self.item(idx)
+                    item_rect = self.visualItemRect(it)
+                    if rect.intersects(item_rect):
+                        it.setSelected(True)
+                return
+
+        if (event.buttons() & Qt.LeftButton) and self._drag_start_pos is not None:
+            if (pos - self._drag_start_pos).manhattanLength() >= QApplication.startDragDistance():
+                if self._drag_item_was_selected:
+                    self.start_file_drag()
+                    self._drag_start_pos = None
+                    return
+
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if self._rubber_origin is not None:
+            self._rubber_band.hide()
+            self._rubber_origin = None
+
+        if event.button() == Qt.LeftButton and self._drag_start_pos is not None:
+            item = self.itemAt(self._drag_start_pos)
+            if item is not None and self._drag_item_was_selected and not (event.modifiers() & (Qt.ControlModifier | Qt.ShiftModifier)):
+                if len(self.selectedItems()) > 1:
+                    self.clearSelection()
+                    item.setSelected(True)
+            self._drag_start_pos = None
+            self._drag_item_was_selected = False
+
+        super().mouseReleaseEvent(event)
+
+    def startDrag(self, supportedActions):
+        self.start_file_drag()
+
+    def start_file_drag(self):
+        window = self.window()
+        if not hasattr(window, "get_selected_paths"):
+            return
+        paths = window.get_selected_paths()
+        if not paths:
+            return
+        valid_paths = [os.path.abspath(p) for p in paths if p and os.path.exists(p)]
+        if not valid_paths:
+            return
+
+        drag = QDrag(self)
+        mime = QMimeData()
+        urls = [QUrl.fromLocalFile(p) for p in valid_paths]
+        mime.setUrls(urls)
+        mime.setText("\n".join(valid_paths))
+        drag.setMimeData(mime)
+
+        selected = self.selectedItems()
+        if selected and not selected[0].icon().isNull():
+            drag.setPixmap(selected[0].icon().pixmap(32, 32))
+            drag.setHotSpot(QPoint(16, 16))
+
+        self._drag_start_pos = None
+        drag.exec_(Qt.CopyAction | Qt.MoveAction)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dropEvent(self, event):
+        if event.mimeData().hasUrls():
+            window = self.window()
+            target_dir = getattr(window, "_current_path", "")
+            item = self.itemAt(event.pos())
+            if item:
+                p = item.data(Qt.UserRole)
+                if p and os.path.isdir(p):
+                    target_dir = p
+
+            if target_dir and os.path.isdir(target_dir):
+                for url in event.mimeData().urls():
+                    src = url.toLocalFile()
+                    if src and os.path.exists(src):
+                        try:
+                            dst = os.path.join(target_dir, os.path.basename(src))
+                            if os.path.abspath(src) != os.path.abspath(dst):
+                                if os.path.isdir(src):
+                                    shutil.copytree(src, dst, dirs_exist_ok=True)
+                                else:
+                                    shutil.copy2(src, dst)
+                        except Exception as err:
+                            print(f"Error copying dropped item: {err}")
+                if hasattr(window, "refresh"):
+                    window.refresh()
+                event.acceptProposedAction()
+                return
+        super().dropEvent(event)
+
+
 class FolderSizeThread(QThread):
     progress = pyqtSignal(int, int, int)
     finished = pyqtSignal(int, int, int)
@@ -2473,6 +2832,8 @@ class WindowsFileExplorer(QMainWindow):
         self._drives = []
         self._side_btns = {}
         self._pinned_folders = self.load_pinned_folders()
+        self._settings = self.load_settings()
+        self._show_hidden = bool(self._settings.get("show_hidden", False))
 
         self._setup_ui()
         self.navigate_to(initial_path, add_to_history=False)
@@ -2580,6 +2941,13 @@ class WindowsFileExplorer(QMainWindow):
         self.btn_view.setObjectName("cmdBtn")
         self.btn_view.clicked.connect(self.toggle_view_mode)
 
+        self.btn_hidden = QPushButton("Hidden items")
+        self.btn_hidden.setObjectName("cmdBtn")
+        self.btn_hidden.setCheckable(True)
+        self.btn_hidden.setChecked(self._show_hidden)
+        self.btn_hidden.setToolTip("Show hidden files and folders (Ctrl+H)")
+        self.btn_hidden.clicked.connect(self.toggle_hidden_files)
+
         self.btn_terminal = QPushButton("Terminal")
         self.btn_terminal.setObjectName("cmdBtn")
         self.btn_terminal.clicked.connect(lambda: open_in_terminal(self._current_path or os.path.expanduser("~")))
@@ -2646,6 +3014,7 @@ class WindowsFileExplorer(QMainWindow):
         cmd_layout.addWidget(self.btn_delete_permanently)
         cmd_layout.addSpacing(10)
         cmd_layout.addWidget(self.btn_view)
+        cmd_layout.addWidget(self.btn_hidden)
         cmd_layout.addWidget(self.btn_terminal)
         cmd_layout.addWidget(self.btn_props)
         cmd_layout.addStretch(1)
@@ -2786,7 +3155,7 @@ class WindowsFileExplorer(QMainWindow):
         folder_layout.setSpacing(0)
 
         # Details Table View
-        self.table_view = QTableWidget()
+        self.table_view = ExplorerTableWidget()
         self.table_view.setObjectName("fileTable")
         self.table_view.setColumnCount(4)
         self.table_view.setHorizontalHeaderLabels(["Name", "Date modified", "Type", "Size"])
@@ -2807,7 +3176,7 @@ class WindowsFileExplorer(QMainWindow):
         folder_layout.addWidget(self.table_view)
 
         # Icons List View (Hidden unless icons mode selected)
-        self.list_view = QListWidget()
+        self.list_view = ExplorerListWidget()
         self.list_view.setObjectName("fileList")
         self.list_view.setViewMode(QListWidget.IconMode)
         self.list_view.setIconSize(QSize(54, 54))
@@ -2928,6 +3297,11 @@ class WindowsFileExplorer(QMainWindow):
                 border-color: #384357;
                 color: #ffffff;
             }
+            QPushButton#cmdBtn:checked {
+                background: #1e3a5f;
+                border-color: #0078d4;
+                color: #ffffff;
+            }
             #sidebar {
                 background: #17191e;
                 border-right: 1px solid #262c37;
@@ -3025,6 +3399,10 @@ class WindowsFileExplorer(QMainWindow):
             QTableWidget#fileTable::item:selected, QListWidget#fileList::item:selected {
                 background: #0078d4;
                 color: #ffffff;
+            }
+            QRubberBand {
+                background-color: rgba(0, 120, 212, 60);
+                border: 1px solid #0078d4;
             }
             QHeaderView::section {
                 background: #1a1d24;
@@ -3166,6 +3544,33 @@ class WindowsFileExplorer(QMainWindow):
 
     CONFIG_DIR = os.path.expanduser("~/.config/devos")
     PINNED_FILE = os.path.join(CONFIG_DIR, "quick_access.json")
+    SETTINGS_FILE = os.path.join(CONFIG_DIR, "explorer_settings.json")
+
+    def load_settings(self):
+        try:
+            if os.path.exists(self.SETTINGS_FILE):
+                with open(self.SETTINGS_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        return data
+        except Exception:
+            pass
+        return {}
+
+    def save_settings(self):
+        try:
+            os.makedirs(self.CONFIG_DIR, exist_ok=True)
+            with open(self.SETTINGS_FILE, "w", encoding="utf-8") as f:
+                json.dump({"show_hidden": self._show_hidden}, f, indent=2)
+        except Exception:
+            pass
+
+    def toggle_hidden_files(self):
+        self._show_hidden = not self._show_hidden
+        if hasattr(self, "btn_hidden"):
+            self.btn_hidden.setChecked(self._show_hidden)
+        self.save_settings()
+        self.refresh()
 
     def load_pinned_folders(self):
         try:
@@ -3523,7 +3928,9 @@ class WindowsFileExplorer(QMainWindow):
         dirs = []
         files = []
         for entry in entries:
-            if entry.startswith(".") and entry not in [".", ".."]:
+            if entry in [".", ".."]:
+                continue
+            if not self._show_hidden and entry.startswith("."):
                 continue
             full_path = os.path.join(path, entry)
             if os.path.isdir(full_path):
@@ -3606,6 +4013,14 @@ class WindowsFileExplorer(QMainWindow):
             list_item.setData(Qt.UserRole, full_path)
             list_item.setData(Qt.UserRole + 1, is_dir)
             self.list_view.addItem(list_item)
+
+            if entry.startswith("."):
+                muted_col = QColor("#94a3b8")
+                name_item.setForeground(muted_col)
+                item1.setForeground(muted_col)
+                item2.setForeground(muted_col)
+                size_item.setForeground(muted_col)
+                list_item.setForeground(muted_col)
 
         self.table_view.setSortingEnabled(True)
         self.status_items_count.setText(f"{len(all_items)} items")
@@ -4471,6 +4886,11 @@ class WindowsFileExplorer(QMainWindow):
                 act_details.triggered.connect(lambda: self.set_view_mode("details"))
                 act_icons = view_menu.addAction("Large icons")
                 act_icons.triggered.connect(lambda: self.set_view_mode("icons"))
+                view_menu.addSeparator()
+                act_hidden = view_menu.addAction("Hidden items")
+                act_hidden.setCheckable(True)
+                act_hidden.setChecked(self._show_hidden)
+                act_hidden.triggered.connect(self.toggle_hidden_files)
 
                 sort_menu = menu.addMenu("Sort by")
                 for s in ["Name", "Original location", "Date deleted", "Size"]:
@@ -4580,6 +5000,11 @@ class WindowsFileExplorer(QMainWindow):
             act_details.triggered.connect(lambda: self.set_view_mode("details"))
             act_icons = view_menu.addAction("Large icons")
             act_icons.triggered.connect(lambda: self.set_view_mode("icons"))
+            view_menu.addSeparator()
+            act_hidden = view_menu.addAction("Hidden items")
+            act_hidden.setCheckable(True)
+            act_hidden.setChecked(self._show_hidden)
+            act_hidden.triggered.connect(self.toggle_hidden_files)
 
             sort_menu = menu.addMenu("Sort by")
             for s in ["Name", "Date modified", "Type", "Size"]:
@@ -4691,6 +5116,8 @@ class WindowsFileExplorer(QMainWindow):
             self.address_bar.switch_to_edit()
         elif event.modifiers() == Qt.AltModifier and event.key() == Qt.Key_D:
             self.address_bar.switch_to_edit()
+        elif event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_H:
+            self.toggle_hidden_files()
         elif event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_F:
             self.search_box.setFocus()
             self.search_box.selectAll()
@@ -4699,8 +5126,21 @@ class WindowsFileExplorer(QMainWindow):
 
 
 def main():
+    try:
+        import ctypes
+        libc = ctypes.cdll.LoadLibrary("libc.so.6")
+        libc.prctl(15, b"devos-files", 0, 0, 0)
+    except Exception:
+        pass
+
     app = QApplication(sys.argv)
-    app.setApplicationName("This PC")
+    app.setApplicationName("devos-thispc")
+    app.setApplicationDisplayName("File Explorer")
+    if hasattr(app, "setDesktopFileName"):
+        app.setDesktopFileName("devos-thispc.desktop")
+    if hasattr(app, "setWindowIcon"):
+        app.setWindowIcon(get_win_icon("this-pc", 64))
+
     initial_path = ""
     if len(sys.argv) > 1:
         arg = sys.argv[1].strip()
