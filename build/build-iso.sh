@@ -37,7 +37,7 @@ cleanup() {
     echo "==> Cleaning up chroot mount points..."
     for mnt in "${CHROOT_DIR}/dev/pts" "${CHROOT_DIR}/dev" "${CHROOT_DIR}/proc" "${CHROOT_DIR}/sys"; do
         if mountpoint -q "$mnt" 2>/dev/null; then
-            umount -lf "$mnt" || true
+            umount --recursive --lazy "$mnt" || true
         fi
     done
 }
