@@ -1533,9 +1533,45 @@ class BreadcrumbBar(QWidget):
             self.crumbs_layout.addWidget(bin_btn)
             return
 
+        # Check if path belongs to a secondary drive (e.g. D:, E:...)
+        matched_drive = None
+        try:
+            for d in list_drives():
+                d_mount = d.get("mount") or ""
+                if not d.get("is_system") and d_mount and os.path.isdir(d_mount):
+                    if path == d_mount or path.startswith(d_mount.rstrip("/") + "/"):
+                        matched_drive = d
+                        break
+        except Exception:
+            matched_drive = None
+
+        if matched_drive:
+            d_mount = matched_drive["mount"]
+            d_title = matched_drive["title"]
+            rel = os.path.relpath(path, d_mount)
+            base_btn = QPushButton(d_title)
+            base_btn.setObjectName("crumbBtn")
+            base_btn.clicked.connect(lambda _=False, p=d_mount: self.path_changed.emit(p))
+            base_btn.setContextMenuPolicy(Qt.CustomContextMenu)
+            base_btn.customContextMenuRequested.connect(lambda pos, p=d_mount, b=base_btn: self._show_crumb_context_menu(p, b.mapToGlobal(pos)))
+            self.crumbs_layout.addWidget(base_btn)
+
+            if rel and rel != ".":
+                parts = rel.split(os.sep)
+                curr = d_mount
+                for part in parts:
+                    sep = QLabel("›")
+                    sep.setObjectName("crumbSep")
+                    self.crumbs_layout.addWidget(sep)
+                    curr = os.path.join(curr, part)
+                    btn = QPushButton(part)
+                    btn.setObjectName("crumbBtn")
+                    btn.clicked.connect(lambda _=False, p=curr: self.path_changed.emit(p))
+                    btn.setContextMenuPolicy(Qt.CustomContextMenu)
+                    btn.customContextMenuRequested.connect(lambda pos, p=curr, b=btn: self._show_crumb_context_menu(p, b.mapToGlobal(pos)))
+                    self.crumbs_layout.addWidget(btn)
         # Home directory shortcut friendly formatting
-        home = os.path.expanduser("~")
-        if path.startswith(home):
+        elif path.startswith(home):
             rel = os.path.relpath(path, home)
             base_btn = QPushButton(os.path.basename(home))
             base_btn.setObjectName("crumbBtn")
@@ -1597,8 +1633,25 @@ class BreadcrumbBar(QWidget):
         elif text.lower() in ("recycle bin", "recycle-bin", "trash", "trash:", "trash:/"):
             self.path_changed.emit(os.path.expanduser("~/.local/share/Trash/files"))
         else:
+            # Check secondary Windows drive letters (D:, E:, etc.)
+            matched_target = None
+            try:
+                for d in list_drives():
+                    letter = d.get("letter", "")
+                    d_mount = d.get("mount", "")
+                    if letter and d_mount and os.path.isdir(d_mount):
+                        prefix = f"{letter.upper()}:"
+                        if text.upper().startswith(prefix + "\\") or text.upper() == prefix or text.upper().startswith(prefix + "/"):
+                            rem = text[len(prefix):].lstrip("\\/").replace("\\", "/")
+                            matched_target = os.path.join(d_mount, rem) if rem else d_mount
+                            break
+            except Exception:
+                matched_target = None
+
+            if matched_target:
+                target = matched_target
             # Handle Windows-style C:\ paths
-            if text.upper().startswith("C:\\") or text.upper() == "C:":
+            elif text.upper().startswith("C:\\") or text.upper() == "C:":
                 rem = text[3:].replace("\\", "/") if text.upper().startswith("C:\\") else ""
                 target = "/" + rem
             elif text.startswith("~"):
@@ -3906,30 +3959,65 @@ class WindowsFileExplorer(QMainWindow):
     def open_drive(self, drive):
         """Open a drive; mounts it automatically if unmounted."""
         mount = drive.get("mount") or ""
-        if not mount and drive.get("path"):
+        dev_path = drive.get("path") or ""
+
+        # Validate that mount is actually an existing directory (never a raw device node like /dev/sda2)
+        if not mount or not os.path.isdir(mount):
+            mount = ""
+            if dev_path:
+                try:
+                    out = subprocess.check_output(
+                        ["findmnt", "-n", "-o", "TARGET", "-S", dev_path],
+                        text=True,
+                        stderr=subprocess.DEVNULL,
+                    ).strip()
+                    if out:
+                        for line in out.splitlines():
+                            target = line.strip()
+                            if os.path.isdir(target):
+                                mount = target
+                                drive["mount"] = mount
+                                break
+                except Exception:
+                    pass
+
+        # If still unmounted, invoke udisksctl
+        if not mount and dev_path:
             try:
                 out = subprocess.check_output(
-                    ["udisksctl", "mount", "-b", drive["path"]],
+                    ["udisksctl", "mount", "-b", dev_path],
                     text=True,
                     stderr=subprocess.STDOUT,
                 )
-                for part in out.split():
-                    if part.startswith("/"):
-                        mount = part
+                if " at " in out:
+                    cand = out.split(" at ")[-1].strip().rstrip(".")
+                    if os.path.isdir(cand):
+                        mount = cand
                         drive["mount"] = mount
-                        break
             except Exception:
                 pass
-            if not mount:
-                for item in list_drives():
-                    if item.get("path") == drive.get("path") and item.get("mount"):
-                        mount = item["mount"]
-                        drive["mount"] = mount
-                        break
 
-        if mount and os.path.exists(mount):
-            self.navigate_to(mount, label=drive["title"])
-        elif not drive.get("fstype") and drive.get("path"):
+            if not mount:
+                try:
+                    out = subprocess.check_output(
+                        ["findmnt", "-n", "-o", "TARGET", "-S", dev_path],
+                        text=True,
+                        stderr=subprocess.DEVNULL,
+                    ).strip()
+                    if out:
+                        for line in out.splitlines():
+                            target = line.strip()
+                            if os.path.isdir(target):
+                                mount = target
+                                drive["mount"] = mount
+                                break
+                except Exception:
+                    pass
+
+        if mount and os.path.isdir(mount):
+            self.navigate_to(mount, label=drive.get("title", ""))
+            self._side_btns[mount] = self._side_btns.get(drive.get("mount"), self.this_pc_btn)
+        elif not drive.get("fstype") and dev_path:
             self._handle_unformatted_drive(drive)
 
     def _handle_unformatted_drive(self, drive):
