@@ -38,6 +38,17 @@ class ModestyPackageTests(unittest.TestCase):
             second = modesty.enable(temp, mode="women")
             self.assertEqual(first["extension_id"], second["extension_id"])
 
+    def test_rules_face_score_threshold_rejects_inanimate_objects(self):
+        rules_js = (ROOT / "components/modesty/extension/rules.js").read_text(encoding="utf-8")
+        self.assertIn("faceScore: 0.55", rules_js)
+
+    def test_svg_filter_uses_object_bounding_box_and_xlink_for_regional_blur(self):
+        content_js = (ROOT / "components/modesty/extension/content.js").read_text(encoding="utf-8")
+        self.assertIn("primitiveUnits: 'objectBoundingBox'", content_js)
+        self.assertIn("xlink:href", content_js)
+        self.assertIn("TECH_DEVICE_REGEX", content_js)
+        self.assertIn("isHardwareOrTechContext", content_js)
+
 
 if __name__ == "__main__":
     unittest.main()

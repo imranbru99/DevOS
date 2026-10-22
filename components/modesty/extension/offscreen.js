@@ -8,7 +8,7 @@
 // The tiny face detector is scale sensitive: a face found at 0.9 at one input
 // size can drop to 0.3 at another. Run three sizes and merge (lean to blur).
 const DETECT_INPUTS = [224, 416, 608];   // multiples of 32
-const DETECT_MIN_SCORE = 0.25;           // keep weak faces; rules.js applies the real threshold
+const DETECT_MIN_SCORE = 0.40;           // keep confident faces; rules.js applies the real threshold
 
 let readyPromise = null;
 let backend = 'none';
@@ -83,16 +83,16 @@ function mergeFaces(list) {
 }
 
 // Check whether a detected face box contains genuine human skin tones.
-// Text, banners, and graphics have high contrast but almost 0% skin-tone pixels.
+// Text, banners, hardware devices, and graphics have high contrast but almost 0% skin-tone pixels.
 function hasSkinTone(img, b) {
   try {
     const bw = Math.max(1, Math.round(b.width || b.w || 0));
     const bh = Math.max(1, Math.round(b.height || b.h || 0));
     const bx = Math.max(0, Math.round(b.x || 0));
     const by = Math.max(0, Math.round(b.y || 0));
-    if (bw < 14 || bh < 14) return false;
+    if (bw < 16 || bh < 16) return false;
     const ratio = bw / bh;
-    if (ratio < 0.45 || ratio > 2.2) return false;
+    if (ratio < 0.5 || ratio > 2.0) return false;
 
     const c = document.createElement('canvas');
     c.width = 32; c.height = 32;
@@ -101,33 +101,97 @@ function hasSkinTone(img, b) {
     const data = ctx.getImageData(0, 0, 32, 32).data;
 
     let skin = 0;
+    let darkPixels = 0;
+    let whitePixels = 0;
     const total = 32 * 32;
     for (let i = 0; i < data.length; i += 4) {
       const r = data[i], g = data[i + 1], b = data[i + 2];
+      const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+      if (lum < 35) darkPixels++;
+      if (lum > 240) whitePixels++;
       // Cross-ethnicity RGB skin tone detection
       if (r > 95 && g > 40 && b > 20 && Math.max(r, g, b) - Math.min(r, g, b) > 15 && Math.abs(r - g) > 15 && r > g && r > b) {
         skin++;
       }
     }
-    return (skin / total) >= 0.12;
+    // Real face cannot be >70% pure dark hardware/black plastic or pure white background
+    if (darkPixels / total > 0.70 || whitePixels / total > 0.70) return false;
+    // Genuine face requires significant skin pixel coverage
+    return (skin / total) >= 0.25;
   } catch (e) {
-    return true; // Fallback to allowing if canvas read fails
+    return false;
   }
 }
 
 function hasAnatomicalBody(pose) {
   if (!pose || !pose.keypoints) return false;
   let confidentKeypoints = 0;
-  let hasTorso = false;
+  let shoulderCount = 0;
+  let hipCount = 0;
+  let shoulderY = 0;
+  let hipY = 0;
+
   for (const kp of pose.keypoints) {
-    if (kp.score >= 0.25) {
+    if (kp.score >= 0.35) {
       confidentKeypoints++;
-      if (kp.part === 'leftShoulder' || kp.part === 'rightShoulder' || kp.part === 'leftHip' || kp.part === 'rightHip') {
-        hasTorso = true;
+      if (kp.part === 'leftShoulder' || kp.part === 'rightShoulder') {
+        shoulderCount++;
+        shoulderY += kp.position.y;
+      }
+      if (kp.part === 'leftHip' || kp.part === 'rightHip') {
+        hipCount++;
+        hipY += kp.position.y;
       }
     }
   }
-  return confidentKeypoints >= 3 && hasTorso;
+
+  // A genuine human body needs at least 5 confident keypoints, including shoulders
+  if (confidentKeypoints < 5 || shoulderCount === 0) return false;
+
+  // Anatomical check: shoulders must be above hips (Y increases downward)
+  if (shoulderCount > 0 && hipCount > 0) {
+    const avgShoulderY = shoulderY / shoulderCount;
+    const avgHipY = hipY / hipCount;
+    if (avgShoulderY >= avgHipY) return false;
+  }
+
+  return true;
+}
+
+function segmentHasSkin(img, segment) {
+  try {
+    const w = segment.width, h = segment.height;
+    if (w <= 0 || h <= 0) return false;
+    const c = document.createElement('canvas');
+    c.width = 48; c.height = 48;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(img, 0, 0, 48, 48);
+    const data = ctx.getImageData(0, 0, 48, 48).data;
+
+    let skin = 0;
+    let sampled = 0;
+    const scaleX = w / 48;
+    const scaleY = h / 48;
+    for (let cy = 0; cy < 48; cy += 2) {
+      for (let cx = 0; cx < 48; cx += 2) {
+        const sx = Math.min(w - 1, Math.round(cx * scaleX));
+        const sy = Math.min(h - 1, Math.round(cy * scaleY));
+        if (segment.data[sy * w + sx]) {
+          sampled++;
+          const idx = (cy * 48 + cx) * 4;
+          const r = data[idx], g = data[idx + 1], b = data[idx + 2];
+          if (r > 95 && g > 40 && b > 20 && Math.max(r, g, b) - Math.min(r, g, b) > 15 && Math.abs(r - g) > 15 && r > g && r > b) {
+            skin++;
+          }
+        }
+      }
+    }
+    if (sampled < 5) return false;
+    // Real person has at least some skin visible (face, hands, neck, arms, legs)
+    return (skin / sampled) >= 0.06;
+  } catch (e) {
+    return true;
+  }
 }
 
 let queue = Promise.resolve();
@@ -146,10 +210,10 @@ function detect(dataUrl) {
     }
     const faces = mergeFaces(found);
     const segments = await personModel.segmentMultiPerson(img, { internalResolution: 'medium',
-      segmentationThreshold: 0.7, maxDetections: 8, scoreThreshold: 0.4, minKeypointScore: 0.25 });
+      segmentationThreshold: 0.75, maxDetections: 6, scoreThreshold: 0.48, minKeypointScore: 0.35 });
     const used = new Set();
     const people = segments
-      .filter((segment) => hasAnatomicalBody(segment.pose))
+      .filter((segment) => hasAnatomicalBody(segment.pose) && segmentHasSkin(img, segment))
       .map((segment) => {
         const faceIndex = ModestyRules.matchFace(segment.pose, faces, used);
         if (faceIndex >= 0) used.add(faceIndex);

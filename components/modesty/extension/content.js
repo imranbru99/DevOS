@@ -56,6 +56,24 @@
 
   let filterSequence = 0;
   const SVG_NS = 'http://www.w3.org/2000/svg';
+  const XLINK_NS = 'http://www.w3.org/1999/xlink';
+  const TECH_DEVICE_REGEX = /\b(?:router|modem|switch|access[\s_-]?point|onu|gpon|epon|adapter|ethernet|wi-fi|wifi|gigabit|mbps|antenna|motherboard|gpu|cpu|ram|ssd|hard[\s_-]?drive|hdd|processor|laptop|desktop|monitor|display|keyboard|mouse|printer|scanner|webcam|casing|chassis|gadget|circuit|pcb)\b/i;
+
+  function isHardwareOrTechContext(img) {
+    try {
+      const src = img.currentSrc || img.src || '';
+      const alt = img.alt || '';
+      const title = img.title || '';
+      if (TECH_DEVICE_REGEX.test(alt) || TECH_DEVICE_REGEX.test(title) || TECH_DEVICE_REGEX.test(src)) return true;
+      const docTitle = document.title || '';
+      const url = location.href || '';
+      if (TECH_DEVICE_REGEX.test(docTitle) || TECH_DEVICE_REGEX.test(url)) {
+        if (img.closest('.product, .gallery, .item, #product, [class*="product"], [class*="gallery"], [class*="image"]')) return true;
+      }
+    } catch (e) {}
+    return false;
+  }
+
   const resize = new ResizeObserver((entries) => {
     for (const entry of entries) {
       const st = info.get(entry.target);
@@ -99,15 +117,23 @@
   }
 
   function positionMask(el, st) {
+    if (!st || !st.filterImage) return;
     const css = getComputedStyle(el);
-    const left = parseFloat(css.borderLeftWidth) + parseFloat(css.paddingLeft);
-    const top = parseFloat(css.borderTopWidth) + parseFloat(css.paddingTop);
-    const w = el.clientWidth - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight);
-    const h = el.clientHeight - parseFloat(css.paddingTop) - parseFloat(css.paddingBottom);
-    const fit = R.fitBox(st.result.width, st.result.height, Math.max(1, w), Math.max(1, h), css.objectFit, css.objectPosition);
-    for (const [key, value] of Object.entries({ x: fit.x + left, y: fit.y + top, width: fit.w, height: fit.h })) {
-      st.filterImage.setAttribute(key, value);
-    }
+    const left = (parseFloat(css.borderLeftWidth) || 0) + (parseFloat(css.paddingLeft) || 0);
+    const top = (parseFloat(css.borderTopWidth) || 0) + (parseFloat(css.paddingTop) || 0);
+    const w = el.clientWidth - (parseFloat(css.paddingLeft) || 0) - (parseFloat(css.paddingRight) || 0);
+    const h = el.clientHeight - (parseFloat(css.paddingTop) || 0) - (parseFloat(css.paddingBottom) || 0);
+    if (w <= 0 || h <= 0 || el.clientWidth <= 0 || el.clientHeight <= 0) return;
+    const fit = R.fitBox(st.result.width, st.result.height, w, h, css.objectFit, css.objectPosition);
+    // In primitiveUnits="objectBoundingBox", coordinates are fractions in [0, 1]
+    const normX = Math.max(0, Math.min(1, (fit.x + left) / el.clientWidth));
+    const normY = Math.max(0, Math.min(1, (fit.y + top) / el.clientHeight));
+    const normW = Math.max(0, Math.min(1, fit.w / el.clientWidth));
+    const normH = Math.max(0, Math.min(1, fit.h / el.clientHeight));
+    st.filterImage.setAttribute('x', normX);
+    st.filterImage.setAttribute('y', normY);
+    st.filterImage.setAttribute('width', normW);
+    st.filterImage.setAttribute('height', normH);
   }
 
   function svgNode(name, attrs) {
@@ -144,15 +170,41 @@
     const existing = getComputedStyle(el).filter;
     const id = `devos-body-mask-${++filterSequence}`;
     const svg = svgNode('svg', { width: 0, height: 0, 'aria-hidden': 'true', 'data-dm-internal': '' });
-    svg.style.cssText = 'position:absolute;pointer-events:none;overflow:hidden';
+    svg.style.cssText = 'position:absolute;pointer-events:none;overflow:hidden;width:0;height:0;left:0;top:0;';
     const defs = svgNode('defs');
-    const filter = svgNode('filter', { id, x: 0, y: 0, width: 1, height: 1, filterUnits: 'objectBoundingBox', 'color-interpolation-filters': 'sRGB' });
-    const image = svgNode('feImage', { href: mask.toDataURL('image/png'), preserveAspectRatio: 'none', result: 'bodyMask' });
-    filter.append(image, svgNode('feGaussianBlur', { in: 'SourceGraphic', stdDeviation: 14, result: 'soft' }),
+    const filter = svgNode('filter', {
+      id,
+      x: '0%',
+      y: '0%',
+      width: '100%',
+      height: '100%',
+      filterUnits: 'objectBoundingBox',
+      primitiveUnits: 'objectBoundingBox',
+      'color-interpolation-filters': 'sRGB'
+    });
+    const maskUrl = mask.toDataURL('image/png');
+    const image = document.createElementNS(SVG_NS, 'feImage');
+    image.setAttribute('href', maskUrl);
+    image.setAttributeNS(XLINK_NS, 'xlink:href', maskUrl);
+    image.setAttribute('preserveAspectRatio', 'none');
+    image.setAttribute('result', 'bodyMask');
+    image.setAttribute('x', '0');
+    image.setAttribute('y', '0');
+    image.setAttribute('width', '1');
+    image.setAttribute('height', '1');
+
+    filter.append(
+      image,
+      svgNode('feGaussianBlur', { in: 'SourceGraphic', stdDeviation: 14, result: 'soft' }),
       svgNode('feComposite', { in: 'soft', in2: 'bodyMask', operator: 'in', result: 'softBody' }),
-      svgNode('feComposite', { in: 'SourceGraphic', in2: 'bodyMask', operator: 'out', result: 'clearArea' }));
-    const merge = svgNode('feMerge'); merge.append(svgNode('feMergeNode', { in: 'clearArea' }), svgNode('feMergeNode', { in: 'softBody' }));
-    filter.append(merge); defs.append(filter); svg.append(defs);
+      svgNode('feComposite', { in: 'SourceGraphic', in2: 'bodyMask', operator: 'out', result: 'clearArea' })
+    );
+    const merge = svgNode('feMerge');
+    merge.append(svgNode('feMergeNode', { in: 'clearArea' }), svgNode('feMergeNode', { in: 'softBody' }));
+    filter.append(merge);
+    defs.append(filter);
+    svg.append(defs);
+
     const root = el.getRootNode(); (root.nodeType === 11 ? root : document.documentElement).append(svg);
     st.svg = svg; st.filterImage = image;
     positionMask(el, st); resize.observe(el);
@@ -164,6 +216,15 @@
   function applyResult(el, result) {
     const st = info.get(el) || {};
     st.result = result; info.set(el, st);
+    // Devices and hardware must not be blurred by noise; require high confidence genuine face
+    if (st.isTechDevice) {
+      const confidentFace = (result.faces || []).some((f) => Number(f.score) >= 0.70 && Number(f.genderProbability) >= 0.80);
+      if (!confidentFace) {
+        st.generation = (st.generation || 0) + 1;
+        setBlurred(el, false);
+        return;
+      }
+    }
     const verdict = R.decide(result, settings);
     if (!verdict.blur) { st.generation = (st.generation || 0) + 1; setBlurred(el, false); return; }
     renderRegions(el, verdict).catch(() => setBlurred(el, false));
@@ -215,6 +276,7 @@
       setBlurred(img, false);
       return;
     }
+    st.isTechDevice = isHardwareOrTechContext(img);
     st.pending = true;
     let p;
     if (/^(data|blob):/i.test(key)) {

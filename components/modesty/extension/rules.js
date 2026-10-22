@@ -14,7 +14,8 @@
     femaleThreshold: 0.75,
     adultAge: 18,
     // Minimum tiny-face-detector score for something to count as a face.
-    faceScore: 0.35,
+    // 0.55 ensures inanimate devices, routers, hardware, and text do not trigger false faces.
+    faceScore: 0.55,
     // Faces smaller than this (px, in the analysed image) are too small for
     // the gender model to be trusted; in women mode these stay clear.
     uncertainFacePx: 24,
@@ -94,9 +95,14 @@
 
   function matchFace(pose, faces, used) {
     const anchors = (pose.keypoints || []).filter((k) => /^(nose|leftEye|rightEye)$/.test(k.part) && k.score >= 0.25);
+    const shoulders = (pose.keypoints || []).filter((k) => /^(leftShoulder|rightShoulder)$/.test(k.part) && k.score >= 0.25);
+    const avgShoulderY = shoulders.length > 0 ? shoulders.reduce((acc, s) => acc + s.position.y, 0) / shoulders.length : null;
+
     let best = -1, distance = Infinity;
     faces.forEach((f, index) => {
       if (used && used.has(index)) return;
+      // If shoulders are detected, human anatomy dictates that the face must be above the shoulder line
+      if (avgShoulderY !== null && (f.y + f.h * 0.5) > avgShoulderY + f.h * 0.3) return;
       for (const anchor of anchors) {
         const p = anchor.position;
         if (p.x < f.x - f.w * 0.25 || p.x > f.x + f.w * 1.25 || p.y < f.y - f.h * 0.25 || p.y > f.y + f.h * 1.25) continue;
