@@ -6,7 +6,7 @@
 
 <p align="center">
   <b>One fast desktop for your Linux, Windows and Android apps — with a private AI assistant built in.</b><br>
-  Based on Ubuntu 24.04 LTS · Open source (MIT) · Made by <a href="https://imrandev.bd/">Imran Ahmed (Imran Dev)</a>
+  Based on Ubuntu 26.04 LTS · Open source (MIT) · Made by <a href="https://imrandev.bd/">Imran Ahmed (Imran Dev)</a>
 </p>
 
 <p align="center">
@@ -440,7 +440,7 @@ Choose whichever tool is easiest for you:
 2. Insert your USB flash drive into your computer.
 3. Open Rufus:
    - Under **Device**, select your USB drive.
-   - Under **Boot selection**, click **SELECT** and choose the downloaded `devos-24.04-amd64.iso` file.
+   - Under **Boot selection**, click **SELECT** and choose the downloaded `devos-26.04-amd64.iso` file.
    - Click the **START** button at the bottom.
    - If a prompt asks for write mode, choose **"Write in DD Image mode"** and click **OK**.
 4. Wait until the progress bar reaches 100% and displays **Ready**.
@@ -448,11 +448,11 @@ Choose whichever tool is easiest for you:
 #### Option B: balenaEtcher (Windows, Mac, or Linux)
 1. Download and install [balenaEtcher](https://etcher.balena.io/) (free).
 2. Open balenaEtcher and plug in your USB drive.
-3. Click **Flash from file** and select the downloaded `devos-24.04-amd64.iso`.
+3. Click **Flash from file** and select the downloaded `devos-26.04-amd64.iso`.
 4. Click **Select target** and pick your USB stick.
 5. Click **Flash!** and wait for verification to complete.
 
-*(Advanced Linux/macOS users can also use `sudo dd if=devos-24.04-amd64.iso of=/dev/sdX bs=4M status=progress oflag=sync`)*
+*(Advanced Linux/macOS users can also use `sudo dd if=devos-26.04-amd64.iso of=/dev/sdX bs=4M status=progress oflag=sync`)*
 
 ---
 

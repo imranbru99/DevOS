@@ -84,7 +84,7 @@ class DevOSControlCenter:
 
     def get_summary(self) -> Dict[str, Any]:
         return {
-            "version": "DevOS 24.04 LTS",
+            "version": "DevOS 26.04 LTS",
             "desktop": "DevOS",
             "settings": self.settings,
         }
