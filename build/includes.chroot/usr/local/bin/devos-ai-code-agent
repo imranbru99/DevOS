@@ -30,7 +30,6 @@ else
 fi
 
 if [ $# -gt 0 ] && [ "$1" = "--cli" ]; then
-    shift
     exec /usr/bin/python3 "${DIR}/code_agent.py" "$@"
 fi
 

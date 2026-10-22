@@ -897,6 +897,11 @@ class LocalLLM:
         try:
             resp = urllib.request.urlopen(req, timeout=self.timeout)
             self._current_resp = resp
+        except urllib.error.HTTPError as exc:
+            # A responding server is already running; restarting it cannot fix a
+            # missing model, invalid request, or rejected credential.
+            detail = exc.read(2048).decode("utf-8", errors="replace")
+            raise AgentError(f"{self.provider_name} ({self.model}) returned HTTP {exc.code}: {detail}") from exc
         except (urllib.error.URLError, OSError) as exc:
             # If on localhost and connection failed, auto-start and retry once
             if self.is_local:
@@ -1628,13 +1633,15 @@ def main(argv=None) -> int:
     parser.add_argument("--framework", default="laravel", choices=["laravel", "filament", "nextjs", "python"])
     parser.add_argument("--dir", default=None, help="project folder (default: current folder)")
     parser.add_argument("--auto-edits", action="store_true", help="apply file changes without asking")
+    parser.add_argument("--auto-commands", action="store_true", help="run project commands without asking (trusted projects only)")
     parser.add_argument("--ask-reads", action="store_true", help="ask before the agent reads files too")
     parser.add_argument("--max-steps", type=int, default=15)
     args = parser.parse_args(argv)
 
     if args.cli:
         folder = args.dir or args.prompt or os.getcwd()
-        return run_cli(args.cli, folder, args.auto_edits, not args.ask_reads, args.max_steps)
+        return run_cli(args.cli, folder, args.auto_edits, not args.ask_reads,
+                       auto_commands=args.auto_commands, max_steps=args.max_steps)
     if args.gui or not args.prompt:
         import agent_gui
         return agent_gui.main([a for a in [args.dir or args.prompt] if a])
