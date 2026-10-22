@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Broadband Dial-up (ONU)
+Name[bn]=ব্রডব্যান্ড ডায়াল-আপ (ONU)
+GenericName=PPPoE Broadband Connection
+Comment=Connect directly to your ISP or ONU using PPPoE username and password
+Comment[bn]=সরাসরি ONU বা ব্রডব্যান্ড লাইনে ইউজারনেম ও পাসওয়ার্ড দিয়ে কানেক্ট করুন
+Exec=devos-broadband
+Icon=network-wired
+Terminal=false
+Categories=Network;Settings;
+Keywords=broadband;dial;pppoe;onu;fiber;internet;network;ব্রডব্যান্ড;ডায়াল;নেটওয়ার্ক;
+StartupWMClass=BroadbandWindow

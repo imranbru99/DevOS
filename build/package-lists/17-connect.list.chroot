@@ -7,6 +7,9 @@ kdeconnect
 # cloudflared is downloaded on first use, not shipped.
 openssh-client
 miniupnpc
+# Broadband Dial-up: Direct ONU / Fiber PPPoE connection
+ppp
+pppoeconf
 # Cloud Backup: Google Drive / OneDrive.
 rclone
 xdg-user-dirs

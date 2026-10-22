@@ -44,6 +44,7 @@ OPTIMIZER_PY = os.path.join(COMPONENTS, "optimizer", "optimizer.py")
 SECURITY_PY = os.path.join(COMPONENTS, "security", "security_center.py")
 CLIPBOARD_PY = os.path.join(COMPONENTS, "clipboard", "clipboard.py")
 EMOJI_PY = os.path.join(COMPONENTS, "emoji", "emoji.py")
+BROADBAND_PY = os.path.join(COMPONENTS, "broadband", "broadband.py")
 KIDS_MODE_PY = os.path.join(COMPONENTS, "kids", "kids_mode.py")
 NOTEPAD_PY = os.path.join(COMPONENTS, "notepad", "notepad.py")
 APP_RESOLVER_PY = os.path.join(COMPONENTS, "apphub", "app_resolver.py")
@@ -1561,6 +1562,8 @@ def route_clause(c: str, ctx: Optional[ToolContext] = None, context: Optional[Li
         return [Action("open_tool", {"tool": "clipboard"}, label="Open clipboard history")]
     if _has(r"\b(?:emoji panel|emoji picker|open emoji|show emoji)\b", c) or c.strip() in ("emoji", "emojis"):
         return [Action("open_tool", {"tool": "emoji"}, label="Open emoji")]
+    if _has(r"\b(?:broadband|dial\s*up|pppoe|onu(?:\s*connection|\s*network)?|connect\s*onu|ডায়াল|ডায়াল|ব্রডব্যান্ড|ওএনইউ)\b", c):
+        return [Action("open_tool", {"tool": "broadband"}, label="Open Broadband Dial-up")]
     if _has(r"\b(?:kids?\s*mode|child(?:ren)?\s*mode|kid\s*play|start\s+kids?\s*mode|open\s+kids?\s*mode|turn\s+on\s+kids?\s*mode|run\s+kids?\s*mode)\b|বাচ্চাদের\s*মোড", c):
         return [Action("open_tool", {"tool": "kids"}, label="Start Kids Mode")]
 
@@ -2723,6 +2726,9 @@ def _x_open_tool(a, ctx, dry):
     elif tool == "kids":
         argv = [py, KIDS_MODE_PY]
         title = "Kids Mode"
+    elif tool == "broadband":
+        argv = [py, BROADBAND_PY]
+        title = "Broadband Dial-up"
     else:
         return ToolResult("Unknown tool.", ok=False)
     ok = _launch(ctx, argv, dry)

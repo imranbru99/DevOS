@@ -1,0 +1,3 @@
+#!/bin/sh
+# Launch the DevOS Broadband Dial-up connection tool
+exec /usr/bin/python3 /usr/local/share/devos/components/broadband/broadband.py "$@"
