@@ -1,0 +1,12 @@
+{
+    "KPlugin": {
+        "Id": "DevOS-AlpineTerrace",
+        "Name": "DevOS Alpine Floral Terrace",
+        "Authors": [
+            {
+                "Name": "DevOS"
+            }
+        ],
+        "License": "CC-BY-SA-4.0"
+    }
+}

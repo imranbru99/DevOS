@@ -1,7 +1,7 @@
 {
     "KPlugin": {
-        "Id": "DevOS-Default",
-        "Name": "DevOS Flagship",
+        "Id": "DevOS",
+        "Name": "DevOS Sapphire Waves (Default)",
         "Authors": [
             {
                 "Name": "DevOS"

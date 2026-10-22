@@ -41,7 +41,7 @@ DevOS exists to give people — especially Windows users and developers — **an
 | 📦 **Apps window** | Windows-style *Installed apps*: uninstall Linux, Windows and Android apps, clear cache, reset data and browser cookies. |
 | 📝 **Notepad** | Windows 11-style tabs; **unsaved text survives crashes and power cuts**. |
 | 💻 **Developer ready** | VS Code, Git, Node.js, Python, PHP + Composer, MariaDB, PostgreSQL, Redis, SQLite, Podman (Docker-compatible). |
-| 🎨 **Premium look** | Dark DevOS theme, icons-only taskbar, **21 wallpapers**, a modern installer, DevOS names everywhere (Files, Terminal, Settings…). |
+| 🎨 **Premium look** | Dark DevOS theme, icons-only taskbar, **25+ wallpapers**, a modern installer, DevOS names everywhere (Files, Terminal, Settings…). |
 | ⚡ **Small & fast** | 3.4 GB ISO, boots straight to the desktop, compressed RAM swap, btrfs + zstd storage, memory-hog protection. |
 
 ---
@@ -75,7 +75,7 @@ DevOS exists to give people — especially Windows users and developers — **an
   | `Win + Alt + A` | **AI on selected text** — rewrite, fix, shorten, translate, summarize |
   | `Ctrl + Shift + Esc` | **Task Manager** |
 
-- **21 wallpapers**: the DevOS default plus 20 premium designs (Aurora Veil, Silk Current, Nebula Drift, Glass Horizon…), with previews in *Configure Desktop and Wallpaper*. See [`tools/wallpapers/preview.jpg`](tools/wallpapers/preview.jpg).
+- **25+ wallpapers**: the new DevOS Sapphire Waves default plus flagship designs (Golden Cloudscape, Cosmic Orbit, Alpine Floral Terrace, Kids Learning Room, Aurora Veil, Silk Current, Nebula Drift…), with previews in *Configure Desktop and Wallpaper*. See [`tools/wallpapers/preview.jpg`](tools/wallpapers/preview.jpg).
 - **Night light** warms the screen from 7:00 pm to 6:30 am, the way Windows does, and leaves daytime colour alone. Turn it off in Settings → Display & Monitor → Night Light.
 - **Your work comes back.** After a restart or shutdown, DevOS opens the same applications again. Browsers reopen their tabs, Notepad and DevOS Code reopen the same files (including unsaved text), and Files, Terminal, Kate and the other KDE apps reopen the documents that were on screen.
 - Everything is called **DevOS**: the sign-in session, “About this PC”, and apps named by what they do — *Files, Terminal, Text Editor, Photos, Document Viewer, Settings, Task Manager*.

@@ -1,0 +1,12 @@
+{
+    "KPlugin": {
+        "Id": "DevOS-KidsLearning",
+        "Name": "DevOS Kids Learning Room",
+        "Authors": [
+            {
+                "Name": "DevOS"
+            }
+        ],
+        "License": "CC-BY-SA-4.0"
+    }
+}

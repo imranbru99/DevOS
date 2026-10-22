@@ -1,0 +1,12 @@
+{
+    "KPlugin": {
+        "Id": "DevOS-CosmicOrbit",
+        "Name": "DevOS Cosmic Orbit",
+        "Authors": [
+            {
+                "Name": "DevOS"
+            }
+        ],
+        "License": "CC-BY-SA-4.0"
+    }
+}
