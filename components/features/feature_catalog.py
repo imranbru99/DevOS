@@ -5,8 +5,8 @@ pick-what-you-want items.
 
 The installer's "Choose your apps" page, the devos-features command and the
 DevOS Features window all read this list. Every apt name was checked against
-Ubuntu 24.04 (noble) and every Flatpak id against Flathub. Thunderbird and
-Firefox come from Flathub because noble's apt packages only install Snap,
+Ubuntu 26.04 (resolute) and every Flatpak id against Flathub. Thunderbird and
+Firefox come from Flathub because resolute's apt packages only install Snap,
 which DevOS blocks.
 
 preinstalled: already on the ISO. Unticking it in the installer removes it
@@ -99,7 +99,7 @@ FEATURES: List[Dict] = [
     F("libreoffice", "office", "LibreOffice Writer, Calc, Impress",
       "The classic free office suite; best for .odt/.ods files and complex macros.",
       380, win="Microsoft Office", apt=["libreoffice-writer", "libreoffice-calc", "libreoffice-impress",
-                                         "libreoffice-kf5", "libreoffice-style-breeze"],
+                                         "libreoffice-kf6", "libreoffice-style-breeze"],
       presets=("student",),
       roles={"documents": "libreoffice-writer.desktop", "spreadsheets": "libreoffice-calc.desktop",
              "presentations": "libreoffice-impress.desktop"}, min_ram_gb=3),

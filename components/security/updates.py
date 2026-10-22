@@ -2,11 +2,11 @@
 """
 DevOS Security - automatic security updates (unattended-upgrades).
 
-Ubuntu 24.04's unattended-upgrades package ships:
+Ubuntu 26.04's unattended-upgrades package ships:
   20auto-upgrades       APT::Periodic::Update-Package-Lists "1";
                         APT::Periodic::Unattended-Upgrade "1";   (debconf)
-  50unattended-upgrades Allowed-Origins: noble, noble-security and the ESM
-                        security pockets (noble-updates commented out).
+  50unattended-upgrades Allowed-Origins: resolute, resolute-security and the ESM
+                        security pockets (resolute-updates commented out).
 Our 52devos-unattended sorts after both, so its values win. It clears the
 origin list and puts back only the security pockets (plus the release
 pocket, which never changes after release but holds dependencies a security

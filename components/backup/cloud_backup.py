@@ -15,7 +15,7 @@ user sees them in Drive/OneDrive straight away):
                                  /Pictures
                                  /Downloads
 
-All transfers go through the `rclone` command (Ubuntu noble ships 1.60.x, so
+All transfers go through the `rclone` command (Ubuntu resolute ships 1.6x+, so
 only flags that exist in 1.60 are used). DevOS never asks for or stores the
 user's password: sign-in happens in the browser and rclone keeps the OAuth
 token in its own config (~/.config/rclone/rclone.conf, mode 600).

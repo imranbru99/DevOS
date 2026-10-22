@@ -170,7 +170,7 @@ def read_os_release(path: str = "/etc/os-release") -> Dict[str, str]:
 
 
 def system_identity(os_release_path: str = "/etc/os-release", live: Optional[bool] = None) -> Dict[str, Any]:
-    """Name/version for the header badge: 'DevOS 24.04' installed, 'DevOS Live 24.04' on the USB."""
+    """Name/version for the header badge: 'DevOS 26.04' installed, 'DevOS Live 26.04' on the USB."""
     rel = read_os_release(os_release_path)
     if live is None:
         live = is_live_system()
