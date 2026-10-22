@@ -1533,6 +1533,8 @@ class BreadcrumbBar(QWidget):
             self.crumbs_layout.addWidget(bin_btn)
             return
 
+        home = os.path.expanduser("~")
+
         # Check if path belongs to a secondary drive (e.g. D:, E:...)
         matched_drive = None
         try:
