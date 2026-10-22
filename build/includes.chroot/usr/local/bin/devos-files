@@ -21,6 +21,9 @@ import re
 import shutil
 import subprocess
 import sys
+import argparse
+import fnmatch
+import shlex
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -60,6 +63,7 @@ try:
         QAction,
         QApplication,
         QCheckBox,
+        QComboBox,
         QDialog,
         QDialogButtonBox,
         QFileDialog,
@@ -534,6 +538,22 @@ def format_bytes(num):
     if val >= 1024:
         return f"{val / 1024:.0f} KB"
     return f"{val:.0f} bytes"
+
+
+def parse_filter_string(filter_str):
+    """Parse filter string such as 'Images (*.png *.jpg);;All Files (*.*)' into [(label, [patterns])]."""
+    res = []
+    if not filter_str:
+        return [("All Files (*.*)", ["*.*"])]
+    parts = [p.strip() for p in filter_str.split(";;") if p.strip()]
+    for p in parts:
+        m = re.search(r"\(([^)]+)\)", p)
+        if m:
+            pats = [x.strip() for x in re.split(r"[\s,;]+", m.group(1)) if x.strip()]
+            res.append((p, pats))
+        else:
+            res.append((p, ["*.*"]))
+    return res or [("All Files (*.*)", ["*.*"])]
 
 
 def get_file_type_description(path):
@@ -2819,11 +2839,31 @@ class WindowsSystemPropertiesDialog(QDialog):
 class WindowsFileExplorer(QMainWindow):
     """Full-featured Windows 10/11 File Explorer for DevOS."""
 
-    def __init__(self, initial_path=""):
+    def __init__(self, initial_path="", picker_mode=False, picker_options=None):
         super().__init__()
-        self.setWindowTitle("This PC")
-        self.setWindowIcon(get_win_icon("this-pc", 32))
-        self.resize(1140, 700)
+        self._picker_mode = picker_mode
+        self._picker_options = picker_options or {}
+        self._picker_accepted = False
+        self.selected_files = []
+        self._current_filter_patterns = []
+
+        if self._picker_mode:
+            title = self._picker_options.get("title")
+            if not title:
+                if self._picker_options.get("save"):
+                    title = "Save As"
+                elif self._picker_options.get("directory"):
+                    title = "Select Folder"
+                else:
+                    title = "Open"
+            self.setWindowTitle(title)
+            self.setWindowIcon(get_win_icon("folder", 32))
+            self.resize(980, 620)
+        else:
+            self.setWindowTitle("This PC")
+            self.setWindowIcon(get_win_icon("this-pc", 32))
+            self.resize(1140, 700)
+
         self._history = []
         self._future = []
         self._current_path = ""
@@ -2836,6 +2876,9 @@ class WindowsFileExplorer(QMainWindow):
         self._show_hidden = bool(self._settings.get("show_hidden", False))
 
         self._setup_ui()
+        if self._picker_mode and not initial_path:
+            dl = os.path.expanduser("~/Downloads")
+            initial_path = dl if os.path.isdir(dl) else os.path.expanduser("~")
         self.navigate_to(initial_path, add_to_history=False)
 
     def _setup_ui(self):
@@ -3019,6 +3062,16 @@ class WindowsFileExplorer(QMainWindow):
         cmd_layout.addWidget(self.btn_props)
         cmd_layout.addStretch(1)
 
+        if self._picker_mode:
+            self.btn_cut.hide()
+            self.btn_copy.hide()
+            self.btn_paste.hide()
+            self.btn_copy_path.hide()
+            self.btn_rename.hide()
+            self.btn_delete.hide()
+            self.btn_terminal.hide()
+            self.btn_props.hide()
+
         main_layout.addWidget(cmd_bar)
 
         # 3. Main Splitter: Sidebar (Left) + Content (Right)
@@ -3190,13 +3243,79 @@ class WindowsFileExplorer(QMainWindow):
         self.list_view.hide()
         folder_layout.addWidget(self.list_view)
 
+        if self._picker_mode and not self._picker_options.get("multiple"):
+            self.table_view.setSelectionMode(QAbstractItemView.SingleSelection)
+            self.list_view.setSelectionMode(QAbstractItemView.SingleSelection)
+
         self.content_stack.addWidget(self.page_folder)
         splitter.addWidget(self.content_stack)
         splitter.setStretchFactor(1, 1)
 
         main_layout.addWidget(splitter, 1)
 
-        # 4. Status Bar
+        # 4. Picker Bottom Bar (if in file chooser/picker mode)
+        if self._picker_mode:
+            picker_bar = QWidget()
+            picker_bar.setObjectName("pickerBottomBar")
+            picker_layout = QVBoxLayout(picker_bar)
+            picker_layout.setContentsMargins(14, 10, 14, 10)
+            picker_layout.setSpacing(8)
+
+            row1 = QHBoxLayout()
+            row1.setSpacing(10)
+            lbl_name = QLabel("File name:")
+            lbl_name.setFixedWidth(85)
+            lbl_name.setObjectName("pickerLabel")
+            self.picker_name_edit = QLineEdit()
+            self.picker_name_edit.setObjectName("pickerEdit")
+            initial_name = self._picker_options.get("name", "")
+            if initial_name:
+                self.picker_name_edit.setText(initial_name)
+            self.picker_name_edit.returnPressed.connect(self._on_picker_accept)
+
+            action_text = "Save" if self._picker_options.get("save") else ("Select Folder" if self._picker_options.get("directory") else "Open")
+            self.btn_picker_action = QPushButton(action_text)
+            self.btn_picker_action.setObjectName("pickerPrimaryBtn")
+            self.btn_picker_action.setFixedWidth(100)
+            self.btn_picker_action.setCursor(Qt.PointingHandCursor)
+            self.btn_picker_action.clicked.connect(self._on_picker_accept)
+
+            row1.addWidget(lbl_name)
+            row1.addWidget(self.picker_name_edit, 1)
+            row1.addWidget(self.btn_picker_action)
+            picker_layout.addLayout(row1)
+
+            row2 = QHBoxLayout()
+            row2.setSpacing(10)
+            lbl_type = QLabel("Files of type:")
+            lbl_type.setFixedWidth(85)
+            lbl_type.setObjectName("pickerLabel")
+
+            self.picker_filter_combo = QComboBox()
+            self.picker_filter_combo.setObjectName("pickerCombo")
+            raw_filters = self._picker_options.get("filters", [])
+            if not raw_filters:
+                raw_filters = [("All Files (*.*)", ["*.*"])]
+            for label, pats in raw_filters:
+                self.picker_filter_combo.addItem(label, pats)
+
+            self.picker_filter_combo.currentIndexChanged.connect(self._on_picker_filter_changed)
+            self._current_filter_patterns = self.picker_filter_combo.currentData() or []
+
+            self.btn_picker_cancel = QPushButton("Cancel")
+            self.btn_picker_cancel.setObjectName("pickerCancelBtn")
+            self.btn_picker_cancel.setFixedWidth(100)
+            self.btn_picker_cancel.setCursor(Qt.PointingHandCursor)
+            self.btn_picker_cancel.clicked.connect(self._on_picker_cancel)
+
+            row2.addWidget(lbl_type)
+            row2.addWidget(self.picker_filter_combo, 1)
+            row2.addWidget(self.btn_picker_cancel)
+            picker_layout.addLayout(row2)
+
+            main_layout.addWidget(picker_bar)
+
+        # 5. Status Bar
         self.status = QStatusBar()
         self.status.setObjectName("statusBar")
         self.status_items_count = QLabel("0 items")
@@ -3539,6 +3658,77 @@ class WindowsFileExplorer(QMainWindow):
             QLabel#propMuted {
                 color: #94a3b8;
                 font-size: 12px;
+            }
+            #pickerBottomBar {
+                background: #191c22;
+                border-top: 1px solid #2b3342;
+            }
+            QLabel#pickerLabel {
+                color: #94a3b8;
+                font-size: 13px;
+                font-weight: 500;
+            }
+            QLineEdit#pickerEdit {
+                background: #13161c;
+                border: 1px solid #2d3545;
+                border-radius: 4px;
+                color: #f8fafc;
+                font-size: 13px;
+                padding: 6px 10px;
+            }
+            QLineEdit#pickerEdit:focus {
+                border-color: #0078d4;
+            }
+            QComboBox#pickerCombo {
+                background: #13161c;
+                border: 1px solid #2d3545;
+                border-radius: 4px;
+                color: #f8fafc;
+                font-size: 13px;
+                padding: 5px 10px;
+            }
+            QComboBox#pickerCombo:focus {
+                border-color: #0078d4;
+            }
+            QComboBox#pickerCombo::drop-down {
+                border: none;
+                width: 20px;
+            }
+            QComboBox#pickerCombo QAbstractItemView {
+                background: #191b20;
+                color: #e2e8f0;
+                selection-background-color: #0078d4;
+                border: 1px solid #2d333f;
+            }
+            QPushButton#pickerPrimaryBtn {
+                background: #0078d4;
+                color: #ffffff;
+                border: 1px solid #0067b5;
+                border-radius: 4px;
+                font-weight: 600;
+                font-size: 13px;
+                padding: 6px 16px;
+            }
+            QPushButton#pickerPrimaryBtn:hover {
+                background: #1084d8;
+            }
+            QPushButton#pickerPrimaryBtn:pressed {
+                background: #006cc1;
+            }
+            QPushButton#pickerCancelBtn {
+                background: #232730;
+                color: #e2e8f0;
+                border: 1px solid #3b4252;
+                border-radius: 4px;
+                font-size: 13px;
+                padding: 6px 16px;
+            }
+            QPushButton#pickerCancelBtn:hover {
+                background: #2d333f;
+                border-color: #4c566a;
+            }
+            QPushButton#pickerCancelBtn:pressed {
+                background: #1f232b;
             }
         """)
 
@@ -3936,6 +4126,17 @@ class WindowsFileExplorer(QMainWindow):
             if os.path.isdir(full_path):
                 dirs.append(entry)
             else:
+                if self._picker_mode:
+                    if self._picker_options.get("directory"):
+                        continue
+                    if self._current_filter_patterns:
+                        matched = False
+                        for pat in self._current_filter_patterns:
+                            if pat in ("*", "*.*", "") or fnmatch.fnmatch(entry.lower(), pat.lower()):
+                                matched = True
+                                break
+                        if not matched:
+                            continue
                 files.append(entry)
 
         dirs.sort(key=str.lower)
@@ -4052,7 +4253,10 @@ class WindowsFileExplorer(QMainWindow):
         if is_dir:
             self.navigate_to(target)
         else:
-            open_file_with_default(target)
+            if self._picker_mode:
+                self._on_picker_accept_paths([target])
+            else:
+                open_file_with_default(target)
 
     def _on_list_item_double_clicked(self, item):
         target = item.data(Qt.UserRole)
@@ -4063,7 +4267,10 @@ class WindowsFileExplorer(QMainWindow):
         if is_dir:
             self.navigate_to(target)
         else:
-            open_file_with_default(target)
+            if self._picker_mode:
+                self._on_picker_accept_paths([target])
+            else:
+                open_file_with_default(target)
 
     def _on_selection_changed(self):
         selected_paths = self.get_selected_paths()
@@ -4081,7 +4288,100 @@ class WindowsFileExplorer(QMainWindow):
         else:
             self.status_selected_info.setText(f"{count} items selected")
 
+        if self._picker_mode:
+            is_dir_mode = bool(self._picker_options.get("directory"))
+            valid = [p for p in selected_paths if (os.path.isdir(p) if is_dir_mode else not os.path.isdir(p))]
+            if valid:
+                names = [os.path.basename(p) for p in valid]
+                if self._picker_options.get("multiple"):
+                    text = " ".join(f'"{n}"' if " " in n else n for n in names)
+                else:
+                    text = names[0]
+                self.picker_name_edit.setText(text)
+
         self._update_command_bar()
+
+    def _on_picker_filter_changed(self, index):
+        self._current_filter_patterns = self.picker_filter_combo.currentData() or []
+        if self._current_path:
+            self._load_folder_contents(self._current_path)
+
+    def _on_picker_accept(self):
+        text = self.picker_name_edit.text().strip()
+        is_save = bool(self._picker_options.get("save"))
+        is_dir = bool(self._picker_options.get("directory"))
+
+        if is_dir:
+            if text:
+                cand = text if os.path.isabs(text) else os.path.join(self._current_path or os.path.expanduser("~"), text)
+                if os.path.isdir(cand):
+                    self._on_picker_accept_paths([cand])
+                    return
+            if self._current_path and os.path.isdir(self._current_path):
+                self._on_picker_accept_paths([self._current_path])
+                return
+
+        if not text:
+            paths = self.get_selected_paths()
+            valid = [p for p in paths if (os.path.isdir(p) if is_dir else not os.path.isdir(p))]
+            if valid:
+                self._on_picker_accept_paths(valid)
+            return
+
+        try:
+            tokens = shlex.split(text)
+        except Exception:
+            tokens = [text]
+
+        base_dir = self._current_path if (self._current_path and os.path.isdir(self._current_path)) else os.path.expanduser("~")
+        resolved = []
+        for tok in tokens:
+            p = tok if os.path.isabs(tok) else os.path.join(base_dir, tok)
+            if os.path.isdir(p) and not is_save and not is_dir:
+                self.navigate_to(p)
+                return
+            resolved.append(p)
+
+        if is_save:
+            chosen = resolved[0]
+            if self._current_filter_patterns and not os.path.splitext(chosen)[1]:
+                first_pat = self._current_filter_patterns[0]
+                if first_pat.startswith("*."):
+                    chosen += first_pat[1:]
+            self._on_picker_accept_paths([chosen])
+        else:
+            existing = [p for p in resolved if os.path.exists(p)]
+            if existing:
+                self._on_picker_accept_paths(existing)
+            elif len(resolved) == 1 and not os.path.exists(resolved[0]):
+                if self._current_filter_patterns:
+                    for pat in self._current_filter_patterns:
+                        if pat.startswith("*."):
+                            cand = resolved[0] + pat[1:]
+                            if os.path.exists(cand):
+                                self._on_picker_accept_paths([cand])
+                                return
+
+    def _on_picker_accept_paths(self, paths):
+        self.selected_files = [os.path.abspath(p) for p in paths]
+        self._picker_accepted = True
+        out_file = self._picker_options.get("output")
+        if out_file:
+            try:
+                with open(out_file, "w", encoding="utf-8") as f:
+                    json.dump(self.selected_files, f)
+            except Exception:
+                pass
+        for p in self.selected_files:
+            print(Path(p).as_uri(), flush=True)
+        self.close()
+        QApplication.instance().exit(0)
+
+    def _on_picker_cancel(self):
+        self._picker_accepted = False
+        self.selected_files = []
+        self.close()
+        QApplication.instance().exit(1)
 
     def _on_search_text_changed(self, text):
         query = text.strip().lower()
@@ -5088,7 +5388,28 @@ class WindowsFileExplorer(QMainWindow):
         except OSError as err:
             QMessageBox.critical(self, "Error", f"Failed to create file: {err.strerror}")
 
+    def closeEvent(self, event):
+        if self._picker_mode and not self._picker_accepted:
+            QApplication.instance().exit(1)
+        event.accept()
+
     def keyPressEvent(self, event):
+        if self._picker_mode:
+            if event.key() == Qt.Key_Escape:
+                self._on_picker_cancel()
+                return
+            elif event.key() in (Qt.Key_Return, Qt.Key_Enter):
+                if self.table_view.hasFocus() or self.list_view.hasFocus():
+                    paths = self.get_selected_paths()
+                    if paths:
+                        first = paths[0]
+                        if os.path.isdir(first):
+                            self.navigate_to(first)
+                            return
+                        else:
+                            self._on_picker_accept_paths([first])
+                            return
+
         if event.key() == Qt.Key_Back:
             self.go_back()
         elif event.key() == Qt.Key_Backspace and not self.search_box.hasFocus() and not self.address_bar.path_edit.hasFocus():
@@ -5133,20 +5454,56 @@ def main():
     except Exception:
         pass
 
+    parser = argparse.ArgumentParser(description="DevOS File Explorer & File Chooser")
+    parser.add_argument("path", nargs="?", default="", help="Initial path or URL")
+    parser.add_argument("--picker", "--choose-file", action="store_true", dest="picker", help="Open in file chooser/picker mode")
+    parser.add_argument("--save", "--save-file", action="store_true", dest="save", help="Save file mode")
+    parser.add_argument("--directory", "--choose-dir", action="store_true", dest="directory", help="Choose folder mode")
+    parser.add_argument("--multiple", "--choose-files", action="store_true", dest="multiple", help="Allow multiple file selection")
+    parser.add_argument("--title", type=str, default="", help="Custom dialog title")
+    parser.add_argument("--name", type=str, default="", help="Suggested file name")
+    parser.add_argument("--filter", type=str, default="", help="Filter pattern(s), e.g. 'Images (*.png *.jpg);;All Files (*.*)'")
+    parser.add_argument("--output", type=str, default="", help="File to write chosen JSON array of paths to")
+
+    args, unknown = parser.parse_known_args()
+    picker_mode = bool(args.picker or args.save or args.directory or args.multiple)
+
     app = QApplication(sys.argv)
     app.setApplicationName("devos-thispc")
-    app.setApplicationDisplayName("File Explorer")
+    app.setApplicationDisplayName("File Explorer" if not picker_mode else (args.title or "Open File"))
     if hasattr(app, "setDesktopFileName"):
         app.setDesktopFileName("devos-thispc.desktop")
     if hasattr(app, "setWindowIcon"):
-        app.setWindowIcon(get_win_icon("this-pc", 64))
+        app.setWindowIcon(get_win_icon("this-pc" if not picker_mode else "folder", 64))
+
+    candidate_path = args.path.strip() if args.path else ""
+    if not candidate_path and unknown:
+        for u in unknown:
+            if not u.startswith("-"):
+                candidate_path = u.strip()
+                break
 
     initial_path = ""
-    if len(sys.argv) > 1:
-        arg = sys.argv[1].strip()
-        if arg and arg not in ("computer:/", "computer:", "thispc"):
-            initial_path = os.path.expanduser(arg)
-    window = WindowsFileExplorer(initial_path)
+    if candidate_path and candidate_path not in ("computer:/", "computer:", "thispc"):
+        initial_path = os.path.expanduser(candidate_path)
+
+    picker_options = {
+        "save": bool(args.save),
+        "directory": bool(args.directory),
+        "multiple": bool(args.multiple),
+        "title": args.title,
+        "name": args.name,
+        "filters": parse_filter_string(args.filter),
+        "output": args.output,
+    }
+
+    if picker_mode and initial_path and os.path.isfile(initial_path):
+        dir_name, file_name = os.path.split(initial_path)
+        initial_path = dir_name
+        if not picker_options["name"]:
+            picker_options["name"] = file_name
+
+    window = WindowsFileExplorer(initial_path, picker_mode=picker_mode, picker_options=picker_options)
     window.show()
     sys.exit(app.exec_())
 

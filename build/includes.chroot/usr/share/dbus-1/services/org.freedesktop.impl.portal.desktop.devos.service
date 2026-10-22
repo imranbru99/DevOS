@@ -1,0 +1,3 @@
+[D-BUS Service]
+Name=org.freedesktop.impl.portal.desktop.devos
+Exec=/usr/local/bin/devos-portal-filechooser

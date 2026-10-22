@@ -1,0 +1,228 @@
+#!/usr/bin/env python3
+"""DevOS XDG Desktop Portal FileChooser Backend.
+
+Implements org.freedesktop.impl.portal.FileChooser to seamlessly integrate
+the DevOS File Explorer as the system file picker dialog for web browsers
+(Chrome, Firefox) and desktop applications.
+"""
+
+import json
+import mimetypes
+import os
+import pathlib
+import shutil
+import subprocess
+import sys
+import threading
+import uuid
+
+try:
+    import dbus
+    import dbus.mainloop.glib
+    import dbus.service
+    from gi.repository import GLib
+except ImportError as e:
+    sys.stderr.write(f"[devos-portal-filechooser] Missing D-Bus dependencies: {e}\n")
+    sys.exit(1)
+
+
+def parse_portal_folder(folder_val):
+    if not folder_val:
+        return ""
+    if isinstance(folder_val, (bytes, bytearray)):
+        return folder_val.rstrip(b"\x00").decode("utf-8", errors="replace")
+    if isinstance(folder_val, (list, tuple)):
+        try:
+            return bytes(folder_val).rstrip(b"\x00").decode("utf-8", errors="replace")
+        except Exception:
+            pass
+    return str(folder_val)
+
+
+def format_portal_filters_for_cli(filters_data):
+    if not filters_data:
+        return "All Files (*.*)"
+    chunks = []
+    for item in filters_data:
+        try:
+            name = str(item[0])
+            specs = item[1]
+            globs = []
+            for spec in specs:
+                spec_type = int(spec[0])
+                spec_val = str(spec[1])
+                if spec_type == 0:  # glob pattern
+                    globs.append(spec_val)
+                elif spec_type == 1:  # mime type
+                    exts = mimetypes.guess_all_extensions(spec_val)
+                    if exts:
+                        for ext in exts:
+                            globs.append(f"*{ext}")
+                    else:
+                        mime_sub = spec_val.split("/")[-1]
+                        globs.append(f"*.{mime_sub}")
+            if not globs:
+                globs = ["*.*"]
+            chunks.append(f"{name} ({' '.join(globs)})")
+        except Exception:
+            continue
+    if not chunks:
+        chunks = ["All Files (*.*)"]
+    return ";;".join(chunks)
+
+
+class DevOSFileChooserPortal(dbus.service.Object):
+    def __init__(self, bus):
+        super().__init__(bus, "/org/freedesktop/portal/desktop")
+        self.bus = bus
+        self._active_processes = {}
+        self._lock = threading.Lock()
+
+    @dbus.service.method(
+        "org.freedesktop.impl.portal.FileChooser",
+        in_signature="osssa{sv}",
+        out_signature="ua{sv}",
+        async_callbacks=("ok_cb", "err_cb")
+    )
+    def OpenFile(self, handle, app_id, parent_window, title, options, ok_cb, err_cb):
+        self._launch_picker(
+            handle=handle,
+            app_id=app_id,
+            parent_window=parent_window,
+            title=title,
+            options=options,
+            save_mode=False,
+            ok_cb=ok_cb,
+            err_cb=err_cb
+        )
+
+    @dbus.service.method(
+        "org.freedesktop.impl.portal.FileChooser",
+        in_signature="osssa{sv}",
+        out_signature="ua{sv}",
+        async_callbacks=("ok_cb", "err_cb")
+    )
+    def SaveFile(self, handle, app_id, parent_window, title, options, ok_cb, err_cb):
+        self._launch_picker(
+            handle=handle,
+            app_id=app_id,
+            parent_window=parent_window,
+            title=title,
+            options=options,
+            save_mode=True,
+            ok_cb=ok_cb,
+            err_cb=err_cb
+        )
+
+    def _launch_picker(self, handle, app_id, parent_window, title, options, save_mode, ok_cb, err_cb):
+        t = threading.Thread(
+            target=self._run_picker_worker,
+            args=(handle, app_id, parent_window, title, options, save_mode, ok_cb, err_cb),
+            daemon=True
+        )
+        t.start()
+
+    def _run_picker_worker(self, handle, app_id, parent_window, title, options, save_mode, ok_cb, err_cb):
+        tmp_id = uuid.uuid4().hex
+        tmp_out = f"/tmp/devos_picker_{tmp_id}.json"
+
+        dialog_title = str(title) if title else ("Save As" if save_mode else "Open File")
+        multiple = bool(options.get("multiple", False))
+        directory = bool(options.get("directory", False))
+        current_name = str(options.get("current_name", ""))
+        current_folder = parse_portal_folder(options.get("current_folder"))
+        filters_data = options.get("filters", [])
+
+        # Locate devos-files executable
+        devos_files_bin = (
+            shutil.which("devos-files")
+            or os.path.expanduser("~/.local/bin/devos-files")
+            or os.path.expanduser("~/.gemini/antigravity/bin/devos-files")
+            or "/usr/local/bin/devos-files"
+        )
+
+        cmd = [devos_files_bin, "--picker", "--output", tmp_out, "--title", dialog_title]
+        if save_mode:
+            cmd.append("--save")
+        if multiple:
+            cmd.append("--multiple")
+        if directory:
+            cmd.append("--directory")
+        if current_name:
+            cmd.extend(["--name", current_name])
+        if filters_data:
+            filter_arg = format_portal_filters_for_cli(filters_data)
+            cmd.extend(["--filter", filter_arg])
+
+        target_folder = ""
+        if current_folder and os.path.isdir(current_folder):
+            target_folder = current_folder
+        else:
+            dl = os.path.expanduser("~/Downloads")
+            target_folder = dl if os.path.isdir(dl) else os.path.expanduser("~")
+        cmd.append(target_folder)
+
+        env = os.environ.copy()
+        try:
+            proc = subprocess.Popen(cmd, env=env)
+            with self._lock:
+                self._active_processes[str(handle)] = proc
+            ret = proc.wait()
+        except Exception as e:
+            sys.stderr.write(f"[devos-portal-filechooser] Failed to spawn file chooser: {e}\n")
+            ret = 1
+        finally:
+            with self._lock:
+                self._active_processes.pop(str(handle), None)
+
+        if ret == 0 and os.path.exists(tmp_out):
+            try:
+                with open(tmp_out, "r", encoding="utf-8") as f:
+                    selected_paths = json.load(f)
+                uris = [pathlib.Path(p).as_uri() for p in selected_paths if os.path.exists(p) or save_mode]
+                if uris:
+                    res_dict = dbus.Dictionary({"uris": dbus.Array(uris, signature="s")}, signature="sv")
+                    GLib.idle_add(ok_cb, dbus.UInt32(0), res_dict)
+                else:
+                    GLib.idle_add(ok_cb, dbus.UInt32(1), dbus.Dictionary({}, signature="sv"))
+            except Exception as e:
+                sys.stderr.write(f"[devos-portal-filechooser] Error reading output: {e}\n")
+                GLib.idle_add(ok_cb, dbus.UInt32(1), dbus.Dictionary({}, signature="sv"))
+            finally:
+                try:
+                    os.remove(tmp_out)
+                except OSError:
+                    pass
+        else:
+            try:
+                if os.path.exists(tmp_out):
+                    os.remove(tmp_out)
+            except OSError:
+                pass
+            GLib.idle_add(ok_cb, dbus.UInt32(1), dbus.Dictionary({}, signature="sv"))
+
+
+def main():
+    try:
+        import ctypes
+        libc = ctypes.cdll.LoadLibrary("libc.so.6")
+        libc.prctl(15, b"devos-portal-fc", 0, 0, 0)
+    except Exception:
+        pass
+
+    dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
+    bus = dbus.SessionBus()
+    name = dbus.service.BusName("org.freedesktop.impl.portal.desktop.devos", bus)
+    portal = DevOSFileChooserPortal(bus)
+    sys.stdout.write("[devos-portal-filechooser] Backend active on org.freedesktop.impl.portal.desktop.devos\n")
+    sys.stdout.flush()
+
+    loop = GLib.MainLoop()
+    try:
+        loop.run()
+    except KeyboardInterrupt:
+        pass
+
+
+if __name__ == "__main__":
+    main()
