@@ -25,7 +25,7 @@ if (panelList.length === 0) {
 
     var menu = panel.addWidget("org.kde.plasma.kickoff");
     menu.currentConfigGroup = ["General"];
-    menu.writeConfig("icon", "/usr/share/pixmaps/devos-logo.png");
+    menu.writeConfig("icon", "devos-logo");
 
     var tasks = panel.addWidget("org.kde.plasma.icontasks");
     tasks.currentConfigGroup = ["General"];

@@ -78,13 +78,20 @@ fi
 
 # Brand plasma icon with DevOS logo across icon themes
 if [ -f /usr/share/pixmaps/devos-logo.png ]; then
-    for size in 16 22 24 32 48 64 128 256; do
-        dir="/usr/share/icons/hicolor/${size}x${size}/apps"
-        mkdir -p "$dir"
-        cp -f /usr/share/pixmaps/devos-logo.png "${dir}/plasma.png" 2>/dev/null || true
+    for size in 16 22 24 32 48 64 128 256 512; do
+        apps_dir="/usr/share/icons/hicolor/${size}x${size}/apps"
+        places_dir="/usr/share/icons/hicolor/${size}x${size}/places"
+        mkdir -p "$apps_dir" "$places_dir"
+        cp -f /usr/share/pixmaps/devos-logo.png "${apps_dir}/plasma.png" 2>/dev/null || true
+        cp -f /usr/share/pixmaps/devos-logo.png "${apps_dir}/devos-logo.png" 2>/dev/null || true
+        cp -f /usr/share/pixmaps/devos-logo.png "${places_dir}/start-here-kde.png" 2>/dev/null || true
+        cp -f /usr/share/pixmaps/devos-logo.png "${places_dir}/start-here-kde-symbolic.png" 2>/dev/null || true
+        cp -f /usr/share/pixmaps/devos-logo.png "${places_dir}/start-here.png" 2>/dev/null || true
+        cp -f /usr/share/pixmaps/devos-logo.png "${places_dir}/distributor-logo.png" 2>/dev/null || true
     done
-    mkdir -p /usr/share/icons/hicolor/scalable/apps
+    mkdir -p /usr/share/icons/hicolor/scalable/apps /usr/share/icons/hicolor/scalable/places
     cp -f /usr/share/pixmaps/devos-logo.png /usr/share/icons/hicolor/scalable/apps/plasma.png 2>/dev/null || true
+    cp -f /usr/share/pixmaps/devos-logo.png /usr/share/icons/hicolor/scalable/apps/devos-logo.png 2>/dev/null || true
 fi
 
 # Desktop names: Files, Terminal, Settings, the "DevOS" session.
