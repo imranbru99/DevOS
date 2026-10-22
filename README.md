@@ -15,6 +15,10 @@
   </a>
 </p>
 
+<p align="center">
+  <img src="docs/images/devos_dashboard_overview.png" alt="DevOS Opening Dashboard" width="900">
+</p>
+
 ---
 
 ## Our aim
@@ -367,6 +371,23 @@ Shut down, restart and uninstall always ask for confirmation first.
 ### 15b. Kids Mode (`devos-kids-mode`)
 - **Cosmic interactive playground:** A full-screen space-themed canvas with glowing star constellations, shooting star trails, interactive floating celestial bodies, and dynamic mouse gravity physics.
 - **Safe computing:** Keeps background developer servers, long-running downloads, and open desktop windows completely protected while children play safely. Start with the desktop shortcut or ask DevOS AI *"Start kids mode"*. Exit easily with `Esc`.
+
+### 15c. Opening Dashboard & System Control (`devos-dashboard`)
+DevOS greets you with an ultra-sleek, luxury dark dashboard designed for zero friction, instant hardware insight, and first-boot onboarding:
+
+<p align="center">
+  <img src="docs/images/devos_dashboard_overview.png" alt="DevOS Opening Dashboard" width="850">
+</p>
+
+- **Real-Time Hardware Telemetry:** Live stats for CPU threads, RAM allocation, ultra-fast memory compression (**zRAM with zstd**, achieving up to 69x compression), and Btrfs storage health.
+- **First-Boot 3-Step Wizard:** Step-by-step guidance to inspect disks, configure fast PIN or password unlock, and select English or Bengali.
+- **Storage & Boot Doctor:** Interactive partition manager detecting UEFI vs MBR standards, checking EFI health, and solving storage problems with one click.
+- **Subsystem & Runtime Center:** Monitor and launch local PHP/MariaDB web dev stacks, the Windows `.exe` Wine layer, Android `.apk` subsystem, and local AI coding assistants.
+
+<p align="center">
+  <img src="docs/images/devos_dashboard_storage.png" alt="Storage & Boot Doctor" width="420">&nbsp;&nbsp;
+  <img src="docs/images/devos_dashboard_subsystems.png" alt="DevOS Subsystems & Runtime Manager" width="420">
+</p>
 
 ### 16. Built-in productivity & AI everywhere
 - **DevOS Notes** — notebooks, sticky notes on the desktop, voice notes, AI summarize / to-do / translate; saved in Documents.

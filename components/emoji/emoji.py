@@ -218,6 +218,10 @@ def main(argv=None):
             print(glyph, end=" ")
         print()
         return 0
+    # Transient picker tool: never restore from previous KDE session on boot
+    if any(arg.startswith("-session") or arg == "-session" for arg in sys.argv):
+        return 0
+
     window = _active_window()
     recent = load_recent()
     try:
@@ -226,6 +230,10 @@ def main(argv=None):
         print(" ".join(visible("", recent)))
         return 0
     app = QtWidgets.QApplication(sys.argv)
+    try:
+        app.setFallbackSessionManagementEnabled(False)
+    except Exception:
+        pass
     win = _panel(QtCore, QtWidgets, recent, window)
     win.show()
     return app.exec_()
