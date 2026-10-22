@@ -1,16 +1,14 @@
 [connection]
-id=Ethernet
+id=Wired Connection
 uuid=8f3c1a2e-6b47-4d9a-9e21-0c5d7a8b4e16
 type=ethernet
 autoconnect=true
 autoconnect-priority=100
-autoconnect-retries=0
 
 [ethernet]
 
 [ipv4]
 method=auto
-dhcp-timeout=90
 dns=1.1.1.1;8.8.8.8;
 
 [ipv6]
