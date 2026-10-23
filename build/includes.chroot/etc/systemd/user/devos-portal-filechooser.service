@@ -1,0 +1,16 @@
+[Unit]
+Description=DevOS XDG Desktop Portal FileChooser Backend
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/bin/devos-portal-filechooser
+Restart=always
+RestartSec=2
+Environment=DISPLAY=:1
+Environment=WAYLAND_DISPLAY=wayland-0
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+
+[Install]
+WantedBy=graphical-session.target

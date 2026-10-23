@@ -51,6 +51,7 @@ try:
         QColor,
         QDrag,
         QFont,
+        QFontMetrics,
         QIcon,
         QKeySequence,
         QLinearGradient,
@@ -4036,9 +4037,10 @@ class WindowsFileExplorer(QMainWindow):
             picker_layout.setContentsMargins(14, 10, 14, 10)
             picker_layout.setSpacing(8)
 
-            row1 = QHBoxLayout()
-            row1.setSpacing(10)
-            lbl_name = QLabel("File name:")
+            is_dir = bool(self._picker_options.get("directory"))
+            is_save = bool(self._picker_options.get("save"))
+            lbl_name_text = "Folder:" if is_dir else ("Save as:" if is_save else "File name:")
+            lbl_name = QLabel(lbl_name_text)
             lbl_name.setFixedWidth(85)
             lbl_name.setObjectName("pickerLabel")
             self.picker_name_edit = QLineEdit()
@@ -4046,15 +4048,29 @@ class WindowsFileExplorer(QMainWindow):
             initial_name = self._picker_options.get("name", "")
             if initial_name:
                 self.picker_name_edit.setText(initial_name)
+            elif is_dir and self._current_path:
+                self.picker_name_edit.setText(os.path.basename(self._current_path))
             self.picker_name_edit.returnPressed.connect(self._on_picker_accept)
 
-            action_text = "Save" if self._picker_options.get("save") else ("Select Folder" if self._picker_options.get("directory") else "Open")
+            action_text = "Save" if is_save else ("Select Folder" if is_dir else "Open")
             self.btn_picker_action = QPushButton(action_text)
             self.btn_picker_action.setObjectName("pickerPrimaryBtn")
-            self.btn_picker_action.setFixedWidth(100)
             self.btn_picker_action.setCursor(Qt.PointingHandCursor)
             self.btn_picker_action.clicked.connect(self._on_picker_accept)
 
+            self.btn_picker_cancel = QPushButton("Cancel")
+            self.btn_picker_cancel.setObjectName("pickerCancelBtn")
+            self.btn_picker_cancel.setCursor(Qt.PointingHandCursor)
+            self.btn_picker_cancel.clicked.connect(self._on_picker_cancel)
+
+            # Auto-calculate comfortable button width to prevent truncation of 'Select Folder'
+            fm = QFontMetrics(self.font())
+            btn_w = max(130, fm.horizontalAdvance(action_text) + 36, fm.horizontalAdvance("Cancel") + 36)
+            self.btn_picker_action.setFixedWidth(btn_w)
+            self.btn_picker_cancel.setFixedWidth(btn_w)
+
+            row1 = QHBoxLayout()
+            row1.setSpacing(10)
             row1.addWidget(lbl_name)
             row1.addWidget(self.picker_name_edit, 1)
             row1.addWidget(self.btn_picker_action)
@@ -4073,18 +4089,12 @@ class WindowsFileExplorer(QMainWindow):
             self.picker_filter_combo.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
             raw_filters = self._picker_options.get("filters", [])
             if not raw_filters:
-                raw_filters = [("All Files (*.*)", ["*.*"])]
+                raw_filters = [("Folder", ["*"])] if is_dir else [("All Files (*.*)", ["*.*"])]
             for label, pats in raw_filters:
                 self.picker_filter_combo.addItem(label, pats)
 
             self.picker_filter_combo.currentIndexChanged.connect(self._on_picker_filter_changed)
             self._current_filter_patterns = self.picker_filter_combo.currentData() or []
-
-            self.btn_picker_cancel = QPushButton("Cancel")
-            self.btn_picker_cancel.setObjectName("pickerCancelBtn")
-            self.btn_picker_cancel.setFixedWidth(100)
-            self.btn_picker_cancel.setCursor(Qt.PointingHandCursor)
-            self.btn_picker_cancel.clicked.connect(self._on_picker_cancel)
 
             row2.addWidget(lbl_type)
             row2.addWidget(self.picker_filter_combo, 1)
@@ -6717,6 +6727,9 @@ class WindowsFileExplorer(QMainWindow):
         event.accept()
 
     def keyPressEvent(self, event):
+        if self._picker_mode and event.key() == Qt.Key_Escape:
+            self._on_picker_cancel()
+            return
         if not self._picker_mode and event.modifiers() == Qt.ControlModifier:
             if event.key() == Qt.Key_T:
                 self._new_tab(self._current_path)

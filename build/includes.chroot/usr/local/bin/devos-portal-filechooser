@@ -131,6 +131,12 @@ class DevOSFileChooserPortal(dbus.service.Object):
         directory = bool(options.get("directory", False))
         current_name = str(options.get("current_name", ""))
         current_folder = parse_portal_folder(options.get("current_folder"))
+        current_file = parse_portal_folder(options.get("current_file"))
+        if current_file:
+            if not current_name:
+                current_name = os.path.basename(current_file)
+            if not current_folder and os.path.exists(current_file):
+                current_folder = os.path.dirname(current_file)
         filters_data = options.get("filters", [])
 
         # Locate devos-files executable
