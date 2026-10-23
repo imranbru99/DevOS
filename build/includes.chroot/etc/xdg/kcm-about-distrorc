@@ -1,0 +1,7 @@
+[General]
+Name=DevOS
+LogoPath=/usr/share/pixmaps/devos-logo.png
+Website=https://github.com/imranbru99/DevOS
+Version=26.04 LTS
+Variant=Desktop
+UseOSReleaseVersion=true
