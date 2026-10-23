@@ -2874,7 +2874,7 @@ class WindowsSystemPropertiesDialog(QDialog):
         name_lbl.setStyleSheet("color: #ffffff;")
         text_col.addWidget(name_lbl)
 
-        sub_lbl = QLabel("DevOS 2027 Pro · 64-bit Workstation")
+        sub_lbl = QLabel("DevOS 26.04 LTS Pro · 64-bit Workstation")
         sub_lbl.setStyleSheet("color: #38bdf8; font-size: 12px; font-weight: 600;")
         text_col.addWidget(sub_lbl)
         hdr_layout.addLayout(text_col, 1)
@@ -2964,10 +2964,10 @@ class WindowsSystemPropertiesDialog(QDialog):
         w_grid.setVerticalSpacing(6)
 
         w_grid.addWidget(self._make_label("Edition"), 0, 0)
-        w_grid.addWidget(self._make_val("DevOS 2027 Pro"), 0, 1)
+        w_grid.addWidget(self._make_val("DevOS 26.04 LTS Pro"), 0, 1)
 
         w_grid.addWidget(self._make_label("Version"), 1, 0)
-        w_grid.addWidget(self._make_val("24H2"), 1, 1)
+        w_grid.addWidget(self._make_val("26H2 (26.04 LTS)"), 1, 1)
 
         w_grid.addWidget(self._make_label("Installed on"), 2, 0)
         w_grid.addWidget(self._make_val("10/18/2026"), 2, 1)
@@ -3548,53 +3548,30 @@ class WindowsFileExplorer(QMainWindow):
 
         # Action Icon Buttons
         self.btn_cut = QPushButton()
-        self.btn_cut.setIcon(get_win_icon("cut", 18))
-        self.btn_cut.setObjectName("cmdBtn")
-        self.btn_cut.setToolTip("Cut (Ctrl+X)")
-        self.btn_cut.clicked.connect(self.action_cut)
-
         self.btn_copy = QPushButton()
-        self.btn_copy.setIcon(get_win_icon("copy", 18))
-        self.btn_copy.setObjectName("cmdBtn")
-        self.btn_copy.setToolTip("Copy (Ctrl+C)")
-        self.btn_copy.clicked.connect(self.action_copy)
-
         self.btn_paste = QPushButton()
-        self.btn_paste.setIcon(get_win_icon("paste", 18))
-        self.btn_paste.setObjectName("cmdBtn")
-        self.btn_paste.setToolTip("Paste (Ctrl+V)")
-        self.btn_paste.clicked.connect(self.action_paste)
-
         self.btn_rename = QPushButton()
-        self.btn_rename.setIcon(get_win_icon("rename", 18))
-        self.btn_rename.setObjectName("cmdBtn")
-        self.btn_rename.setToolTip("Rename (F2)")
-        self.btn_rename.clicked.connect(self.action_rename)
-
         self.btn_copy_path = QPushButton()
-        self.btn_copy_path.setIcon(get_win_icon("copy-path", 18))
-        self.btn_copy_path.setObjectName("cmdBtn")
-        self.btn_copy_path.setToolTip("Copy path (Ctrl+Shift+C)")
-        self.btn_copy_path.clicked.connect(self.action_copy_path)
-
         self.btn_share = QPushButton()
-        self.btn_share.setIcon(get_win_icon("share", 18))
-        self.btn_share.setObjectName("cmdBtn")
-        self.btn_share.setToolTip("Share")
-        self.btn_share.clicked.connect(self.action_share)
-
         self.btn_delete = QPushButton()
-        self.btn_delete.setIcon(get_win_icon("delete", 18))
-        self.btn_delete.setObjectName("cmdBtn")
-        self.btn_delete.setToolTip("Delete (Delete)")
-        self.btn_delete.clicked.connect(self.action_delete)
 
-        cmd_layout.addWidget(self.btn_cut)
-        cmd_layout.addWidget(self.btn_copy)
-        cmd_layout.addWidget(self.btn_paste)
-        cmd_layout.addWidget(self.btn_rename)
-        cmd_layout.addWidget(self.btn_share)
-        cmd_layout.addWidget(self.btn_delete)
+        action_defs = [
+            (self.btn_cut, "cut", "Cut (Ctrl+X)", self.action_cut),
+            (self.btn_copy, "copy", "Copy (Ctrl+C)", self.action_copy),
+            (self.btn_paste, "paste", "Paste (Ctrl+V)", self.action_paste),
+            (self.btn_rename, "rename", "Rename (F2)", self.action_rename),
+            (self.btn_copy_path, "copy-path", "Copy path (Ctrl+Shift+C)", self.action_copy_path),
+            (self.btn_share, "share", "Share", self.action_share),
+            (self.btn_delete, "delete", "Delete (Delete)", self.action_delete),
+        ]
+        for btn, name, tip, cb in action_defs:
+            btn.setIcon(get_win_icon(name, 18))
+            btn.setObjectName("cmdIconBtn")
+            btn.setToolTip(tip)
+            btn.setFixedSize(34, 30)
+            btn.setIconSize(QSize(18, 18))
+            btn.clicked.connect(cb)
+            cmd_layout.addWidget(btn)
 
         # Archive buttons
         self.btn_extract = QPushButton("Extract all")
@@ -3650,7 +3627,9 @@ class WindowsFileExplorer(QMainWindow):
         # "⇅ Sort ˇ"
         self.btn_sort = QPushButton("Sort")
         self.btn_sort.setIcon(get_win_icon("sort", 16))
-        self.btn_sort.setObjectName("cmdBtn")
+        self.btn_sort.setObjectName("cmdMenuBtn")
+        self.btn_sort.setMinimumWidth(80)
+        self.btn_sort.setFixedHeight(30)
         sort_menu = QMenu(self.btn_sort)
         for col_idx, col_name in enumerate(["Name", "Date modified", "Type", "Size"]):
             sort_menu.addAction(col_name, lambda c=col_idx: self.table_view.sortItems(c, self.table_view.horizontalHeader().sortIndicatorOrder()))
@@ -3663,7 +3642,9 @@ class WindowsFileExplorer(QMainWindow):
         # "⊞ View ˇ"
         self.btn_view = QPushButton("View")
         self.btn_view.setIcon(get_win_icon("view", 16))
-        self.btn_view.setObjectName("cmdBtn")
+        self.btn_view.setObjectName("cmdMenuBtn")
+        self.btn_view.setMinimumWidth(80)
+        self.btn_view.setFixedHeight(30)
         view_menu = QMenu(self.btn_view)
         view_menu.addAction("Extra large icons", lambda: self.set_view_mode("icons", 128))
         view_menu.addAction("Large icons", lambda: self.set_view_mode("icons", 96))
@@ -3701,7 +3682,8 @@ class WindowsFileExplorer(QMainWindow):
 
         # "···" See More Menu
         self.btn_more = QPushButton("…")
-        self.btn_more.setObjectName("cmdBtn")
+        self.btn_more.setObjectName("cmdIconBtn")
+        self.btn_more.setFixedSize(34, 30)
         self.btn_more.setToolTip("See more")
         more_menu = QMenu(self.btn_more)
         more_menu.addAction("Undo\tCtrl+Z", self.action_undo)
@@ -3730,11 +3712,24 @@ class WindowsFileExplorer(QMainWindow):
         # Stretch
         cmd_layout.addStretch(1)
 
-        # Right-aligned Details / Preview toggle
+        # Right-aligned Details & Preview toggle
+        self.details_button = QPushButton("Details")
+        self.details_button.setIcon(get_win_icon("file-doc", 16))
+        self.details_button.setObjectName("cmdBtn")
+        self.details_button.setCheckable(True)
+        self.details_button.setMinimumWidth(80)
+        self.details_button.setFixedHeight(30)
+        self.details_button.setChecked(self._view_mode == "details")
+        self.details_button.setToolTip("Details view")
+        self.details_button.clicked.connect(lambda: self.set_view_mode("details"))
+        cmd_layout.addWidget(self.details_button)
+
         self.preview_button = QPushButton("Preview")
         self.preview_button.setIcon(get_win_icon("preview", 16))
         self.preview_button.setObjectName("cmdBtn")
         self.preview_button.setCheckable(True)
+        self.preview_button.setMinimumWidth(84)
+        self.preview_button.setFixedHeight(30)
         self.preview_button.setChecked(self._settings.get("preview", False))
         self.preview_button.setToolTip("Preview pane (Alt+P)")
         self.preview_button.clicked.connect(self.toggle_preview)
@@ -3837,9 +3832,10 @@ class WindowsFileExplorer(QMainWindow):
         self._side_btns[trash_path] = self.bin_btn
 
         props_btn = QPushButton("PC properties")
+        props_btn.setIcon(get_win_icon("this-pc", 18))
         props_btn.setObjectName("sideBtn")
         props_btn.setCursor(Qt.PointingHandCursor)
-        props_btn.clicked.connect(lambda _=False: self.show_properties(""))
+        props_btn.clicked.connect(lambda _=False: self.show_system_properties())
         sidebar_layout.addWidget(props_btn)
 
         sidebar_layout.addStretch(1)
@@ -4579,19 +4575,55 @@ class WindowsFileExplorer(QMainWindow):
             }
             QLineEdit#searchBox:focus { border-color: #0078d4; background: #0d1522; }
 
-            QWidget#commandBar { background: #0e1624; border-bottom: 1px solid #1c2a3d; padding: 2px 6px; }
+            QWidget#commandBar { background: #0d1522; border-bottom: 1px solid #1c2b3e; padding: 4px 10px; }
             QPushButton#cmdBtn, QToolButton#cmdBtn {
                 background: transparent;
                 border: 1px solid transparent;
                 border-radius: 6px;
-                padding: 6px 10px;
+                padding: 5px 12px;
                 color: #e2e8f0;
                 font-size: 12px;
+                min-height: 28px;
             }
-            QPushButton#cmdBtn:hover, QToolButton#cmdBtn:hover { background: #1a283c; border-color: #273d5c; }
+            QPushButton#cmdBtn:hover, QToolButton#cmdBtn:hover { background: #1a283c; border-color: #273d5c; color: #ffffff; }
             QPushButton#cmdBtn:pressed, QToolButton#cmdBtn:pressed { background: #223753; }
             QPushButton#cmdBtn:checked, QToolButton#cmdBtn:checked { background: #1a365d; border-color: #0078d4; color: #60a5fa; }
             QPushButton#cmdBtn:disabled { color: #475569; }
+
+            QPushButton#cmdIconBtn {
+                background: transparent;
+                border: 1px solid transparent;
+                border-radius: 6px;
+                padding: 4px;
+                min-width: 32px;
+                max-width: 34px;
+                min-height: 28px;
+                max-height: 30px;
+                color: #e2e8f0;
+            }
+            QPushButton#cmdIconBtn:hover { background: #1a283c; border-color: #273d5c; color: #ffffff; }
+            QPushButton#cmdIconBtn:pressed { background: #223753; }
+            QPushButton#cmdIconBtn:disabled { color: #475569; }
+
+            QPushButton#cmdMenuBtn {
+                background: transparent;
+                border: 1px solid transparent;
+                border-radius: 6px;
+                padding: 5px 24px 5px 10px;
+                color: #e2e8f0;
+                font-size: 12px;
+                min-height: 28px;
+                min-width: 76px;
+            }
+            QPushButton#cmdMenuBtn:hover { background: #1a283c; border-color: #273d5c; color: #ffffff; }
+            QPushButton#cmdMenuBtn:pressed { background: #223753; }
+            QPushButton#cmdMenuBtn::menu-indicator {
+                subcontrol-origin: padding;
+                subcontrol-position: center right;
+                right: 6px;
+                width: 9px;
+                height: 9px;
+            }
 
             QPushButton#newBtn {
                 background: #0078d4;
@@ -4599,13 +4631,21 @@ class WindowsFileExplorer(QMainWindow):
                 font-weight: 600;
                 border: 1px solid #2563eb;
                 border-radius: 6px;
-                padding: 6px 14px;
+                padding: 5px 18px 5px 12px;
                 font-size: 12px;
+                min-height: 28px;
             }
             QPushButton#newBtn:hover { background: #1d4ed8; }
             QPushButton#newBtn:pressed { background: #1e40af; }
+            QPushButton#newBtn::menu-indicator {
+                subcontrol-origin: padding;
+                subcontrol-position: center right;
+                right: 6px;
+                width: 9px;
+                height: 9px;
+            }
 
-            QFrame#cmdSep { background: #22334a; max-width: 1px; min-width: 1px; margin: 4px 4px; }
+            QFrame#cmdSep { background: #22334a; max-width: 1px; min-width: 1px; margin: 4px 6px; }
 
             QWidget#sidebar { background: #0c131f; border-right: 1px solid #1a2638; }
             QLabel#sideSection { color: #64748b; font-size: 11px; font-weight: 600; text-transform: uppercase; padding: 8px 8px 4px 8px; }
@@ -4633,7 +4673,17 @@ class WindowsFileExplorer(QMainWindow):
 
             QTableWidget#fileTable, QListWidget#fileList { background: #090f18; alternate-background-color: #0c1421; border: none; color: #dce7f7; }
             QTableWidget#fileTable::item:selected, QListWidget#fileList::item:selected { background: #17375a; color: white; border: 1px solid #0078d4; border-radius: 4px; }
-            QHeaderView::section { background: #101927; color: #94a3b8; border: none; border-bottom: 1px solid #203046; padding: 8px 12px; font-weight: 600; }
+            QHeaderView::section {
+                background: #0e1624;
+                color: #94a3b8;
+                border: none;
+                border-top: 1px solid #1c2a3d;
+                border-bottom: 1px solid #1c2a3d;
+                border-right: 1px solid #141f2e;
+                padding: 7px 12px;
+                font-weight: 600;
+                font-size: 12px;
+            }
             QHeaderView::section:hover { background: #172437; color: #f8fafc; }
 
             QWidget#previewPane { background: #0c131f; border-left: 1px solid #1a2638; }
