@@ -24,12 +24,15 @@ import sys
 import argparse
 import fnmatch
 import shlex
+import tempfile
 from pathlib import Path
 from urllib.parse import unquote
 
 try:
     from PyQt5.QtCore import (
         QEvent,
+        QFileSystemWatcher,
+        QTimer,
         QItemSelection,
         QItemSelectionModel,
         QMimeData,
@@ -56,12 +59,14 @@ try:
         QPalette,
         QPen,
         QPixmap,
+        QImageReader,
         QPolygonF,
     )
     from PyQt5.QtWidgets import (
         QAbstractItemView,
         QAction,
         QApplication,
+        QButtonGroup,
         QCheckBox,
         QComboBox,
         QDialog,
@@ -69,6 +74,7 @@ try:
         QFileDialog,
         QFrame,
         QGridLayout,
+        QGroupBox,
         QHBoxLayout,
         QHeaderView,
         QLabel,
@@ -78,8 +84,10 @@ try:
         QMainWindow,
         QMenu,
         QMessageBox,
+        QPlainTextEdit,
         QProgressBar,
         QPushButton,
+        QRadioButton,
         QRubberBand,
         QScrollArea,
         QSizePolicy,
@@ -91,6 +99,8 @@ try:
         QTableWidgetItem,
         QTabWidget,
         QToolButton,
+        QTreeWidget,
+        QTreeWidgetItem,
         QVBoxLayout,
         QWidget,
     )
@@ -495,6 +505,150 @@ def get_win_icon(name, size=32):
             QPointF(24 * s, 32 * s),
         ])
         p.drawPolygon(arrow)
+
+    elif name == "cut":
+        # Windows 11 scissor blades
+        p.setPen(QPen(QColor("#38bdf8"), 2.5 * s, Qt.SolidLine, Qt.RoundCap))
+        p.drawEllipse(QPointF(20 * s, 46 * s), 7 * s, 7 * s)
+        p.drawEllipse(QPointF(44 * s, 46 * s), 7 * s, 7 * s)
+        p.drawLine(QPointF(24 * s, 40 * s), QPointF(46 * s, 14 * s))
+        p.drawLine(QPointF(40 * s, 40 * s), QPointF(18 * s, 14 * s))
+
+    elif name == "copy":
+        # Windows 11 overlapping sheets
+        p.setBrush(QColor("#1e293b"))
+        p.setPen(QPen(QColor("#94a3b8"), 2 * s))
+        p.drawRoundedRect(QRectF(14 * s, 10 * s, 28 * s, 34 * s), 3 * s, 3 * s)
+        p.setBrush(QColor("#38bdf8"))
+        p.setPen(QPen(QColor("#ffffff"), 1.5 * s))
+        p.drawRoundedRect(QRectF(22 * s, 20 * s, 28 * s, 34 * s), 3 * s, 3 * s)
+
+    elif name == "paste":
+        # Windows 11 clipboard with paper
+        p.setBrush(QColor("#64748b"))
+        p.setPen(Qt.NoPen)
+        p.drawRoundedRect(QRectF(16 * s, 10 * s, 32 * s, 44 * s), 3 * s, 3 * s)
+        p.setBrush(QColor("#ffffff"))
+        p.drawRoundedRect(QRectF(20 * s, 18 * s, 24 * s, 32 * s), 2 * s, 2 * s)
+        p.setBrush(QColor("#0078d4"))
+        p.drawRoundedRect(QRectF(24 * s, 8 * s, 16 * s, 8 * s), 2 * s, 2 * s)
+
+    elif name == "rename":
+        # Windows 11 document with editing pen
+        p.setBrush(QColor("#ffffff"))
+        p.setPen(QPen(QColor("#94a3b8"), 1.5 * s))
+        p.drawRoundedRect(QRectF(14 * s, 12 * s, 28 * s, 38 * s), 2 * s, 2 * s)
+        p.setBrush(QColor("#38bdf8"))
+        p.setPen(QPen(QColor("#0284c7"), 1.8 * s, Qt.SolidLine, Qt.RoundCap))
+        p.drawLine(QPointF(32 * s, 48 * s), QPointF(52 * s, 24 * s))
+
+    elif name == "share":
+        # Windows 11 share nodes
+        p.setPen(QPen(QColor("#38bdf8"), 2.5 * s))
+        p.drawEllipse(QPointF(18 * s, 32 * s), 5 * s, 5 * s)
+        p.drawEllipse(QPointF(46 * s, 18 * s), 5 * s, 5 * s)
+        p.drawEllipse(QPointF(46 * s, 46 * s), 5 * s, 5 * s)
+        p.drawLine(QPointF(22 * s, 29 * s), QPointF(42 * s, 20 * s))
+        p.drawLine(QPointF(22 * s, 35 * s), QPointF(42 * s, 44 * s))
+
+    elif name == "delete":
+        # Windows 11 trash bin
+        p.setBrush(QColor("#ef4444"))
+        p.setPen(Qt.NoPen)
+        p.drawRoundedRect(QRectF(16 * s, 18 * s, 32 * s, 38 * s), 3 * s, 3 * s)
+        p.drawRoundedRect(QRectF(12 * s, 12 * s, 40 * s, 5 * s), 2 * s, 2 * s)
+        p.drawRect(QRectF(26 * s, 8 * s, 12 * s, 4 * s))
+        p.setPen(QPen(QColor("#ffffff"), 2 * s))
+        p.drawLine(QPointF(24 * s, 26 * s), QPointF(24 * s, 46 * s))
+        p.drawLine(QPointF(32 * s, 26 * s), QPointF(32 * s, 46 * s))
+        p.drawLine(QPointF(40 * s, 26 * s), QPointF(40 * s, 46 * s))
+
+    elif name == "sort":
+        # Windows 11 up/down sort arrows
+        p.setPen(QPen(QColor("#38bdf8"), 2.5 * s, Qt.SolidLine, Qt.RoundCap))
+        p.drawLine(QPointF(24 * s, 14 * s), QPointF(24 * s, 50 * s))
+        p.drawLine(QPointF(16 * s, 24 * s), QPointF(24 * s, 14 * s))
+        p.drawLine(QPointF(32 * s, 24 * s), QPointF(24 * s, 14 * s))
+        p.drawLine(QPointF(42 * s, 14 * s), QPointF(42 * s, 50 * s))
+        p.drawLine(QPointF(34 * s, 40 * s), QPointF(42 * s, 50 * s))
+        p.drawLine(QPointF(50 * s, 40 * s), QPointF(42 * s, 50 * s))
+
+    elif name == "view":
+        # Windows 11 grid view squares
+        p.setPen(QPen(QColor("#38bdf8"), 1.8 * s))
+        p.setBrush(QColor("#1e293b"))
+        p.drawRoundedRect(QRectF(12 * s, 12 * s, 18 * s, 18 * s), 2 * s, 2 * s)
+        p.drawRoundedRect(QRectF(34 * s, 12 * s, 18 * s, 18 * s), 2 * s, 2 * s)
+        p.drawRoundedRect(QRectF(12 * s, 34 * s, 18 * s, 18 * s), 2 * s, 2 * s)
+        p.drawRoundedRect(QRectF(34 * s, 34 * s, 18 * s, 18 * s), 2 * s, 2 * s)
+
+    elif name == "more":
+        # Windows 11 three horizontal dots
+        p.setBrush(QColor("#e2e8f0"))
+        p.setPen(Qt.NoPen)
+        p.drawEllipse(QPointF(16 * s, 32 * s), 3.5 * s, 3.5 * s)
+        p.drawEllipse(QPointF(32 * s, 32 * s), 3.5 * s, 3.5 * s)
+        p.drawEllipse(QPointF(48 * s, 32 * s), 3.5 * s, 3.5 * s)
+
+    elif name == "preview":
+        # Windows 11 preview pane split icon
+        p.setBrush(QColor("#1e293b"))
+        p.setPen(QPen(QColor("#94a3b8"), 2 * s))
+        p.drawRoundedRect(QRectF(10 * s, 12 * s, 44 * s, 40 * s), 3 * s, 3 * s)
+        p.drawLine(QPointF(38 * s, 12 * s), QPointF(38 * s, 52 * s))
+        p.setBrush(QColor("#38bdf8"))
+        p.setPen(Qt.NoPen)
+        p.drawRoundedRect(QRectF(40 * s, 16 * s, 12 * s, 32 * s), 2 * s, 2 * s)
+
+    elif name == "home":
+        # Fluent home icon
+        p.setBrush(QColor("#38bdf8"))
+        p.setPen(Qt.NoPen)
+        poly = QPolygonF([QPointF(32 * s, 12 * s), QPointF(12 * s, 28 * s), QPointF(52 * s, 28 * s)])
+        p.drawPolygon(poly)
+        p.drawRect(QRectF(18 * s, 28 * s, 28 * s, 24 * s))
+        p.setBrush(QColor("#0f172a"))
+        p.drawRect(QRectF(27 * s, 36 * s, 10 * s, 16 * s))
+
+    elif name == "gallery":
+        # Fluent photo landscape icon
+        p.setBrush(QColor("#1e293b"))
+        p.setPen(QPen(QColor("#94a3b8"), 1.8 * s))
+        p.drawRoundedRect(QRectF(10 * s, 12 * s, 44 * s, 40 * s), 3 * s, 3 * s)
+        p.setBrush(QColor("#f59e0b"))
+        p.setPen(Qt.NoPen)
+        p.drawEllipse(QPointF(22 * s, 24 * s), 4 * s, 4 * s)
+        p.setBrush(QColor("#10b981"))
+        poly = QPolygonF([
+            QPointF(12 * s, 50 * s),
+            QPointF(26 * s, 32 * s),
+            QPointF(38 * s, 44 * s),
+            QPointF(46 * s, 36 * s),
+            QPointF(52 * s, 50 * s),
+        ])
+        p.drawPolygon(poly)
+
+    elif name == "folder-options":
+        # Folder with settings sliders
+        p.setBrush(QColor("#f59e0b"))
+        p.setPen(Qt.NoPen)
+        p.drawRoundedRect(QRectF(8 * s, 12 * s, 22 * s, 10 * s), 2 * s, 2 * s)
+        p.drawRoundedRect(QRectF(8 * s, 16 * s, 48 * s, 36 * s), 3 * s, 3 * s)
+        p.setPen(QPen(QColor("#ffffff"), 2.5 * s))
+        p.drawLine(QPointF(20 * s, 30 * s), QPointF(44 * s, 30 * s))
+        p.drawLine(QPointF(20 * s, 40 * s), QPointF(44 * s, 40 * s))
+        p.setBrush(QColor("#38bdf8"))
+        p.drawEllipse(QPointF(28 * s, 30 * s), 3.5 * s, 3.5 * s)
+        p.drawEllipse(QPointF(38 * s, 40 * s), 3.5 * s, 3.5 * s)
+
+    elif name == "new":
+        # Windows 11 plus circle badge
+        p.setBrush(QColor("#0078d4"))
+        p.setPen(Qt.NoPen)
+        p.drawEllipse(QPointF(32 * s, 32 * s), 24 * s, 24 * s)
+        p.setPen(QPen(QColor("#ffffff"), 3.5 * s, Qt.SolidLine, Qt.RoundCap))
+        p.drawLine(QPointF(32 * s, 20 * s), QPointF(32 * s, 44 * s))
+        p.drawLine(QPointF(20 * s, 32 * s), QPointF(44 * s, 32 * s))
 
     elif name == "delete-perm":
         # Red permanent delete icon with X badge
@@ -2891,6 +3045,319 @@ class WindowsSystemPropertiesDialog(QDialog):
         return lbl
 
 
+class WindowsFolderOptionsDialog(QDialog):
+    """Authentic Windows 11 Folder Options Dialog matching Microsoft Windows 11 design."""
+
+    def __init__(self, explorer):
+        super().__init__(explorer)
+        self.explorer = explorer
+        self.setWindowTitle("Folder Options")
+        self.setWindowIcon(get_win_icon("folder-options", 24))
+        self.resize(520, 580)
+        self.setMinimumSize(480, 520)
+        self._setup_dialog_ui()
+
+    def _setup_dialog_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(12)
+
+        self.tabs = QTabWidget()
+        self.tabs.setObjectName("optionsTabs")
+
+        # Tab 1: General
+        tab_general = QWidget()
+        l_gen = QVBoxLayout(tab_general)
+        l_gen.setContentsMargins(14, 14, 14, 14)
+        l_gen.setSpacing(12)
+
+        row_open_to = QHBoxLayout()
+        row_open_to.addWidget(QLabel("Open File Explorer to:"))
+        self.combo_open_to = QComboBox()
+        self.combo_open_to.addItems(["Home", "This PC"])
+        if self.explorer._settings.get("open_to", "Home") == "This PC":
+            self.combo_open_to.setCurrentIndex(1)
+        row_open_to.addWidget(self.combo_open_to, 1)
+        l_gen.addLayout(row_open_to)
+
+        grp_browse = QGroupBox("Browse folders")
+        l_browse = QVBoxLayout(grp_browse)
+        self.rb_same_window = QRadioButton("Open each folder in the same window")
+        self.rb_new_window = QRadioButton("Open each folder in its own window")
+        if self.explorer._settings.get("new_window", False):
+            self.rb_new_window.setChecked(True)
+        else:
+            self.rb_same_window.setChecked(True)
+        l_browse.addWidget(self.rb_same_window)
+        l_browse.addWidget(self.rb_new_window)
+        l_gen.addWidget(grp_browse)
+
+        grp_click = QGroupBox("Click items as follows")
+        l_click = QVBoxLayout(grp_click)
+        self.rb_single_click = QRadioButton("Single-click to open an item (point to select)")
+        self.rb_double_click = QRadioButton("Double-click to open an item (single-click to select)")
+        if self.explorer._settings.get("single_click", False):
+            self.rb_single_click.setChecked(True)
+        else:
+            self.rb_double_click.setChecked(True)
+
+        sub_layout = QVBoxLayout()
+        sub_layout.setContentsMargins(24, 2, 0, 4)
+        self.rb_underline_browser = QRadioButton("Underline icon titles consistent with my browser")
+        self.rb_underline_hover = QRadioButton("Underline icon titles only when I point at them")
+        self.rb_underline_browser.setChecked(True)
+        sub_layout.addWidget(self.rb_underline_browser)
+        sub_layout.addWidget(self.rb_underline_hover)
+
+        l_click.addWidget(self.rb_single_click)
+        l_click.addLayout(sub_layout)
+        l_click.addWidget(self.rb_double_click)
+        l_gen.addWidget(grp_click)
+
+        grp_privacy = QGroupBox("Privacy")
+        l_privacy = QVBoxLayout(grp_privacy)
+        self.cb_recent_files = QCheckBox("Show recently used files")
+        self.cb_recent_files.setChecked(self.explorer._settings.get("recent_files", True))
+        self.cb_freq_folders = QCheckBox("Show frequently used folders")
+        self.cb_freq_folders.setChecked(self.explorer._settings.get("freq_folders", True))
+        self.cb_office_files = QCheckBox("Show files from Office.com")
+        self.cb_office_files.setChecked(self.explorer._settings.get("office_files", True))
+
+        clear_row = QHBoxLayout()
+        clear_row.addWidget(QLabel("Clear File Explorer history"))
+        clear_row.addStretch(1)
+        btn_clear = QPushButton("Clear")
+        btn_clear.clicked.connect(self._clear_history)
+        clear_row.addWidget(btn_clear)
+
+        l_privacy.addWidget(self.cb_recent_files)
+        l_privacy.addWidget(self.cb_freq_folders)
+        l_privacy.addWidget(self.cb_office_files)
+        l_privacy.addLayout(clear_row)
+        l_gen.addWidget(grp_privacy)
+        l_gen.addStretch(1)
+        self.tabs.addTab(tab_general, "General")
+
+        # Tab 2: View
+        tab_view = QWidget()
+        l_view = QVBoxLayout(tab_view)
+        l_view.setContentsMargins(14, 14, 14, 14)
+        l_view.setSpacing(10)
+
+        grp_fviews = QGroupBox("Folder views")
+        l_fviews = QVBoxLayout(grp_fviews)
+        l_fviews.addWidget(QLabel("You can apply this view (such as Details or Large Icons) to all folders."))
+        row_fv_btns = QHBoxLayout()
+        btn_apply_folders = QPushButton("Apply to Folders")
+        btn_apply_folders.clicked.connect(self._apply_to_folders)
+        btn_reset_folders = QPushButton("Reset Folders")
+        btn_reset_folders.clicked.connect(self._reset_folders)
+        row_fv_btns.addWidget(btn_apply_folders)
+        row_fv_btns.addWidget(btn_reset_folders)
+        row_fv_btns.addStretch(1)
+        l_fviews.addLayout(row_fv_btns)
+        l_view.addWidget(grp_fviews)
+
+        l_view.addWidget(QLabel("Advanced settings:"))
+        self.tree_advanced = QTreeWidget()
+        self.tree_advanced.setHeaderHidden(True)
+        self.tree_advanced.setObjectName("advancedSettingsTree")
+
+        root_item = QTreeWidgetItem(self.tree_advanced, ["Files and Folders"])
+        root_item.setIcon(0, get_win_icon("folder", 16))
+        root_item.setExpanded(True)
+
+        self.adv_checks = {}
+        settings_defs = [
+            ("always_icons", "Always show icons, never thumbnails", False),
+            ("always_menus", "Always show menus", False),
+            ("icon_on_thumbnails", "Display file icon on thumbnails", False),
+            ("folder_tips_size", "Display file size information in folder tips", False),
+            ("path_in_title", "Display the full path in the title bar", False),
+            ("hide_empty_drives", "Hide empty drives", False),
+            ("hide_extensions", "Hide extensions for known file types", not self.explorer._settings.get("extensions", True)),
+            ("hide_merge_conflicts", "Hide folder merge conflicts", True),
+            ("hide_system_files", "Hide protected operating system files (Recommended)", True),
+            ("separate_process", "Launch folder windows in a separate process", False),
+            ("restore_windows", "Restore previous folder windows at logon", True),
+            ("show_drive_letters", "Show drive letters", False),
+            ("show_ntfs_color", "Show encrypted or compressed NTFS files in color", True),
+            ("show_popup_desc", "Show popup description for folder and desktop items", False),
+            ("preview_handlers", "Show preview handlers in preview pane", self.explorer._settings.get("preview", False)),
+            ("status_bar", "Show status bar", self.explorer._settings.get("status_bar", True)),
+            ("use_checkboxes", "Use check boxes to select items", self.explorer._settings.get("use_checkboxes", True)),
+            ("use_sharing_wizard", "Use Sharing Wizard (Recommended)", False),
+        ]
+
+        hidden_group = QTreeWidgetItem(root_item, ["Hidden files and folders"])
+        hidden_group.setIcon(0, get_win_icon("folder", 16))
+        hidden_group.setExpanded(True)
+
+        self.item_dont_show_hidden = QTreeWidgetItem(hidden_group, ["Don't show hidden files, folders, or drives"])
+        self.item_show_hidden = QTreeWidgetItem(hidden_group, ["Show hidden files, folders, and drives"])
+        is_hidden_checked = bool(self.explorer._show_hidden)
+        self.item_dont_show_hidden.setCheckState(0, Qt.Unchecked if is_hidden_checked else Qt.Checked)
+        self.item_show_hidden.setCheckState(0, Qt.Checked if is_hidden_checked else Qt.Unchecked)
+
+        def on_tree_item_clicked(item, col):
+            if item == self.item_dont_show_hidden:
+                self.item_dont_show_hidden.setCheckState(0, Qt.Checked)
+                self.item_show_hidden.setCheckState(0, Qt.Unchecked)
+            elif item == self.item_show_hidden:
+                self.item_show_hidden.setCheckState(0, Qt.Checked)
+                self.item_dont_show_hidden.setCheckState(0, Qt.Unchecked)
+
+        self.tree_advanced.itemClicked.connect(on_tree_item_clicked)
+
+        for key, text, default_val in settings_defs:
+            val = self.explorer._settings.get(key, default_val)
+            item = QTreeWidgetItem(root_item, [text])
+            item.setCheckState(0, Qt.Checked if val else Qt.Unchecked)
+            self.adv_checks[key] = item
+
+        l_view.addWidget(self.tree_advanced, 1)
+        self.tabs.addTab(tab_view, "View")
+
+        # Tab 3: Search
+        tab_search = QWidget()
+        l_search = QVBoxLayout(tab_search)
+        l_search.setContentsMargins(14, 14, 14, 14)
+        l_search.setSpacing(12)
+
+        grp_search_how = QGroupBox("How to search")
+        l_sh = QVBoxLayout(grp_search_how)
+        self.cb_search_no_index = QCheckBox("Don't use the index when searching in file folders for system files (searches might take longer)")
+        self.cb_search_no_index.setChecked(self.explorer._settings.get("search_no_index", True))
+        l_sh.addWidget(self.cb_search_no_index)
+        l_search.addWidget(grp_search_how)
+
+        grp_search_loc = QGroupBox("When searching non-indexed locations")
+        l_sl = QVBoxLayout(grp_search_loc)
+        self.cb_include_system = QCheckBox("Include system directories")
+        self.cb_include_system.setChecked(self.explorer._settings.get("search_include_system", True))
+        self.cb_include_zip = QCheckBox("Include compressed files (ZIP, CAB...)")
+        self.cb_include_zip.setChecked(self.explorer._settings.get("search_include_zip", True))
+        self.cb_search_contents = QCheckBox("Always search file names and contents (this might take several minutes)")
+        self.cb_search_contents.setChecked(self.explorer._settings.get("search_contents", False))
+        l_sl.addWidget(self.cb_include_system)
+        l_sl.addWidget(self.cb_include_zip)
+        l_sl.addWidget(self.cb_search_contents)
+        l_search.addWidget(grp_search_loc)
+        l_search.addStretch(1)
+        self.tabs.addTab(tab_search, "Search")
+
+        layout.addWidget(self.tabs)
+
+        bottom_row = QHBoxLayout()
+        btn_defaults = QPushButton("Restore Defaults")
+        btn_defaults.clicked.connect(self._restore_defaults)
+        bottom_row.addWidget(btn_defaults)
+        bottom_row.addStretch(1)
+
+        btn_ok = QPushButton("OK")
+        btn_ok.setDefault(True)
+        btn_ok.clicked.connect(self._accept)
+        btn_cancel = QPushButton("Cancel")
+        btn_cancel.clicked.connect(self.reject)
+        btn_apply = QPushButton("Apply")
+        btn_apply.clicked.connect(self._apply)
+
+        bottom_row.addWidget(btn_ok)
+        bottom_row.addWidget(btn_cancel)
+        bottom_row.addWidget(btn_apply)
+        layout.addLayout(bottom_row)
+
+    def _clear_history(self):
+        self.explorer._history.clear()
+        self.explorer._future.clear()
+        self.explorer.btn_back.setEnabled(False)
+        self.explorer.btn_forward.setEnabled(False)
+        QMessageBox.information(self, "Clear History", "File Explorer history has been cleared.")
+
+    def _apply_to_folders(self):
+        self.explorer._settings["view_mode"] = self.explorer._view_mode
+        self.explorer.save_settings()
+        QMessageBox.information(self, "Folder Views", f"Current view mode ({self.explorer._view_mode}) applied as default for all folders.")
+
+    def _reset_folders(self):
+        self.explorer._settings.pop("folder_sort", None)
+        self.explorer._settings["view_mode"] = "details"
+        self.explorer.set_view_mode("details")
+        self.explorer.save_settings()
+        self.explorer.refresh()
+        QMessageBox.information(self, "Folder Views", "All folder views have been reset to default.")
+
+    def _restore_defaults(self):
+        self.combo_open_to.setCurrentIndex(0)
+        self.rb_same_window.setChecked(True)
+        self.rb_double_click.setChecked(True)
+        self.cb_recent_files.setChecked(True)
+        self.cb_freq_folders.setChecked(True)
+        self.cb_office_files.setChecked(True)
+        self.item_dont_show_hidden.setCheckState(0, Qt.Checked)
+        self.item_show_hidden.setCheckState(0, Qt.Unchecked)
+        for key, item in self.adv_checks.items():
+            if key in ("hide_extensions", "hide_merge_conflicts", "hide_system_files", "restore_windows", "show_ntfs_color", "status_bar", "use_checkboxes", "preview_handlers"):
+                item.setCheckState(0, Qt.Checked)
+            else:
+                item.setCheckState(0, Qt.Unchecked)
+        self.cb_search_no_index.setChecked(True)
+        self.cb_include_system.setChecked(True)
+        self.cb_include_zip.setChecked(True)
+        self.cb_search_contents.setChecked(False)
+
+    def _apply(self):
+        s = self.explorer._settings
+        s["open_to"] = self.combo_open_to.currentText()
+        s["new_window"] = self.rb_new_window.isChecked()
+        s["single_click"] = self.rb_single_click.isChecked()
+        s["recent_files"] = self.cb_recent_files.isChecked()
+        s["freq_folders"] = self.cb_freq_folders.isChecked()
+        s["office_files"] = self.cb_office_files.isChecked()
+
+        show_hidden = (self.item_show_hidden.checkState(0) == Qt.Checked)
+        self.explorer._show_hidden = show_hidden
+        s["show_hidden"] = show_hidden
+        if hasattr(self.explorer, "act_show_hidden"):
+            self.explorer.act_show_hidden.setChecked(show_hidden)
+        if hasattr(self.explorer, "btn_hidden"):
+            self.explorer.btn_hidden.setChecked(show_hidden)
+
+        for key, item in self.adv_checks.items():
+            s[key] = (item.checkState(0) == Qt.Checked)
+
+        s["extensions"] = not s.get("hide_extensions", False)
+        if hasattr(self.explorer, "act_show_ext"):
+            self.explorer.act_show_ext.setChecked(s["extensions"])
+
+        has_preview = bool(s.get("preview_handlers", False))
+        s["preview"] = has_preview
+        if hasattr(self.explorer, "preview"):
+            self.explorer.preview.setVisible(has_preview)
+        if hasattr(self.explorer, "preview_button"):
+            self.explorer.preview_button.setChecked(has_preview)
+
+        show_status = bool(s.get("status_bar", True))
+        s["status_bar"] = show_status
+        if hasattr(self.explorer, "status"):
+            self.explorer.status.setVisible(show_status)
+
+        s["search_no_index"] = self.cb_search_no_index.isChecked()
+        s["search_include_system"] = self.cb_include_system.isChecked()
+        s["search_include_zip"] = self.cb_include_zip.isChecked()
+        s["search_contents"] = self.cb_search_contents.isChecked()
+
+        self.explorer.save_settings()
+        self.explorer._apply_appearance()
+        self.explorer.refresh()
+
+    def _accept(self):
+        self._apply()
+        self.accept()
+
+
+
+
 class WindowsFileExplorer(QMainWindow):
     """Full-featured Windows 10/11 File Explorer for DevOS."""
 
@@ -2930,11 +3397,37 @@ class WindowsFileExplorer(QMainWindow):
         self._settings = self.load_settings()
         self._show_hidden = bool(self._settings.get("show_hidden", False))
 
+        self._loading_folder = False
+        self._watcher = QFileSystemWatcher(self)
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.setSingleShot(True)
+        self._refresh_timer.setInterval(250)
+        self._refresh_timer.timeout.connect(self.refresh)
+        self._watcher.directoryChanged.connect(lambda _: self._refresh_timer.start())
+        self._thumbnail_timer = QTimer(self)
+        self._thumbnail_timer.setInterval(15)
+        self._thumbnail_timer.timeout.connect(self._load_next_thumbnail)
+        self._thumbnail_queue = []
+        self._active_tab = 0
         self._setup_ui()
+        self._apply_appearance()
+        self.reload_drives()
+        self.table_view.horizontalHeader().sortIndicatorChanged.connect(self._remember_sort)
+        if (not initial_path or self._picker_options.get("resume")) and self._settings.get("restore_folder", True):
+            remembered = self._settings.get("last_folder", "")
+            if os.path.isdir(remembered):
+                initial_path = remembered
         if self._picker_mode and not initial_path:
             dl = os.path.expanduser("~/Downloads")
             initial_path = dl if os.path.isdir(dl) else os.path.expanduser("~")
+        saved_view = self._settings.get("view_mode")
         self.navigate_to(initial_path, add_to_history=False)
+        if saved_view == "icons":
+            self.toggle_view_mode()
+        screen = QApplication.primaryScreen()
+        if screen:
+            area = screen.availableGeometry()
+            self.resize(min(self.width(), area.width() - 40), min(self.height(), area.height() - 60))
 
     def _setup_ui(self):
         root = QWidget()
@@ -2942,6 +3435,34 @@ class WindowsFileExplorer(QMainWindow):
         main_layout = QVBoxLayout(root)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
+        # 0. Modern Top Tab Strip (acrylic dark tabs directly at window top)
+        if not self._picker_mode:
+            self.tab_container = QWidget()
+            self.tab_container.setObjectName("tabContainer")
+            tab_row = QHBoxLayout(self.tab_container)
+            tab_row.setContentsMargins(12, 6, 12, 0)
+            tab_row.setSpacing(6)
+
+            self.folder_tabs = QTabBar()
+            self.folder_tabs.setObjectName("windowTabs")
+            self.folder_tabs.setExpanding(False)
+            self.folder_tabs.setTabsClosable(True)
+            self.folder_tabs.setUsesScrollButtons(True)
+            self.folder_tabs.addTab(get_win_icon("this-pc", 16), "This PC")
+            self.folder_tabs.setTabData(0, {"path": "", "history": [], "future": []})
+            self.folder_tabs.currentChanged.connect(self._switch_tab)
+            self.folder_tabs.tabCloseRequested.connect(self._close_tab)
+            tab_row.addWidget(self.folder_tabs)
+
+            self.btn_add_tab = QToolButton()
+            self.btn_add_tab.setText("+")
+            self.btn_add_tab.setObjectName("addTabBtn")
+            self.btn_add_tab.setToolTip("New tab (Ctrl+T)")
+            self.btn_add_tab.clicked.connect(lambda: self._new_tab(self._current_path))
+            tab_row.addWidget(self.btn_add_tab)
+            tab_row.addStretch(1)
+
+            main_layout.addWidget(self.tab_container)
 
         # 1. Top Navigation & Address Toolbar
         nav_toolbar = QWidget()
@@ -2997,135 +3518,235 @@ class WindowsFileExplorer(QMainWindow):
 
         main_layout.addWidget(nav_toolbar)
 
-        # 2. Command Bar / Ribbon (New folder, Cut, Copy, Paste, Delete, Properties, View)
+        # 2. Command Ribbon (Windows 11 Fluent)
         cmd_bar = QWidget()
         cmd_bar.setObjectName("commandBar")
         cmd_layout = QHBoxLayout(cmd_bar)
-        cmd_layout.setContentsMargins(12, 4, 12, 6)
-        cmd_layout.setSpacing(6)
+        cmd_layout.setContentsMargins(10, 4, 10, 4)
+        cmd_layout.setSpacing(4)
 
-        self.btn_new_folder = QPushButton("New folder")
-        self.btn_new_folder.setIcon(get_win_icon("folder", 18))
-        self.btn_new_folder.setObjectName("cmdBtn")
-        self.btn_new_folder.clicked.connect(self.action_new_folder)
+        # "+ New ˇ" Dropdown Button
+        self.btn_new = QPushButton("  New  ")
+        self.btn_new.setIcon(get_win_icon("new", 18))
+        self.btn_new.setObjectName("newBtn")
+        self.btn_new.setToolTip("Create new item")
+        new_menu = QMenu(self.btn_new)
+        act_new_folder = new_menu.addAction(get_win_icon("folder", 16), "Folder\tCtrl+Shift+N")
+        act_new_folder.triggered.connect(self.action_new_folder)
+        act_new_txt = new_menu.addAction(get_win_icon("file-doc", 16), "Text Document (.txt)")
+        act_new_txt.triggered.connect(self.action_new_text_document)
+        act_new_md = new_menu.addAction(get_win_icon("file-code", 16), "Markdown Document (.md)")
+        act_new_md.triggered.connect(self.action_new_markdown_document)
+        act_new_zip = new_menu.addAction(get_win_icon("file-archive", 16), "Compressed (zipped) Folder")
+        act_new_zip.triggered.connect(self.action_compress_zip)
+        self.btn_new.setMenu(new_menu)
+        cmd_layout.addWidget(self.btn_new)
 
-        self.btn_cut = QPushButton("Cut")
+        self.btn_new_folder = self.btn_new  # Alias for backward compatibility & tests
+
+        cmd_layout.addSpacing(6)
+
+        # Action Icon Buttons
+        self.btn_cut = QPushButton()
+        self.btn_cut.setIcon(get_win_icon("cut", 18))
         self.btn_cut.setObjectName("cmdBtn")
+        self.btn_cut.setToolTip("Cut (Ctrl+X)")
         self.btn_cut.clicked.connect(self.action_cut)
 
-        self.btn_copy = QPushButton("Copy")
+        self.btn_copy = QPushButton()
+        self.btn_copy.setIcon(get_win_icon("copy", 18))
         self.btn_copy.setObjectName("cmdBtn")
+        self.btn_copy.setToolTip("Copy (Ctrl+C)")
         self.btn_copy.clicked.connect(self.action_copy)
 
-        self.btn_paste = QPushButton("Paste")
+        self.btn_paste = QPushButton()
+        self.btn_paste.setIcon(get_win_icon("paste", 18))
         self.btn_paste.setObjectName("cmdBtn")
+        self.btn_paste.setToolTip("Paste (Ctrl+V)")
         self.btn_paste.clicked.connect(self.action_paste)
 
-        self.btn_copy_path = QPushButton("Copy path")
-        self.btn_copy_path.setIcon(get_win_icon("copy-path", 16))
+        self.btn_rename = QPushButton()
+        self.btn_rename.setIcon(get_win_icon("rename", 18))
+        self.btn_rename.setObjectName("cmdBtn")
+        self.btn_rename.setToolTip("Rename (F2)")
+        self.btn_rename.clicked.connect(self.action_rename)
+
+        self.btn_copy_path = QPushButton()
+        self.btn_copy_path.setIcon(get_win_icon("copy-path", 18))
         self.btn_copy_path.setObjectName("cmdBtn")
         self.btn_copy_path.setToolTip("Copy path (Ctrl+Shift+C)")
         self.btn_copy_path.clicked.connect(self.action_copy_path)
 
-        self.btn_rename = QPushButton("Rename")
-        self.btn_rename.setObjectName("cmdBtn")
-        self.btn_rename.clicked.connect(self.action_rename)
+        self.btn_share = QPushButton()
+        self.btn_share.setIcon(get_win_icon("share", 18))
+        self.btn_share.setObjectName("cmdBtn")
+        self.btn_share.setToolTip("Share")
+        self.btn_share.clicked.connect(self.action_share)
 
-        self.btn_delete = QPushButton("Delete")
+        self.btn_delete = QPushButton()
+        self.btn_delete.setIcon(get_win_icon("delete", 18))
         self.btn_delete.setObjectName("cmdBtn")
+        self.btn_delete.setToolTip("Delete (Delete)")
         self.btn_delete.clicked.connect(self.action_delete)
 
-        self.btn_view = QPushButton("View: Details")
-        self.btn_view.setObjectName("cmdBtn")
-        self.btn_view.clicked.connect(self.toggle_view_mode)
+        cmd_layout.addWidget(self.btn_cut)
+        cmd_layout.addWidget(self.btn_copy)
+        cmd_layout.addWidget(self.btn_paste)
+        cmd_layout.addWidget(self.btn_rename)
+        cmd_layout.addWidget(self.btn_share)
+        cmd_layout.addWidget(self.btn_delete)
 
-        self.btn_hidden = QPushButton("Hidden items")
-        self.btn_hidden.setObjectName("cmdBtn")
-        self.btn_hidden.setCheckable(True)
-        self.btn_hidden.setChecked(self._show_hidden)
-        self.btn_hidden.setToolTip("Show hidden files and folders (Ctrl+H)")
-        self.btn_hidden.clicked.connect(self.toggle_hidden_files)
-
-        self.btn_terminal = QPushButton("Terminal")
-        self.btn_terminal.setObjectName("cmdBtn")
-        self.btn_terminal.clicked.connect(lambda: open_in_terminal(self._current_path or os.path.expanduser("~")))
-
-        self.btn_props = QPushButton("Properties")
-        self.btn_props.setObjectName("cmdBtn")
-        self.btn_props.clicked.connect(self.show_properties)
-
+        # Archive buttons
         self.btn_extract = QPushButton("Extract all")
         self.btn_extract.setIcon(get_win_icon("file-archive", 16))
         self.btn_extract.setObjectName("cmdBtn")
-        self.btn_extract.setToolTip("Extract compressed archive")
         self.btn_extract.setVisible(False)
         self.btn_extract.clicked.connect(lambda: self.action_extract_dialog())
+        cmd_layout.addWidget(self.btn_extract)
 
         self.btn_compress = QPushButton("Compress to ZIP")
         self.btn_compress.setIcon(get_win_icon("file-archive", 16))
         self.btn_compress.setObjectName("cmdBtn")
-        self.btn_compress.setToolTip("Compress selected item(s) into a ZIP file")
         self.btn_compress.setVisible(False)
         self.btn_compress.clicked.connect(lambda: self.action_compress_zip())
+        cmd_layout.addWidget(self.btn_compress)
 
         # Recycle Bin specific buttons
         self.btn_empty_trash = QPushButton("Empty Recycle Bin")
         self.btn_empty_trash.setIcon(get_win_icon("recycle-bin", 18))
         self.btn_empty_trash.setObjectName("cmdBtn")
-        self.btn_empty_trash.setToolTip("Permanently delete all items in the Recycle Bin")
         self.btn_empty_trash.setVisible(False)
         self.btn_empty_trash.clicked.connect(self.action_empty_recycle_bin)
+        cmd_layout.addWidget(self.btn_empty_trash)
 
         self.btn_restore_all = QPushButton("Restore all items")
         self.btn_restore_all.setIcon(get_win_icon("restore", 18))
         self.btn_restore_all.setObjectName("cmdBtn")
-        self.btn_restore_all.setToolTip("Restore all items in the Recycle Bin to their original locations")
         self.btn_restore_all.setVisible(False)
         self.btn_restore_all.clicked.connect(self.action_restore_all)
+        cmd_layout.addWidget(self.btn_restore_all)
 
         self.btn_restore_selected = QPushButton("Restore selected")
         self.btn_restore_selected.setIcon(get_win_icon("restore", 18))
         self.btn_restore_selected.setObjectName("cmdBtn")
-        self.btn_restore_selected.setToolTip("Restore selected item(s) to original location")
         self.btn_restore_selected.setVisible(False)
         self.btn_restore_selected.clicked.connect(self.action_restore_selected)
+        cmd_layout.addWidget(self.btn_restore_selected)
 
         self.btn_delete_permanently = QPushButton("Delete permanently")
         self.btn_delete_permanently.setIcon(get_win_icon("delete-perm", 18))
         self.btn_delete_permanently.setObjectName("cmdBtn")
-        self.btn_delete_permanently.setToolTip("Permanently delete selected item(s)")
         self.btn_delete_permanently.setVisible(False)
         self.btn_delete_permanently.clicked.connect(self.action_delete_permanently)
-
-        cmd_layout.addWidget(self.btn_new_folder)
-        cmd_layout.addWidget(self.btn_cut)
-        cmd_layout.addWidget(self.btn_copy)
-        cmd_layout.addWidget(self.btn_paste)
-        cmd_layout.addWidget(self.btn_copy_path)
-        cmd_layout.addWidget(self.btn_rename)
-        cmd_layout.addWidget(self.btn_delete)
-        cmd_layout.addWidget(self.btn_extract)
-        cmd_layout.addWidget(self.btn_compress)
-        cmd_layout.addWidget(self.btn_empty_trash)
-        cmd_layout.addWidget(self.btn_restore_all)
-        cmd_layout.addWidget(self.btn_restore_selected)
         cmd_layout.addWidget(self.btn_delete_permanently)
-        cmd_layout.addSpacing(10)
+
+        # Separator
+        sep = QFrame()
+        sep.setFrameShape(QFrame.VLine)
+        sep.setObjectName("cmdSep")
+        sep.setFixedHeight(24)
+        cmd_layout.addWidget(sep)
+
+        # "⇅ Sort ˇ"
+        self.btn_sort = QPushButton("Sort")
+        self.btn_sort.setIcon(get_win_icon("sort", 16))
+        self.btn_sort.setObjectName("cmdBtn")
+        sort_menu = QMenu(self.btn_sort)
+        for col_idx, col_name in enumerate(["Name", "Date modified", "Type", "Size"]):
+            sort_menu.addAction(col_name, lambda c=col_idx: self.table_view.sortItems(c, self.table_view.horizontalHeader().sortIndicatorOrder()))
+        sort_menu.addSeparator()
+        sort_menu.addAction("Ascending", lambda: self.table_view.sortItems(self.table_view.horizontalHeader().sortIndicatorSection(), Qt.AscendingOrder))
+        sort_menu.addAction("Descending", lambda: self.table_view.sortItems(self.table_view.horizontalHeader().sortIndicatorSection(), Qt.DescendingOrder))
+        self.btn_sort.setMenu(sort_menu)
+        cmd_layout.addWidget(self.btn_sort)
+
+        # "⊞ View ˇ"
+        self.btn_view = QPushButton("View")
+        self.btn_view.setIcon(get_win_icon("view", 16))
+        self.btn_view.setObjectName("cmdBtn")
+        view_menu = QMenu(self.btn_view)
+        view_menu.addAction("Extra large icons", lambda: self.set_view_mode("icons", 128))
+        view_menu.addAction("Large icons", lambda: self.set_view_mode("icons", 96))
+        view_menu.addAction("Medium icons", lambda: self.set_view_mode("icons", 64))
+        view_menu.addAction("Small icons", lambda: self.set_view_mode("icons", 48))
+        view_menu.addSeparator()
+        view_menu.addAction("List", lambda: self.set_view_mode("icons", 32))
+        view_menu.addAction("Details", lambda: self.set_view_mode("details"))
+        view_menu.addAction("Tiles", lambda: self.set_view_mode("icons", 80))
+        view_menu.addSeparator()
+
+        act_compact = view_menu.addAction("Compact view")
+        act_compact.setCheckable(True)
+        act_compact.setChecked(self._settings.get("compact", False))
+        act_compact.toggled.connect(self.toggle_compact_view)
+
+        show_submenu = view_menu.addMenu("Show")
+        self.act_show_hidden = show_submenu.addAction("Hidden items")
+        self.act_show_hidden.setCheckable(True)
+        self.act_show_hidden.setChecked(self._show_hidden)
+        self.act_show_hidden.triggered.connect(self.toggle_hidden_files)
+
+        self.act_show_ext = show_submenu.addAction("File name extensions")
+        self.act_show_ext.setCheckable(True)
+        self.act_show_ext.setChecked(self._settings.get("extensions", True))
+        self.act_show_ext.triggered.connect(self.toggle_extensions)
+
+        self.act_show_checks = show_submenu.addAction("Item check boxes")
+        self.act_show_checks.setCheckable(True)
+        self.act_show_checks.setChecked(self._settings.get("use_checkboxes", True))
+        self.act_show_checks.triggered.connect(self.toggle_checkboxes)
+
+        self.btn_view.setMenu(view_menu)
         cmd_layout.addWidget(self.btn_view)
-        cmd_layout.addWidget(self.btn_hidden)
-        cmd_layout.addWidget(self.btn_terminal)
-        cmd_layout.addWidget(self.btn_props)
+
+        # "···" See More Menu
+        self.btn_more = QPushButton("…")
+        self.btn_more.setObjectName("cmdBtn")
+        self.btn_more.setToolTip("See more")
+        more_menu = QMenu(self.btn_more)
+        more_menu.addAction("Undo\tCtrl+Z", self.action_undo)
+        more_menu.addAction("Pin to Quick access", lambda: self.pin_to_quick_access(self._current_path))
+        more_menu.addAction(get_win_icon("copy-path", 16), "Copy path\tCtrl+Shift+C", lambda: self.action_copy_path(self._current_path))
+        more_menu.addSeparator()
+        more_menu.addAction("Map network drive…", self.action_map_network_drive)
+        more_menu.addAction("Disconnect network drive…", self.action_disconnect_network_drive)
+        more_menu.addAction("Add a network location", self.action_add_network_location)
+        more_menu.addSeparator()
+        more_menu.addAction("Select all\tCtrl+A", lambda: (self.table_view if self._view_mode == "details" else self.list_view).selectAll())
+        more_menu.addAction("Select none", lambda: (self.table_view if self._view_mode == "details" else self.list_view).clearSelection())
+        more_menu.addAction("Invert selection", self.action_invert_selection)
+        more_menu.addSeparator()
+        self.btn_terminal = more_menu.addAction("Open in Terminal")
+        self.btn_terminal.triggered.connect(lambda: open_in_terminal(self._current_path or os.path.expanduser("~")))
+        self.btn_props = more_menu.addAction("Properties\tAlt+Enter")
+        self.btn_props.triggered.connect(lambda: self.show_properties(self._current_path))
+        more_menu.addSeparator()
+        act_options = more_menu.addAction(get_win_icon("folder-options", 16), "Options")
+        act_options.triggered.connect(self.show_folder_options)
+
+        self.btn_more.setMenu(more_menu)
+        cmd_layout.addWidget(self.btn_more)
+
+        # Stretch
         cmd_layout.addStretch(1)
 
+        # Right-aligned Details / Preview toggle
+        self.preview_button = QPushButton("Preview")
+        self.preview_button.setIcon(get_win_icon("preview", 16))
+        self.preview_button.setObjectName("cmdBtn")
+        self.preview_button.setCheckable(True)
+        self.preview_button.setChecked(self._settings.get("preview", False))
+        self.preview_button.setToolTip("Preview pane (Alt+P)")
+        self.preview_button.clicked.connect(self.toggle_preview)
+        cmd_layout.addWidget(self.preview_button)
+
         if self._picker_mode:
-            self.btn_cut.hide()
-            self.btn_copy.hide()
-            self.btn_paste.hide()
-            self.btn_copy_path.hide()
-            self.btn_rename.hide()
-            self.btn_delete.hide()
-            self.btn_terminal.hide()
-            self.btn_props.hide()
+            for b in (self.btn_cut, self.btn_copy, self.btn_paste, self.btn_copy_path,
+                      self.btn_rename, self.btn_share, self.btn_delete, self.btn_terminal, self.btn_props):
+                if hasattr(b, "hide"):
+                    b.hide()
+                elif hasattr(b, "setVisible"):
+                    b.setVisible(False)
 
         main_layout.addWidget(cmd_bar)
 
@@ -3140,6 +3761,26 @@ class WindowsFileExplorer(QMainWindow):
         sidebar_layout = QVBoxLayout(self.sidebar)
         sidebar_layout.setContentsMargins(10, 12, 10, 12)
         sidebar_layout.setSpacing(2)
+
+        # Top Navigation Shortcuts: Home, Gallery
+        self.home_btn = QPushButton("Home")
+        self.home_btn.setIcon(get_win_icon("home", 20))
+        self.home_btn.setObjectName("sideBtn")
+        self.home_btn.setCursor(Qt.PointingHandCursor)
+        self.home_btn.clicked.connect(lambda: self.navigate_to(os.path.expanduser("~")))
+        sidebar_layout.addWidget(self.home_btn)
+        self._side_btns[os.path.expanduser("~")] = self.home_btn
+
+        pics_dir = os.path.expanduser("~/Pictures")
+        self.gallery_btn = QPushButton("Gallery")
+        self.gallery_btn.setIcon(get_win_icon("gallery", 20))
+        self.gallery_btn.setObjectName("sideBtn")
+        self.gallery_btn.setCursor(Qt.PointingHandCursor)
+        self.gallery_btn.clicked.connect(lambda: self.navigate_to(pics_dir if os.path.isdir(pics_dir) else os.path.expanduser("~")))
+        sidebar_layout.addWidget(self.gallery_btn)
+        self._side_btns[pics_dir] = self.gallery_btn
+
+        sidebar_layout.addSpacing(6)
 
         # Quick Access Section
         qa_label = QLabel("Quick access")
@@ -3202,7 +3843,13 @@ class WindowsFileExplorer(QMainWindow):
         sidebar_layout.addWidget(props_btn)
 
         sidebar_layout.addStretch(1)
-        splitter.addWidget(self.sidebar)
+        sidebar_scroll = QScrollArea()
+        sidebar_scroll.setWidget(self.sidebar)
+        sidebar_scroll.setWidgetResizable(True)
+        sidebar_scroll.setFrameShape(QFrame.NoFrame)
+        sidebar_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        sidebar_scroll.setFixedWidth(236)
+        splitter.addWidget(sidebar_scroll)
 
         # Right Stacked Widget: Page 0 = This PC view, Page 1 = Folder browser view
         self.content_stack = QStackedWidget()
@@ -3277,7 +3924,8 @@ class WindowsFileExplorer(QMainWindow):
         self.table_view.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.table_view.setShowGrid(False)
         self.table_view.setSortingEnabled(True)
-        self.table_view.itemDoubleClicked.connect(self._on_table_item_double_clicked)
+        self.table_view.itemDoubleClicked.connect(lambda item: self._on_table_item_double_clicked(item) if self._picker_mode or not self._settings.get("single_click", False) else None)
+        self.table_view.itemClicked.connect(lambda item: self._on_table_item_double_clicked(item) if not self._picker_mode and self._settings.get("single_click", False) else None)
         self.table_view.itemSelectionChanged.connect(self._on_selection_changed)
         self.table_view.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table_view.customContextMenuRequested.connect(self._show_context_menu)
@@ -3286,12 +3934,19 @@ class WindowsFileExplorer(QMainWindow):
         # Icons List View (Hidden unless icons mode selected)
         self.list_view = ExplorerListWidget()
         self.list_view.setObjectName("fileList")
+        self.list_view.setStyleSheet("""
+            QListWidget#fileList { font-size: 12px; background: #0e1827; color: #dce7f7; padding: 10px; border: none; }
+            QListWidget#fileList::item { background: #16273c; border: 1px solid #243b56; border-radius: 10px; padding: 8px; margin: 5px; }
+            QListWidget#fileList::item:hover { background: #203951; border-color: #4f8bb5; }
+            QListWidget#fileList::item:selected { background: #235073; border-color: #7dd3fc; }
+        """)
         self.list_view.setViewMode(QListWidget.IconMode)
-        self.list_view.setIconSize(QSize(54, 54))
-        self.list_view.setGridSize(QSize(110, 95))
+        self.list_view.setIconSize(QSize(128, 88))
+        self.list_view.setGridSize(QSize(174, 150))
         self.list_view.setResizeMode(QListWidget.Adjust)
         self.list_view.setWordWrap(True)
-        self.list_view.itemDoubleClicked.connect(self._on_list_item_double_clicked)
+        self.list_view.itemDoubleClicked.connect(lambda item: self._on_list_item_double_clicked(item) if self._picker_mode or not self._settings.get("single_click", False) else None)
+        self.list_view.itemClicked.connect(lambda item: self._on_list_item_double_clicked(item) if not self._picker_mode and self._settings.get("single_click", False) else None)
         self.list_view.itemSelectionChanged.connect(self._on_selection_changed)
         self.list_view.setContextMenuPolicy(Qt.CustomContextMenu)
         self.list_view.customContextMenuRequested.connect(self._show_context_menu)
@@ -3304,6 +3959,75 @@ class WindowsFileExplorer(QMainWindow):
 
         self.content_stack.addWidget(self.page_folder)
         splitter.addWidget(self.content_stack)
+        # 4. Collapsible Right Preview Pane (matching Windows 11 Fluent design)
+        self.preview = QWidget()
+        self.preview.setObjectName("previewPane")
+        self.preview.setMinimumWidth(260)
+        self.preview.setMaximumWidth(360)
+        preview_layout = QVBoxLayout(self.preview)
+        preview_layout.setContentsMargins(16, 20, 16, 16)
+        preview_layout.setSpacing(12)
+
+        # Empty state container (matching screenshot 5)
+        self.preview_empty = QWidget()
+        self.preview_empty.setObjectName("previewEmpty")
+        empty_l = QVBoxLayout(self.preview_empty)
+        empty_l.setContentsMargins(0, 80, 0, 0)
+        empty_l.setSpacing(14)
+        empty_icon = QLabel()
+        empty_icon.setPixmap(get_win_icon("preview", 56).pixmap(56, 56))
+        empty_icon.setAlignment(Qt.AlignCenter)
+        empty_l.addWidget(empty_icon)
+        empty_text = QLabel("Select a file to preview.")
+        empty_text.setAlignment(Qt.AlignCenter)
+        empty_text.setStyleSheet("font-size: 13.5px; color: #8e9faa; background: transparent; font-weight: 500;")
+        empty_l.addWidget(empty_text)
+        empty_l.addStretch()
+        preview_layout.addWidget(self.preview_empty)
+
+        # Content state container
+        self.preview_content = QWidget()
+        self.preview_content.setObjectName("previewContent")
+        content_l = QVBoxLayout(self.preview_content)
+        content_l.setContentsMargins(0, 0, 0, 0)
+        content_l.setSpacing(10)
+
+        self.preview_name = QLabel()
+        self.preview_name.setTextFormat(Qt.PlainText)
+        self.preview_name.setWordWrap(True)
+        self.preview_name.setStyleSheet("font-size: 15px; font-weight: 600; color: #f1f5f9; background: transparent;")
+        content_l.addWidget(self.preview_name)
+
+        self.preview_type_badge = QLabel()
+        self.preview_type_badge.setStyleSheet("color: #38bdf8; font-size: 12px; font-weight: 500; background: transparent;")
+        content_l.addWidget(self.preview_type_badge)
+
+        self.preview_image = QLabel()
+        self.preview_image.setAlignment(Qt.AlignCenter)
+        self.preview_image.setWordWrap(True)
+        self.preview_image.setTextFormat(Qt.PlainText)
+        self.preview_image.setStyleSheet("background: #111a28; border: 1px solid #1e2c40; border-radius: 8px; padding: 6px;")
+        content_l.addWidget(self.preview_image)
+
+        self.preview_text = QPlainTextEdit()
+        self.preview_text.setReadOnly(True)
+        self.preview_text.setMaximumBlockCount(500)
+        self.preview_text.setStyleSheet("background: #0d1522; color: #cbd5e1; border: 1px solid #1e2c40; border-radius: 8px; font-family: Monospace; font-size: 11.5px; padding: 6px;")
+        self.preview_text.hide()
+        content_l.addWidget(self.preview_text, 1)
+
+        self.preview_metadata = QLabel()
+        self.preview_metadata.setTextFormat(Qt.PlainText)
+        self.preview_metadata.setWordWrap(True)
+        self.preview_metadata.setStyleSheet("color: #94a3b8; background: #131f30; border: 1px solid #1f3048; border-radius: 8px; padding: 10px; font-size: 11.5px; line-height: 1.4;")
+        content_l.addWidget(self.preview_metadata)
+        content_l.addStretch()
+
+        self.preview_content.hide()
+        preview_layout.addWidget(self.preview_content)
+
+        self.preview.setVisible(self._settings.get("preview", False))
+        splitter.addWidget(self.preview)
         splitter.setStretchFactor(1, 1)
 
         main_layout.addWidget(splitter, 1)
@@ -3348,6 +4072,9 @@ class WindowsFileExplorer(QMainWindow):
 
             self.picker_filter_combo = QComboBox()
             self.picker_filter_combo.setObjectName("pickerCombo")
+            self.picker_filter_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+            self.picker_filter_combo.setMinimumContentsLength(18)
+            self.picker_filter_combo.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
             raw_filters = self._picker_options.get("filters", [])
             if not raw_filters:
                 raw_filters = [("All Files (*.*)", ["*.*"])]
@@ -3791,6 +4518,136 @@ class WindowsFileExplorer(QMainWindow):
     PINNED_FILE = os.path.join(CONFIG_DIR, "quick_access.json")
     SETTINGS_FILE = os.path.join(CONFIG_DIR, "explorer_settings.json")
 
+    def _apply_appearance(self):
+        if not hasattr(self, "_base_style"):
+            self._base_style = self.styleSheet()
+        self.setStyleSheet(self._base_style + """
+            QMainWindow, QDialog { background: #0c131f; color: #f1f5f9; font-family: 'Segoe UI', 'Inter', sans-serif; }
+            QWidget#tabContainer { background: #090e17; border-bottom: 1px solid #1a2638; }
+            QTabBar#windowTabs { background: transparent; }
+            QTabBar#windowTabs::tab {
+                background: #111a28;
+                color: #94a3b8;
+                border: 1px solid #1e2c40;
+                border-bottom: none;
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+                padding: 8px 18px;
+                margin-right: 4px;
+                font-size: 12px;
+                font-weight: 500;
+            }
+            QTabBar#windowTabs::tab:hover { background: #172437; color: #e2e8f0; }
+            QTabBar#windowTabs::tab:selected {
+                background: #1a273b;
+                color: #ffffff;
+                border-color: #2b3e58;
+                border-top: 2px solid #0078d4;
+                font-weight: 600;
+            }
+            QToolButton#addTabBtn {
+                background: transparent;
+                color: #94a3b8;
+                border: 1px solid transparent;
+                border-radius: 6px;
+                padding: 4px 10px;
+                font-size: 16px;
+                font-weight: bold;
+            }
+            QToolButton#addTabBtn:hover { background: #1a273b; border-color: #2b3e58; color: #ffffff; }
+
+            QWidget#navToolbar { background: #0f1725; border: none; padding: 4px 8px; }
+            QToolButton#navBtn {
+                background: #152132;
+                border: 1px solid #23344d;
+                border-radius: 6px;
+                padding: 5px 8px;
+                color: #cbd5e1;
+                font-size: 13px;
+                font-weight: bold;
+            }
+            QToolButton#navBtn:hover { background: #1e3048; border-color: #38bdf8; color: #ffffff; }
+            QToolButton#navBtn:disabled { background: #111a28; border-color: #1a2638; color: #475569; }
+
+            QLineEdit#searchBox {
+                background: #090e17;
+                border: 1px solid #1f2f45;
+                border-radius: 6px;
+                padding: 6px 12px;
+                color: #ecf4ff;
+                font-size: 12px;
+            }
+            QLineEdit#searchBox:focus { border-color: #0078d4; background: #0d1522; }
+
+            QWidget#commandBar { background: #0e1624; border-bottom: 1px solid #1c2a3d; padding: 2px 6px; }
+            QPushButton#cmdBtn, QToolButton#cmdBtn {
+                background: transparent;
+                border: 1px solid transparent;
+                border-radius: 6px;
+                padding: 6px 10px;
+                color: #e2e8f0;
+                font-size: 12px;
+            }
+            QPushButton#cmdBtn:hover, QToolButton#cmdBtn:hover { background: #1a283c; border-color: #273d5c; }
+            QPushButton#cmdBtn:pressed, QToolButton#cmdBtn:pressed { background: #223753; }
+            QPushButton#cmdBtn:checked, QToolButton#cmdBtn:checked { background: #1a365d; border-color: #0078d4; color: #60a5fa; }
+            QPushButton#cmdBtn:disabled { color: #475569; }
+
+            QPushButton#newBtn {
+                background: #0078d4;
+                color: white;
+                font-weight: 600;
+                border: 1px solid #2563eb;
+                border-radius: 6px;
+                padding: 6px 14px;
+                font-size: 12px;
+            }
+            QPushButton#newBtn:hover { background: #1d4ed8; }
+            QPushButton#newBtn:pressed { background: #1e40af; }
+
+            QFrame#cmdSep { background: #22334a; max-width: 1px; min-width: 1px; margin: 4px 4px; }
+
+            QWidget#sidebar { background: #0c131f; border-right: 1px solid #1a2638; }
+            QLabel#sideSection { color: #64748b; font-size: 11px; font-weight: 600; text-transform: uppercase; padding: 8px 8px 4px 8px; }
+            QPushButton#sideBtn {
+                background: transparent;
+                border: 1px solid transparent;
+                border-radius: 7px;
+                padding: 7px 10px;
+                text-align: left;
+                color: #cbd5e1;
+                font-size: 12.5px;
+            }
+            QPushButton#sideBtn:hover { background: #162234; border-color: #23354f; color: #ffffff; }
+            QPushButton#sideBtnSelected {
+                background: #182e4a;
+                border: 1px solid #2b4c77;
+                border-left: 3px solid #0078d4;
+                border-radius: 7px;
+                padding: 7px 10px;
+                text-align: left;
+                color: #ffffff;
+                font-weight: 600;
+                font-size: 12.5px;
+            }
+
+            QTableWidget#fileTable, QListWidget#fileList { background: #090f18; alternate-background-color: #0c1421; border: none; color: #dce7f7; }
+            QTableWidget#fileTable::item:selected, QListWidget#fileList::item:selected { background: #17375a; color: white; border: 1px solid #0078d4; border-radius: 4px; }
+            QHeaderView::section { background: #101927; color: #94a3b8; border: none; border-bottom: 1px solid #203046; padding: 8px 12px; font-weight: 600; }
+            QHeaderView::section:hover { background: #172437; color: #f8fafc; }
+
+            QWidget#previewPane { background: #0c131f; border-left: 1px solid #1a2638; }
+            QStatusBar#statusBar { background: #090e17; border-top: 1px solid #1a2638; color: #94a3b8; font-size: 12px; padding: 2px 10px; }
+
+            QGroupBox { font-weight: 600; color: #cbd5e1; border: 1px solid #233247; border-radius: 8px; margin-top: 14px; padding-top: 16px; }
+            QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; left: 12px; padding: 0 6px; color: #38bdf8; }
+            QTreeWidget#advancedSettingsTree { background: #0a1019; border: 1px solid #1e2c40; border-radius: 6px; padding: 6px; color: #e2e8f0; }
+            QTabWidget#optionsTabs::pane { border: 1px solid #233247; background: #0e1624; border-radius: 8px; }
+            QCheckBox, QRadioButton { color: #cbd5e1; spacing: 8px; }
+        """)
+        self.table_view.verticalHeader().setDefaultSectionSize(28 if self._settings.get("compact", False) else 40)
+        self.status.setVisible(self._settings.get("status_bar", True))
+
     def load_settings(self):
         try:
             if os.path.exists(self.SETTINGS_FILE):
@@ -3803,12 +4660,55 @@ class WindowsFileExplorer(QMainWindow):
         return {}
 
     def save_settings(self):
+        temporary = None
         try:
             os.makedirs(self.CONFIG_DIR, exist_ok=True)
-            with open(self.SETTINGS_FILE, "w", encoding="utf-8") as f:
-                json.dump({"show_hidden": self._show_hidden}, f, indent=2)
-        except Exception:
-            pass
+            self._settings.update(show_hidden=self._show_hidden, view_mode=self._view_mode)
+            encoded = json.dumps(self._settings, indent=2)
+            if os.path.isfile(self.SETTINGS_FILE) and Path(self.SETTINGS_FILE).read_text() == encoded:
+                return
+            with tempfile.NamedTemporaryFile(mode="w", dir=self.CONFIG_DIR, delete=False, encoding="utf-8") as f:
+                temporary = f.name
+                f.write(encoded)
+            os.replace(temporary, self.SETTINGS_FILE)
+        except OSError:
+            if temporary and os.path.exists(temporary):
+                os.unlink(temporary)
+
+    def _remember_sort(self, column, order):
+        if self._loading_folder or not self._current_path:
+            return
+        self._settings.setdefault("folder_sort", {})[self._current_path] = [column, int(order)]
+        self.save_settings()
+        self._sync_icon_order()
+
+    def _sync_icon_order(self):
+        items = {}
+        while self.list_view.count():
+            item = self.list_view.takeItem(0)
+            items[item.data(Qt.UserRole)] = item
+        for row in range(self.table_view.rowCount()):
+            item = items.get(self.table_view.item(row, 0).data(Qt.UserRole))
+            if item is not None:
+                self.list_view.addItem(item)
+
+    def _load_next_thumbnail(self):
+        if not self._settings.get("thumbnails", True) or not self._thumbnail_queue:
+            self._thumbnail_timer.stop()
+            return
+        item = self._thumbnail_queue.pop(0)
+        path = item.data(Qt.UserRole)
+        if Path(path).suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp", ".bmp"):
+            return
+        reader = QImageReader(path)
+        size = reader.size()
+        if size.isValid() and size.width() * size.height() <= 40000000:
+            size.scale(128, 88, Qt.KeepAspectRatio)
+            reader.setScaledSize(size)
+            reader.setAutoTransform(True)
+            image = reader.read()
+            if not image.isNull():
+                item.setIcon(QIcon(QPixmap.fromImage(image)))
 
     def toggle_hidden_files(self):
         self._show_hidden = not self._show_hidden
@@ -4086,6 +4986,9 @@ class WindowsFileExplorer(QMainWindow):
             self.btn_paste.setEnabled(bool(self._clipboard.get("paths")))
             self.btn_rename.setVisible(True)
             self.btn_rename.setEnabled(count == 1)
+            if hasattr(self, "btn_share"):
+                self.btn_share.setVisible(True)
+                self.btn_share.setEnabled(count > 0)
             self.btn_delete.setVisible(True)
             self.btn_delete.setEnabled(count > 0)
             self.btn_terminal.setVisible(not is_this_pc)
@@ -4099,6 +5002,16 @@ class WindowsFileExplorer(QMainWindow):
             self.btn_restore_all.setVisible(False)
             self.btn_restore_selected.setVisible(False)
             self.btn_delete_permanently.setVisible(False)
+
+        if self._picker_mode:
+            for button in (self.btn_cut, self.btn_copy, self.btn_paste, self.btn_copy_path,
+                           self.btn_rename, getattr(self, "btn_share", None), self.btn_delete,
+                           self.btn_terminal, self.btn_props, self.btn_extract, self.btn_compress):
+                if button is not None:
+                    if hasattr(button, "hide"):
+                        button.hide()
+                    elif hasattr(button, "setVisible"):
+                        button.setVisible(False)
 
     def navigate_to(self, path, label="", add_to_history=True):
         """Navigate to 'This PC' (empty string) or any folder path."""
@@ -4115,6 +5028,16 @@ class WindowsFileExplorer(QMainWindow):
             self.btn_forward.setEnabled(False)
 
         self._current_path = path
+        if hasattr(self, "folder_tabs"):
+            tab_name = os.path.basename(path) or "This PC"
+            in_trash_preview = is_recycle_bin_path(path)
+            tab_icon = get_win_icon("this-pc" if not path else ("recycle-bin" if in_trash_preview else "folder"), 16)
+            self.folder_tabs.setTabText(self.folder_tabs.currentIndex(), tab_name)
+            self.folder_tabs.setTabIcon(self.folder_tabs.currentIndex(), tab_icon)
+            self.folder_tabs.setTabToolTip(self.folder_tabs.currentIndex(), path or "This PC")
+        if os.path.isdir(path):
+            self._settings["last_folder"] = path
+            self.save_settings()
 
         # Update sidebar highlights
         in_trash = self.is_in_recycle_bin()
@@ -4154,6 +5077,11 @@ class WindowsFileExplorer(QMainWindow):
             self._load_folder_contents(path)
 
         self._update_command_bar()
+        watched = self._watcher.directories()
+        if watched:
+            self._watcher.removePaths(watched)
+        if os.path.isdir(path):
+            self._watcher.addPath(path)
 
     def go_back(self):
         if self._history:
@@ -4184,10 +5112,20 @@ class WindowsFileExplorer(QMainWindow):
             self.navigate_to(parent)
 
     def refresh(self):
+        query = self.search_box.text()
+        selection = self.get_selected_paths()
+        scroll = self.table_view.verticalScrollBar().value()
         self.navigate_to(self._current_path, add_to_history=False)
+        self.search_box.setText(query)
+        for path in selection:
+            self._select_path(path)
+        self.table_view.verticalScrollBar().setValue(scroll)
 
     def _load_folder_contents(self, path):
         """Populate table and list view with items in directory."""
+        self._loading_folder = True
+        self._thumbnail_timer.stop()
+        self._thumbnail_queue = []
         self.table_view.setSortingEnabled(False)
         self.table_view.setRowCount(0)
         self.list_view.clear()
@@ -4202,6 +5140,7 @@ class WindowsFileExplorer(QMainWindow):
             entries = os.listdir(path)
         except OSError as err:
             self.status_items_count.setText(f"Unable to access: {err.strerror}")
+            self._loading_folder = False
             return
 
         # Separate folders and files
@@ -4274,7 +5213,8 @@ class WindowsFileExplorer(QMainWindow):
                 col2_val = item_type
 
             # Name Column
-            name_item = ExplorerTableItem(entry)
+            display_name = entry if is_dir or self._settings.get("extensions", True) else os.path.splitext(entry)[0]
+            name_item = ExplorerTableItem(display_name)
             name_item.setIcon(icon)
             name_item.setData(Qt.UserRole, full_path)
             name_item.setData(Qt.UserRole + 1, is_dir)
@@ -4300,10 +5240,14 @@ class WindowsFileExplorer(QMainWindow):
             self.table_view.setItem(row, 3, size_item)
 
             # Also populate Icon list view
-            list_item = QListWidgetItem(icon, entry)
+            display_name = entry if is_dir or self._settings.get("extensions", True) else os.path.splitext(entry)[0]
+            list_item = QListWidgetItem(icon, display_name)
+            list_item.setToolTip(entry + "\n" + mtime + "\n" + size_str)
             list_item.setData(Qt.UserRole, full_path)
             list_item.setData(Qt.UserRole + 1, is_dir)
             self.list_view.addItem(list_item)
+            if not is_dir and len(self._thumbnail_queue) < 500:
+                self._thumbnail_queue.append(list_item)
 
             if entry.startswith("."):
                 muted_col = QColor("#94a3b8")
@@ -4314,6 +5258,15 @@ class WindowsFileExplorer(QMainWindow):
                 list_item.setForeground(muted_col)
 
         self.table_view.setSortingEnabled(True)
+        newest = self._settings.get("newest_first", True) and os.path.basename(path).lower() in ("screenshots", "downloads", "pictures")
+        column, order = self._settings.get("folder_sort", {}).get(path, [1 if newest else 0, int(Qt.DescendingOrder if newest else Qt.AscendingOrder)])
+        if column not in (0, 1, 2, 3) or order not in (0, 1):
+            column, order = 0, 0
+        self.table_view.sortItems(column, Qt.SortOrder(order))
+        self._sync_icon_order()
+        self._loading_folder = False
+        if self._view_mode == "icons":
+            self._thumbnail_timer.start()
         self.status_items_count.setText(f"{len(all_items)} items")
         self.status_selected_info.setText("")
 
@@ -4341,7 +5294,10 @@ class WindowsFileExplorer(QMainWindow):
             self._prompt_trash_item_action(target)
             return
         if is_dir:
-            self.navigate_to(target)
+            if self._settings.get("new_window", False) and not self._picker_mode:
+                open_in_new_window(target)
+            else:
+                self.navigate_to(target)
         else:
             if self._picker_mode:
                 self._on_picker_accept_paths([target])
@@ -4355,15 +5311,140 @@ class WindowsFileExplorer(QMainWindow):
             self._prompt_trash_item_action(target)
             return
         if is_dir:
-            self.navigate_to(target)
+            if self._settings.get("new_window", False) and not self._picker_mode:
+                open_in_new_window(target)
+            else:
+                self.navigate_to(target)
         else:
             if self._picker_mode:
                 self._on_picker_accept_paths([target])
             else:
                 open_file_with_default(target)
 
+    def _render_preview(self, paths):
+        if not hasattr(self, "preview_empty"):
+            return
+        if not paths:
+            self.preview_empty.show()
+            self.preview_content.hide()
+            return
+
+        self.preview_empty.hide()
+        self.preview_content.show()
+        self.preview_image.clear()
+        self.preview_image.hide()
+        self.preview_text.clear()
+        self.preview_text.hide()
+        self.preview_metadata.clear()
+
+        if len(paths) > 1:
+            self.preview_name.setText(f"{len(paths)} items selected")
+            self.preview_type_badge.setText("Multiple items")
+            total_sz = 0
+            for p in paths:
+                try:
+                    total_sz += os.path.getsize(p)
+                except OSError:
+                    pass
+            self.preview_metadata.setText(f"Total size: {format_bytes(total_sz)}\nItems count: {len(paths)}")
+            return
+
+        path = Path(paths[0])
+        self.preview_name.setText(path.name)
+        try:
+            st = path.stat()
+            file_desc = get_file_type_description(str(path))
+            self.preview_type_badge.setText(file_desc)
+            mtime_str = datetime.datetime.fromtimestamp(st.st_mtime).strftime("%d %b %Y, %I:%M %p")
+            ctime_str = datetime.datetime.fromtimestamp(st.st_ctime).strftime("%d %b %Y, %I:%M %p")
+            self.preview_metadata.setText(
+                f"Size: {format_bytes(st.st_size)}\n"
+                f"Modified: {mtime_str}\n"
+                f"Created: {ctime_str}\n"
+                f"Folder: {path.parent}"
+            )
+
+            if path.is_dir():
+                self.preview_image.setPixmap(get_win_icon("folder", 64).pixmap(64, 64))
+                self.preview_image.show()
+                return
+
+            ext = path.suffix.lower()
+            if ext in (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".ico", ".svg"):
+                reader = QImageReader(str(path))
+                size = reader.size()
+                if size.isValid() and size.width() * size.height() <= 50000000:
+                    size.scale(280, 240, Qt.KeepAspectRatio)
+                    reader.setScaledSize(size)
+                    reader.setAutoTransform(True)
+                    image = reader.read()
+                    if not image.isNull():
+                        self.preview_image.setPixmap(QPixmap.fromImage(image))
+                        self.preview_image.show()
+                        return
+
+            if ext in (".txt", ".md", ".py", ".js", ".json", ".css", ".html", ".csv", ".yaml", ".yml", ".sh", ".log", ".c", ".cpp", ".h", ".rs", ".go", ".xml", ".ini", ".conf", ".sql"):
+                with path.open("rb") as f:
+                    data = f.read(32769)
+                self.preview_text.setPlainText(data[:32768].decode("utf-8", errors="replace") + ("\n[Preview limited to 32 KiB]" if len(data) > 32768 else ""))
+                self.preview_text.show()
+            else:
+                icon_type = get_icon_name_for_file(str(path))
+                self.preview_image.setPixmap(get_win_icon(icon_type, 64).pixmap(64, 64))
+                self.preview_image.show()
+
+        except OSError:
+            self.preview_metadata.setText("This file is no longer accessible")
+
+    def _new_tab(self, path=""):
+        self._save_tab()
+        self.folder_tabs.blockSignals(True)
+        tab_name = os.path.basename(path) or "This PC"
+        tab_icon = get_win_icon("this-pc" if not path else "folder", 16)
+        index = self.folder_tabs.addTab(tab_icon, tab_name)
+        self.folder_tabs.setTabData(index, {"path": path, "history": [], "future": []})
+        self.folder_tabs.blockSignals(False)
+        self.folder_tabs.setCurrentIndex(index)
+
+    def _save_tab(self):
+        if hasattr(self, "folder_tabs") and self._active_tab >= 0:
+            self.folder_tabs.setTabData(self._active_tab, {"path": self._current_path, "history": list(self._history), "future": list(self._future)})
+
+    def _switch_tab(self, index):
+        if index < 0:
+            return
+        self._save_tab()
+        self._active_tab = index
+        state = self.folder_tabs.tabData(index)
+        self._history = list(state["history"])
+        self._future = list(state["future"])
+        self.navigate_to(state["path"], add_to_history=False)
+        self.btn_back.setEnabled(bool(self._history))
+        self.btn_forward.setEnabled(bool(self._future))
+
+    def _close_tab(self, index):
+        if self.folder_tabs.count() == 1:
+            self.close()
+            return
+        self._save_tab()
+        self.folder_tabs.blockSignals(True)
+        self.folder_tabs.removeTab(index)
+        self._active_tab = -1
+        current = self.folder_tabs.currentIndex()
+        self.folder_tabs.blockSignals(False)
+        self._switch_tab(current)
+
+    def toggle_preview(self):
+        self.preview.setVisible(not self.preview.isVisible())
+        self._settings["preview"] = not self.preview.isHidden()
+        self.preview_button.setChecked(self._settings["preview"])
+        self.save_settings()
+        self._on_selection_changed()
+
     def _on_selection_changed(self):
         selected_paths = self.get_selected_paths()
+        if hasattr(self, "preview") and not self.preview.isHidden():
+            self._render_preview(selected_paths)
         count = len(selected_paths)
         if count == 0:
             self.status_selected_info.setText("")
@@ -4474,16 +5555,18 @@ class WindowsFileExplorer(QMainWindow):
         QApplication.instance().exit(1)
 
     def _on_search_text_changed(self, text):
-        query = text.strip().lower()
+        normalize = (lambda value: value) if self._settings.get("case_sensitive", False) else str.casefold
+        query = normalize(text.strip())
         if self.content_stack.currentIndex() == 0:
             return
         for row in range(self.table_view.rowCount()):
-            name = self.table_view.item(row, 0).text().lower()
-            match = query in name if query else True
+            name = normalize(os.path.basename(self.table_view.item(row, 0).data(Qt.UserRole)))
+            match = (fnmatch.fnmatchcase(name, query) if self._settings.get("wildcards", False) else query in name) if query else True
             self.table_view.setRowHidden(row, not match)
         for idx in range(self.list_view.count()):
             item = self.list_view.item(idx)
-            match = query in item.text().lower() if query else True
+            name = normalize(os.path.basename(item.data(Qt.UserRole)))
+            match = (fnmatch.fnmatchcase(name, query) if self._settings.get("wildcards", False) else query in name) if query else True
             item.setHidden(not match)
 
     def get_selected_paths(self):
@@ -4495,15 +5578,115 @@ class WindowsFileExplorer(QMainWindow):
 
     def toggle_view_mode(self):
         if self._view_mode == "details":
-            self._view_mode = "icons"
-            self.table_view.hide()
-            self.list_view.show()
-            self.btn_view.setText("View: Icons")
+            self.set_view_mode("icons")
         else:
+            self.set_view_mode("details")
+
+    def set_view_mode(self, mode, icon_size=None):
+        if mode == "details":
             self._view_mode = "details"
             self.list_view.hide()
             self.table_view.show()
             self.btn_view.setText("View: Details")
+        else:
+            self._view_mode = "icons"
+            self.table_view.hide()
+            self.list_view.show()
+            if icon_size:
+                self.list_view.setIconSize(QSize(icon_size, int(icon_size * 0.75)))
+                self.list_view.setGridSize(QSize(icon_size + 34, icon_size + 42))
+            self.btn_view.setText("View: Icons")
+            self._thumbnail_timer.start()
+        self.save_settings()
+
+    def action_new_markdown_document(self):
+        if not self._current_path or not os.path.exists(self._current_path):
+            return
+        base_name = "New Document.md"
+        idx = 2
+        suggested_name = base_name
+        while os.path.exists(os.path.join(self._current_path, suggested_name)):
+            suggested_name = f"New Document ({idx}).md"
+            idx += 1
+        dlg = QDialog(self)
+        dlg.setWindowTitle("New Markdown Document")
+        dlg.setMinimumWidth(320)
+        layout = QVBoxLayout(dlg)
+        layout.addWidget(QLabel("File name:"))
+        edit = QLineEdit(suggested_name)
+        if "." in suggested_name:
+            edit.setSelection(0, suggested_name.rfind("."))
+        else:
+            edit.selectAll()
+        layout.addWidget(edit)
+        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btns.accepted.connect(dlg.accept)
+        btns.rejected.connect(dlg.reject)
+        layout.addWidget(btns)
+        if dlg.exec_() != QDialog.Accepted:
+            return
+        name = edit.text().strip()
+        if not name:
+            return
+        target = os.path.join(self._current_path, name)
+        try:
+            with open(target, "w", encoding="utf-8") as f:
+                f.write("# " + os.path.splitext(name)[0] + "\n\n")
+            self.refresh()
+            self._select_path(target)
+        except OSError as err:
+            QMessageBox.critical(self, "Error", f"Failed to create file: {err.strerror}")
+
+    def action_share(self):
+        paths = self.get_selected_paths()
+        if not paths:
+            return
+        try:
+            subprocess.Popen(["kde-open5", paths[0]])
+        except Exception:
+            self.action_copy_path(paths[0])
+            if hasattr(self, "status"):
+                self.status.showMessage(f"Copied {len(paths)} path(s) to share", 3000)
+
+    def action_undo(self):
+        if hasattr(self, "status"):
+            self.status.showMessage("Undo not available", 2500)
+
+    def action_invert_selection(self):
+        view = self.table_view if self._view_mode == "details" else self.list_view
+        sel_model = view.selectionModel()
+        for row in range(view.model().rowCount()):
+            idx = view.model().index(row, 0)
+            sel_model.select(idx, QItemSelectionModel.Toggle | QItemSelectionModel.Rows)
+
+    def action_map_network_drive(self):
+        self.navigate_to("network:/")
+
+    def action_disconnect_network_drive(self):
+        if hasattr(self, "status"):
+            self.status.showMessage("No disconnected network drives", 2500)
+
+    def action_add_network_location(self):
+        self.navigate_to("network:/")
+
+    def toggle_compact_view(self, checked):
+        self._settings["compact"] = checked
+        self.save_settings()
+        self.table_view.verticalHeader().setDefaultSectionSize(28 if checked else 40)
+
+    def toggle_extensions(self, checked):
+        self._settings["extensions"] = checked
+        self.save_settings()
+        self.refresh()
+
+    def toggle_checkboxes(self, checked):
+        self._settings["use_checkboxes"] = checked
+        self.save_settings()
+        self.refresh()
+
+    def show_folder_options(self):
+        dlg = WindowsFolderOptionsDialog(self)
+        dlg.exec_()
 
     def action_extract_dialog(self, target=None):
         if not target:
@@ -5484,6 +6667,19 @@ class WindowsFileExplorer(QMainWindow):
         event.accept()
 
     def keyPressEvent(self, event):
+        if not self._picker_mode and event.modifiers() == Qt.ControlModifier:
+            if event.key() == Qt.Key_T:
+                self._new_tab(self._current_path)
+                return
+            if event.key() == Qt.Key_W:
+                self._close_tab(self.folder_tabs.currentIndex())
+                return
+            if event.key() == Qt.Key_Tab:
+                self.folder_tabs.setCurrentIndex((self.folder_tabs.currentIndex() + 1) % self.folder_tabs.count())
+                return
+        if event.key() == Qt.Key_P and event.modifiers() == Qt.AltModifier:
+            self.toggle_preview()
+            return
         if self._picker_mode:
             if event.key() == Qt.Key_Escape:
                 self._on_picker_cancel()
@@ -5553,6 +6749,7 @@ def main():
     parser.add_argument("--title", type=str, default="", help="Custom dialog title")
     parser.add_argument("--name", type=str, default="", help="Suggested file name")
     parser.add_argument("--filter", type=str, default="", help="Filter pattern(s), e.g. 'Images (*.png *.jpg);;All Files (*.*)'")
+    parser.add_argument("--resume", action="store_true", help="Resume the last folder in open-file dialogs")
     parser.add_argument("--output", type=str, default="", help="File to write chosen JSON array of paths to")
 
     args, unknown = parser.parse_known_args()
@@ -5578,6 +6775,7 @@ def main():
         initial_path = os.path.expanduser(candidate_path)
 
     picker_options = {
+        "resume": bool(args.resume) and not args.save,
         "save": bool(args.save),
         "directory": bool(args.directory),
         "multiple": bool(args.multiple),

@@ -144,6 +144,8 @@ class DevOSFileChooserPortal(dbus.service.Object):
         cmd = [devos_files_bin, "--picker", "--output", tmp_out, "--title", dialog_title]
         if save_mode:
             cmd.append("--save")
+        else:
+            cmd.append("--resume")
         if multiple:
             cmd.append("--multiple")
         if directory:
@@ -157,10 +159,8 @@ class DevOSFileChooserPortal(dbus.service.Object):
         target_folder = ""
         if current_folder and os.path.isdir(current_folder):
             target_folder = current_folder
-        else:
-            dl = os.path.expanduser("~/Downloads")
-            target_folder = dl if os.path.isdir(dl) else os.path.expanduser("~")
-        cmd.append(target_folder)
+        if target_folder:
+            cmd.append(target_folder)
 
         env = os.environ.copy()
         try:
