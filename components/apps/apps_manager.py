@@ -1905,7 +1905,8 @@ def run_gui(focus: Optional[str] = None, discovery: Optional[AppDiscovery] = Non
     QtCore.QCoreApplication.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling, True)
     QtCore.QCoreApplication.setAttribute(QtCore.Qt.AA_UseHighDpiPixmaps, True)
     qapp = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
-    qapp.setApplicationName("Apps")
+    qapp.setApplicationName("devos-apps")
+    qapp.setApplicationDisplayName("DevOS Apps")
     qapp.setDesktopFileName("devos-apps")
     if QtGui.QIcon.themeName() in ("", "hicolor"):
         QtGui.QIcon.setThemeName("breeze-dark")

@@ -974,7 +974,10 @@ def _load_gui():
             self.editor_family = pick_family(
                 ["JetBrains Mono", "Noto Sans Mono", "DejaVu Sans Mono", "Liberation Mono"], "monospace")
 
-            self.setWindowIcon(QIcon.fromTheme("accessories-text-editor"))
+            _notepad_icon = QIcon.fromTheme("devos-notepad")
+            if _notepad_icon.isNull():
+                _notepad_icon = QIcon.fromTheme("accessories-text-editor")
+            self.setWindowIcon(_notepad_icon)
             self.resize(1100, 720)
             self._build_ui()
             self._build_menus()
@@ -1852,6 +1855,10 @@ def create_app(argv=None, store=None):
     files = [os.path.abspath(os.path.expanduser(a)) for a in argv[1:] if not a.startswith("-")]
     gui = _load_gui()
     app = gui["QApplication"].instance() or gui["QApplication"](argv)
+    app.setApplicationName("devos-notepad")
+    app.setApplicationDisplayName("Notepad")
+    if hasattr(app, "setDesktopFileName"):
+        app.setDesktopFileName("devos-notepad")
     instance = gui["SingleInstance"]()
     if instance.forward(files):
         return app, None

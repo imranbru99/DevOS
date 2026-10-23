@@ -1746,7 +1746,10 @@ def run_gui(open_cleanup=False):
                             [("Clean up", self.open_cleanup), ("Later", lambda: None)])
 
     qapp = QtWidgets.QApplication(sys.argv)
-    qapp.setApplicationName(APP_NAME)
+    qapp.setApplicationName("devos-optimizer")
+    qapp.setApplicationDisplayName("DevOS Optimizer")
+    if hasattr(qapp, "setDesktopFileName"):
+        qapp.setDesktopFileName("devos-optimizer")
     qapp.setQuitOnLastWindowClosed(False)
     font = QtGui.QFont("Inter")
     if not QtGui.QFontInfo(font).exactMatch():

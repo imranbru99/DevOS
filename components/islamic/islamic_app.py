@@ -917,7 +917,8 @@ def run_gui(screenshot=None):
                                                                     ("#64748b" if key == "sunrise" else "#94a3b8")))
 
     app = QtWidgets.QApplication(sys.argv)
-    app.setApplicationName(APP_NAME)
+    app.setApplicationName("devos-islamic")
+    app.setApplicationDisplayName("DevOS Islamic")
     app.setDesktopFileName("devos-islamic")
     window = IslamicWindow()
     window.show()

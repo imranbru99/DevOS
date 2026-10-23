@@ -2133,7 +2133,8 @@ def main(argv=None) -> int:
     sys.path.insert(0, os.path.join(COMPONENTS, "assistant"))
     import listen
     app = listen.make_app(argv)
-    app.setApplicationName(APP_NAME)
+    app.setApplicationName("devos-notes")
+    app.setApplicationDisplayName("Notes")
     app.setDesktopFileName("devos-notes")
     if _send_to_running(cmd, QLocalSocket):
         return 0

@@ -8,6 +8,7 @@ Exec=/usr/bin/python3 /usr/local/share/devos/components/clipboard/clipboard.py
 Icon=edit-paste
 Terminal=false
 StartupNotify=false
+StartupWMClass=devos-clipboard
 Categories=Utility;
 Keywords=clipboard;paste;history;copy;win+v;
 X-KDE-Shortcuts=Meta+V

@@ -9,3 +9,4 @@ Terminal=false
 Categories=System;Utility;
 Keywords=clean;cleanup;cache;trash;disk;memory;speed;optimize;
 StartupNotify=false
+StartupWMClass=devos-optimizer

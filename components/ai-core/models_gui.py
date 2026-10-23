@@ -191,7 +191,10 @@ class ModelsWindow(QtWidgets.QWidget):
 
 def main():
     app = QtWidgets.QApplication(sys.argv)
-    app.setApplicationName("DevOS AI Models")
+    app.setApplicationName("devos-ai-models")
+    app.setApplicationDisplayName("DevOS AI Models")
+    if hasattr(app, "setDesktopFileName"):
+        app.setDesktopFileName("devos-ai-models")
     window = ModelsWindow()
     window.show()
     sys.exit(app.exec_())

@@ -8,3 +8,4 @@ Terminal=false
 Categories=System;Settings;HardwareSettings;
 Keywords=disk;partition;mbr;gpt;storage;boot;format;
 StartupNotify=true
+StartupWMClass=devos-disk

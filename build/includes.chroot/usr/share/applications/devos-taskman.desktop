@@ -9,3 +9,4 @@ Terminal=false
 Categories=System;Monitor;
 Keywords=task;manager;process;cpu;memory;startup;services;performance;ctrl+shift+esc;
 StartupNotify=true
+StartupWMClass=devos-taskman

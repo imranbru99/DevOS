@@ -9,3 +9,4 @@ Terminal=false
 Categories=Development;Network;
 Keywords=share;tunnel;public;link;localhost;port;dev server;cloudflare;ngrok;expose;qr;
 StartupNotify=false
+StartupWMClass=devos-share

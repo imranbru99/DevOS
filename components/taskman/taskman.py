@@ -2158,7 +2158,10 @@ def run_gui():
             super().closeEvent(event)
 
     app = QtWidgets.QApplication(sys.argv)
-    app.setApplicationName(APP_NAME)
+    app.setApplicationName("devos-taskman")
+    app.setApplicationDisplayName("Task Manager")
+    if hasattr(app, "setDesktopFileName"):
+        app.setDesktopFileName("devos-taskman")
     window = Window()
     window.show()
     return app.exec_()

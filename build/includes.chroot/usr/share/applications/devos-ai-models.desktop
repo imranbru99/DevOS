@@ -9,3 +9,4 @@ Terminal=false
 Categories=System;Settings;
 Keywords=ai;model;llm;api;openai;qwen;download;
 StartupNotify=false
+StartupWMClass=devos-ai-models

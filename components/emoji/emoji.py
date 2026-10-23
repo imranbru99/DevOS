@@ -230,6 +230,10 @@ def main(argv=None):
         print(" ".join(visible("", recent)))
         return 0
     app = QtWidgets.QApplication(sys.argv)
+    app.setApplicationName("devos-emoji")
+    app.setApplicationDisplayName("Emoji Panel")
+    if hasattr(app, "setDesktopFileName"):
+        app.setDesktopFileName("devos-emoji")
     try:
         app.setFallbackSessionManagementEnabled(False)
     except Exception:

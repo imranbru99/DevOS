@@ -9,4 +9,4 @@ Terminal=false
 Categories=Settings;DesktopSettings;HardwareSettings;
 Keywords=power;sleep;power on;power off;screen timeout;sleep time;turn off screen;battery;energy;standby;suspend;shutdown;restart;performance;
 StartupNotify=true
-StartupWMClass=DevOS Power & Sleep
+StartupWMClass=devos-power

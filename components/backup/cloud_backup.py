@@ -1400,7 +1400,10 @@ def run_gui():
             self.refresh()
 
     qapp = QtWidgets.QApplication(sys.argv)
-    qapp.setApplicationName(APP_NAME)
+    qapp.setApplicationName("devos-backup")
+    qapp.setApplicationDisplayName("Cloud Backup")
+    if hasattr(qapp, "setDesktopFileName"):
+        qapp.setDesktopFileName("devos-backup")
     font = QtGui.QFont("Inter")
     if not QtGui.QFontInfo(font).exactMatch():
         font = QtGui.QFont("Noto Sans")

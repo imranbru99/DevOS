@@ -8,6 +8,7 @@ Exec=/usr/bin/python3 /usr/local/share/devos/components/emoji/emoji.py
 Icon=face-smile
 Terminal=false
 StartupNotify=false
+StartupWMClass=devos-emoji
 Categories=Utility;
 Keywords=emoji;emoticon;smile;sticker;
 X-KDE-Shortcuts=Meta+.

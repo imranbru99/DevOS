@@ -1043,7 +1043,8 @@ def gui() -> int:
             QtCore.QProcess.startDetached("kcmshell5", ["kcm_users"])
 
     app = QtWidgets.QApplication(sys.argv)
-    app.setApplicationName("Family Safety")
+    app.setApplicationName("devos-familysafe")
+    app.setApplicationDisplayName("Family Safety")
     app.setDesktopFileName("devos-familysafe")
     window = Window()
     window.show()

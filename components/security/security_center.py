@@ -1408,7 +1408,8 @@ def gui(page="overview"):
             self.refresh(check=True)
 
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
-    app.setApplicationName(common.APP_NAME)
+    app.setApplicationName("devos-security")
+    app.setApplicationDisplayName(common.APP_NAME)
     app.setDesktopFileName("devos-security")
     font = QtGui.QFont("Inter")
     if not QtGui.QFontInfo(font).exactMatch():

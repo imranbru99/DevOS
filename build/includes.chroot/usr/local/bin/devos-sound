@@ -1108,7 +1108,10 @@ def main():
 
     # GUI Mode
     app = QApplication(sys.argv)
-    app.setApplicationName("DevOS Sound")
+    app.setApplicationName("Sound")
+    app.setApplicationDisplayName("Sound")
+    if hasattr(app, "setDesktopFileName"):
+        app.setDesktopFileName("devos-sound")
     app.setQuitOnLastWindowClosed(not args.tray)
 
     if args.tray:

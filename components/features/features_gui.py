@@ -804,7 +804,8 @@ def main():
     from PyQt5 import QtCore, QtWidgets
 
     app = QtWidgets.QApplication(sys.argv)
-    app.setApplicationName(APP_NAME)
+    app.setApplicationName("devos-features")
+    app.setApplicationDisplayName("DevOS Features")
     app.setDesktopFileName("devos-features")
     window = build_window(QtCore, QtWidgets)()
     window.show()

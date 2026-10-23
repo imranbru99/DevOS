@@ -9,3 +9,4 @@ Terminal=false
 Categories=System;Settings;Security;
 Keywords=family;parental;control;children;kids;safe;safesearch;adult;block;filter;
 StartupNotify=false
+StartupWMClass=devos-familysafe

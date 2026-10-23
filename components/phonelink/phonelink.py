@@ -1656,7 +1656,8 @@ def run_gui():
             super().closeEvent(event)
 
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
-    app.setApplicationName("Phone Link")
+    app.setApplicationName("devos-phonelink")
+    app.setApplicationDisplayName("Phone Link")
     app.setDesktopFileName("devos-phonelink")
     win = Window()
     win.show()

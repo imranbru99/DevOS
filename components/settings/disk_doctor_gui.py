@@ -218,6 +218,10 @@ class DiskDoctorWindow(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
+    app.setApplicationName("devos-disk")
+    app.setApplicationDisplayName("Storage & Boot Doctor")
+    if hasattr(app, "setDesktopFileName"):
+        app.setDesktopFileName("devos-disk")
     app.setFont(QFont("Inter", 11))
     window = DiskDoctorWindow()
     window.show()

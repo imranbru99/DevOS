@@ -147,6 +147,10 @@ def main(argv=None):
             print(f"{i}. {preview(text)}")
         return 0
     app = QtWidgets.QApplication(sys.argv)
+    app.setApplicationName("devos-clipboard")
+    app.setApplicationDisplayName("Clipboard")
+    if hasattr(app, "setDesktopFileName"):
+        app.setDesktopFileName("devos-clipboard")
     win = _Window(items, window, QtCore, QtGui, QtWidgets)
     win.show()
     return app.exec_()

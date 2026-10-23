@@ -1188,7 +1188,8 @@ def run_gui():
             event.accept()
 
     qapp = QtWidgets.QApplication(sys.argv)
-    qapp.setApplicationName(APP_NAME)
+    qapp.setApplicationName("devos-share")
+    qapp.setApplicationDisplayName("DevOS Share")
     qapp.setDesktopFileName("devos-share")
     font = QtGui.QFont("Inter")
     if not QtGui.QFontInfo(font).exactMatch():

@@ -7,6 +7,6 @@ Exec=/usr/bin/python3 /usr/local/share/devos/components/backup/cloud_backup.py g
 Icon=devos-backup
 Terminal=false
 StartupNotify=true
-StartupWMClass=cloud_backup.py
+StartupWMClass=devos-backup
 Categories=System;Utility;
 Keywords=backup;cloud;google drive;onedrive;restore;sync;files;

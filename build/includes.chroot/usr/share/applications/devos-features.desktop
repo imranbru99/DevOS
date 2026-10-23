@@ -9,3 +9,4 @@ Terminal=false
 Categories=System;Settings;
 Keywords=apps;features;install;uninstall;remove;office;word;excel;powerpoint;default apps;optional features;programs;
 StartupNotify=true
+StartupWMClass=devos-features

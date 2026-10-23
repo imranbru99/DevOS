@@ -9,3 +9,4 @@ Terminal=false
 Categories=System;Network;
 Keywords=phone;mobile;remote;android;iphone;qr;pair;kdeconnect;
 StartupNotify=true
+StartupWMClass=devos-phonelink

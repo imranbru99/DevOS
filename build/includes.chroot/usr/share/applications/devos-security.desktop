@@ -9,3 +9,4 @@ Terminal=false
 Categories=System;Security;Settings;
 Keywords=security;antivirus;virus;malware;defender;firewall;phishing;quarantine;scan;clamav;updates;protection;
 StartupNotify=false
+StartupWMClass=devos-security

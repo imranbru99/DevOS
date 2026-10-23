@@ -350,7 +350,10 @@ def run_gui() -> int:
     app = QtWidgets.QApplication.instance()
     if app is None:
         app = QtWidgets.QApplication(sys.argv)
-    app.setApplicationName("DevOS Power & Sleep")
+    app.setApplicationName("devos-power")
+    app.setApplicationDisplayName("Power & sleep")
+    if hasattr(app, "setDesktopFileName"):
+        app.setDesktopFileName("devos-power")
 
     class WindowsCard(QtWidgets.QFrame):
         """Card matching Windows 11 Fluent container styling."""
