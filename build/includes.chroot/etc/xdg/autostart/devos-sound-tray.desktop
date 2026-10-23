@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=DevOS Sound Tray
+Comment=Windows 11 Volume Controller & Sound Tray
+Exec=devos-sound --tray
+Icon=audio-volume-high
+Terminal=false
+Categories=Utility;AudioVideo;Audio;
+X-GNOME-Autostart-enabled=true
+X-KDE-autostart-phase=2
+NoDisplay=true

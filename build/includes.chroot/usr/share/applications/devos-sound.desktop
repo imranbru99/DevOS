@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Sound Settings
+GenericName=Audio & Volume Settings
+Comment=Choose output speakers, microphone, adjust master volume, and app mixer
+Exec=devos-sound
+Icon=audio-volume-high
+Terminal=false
+Categories=Settings;HardwareSettings;DesktopSettings;AudioVideo;Audio;Qt;
+Keywords=sound;audio;volume;speaker;headphone;microphone;mic;mixer;settings;output;input;mute;
+StartupNotify=true
+StartupWMClass=DevOS Sound

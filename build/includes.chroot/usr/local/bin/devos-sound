@@ -1,0 +1,1124 @@
+#!/usr/bin/env python3
+"""
+DevOS Sound Manager & Volume Controller (Windows 11 Fluent Sound Hub)
+Provides:
+  - Windows 11 System > Sound settings interface
+  - Output & Input device selection (HDMI, Speakers, Headphones, Microphones)
+  - Master volume slider, mute toggle, and audio test chime
+  - Windows 11 Volume Mixer (per-application volume controls)
+  - Resident System Tray icon with Windows 11 quick volume flyout
+"""
+
+import argparse
+import json
+import math
+import os
+import re
+import shutil
+import struct
+import subprocess
+import sys
+import tempfile
+import time
+from typing import Dict, List, Optional, Any
+
+from PyQt5.QtCore import Qt, QTimer, QSize, QPoint, pyqtSignal, QObject
+from PyQt5.QtGui import (
+    QColor, QIcon, QPainter, QPainterPath, QPen, QFont, QPalette, QBrush
+)
+from PyQt5.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+    QSlider, QPushButton, QRadioButton, QButtonGroup, QFrame, QScrollArea,
+    QSystemTrayIcon, QMenu, QAction, QDialog, QProgressBar, QSizePolicy
+)
+
+
+# ============================================================================
+# VECTOR ICONS GENERATOR (Crisp Windows 11 Style)
+# ============================================================================
+
+def make_vector_sound_icon(name: str, size: int = 24, color: str = "#ffffff") -> QIcon:
+    pix = QPixmap = None
+    from PyQt5.QtGui import QPixmap
+    pix = QPixmap(size, size)
+    pix.fill(Qt.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.Antialiasing)
+
+    qc = QColor(color)
+    scale = size / 24.0
+
+    if name in ("volume-high", "volume-medium", "volume-low", "volume-zero", "volume-muted"):
+        # Speaker body
+        body = QPainterPath()
+        body.moveTo(4 * scale, 9 * scale)
+        body.lineTo(8 * scale, 9 * scale)
+        body.lineTo(13 * scale, 5 * scale)
+        body.lineTo(13 * scale, 19 * scale)
+        body.lineTo(8 * scale, 15 * scale)
+        body.lineTo(4 * scale, 15 * scale)
+        body.closeSubpath()
+        p.fillPath(body, qc)
+
+        p.setPen(QPen(qc, 1.8 * scale, Qt.SolidLine, Qt.RoundCap))
+        if name == "volume-high":
+            # 3 arcs
+            p.drawArc(int(10 * scale), int(9 * scale), int(6 * scale), int(6 * scale), -45 * 16, 90 * 16)
+            p.drawArc(int(9 * scale), int(6 * scale), int(11 * scale), int(12 * scale), -45 * 16, 90 * 16)
+            p.drawArc(int(8 * scale), int(3 * scale), int(16 * scale), int(18 * scale), -45 * 16, 90 * 16)
+        elif name == "volume-medium":
+            p.drawArc(int(10 * scale), int(9 * scale), int(6 * scale), int(6 * scale), -45 * 16, 90 * 16)
+            p.drawArc(int(9 * scale), int(6 * scale), int(11 * scale), int(12 * scale), -45 * 16, 90 * 16)
+        elif name == "volume-low":
+            p.drawArc(int(10 * scale), int(9 * scale), int(6 * scale), int(6 * scale), -45 * 16, 90 * 16)
+        elif name == "volume-muted":
+            p.setPen(QPen(QColor("#f87171"), 2.0 * scale, Qt.SolidLine, Qt.RoundCap))
+            p.drawLine(int(16 * scale), int(8 * scale), int(21 * scale), int(16 * scale))
+            p.drawLine(int(21 * scale), int(8 * scale), int(16 * scale), int(16 * scale))
+
+    elif name == "mic":
+        p.setPen(QPen(qc, 1.8 * scale, Qt.SolidLine, Qt.RoundCap))
+        # Capsule
+        p.drawRoundedRect(int(9 * scale), int(4 * scale), int(6 * scale), int(10 * scale), 3 * scale, 3 * scale)
+        # Stand arc
+        p.drawArc(int(7 * scale), int(7 * scale), int(10 * scale), int(10 * scale), -180 * 16, 180 * 16)
+        # Vertical post
+        p.drawLine(int(12 * scale), int(17 * scale), int(12 * scale), int(20 * scale))
+        # Base
+        p.drawLine(int(9 * scale), int(20 * scale), int(15 * scale), int(20 * scale))
+
+    elif name == "mic-muted":
+        p.setPen(QPen(qc, 1.8 * scale, Qt.SolidLine, Qt.RoundCap))
+        p.drawRoundedRect(int(9 * scale), int(4 * scale), int(6 * scale), int(10 * scale), 3 * scale, 3 * scale)
+        p.drawArc(int(7 * scale), int(7 * scale), int(10 * scale), int(10 * scale), -180 * 16, 180 * 16)
+        p.drawLine(int(12 * scale), int(17 * scale), int(12 * scale), int(20 * scale))
+        p.setPen(QPen(QColor("#f87171"), 2.0 * scale, Qt.SolidLine, Qt.RoundCap))
+        p.drawLine(int(5 * scale), int(5 * scale), int(19 * scale), int(19 * scale))
+
+    elif name == "play":
+        path = QPainterPath()
+        path.moveTo(8 * scale, 5 * scale)
+        path.lineTo(19 * scale, 12 * scale)
+        path.lineTo(8 * scale, 19 * scale)
+        path.closeSubpath()
+        p.fillPath(path, qc)
+
+    elif name == "mixer":
+        p.setPen(QPen(qc, 2.0 * scale, Qt.SolidLine, Qt.RoundCap))
+        p.drawLine(int(6 * scale), int(4 * scale), int(6 * scale), int(20 * scale))
+        p.drawLine(int(12 * scale), int(4 * scale), int(12 * scale), int(20 * scale))
+        p.drawLine(int(18 * scale), int(4 * scale), int(18 * scale), int(20 * scale))
+        p.setBrush(QBrush(qc))
+        p.setPen(Qt.NoPen)
+        p.drawEllipse(int(4 * scale), int(12 * scale), int(4 * scale), int(4 * scale))
+        p.drawEllipse(int(10 * scale), int(7 * scale), int(4 * scale), int(4 * scale))
+        p.drawEllipse(int(16 * scale), int(15 * scale), int(4 * scale), int(4 * scale))
+
+    elif name == "settings":
+        p.setPen(QPen(qc, 1.8 * scale))
+        p.drawEllipse(int(8 * scale), int(8 * scale), int(8 * scale), int(8 * scale))
+        for angle in range(0, 360, 45):
+            rad = math.radians(angle)
+            x1 = 12 * scale + 8 * scale * math.cos(rad)
+            y1 = 12 * scale + 8 * scale * math.sin(rad)
+            x2 = 12 * scale + 10.5 * scale * math.cos(rad)
+            y2 = 12 * scale + 10.5 * scale * math.sin(rad)
+            p.drawLine(int(x1), int(y1), int(x2), int(y2))
+
+    p.end()
+    return QIcon(pix)
+
+
+# ============================================================================
+# AUDIO BACKEND (PipeWire & PulseAudio via pactl / wpctl)
+# ============================================================================
+
+class AudioManager:
+    """Communicates directly with PipeWire / PulseAudio."""
+
+    @staticmethod
+    def get_audio_state() -> Dict[str, Any]:
+        """Collects all sinks (outputs), sources (inputs), and running apps."""
+        state = {
+            "sinks": [],
+            "sources": [],
+            "apps": [],
+            "default_sink": "",
+            "default_source": "",
+            "master_volume": 50,
+            "master_muted": False,
+        }
+
+        # Query defaults
+        try:
+            info_out = subprocess.check_output(["pactl", "info"], text=True, stderr=subprocess.DEVNULL)
+            for line in info_out.splitlines():
+                if "Default Sink:" in line:
+                    state["default_sink"] = line.split("Default Sink:")[1].strip()
+                elif "Default Source:" in line:
+                    state["default_source"] = line.split("Default Source:")[1].strip()
+        except Exception:
+            pass
+
+        # Query sinks
+        try:
+            sinks_out = subprocess.check_output(["pactl", "list", "sinks"], text=True, stderr=subprocess.DEVNULL)
+            current = {}
+            for line in sinks_out.splitlines():
+                line = line.strip()
+                if line.startswith("Sink #"):
+                    if current:
+                        state["sinks"].append(current)
+                    current = {"id": line.split("#")[1].strip()}
+                elif line.startswith("Name:"):
+                    current["name"] = line.split("Name:")[1].strip()
+                elif line.startswith("Description:"):
+                    current["desc"] = line.split("Description:")[1].strip()
+                elif line.startswith("Volume:") and "volume" not in current:
+                    m = re.search(r"(\d+)%", line)
+                    current["volume"] = int(m.group(1)) if m else 50
+                elif line.startswith("Mute:"):
+                    current["mute"] = "yes" in line.lower()
+            if current:
+                state["sinks"].append(current)
+        except Exception:
+            pass
+
+        # Identify master volume
+        for s in state["sinks"]:
+            if s.get("name") == state["default_sink"] or (not state["default_sink"] and not state.get("found_def")):
+                state["master_volume"] = s.get("volume", 50)
+                state["master_muted"] = s.get("mute", False)
+                state["found_def"] = True
+                break
+
+        # Query sources (inputs)
+        try:
+            sources_out = subprocess.check_output(["pactl", "list", "sources"], text=True, stderr=subprocess.DEVNULL)
+            current = {}
+            for line in sources_out.splitlines():
+                line = line.strip()
+                if line.startswith("Source #"):
+                    if current and not current.get("name", "").endswith(".monitor"):
+                        state["sources"].append(current)
+                    current = {"id": line.split("#")[1].strip()}
+                elif line.startswith("Name:"):
+                    current["name"] = line.split("Name:")[1].strip()
+                elif line.startswith("Description:"):
+                    current["desc"] = line.split("Description:")[1].strip()
+                elif line.startswith("Volume:") and "volume" not in current:
+                    m = re.search(r"(\d+)%", line)
+                    current["volume"] = int(m.group(1)) if m else 50
+                elif line.startswith("Mute:"):
+                    current["mute"] = "yes" in line.lower()
+            if current and not current.get("name", "").endswith(".monitor"):
+                state["sources"].append(current)
+        except Exception:
+            pass
+
+        # Query active apps (sink-inputs)
+        try:
+            apps_out = subprocess.check_output(["pactl", "list", "sink-inputs"], text=True, stderr=subprocess.DEVNULL)
+            current = {}
+            for line in apps_out.splitlines():
+                line = line.strip()
+                if line.startswith("Sink Input #"):
+                    if current:
+                        state["apps"].append(current)
+                    current = {"id": line.split("#")[1].strip()}
+                elif line.startswith("application.name ="):
+                    current["name"] = line.split("=")[1].strip(" \"")
+                elif line.startswith("application.process.binary ="):
+                    current["binary"] = line.split("=")[1].strip(" \"")
+                elif line.startswith("Volume:") and "volume" not in current:
+                    m = re.search(r"(\d+)%", line)
+                    current["volume"] = int(m.group(1)) if m else 100
+                elif line.startswith("Mute:"):
+                    current["mute"] = "yes" in line.lower()
+            if current:
+                state["apps"].append(current)
+        except Exception:
+            pass
+
+        return state
+
+    @staticmethod
+    def set_master_volume(percent: int):
+        percent = max(0, min(100, percent))
+        try:
+            subprocess.run(["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{percent}%"], check=False)
+        except Exception:
+            pass
+
+    @staticmethod
+    def set_master_mute(mute: bool):
+        val = "1" if mute else "0"
+        try:
+            subprocess.run(["pactl", "set-sink-mute", "@DEFAULT_SINK@", val], check=False)
+        except Exception:
+            pass
+
+    @staticmethod
+    def toggle_master_mute():
+        try:
+            subprocess.run(["pactl", "set-sink-mute", "@DEFAULT_SINK@", "toggle"], check=False)
+        except Exception:
+            pass
+
+    @staticmethod
+    def set_default_sink(sink_name: str):
+        try:
+            subprocess.run(["pactl", "set-default-sink", sink_name], check=False)
+        except Exception:
+            pass
+
+    @staticmethod
+    def set_default_source(source_name: str):
+        try:
+            subprocess.run(["pactl", "set-default-source", source_name], check=False)
+        except Exception:
+            pass
+
+    @staticmethod
+    def set_source_volume(percent: int):
+        percent = max(0, min(100, percent))
+        try:
+            subprocess.run(["pactl", "set-source-volume", "@DEFAULT_SOURCE@", f"{percent}%"], check=False)
+        except Exception:
+            pass
+
+    @staticmethod
+    def set_source_mute(mute: bool):
+        val = "1" if mute else "0"
+        try:
+            subprocess.run(["pactl", "set-source-mute", "@DEFAULT_SOURCE@", val], check=False)
+        except Exception:
+            pass
+
+    @staticmethod
+    def set_app_volume(app_id: str, percent: int):
+        percent = max(0, min(100, percent))
+        try:
+            subprocess.run(["pactl", "set-sink-input-volume", app_id, f"{percent}%"], check=False)
+        except Exception:
+            pass
+
+    @staticmethod
+    def set_app_mute(app_id: str, mute: bool):
+        val = "1" if mute else "0"
+        try:
+            subprocess.run(["pactl", "set-sink-input-mute", app_id, val], check=False)
+        except Exception:
+            pass
+
+    @staticmethod
+    def play_chime():
+        """Generates and plays a pleasant 2-tone Windows test chime."""
+        try:
+            # Check if system sound exists
+            system_wav = "/usr/share/sounds/alsa/Front_Center.wav"
+            if os.path.exists(system_wav):
+                subprocess.Popen(["paplay", system_wav])
+                return
+        except Exception:
+            pass
+
+        # Synthesize chime
+        sample_rate = 44100
+        tones = [(523.25, 0.12), (783.99, 0.20)]  # C5 -> G5
+        frames = bytearray()
+        for freq, dur in tones:
+            num_samples = int(sample_rate * dur)
+            for i in range(num_samples):
+                t = i / sample_rate
+                envelope = math.exp(-3.5 * (i / num_samples))
+                val = int(32767.0 * 0.45 * envelope * math.sin(2.0 * math.pi * freq * t))
+                frames.extend(struct.pack('<h', val))
+                frames.extend(struct.pack('<h', val))
+
+        tmp = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
+        tmp_name = tmp.name
+        tmp.close()
+        import wave
+        with wave.open(tmp_name, 'wb') as wf:
+            wf.setnchannels(2)
+            wf.setsampwidth(2)
+            wf.setframerate(sample_rate)
+            wf.writeframes(frames)
+        subprocess.Popen(["paplay", tmp_name])
+
+
+# ============================================================================
+# FLUENT UI CARD WIDGET
+# ============================================================================
+
+class FluentCard(QFrame):
+    """Windows 11 rounded fluent card."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setStyleSheet("""
+            FluentCard {
+                background-color: #2b2b2b;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 8px;
+            }
+        """)
+
+
+# ============================================================================
+# WINDOWS 11 SOUND SETTINGS WINDOW
+# ============================================================================
+
+class WindowsSoundSettingsWindow(QMainWindow):
+    """Full Windows 11 System > Sound Settings Application."""
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Sound - DevOS Settings")
+        self.resize(760, 680)
+        self.setMinimumSize(600, 500)
+        self.setWindowIcon(make_vector_sound_icon("volume-high", 32, "#60cdff"))
+
+        self._updating = False
+        self._setup_ui()
+
+        # Polling timer for real-time external changes
+        self.timer = QTimer(self)
+        self.timer.setInterval(1200)
+        self.timer.timeout.connect(self.refresh_audio_state)
+        self.timer.start()
+
+        self.refresh_audio_state()
+
+    def _setup_ui(self):
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #202020;
+                color: #ffffff;
+            }
+            QLabel {
+                color: #ffffff;
+                font-family: 'Segoe UI', 'Inter', sans-serif;
+            }
+            QRadioButton {
+                color: #f1f5f9;
+                font-size: 13px;
+                spacing: 8px;
+            }
+            QRadioButton::indicator {
+                width: 16px;
+                height: 16px;
+                border-radius: 8px;
+                border: 2px solid #64748b;
+                background-color: transparent;
+            }
+            QRadioButton::indicator:checked {
+                border-color: #60cdff;
+                background-color: #60cdff;
+            }
+            QSlider::groove:horizontal {
+                height: 4px;
+                background: #475569;
+                border-radius: 2px;
+            }
+            QSlider::sub-page:horizontal {
+                background: #60cdff;
+                border-radius: 2px;
+            }
+            QSlider::handle:horizontal {
+                background: #ffffff;
+                border: 2px solid #60cdff;
+                width: 16px;
+                margin-top: -6px;
+                margin-bottom: -6px;
+                border-radius: 8px;
+            }
+            QSlider::handle:horizontal:hover {
+                background: #60cdff;
+                border-color: #ffffff;
+            }
+            QPushButton {
+                background-color: #383838;
+                color: #f1f5f9;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 4px;
+                padding: 6px 14px;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #444444;
+                border-color: rgba(255, 255, 255, 0.16);
+            }
+            QPushButton:pressed {
+                background-color: #2e2e2e;
+            }
+            QScrollBar:vertical {
+                border: none;
+                background: transparent;
+                width: 8px;
+            }
+            QScrollBar::handle:vertical {
+                background: #475569;
+                min-height: 20px;
+                border-radius: 4px;
+            }
+        """)
+
+        central = QWidget()
+        self.setCentralWidget(central)
+        main_layout = QVBoxLayout(central)
+        main_layout.setContentsMargins(24, 20, 24, 20)
+        main_layout.setSpacing(16)
+
+        # Breadcrumb & Title
+        breadcrumb = QLabel("System  ›  Sound")
+        breadcrumb.setStyleSheet("color: #94a3b8; font-size: 12px; font-weight: 500;")
+        main_layout.addWidget(breadcrumb)
+
+        title = QLabel("Sound")
+        title.setStyleSheet("color: #ffffff; font-size: 26px; font-weight: 600; margin-bottom: 4px;")
+        main_layout.addWidget(title)
+
+        # Scroll Area for Content
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setStyleSheet("background: transparent;")
+
+        content_widget = QWidget()
+        self.content_layout = QVBoxLayout(content_widget)
+        self.content_layout.setContentsMargins(0, 0, 10, 0)
+        self.content_layout.setSpacing(16)
+
+        # -------------------------------------------------------------
+        # 1. OUTPUT SECTION
+        # -------------------------------------------------------------
+        self.card_output = FluentCard()
+        l_out = QVBoxLayout(self.card_output)
+        l_out.setContentsMargins(18, 16, 18, 16)
+        l_out.setSpacing(12)
+
+        lbl_out_title = QLabel("Output")
+        lbl_out_title.setStyleSheet("font-size: 16px; font-weight: 600;")
+        l_out.addWidget(lbl_out_title)
+
+        lbl_out_desc = QLabel("Choose where to play sound. Apps might have their own settings.")
+        lbl_out_desc.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        l_out.addWidget(lbl_out_desc)
+
+        self.sink_button_group = QButtonGroup(self)
+        self.sink_layout = QVBoxLayout()
+        self.sink_layout.setSpacing(8)
+        l_out.addLayout(self.sink_layout)
+
+        # Master volume slider row
+        row_vol = QHBoxLayout()
+        row_vol.setSpacing(12)
+
+        self.btn_master_mute = QPushButton()
+        self.btn_master_mute.setFixedSize(36, 32)
+        self.btn_master_mute.setIcon(make_vector_sound_icon("volume-high", 18))
+        self.btn_master_mute.clicked.connect(self._on_toggle_master_mute)
+        row_vol.addWidget(self.btn_master_mute)
+
+        self.slider_master = QSlider(Qt.Horizontal)
+        self.slider_master.setRange(0, 100)
+        self.slider_master.setValue(50)
+        self.slider_master.valueChanged.connect(self._on_master_slider_changed)
+        row_vol.addWidget(self.slider_master, 1)
+
+        self.lbl_master_pct = QLabel("50%")
+        self.lbl_master_pct.setStyleSheet("font-size: 13px; font-weight: 600; min-width: 40px;")
+        row_vol.addWidget(self.lbl_master_pct)
+
+        btn_test = QPushButton("Test")
+        btn_test.setIcon(make_vector_sound_icon("play", 14))
+        btn_test.setToolTip("Play a test chime through the selected speaker")
+        btn_test.clicked.connect(AudioManager.play_chime)
+        row_vol.addWidget(btn_test)
+
+        l_out.addLayout(row_vol)
+        self.content_layout.addWidget(self.card_output)
+
+        # -------------------------------------------------------------
+        # 2. INPUT SECTION (Microphone)
+        # -------------------------------------------------------------
+        self.card_input = FluentCard()
+        l_in = QVBoxLayout(self.card_input)
+        l_in.setContentsMargins(18, 16, 18, 16)
+        l_in.setSpacing(12)
+
+        lbl_in_title = QLabel("Input")
+        lbl_in_title.setStyleSheet("font-size: 16px; font-weight: 600;")
+        l_in.addWidget(lbl_in_title)
+
+        lbl_in_desc = QLabel("Choose a device for speaking or recording.")
+        lbl_in_desc.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        l_in.addWidget(lbl_in_desc)
+
+        self.source_button_group = QButtonGroup(self)
+        self.source_layout = QVBoxLayout()
+        self.source_layout.setSpacing(8)
+        l_in.addLayout(self.source_layout)
+
+        # Input volume slider row
+        row_in_vol = QHBoxLayout()
+        row_in_vol.setSpacing(12)
+
+        self.btn_source_mute = QPushButton()
+        self.btn_source_mute.setFixedSize(36, 32)
+        self.btn_source_mute.setIcon(make_vector_sound_icon("mic", 18))
+        self.btn_source_mute.clicked.connect(self._on_toggle_source_mute)
+        row_in_vol.addWidget(self.btn_source_mute)
+
+        self.slider_source = QSlider(Qt.Horizontal)
+        self.slider_source.setRange(0, 100)
+        self.slider_source.setValue(80)
+        self.slider_source.valueChanged.connect(self._on_source_slider_changed)
+        row_in_vol.addWidget(self.slider_source, 1)
+
+        self.lbl_source_pct = QLabel("80%")
+        self.lbl_source_pct.setStyleSheet("font-size: 13px; font-weight: 600; min-width: 40px;")
+        row_in_vol.addWidget(self.lbl_source_pct)
+
+        l_in.addLayout(row_in_vol)
+        self.content_layout.addWidget(self.card_input)
+
+        # -------------------------------------------------------------
+        # 3. VOLUME MIXER SECTION (Per-app volume)
+        # -------------------------------------------------------------
+        self.card_mixer = FluentCard()
+        l_mix = QVBoxLayout(self.card_mixer)
+        l_mix.setContentsMargins(18, 16, 18, 16)
+        l_mix.setSpacing(12)
+
+        row_mix_h = QHBoxLayout()
+        lbl_mix_title = QLabel("Volume mixer")
+        lbl_mix_title.setStyleSheet("font-size: 16px; font-weight: 600;")
+        row_mix_h.addWidget(lbl_mix_title)
+        row_mix_h.addStretch(1)
+
+        btn_reset_apps = QPushButton("Reset")
+        btn_reset_apps.setToolTip("Reset all app volumes to 100%")
+        btn_reset_apps.clicked.connect(self._reset_all_apps)
+        row_mix_h.addWidget(btn_reset_apps)
+        l_mix.addLayout(row_mix_h)
+
+        lbl_mix_desc = QLabel("Adjust volume levels for running applications.")
+        lbl_mix_desc.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        l_mix.addWidget(lbl_mix_desc)
+
+        self.apps_layout = QVBoxLayout()
+        self.apps_layout.setSpacing(10)
+        l_mix.addLayout(self.apps_layout)
+
+        self.content_layout.addWidget(self.card_mixer)
+
+        # Advanced options button
+        row_adv = QHBoxLayout()
+        btn_advanced = QPushButton("More volume settings & PulseAudio control")
+        btn_advanced.setIcon(make_vector_sound_icon("mixer", 16))
+        btn_advanced.clicked.connect(self._open_advanced_mixer)
+        row_adv.addWidget(btn_advanced)
+        row_adv.addStretch(1)
+        self.content_layout.addLayout(row_adv)
+
+        self.content_layout.addStretch(1)
+        scroll.setWidget(content_widget)
+        main_layout.addWidget(scroll, 1)
+
+    def refresh_audio_state(self):
+        """Polls PipeWire state and refreshes UI widgets."""
+        if self._updating:
+            return
+
+        self._updating = True
+        try:
+            state = AudioManager.get_audio_state()
+
+            # Master volume & mute
+            mv = state.get("master_volume", 50)
+            muted = state.get("master_muted", False)
+            self.slider_master.setValue(mv)
+            self.lbl_master_pct.setText(f"{mv}%")
+            if muted or mv == 0:
+                self.btn_master_mute.setIcon(make_vector_sound_icon("volume-muted", 18))
+            elif mv < 33:
+                self.btn_master_mute.setIcon(make_vector_sound_icon("volume-low", 18))
+            elif mv < 66:
+                self.btn_master_mute.setIcon(make_vector_sound_icon("volume-medium", 18))
+            else:
+                self.btn_master_mute.setIcon(make_vector_sound_icon("volume-high", 18))
+
+            # Sinks list
+            # Clear old buttons
+            while self.sink_layout.count():
+                child = self.sink_layout.takeAt(0)
+                if child.widget():
+                    child.widget().deleteLater()
+
+            def_sink = state.get("default_sink", "")
+            for s in state.get("sinks", []):
+                s_name = s.get("name", "")
+                s_desc = s.get("desc", s_name)
+                rb = QRadioButton(s_desc)
+                if s_name == def_sink or len(state["sinks"]) == 1:
+                    rb.setChecked(True)
+                rb.toggled.connect(lambda checked, name=s_name: self._on_sink_selected(name, checked))
+                self.sink_button_group.addButton(rb)
+                self.sink_layout.addWidget(rb)
+
+            if not state.get("sinks"):
+                lbl_none = QLabel("No output devices detected")
+                lbl_none.setStyleSheet("color: #64748b; font-style: italic;")
+                self.sink_layout.addWidget(lbl_none)
+
+            # Sources list (Inputs)
+            while self.source_layout.count():
+                child = self.source_layout.takeAt(0)
+                if child.widget():
+                    child.widget().deleteLater()
+
+            def_source = state.get("default_source", "")
+            for src in state.get("sources", []):
+                src_name = src.get("name", "")
+                src_desc = src.get("desc", src_name)
+                rb = QRadioButton(src_desc)
+                if src_name == def_source or len(state["sources"]) == 1:
+                    rb.setChecked(True)
+                rb.toggled.connect(lambda checked, name=src_name: self._on_source_selected(name, checked))
+                self.source_button_group.addButton(rb)
+                self.source_layout.addWidget(rb)
+
+            if not state.get("sources"):
+                lbl_none = QLabel("No microphone / recording devices detected")
+                lbl_none.setStyleSheet("color: #64748b; font-style: italic;")
+                self.source_layout.addWidget(lbl_none)
+
+            # Apps volume mixer
+            while self.apps_layout.count():
+                child = self.apps_layout.takeAt(0)
+                if child.widget():
+                    child.widget().deleteLater()
+
+            apps = state.get("apps", [])
+            if not apps:
+                lbl_no_apps = QLabel("No apps are currently playing audio.")
+                lbl_no_apps.setStyleSheet("color: #64748b; font-style: italic; font-size: 12px; margin: 6px 0;")
+                self.apps_layout.addWidget(lbl_no_apps)
+            else:
+                for app in apps:
+                    row = QHBoxLayout()
+                    app_id = app.get("id")
+                    app_name = app.get("name", "Audio Stream")
+                    app_vol = app.get("volume", 100)
+                    app_mute = app.get("mute", False)
+
+                    lbl_name = QLabel(app_name)
+                    lbl_name.setStyleSheet("font-size: 13px; font-weight: 500; min-width: 140px;")
+                    row.addWidget(lbl_name)
+
+                    btn_app_mute = QPushButton()
+                    btn_app_mute.setFixedSize(30, 26)
+                    btn_app_mute.setIcon(make_vector_sound_icon("volume-muted" if app_mute else "volume-high", 14))
+                    btn_app_mute.clicked.connect(lambda _, aid=app_id, m=app_mute: self._on_app_mute_toggle(aid, not m))
+                    row.addWidget(btn_app_mute)
+
+                    slider_app = QSlider(Qt.Horizontal)
+                    slider_app.setRange(0, 100)
+                    slider_app.setValue(app_vol)
+                    slider_app.valueChanged.connect(lambda val, aid=app_id: AudioManager.set_app_volume(aid, val))
+                    row.addWidget(slider_app, 1)
+
+                    lbl_pct = QLabel(f"{app_vol}%")
+                    lbl_pct.setStyleSheet("font-size: 12px; min-width: 38px;")
+                    slider_app.valueChanged.connect(lambda val, l=lbl_pct: l.setText(f"{val}%"))
+                    row.addWidget(lbl_pct)
+
+                    self.apps_layout.addLayout(row)
+
+        finally:
+            self._updating = False
+
+    def _on_master_slider_changed(self, value):
+        if self._updating:
+            return
+        self.lbl_master_pct.setText(f"{value}%")
+        AudioManager.set_master_volume(value)
+
+    def _on_toggle_master_mute(self):
+        AudioManager.toggle_master_mute()
+        self.refresh_audio_state()
+
+    def _on_sink_selected(self, name: str, checked: bool):
+        if checked and not self._updating:
+            AudioManager.set_default_sink(name)
+
+    def _on_source_slider_changed(self, value):
+        if self._updating:
+            return
+        self.lbl_source_pct.setText(f"{value}%")
+        AudioManager.set_source_volume(value)
+
+    def _on_toggle_source_mute(self):
+        # Toggle source mute
+        state = AudioManager.get_audio_state()
+        cur_mute = False
+        for src in state.get("sources", []):
+            if src.get("name") == state.get("default_source"):
+                cur_mute = src.get("mute", False)
+                break
+        AudioManager.set_source_mute(not cur_mute)
+        self.refresh_audio_state()
+
+    def _on_source_selected(self, name: str, checked: bool):
+        if checked and not self._updating:
+            AudioManager.set_default_source(name)
+
+    def _on_app_mute_toggle(self, app_id: str, new_mute: bool):
+        AudioManager.set_app_mute(app_id, new_mute)
+        self.refresh_audio_state()
+
+    def _reset_all_apps(self):
+        state = AudioManager.get_audio_state()
+        for app in state.get("apps", []):
+            AudioManager.set_app_volume(app["id"], 100)
+            AudioManager.set_app_mute(app["id"], False)
+        self.refresh_audio_state()
+
+    def _open_advanced_mixer(self):
+        for cmd in [["pavucontrol-qt"], ["pavucontrol"], ["kcmshell6", "kcm_pulseaudio"]]:
+            if shutil.which(cmd[0]):
+                subprocess.Popen(cmd)
+                return
+
+
+# ============================================================================
+# WINDOWS 11 VOLUME FLYOUT (Taskbar Quick Popup)
+# ============================================================================
+
+class WindowsVolumeFlyout(QWidget):
+    """Windows 11 Quick Volume & Device Flyout above System Tray."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent, Qt.Popup | Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setFixedSize(360, 200)
+
+        self._setup_ui()
+        self._updating = False
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+
+        self.card = FluentCard(self)
+        self.card.setStyleSheet("""
+            FluentCard {
+                background-color: rgba(36, 36, 36, 0.95);
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                border-radius: 10px;
+            }
+            QLabel {
+                color: #ffffff;
+                font-family: 'Segoe UI', 'Inter', sans-serif;
+            }
+            QSlider::groove:horizontal {
+                height: 4px;
+                background: #475569;
+                border-radius: 2px;
+            }
+            QSlider::sub-page:horizontal {
+                background: #60cdff;
+                border-radius: 2px;
+            }
+            QSlider::handle:horizontal {
+                background: #ffffff;
+                border: 2px solid #60cdff;
+                width: 16px;
+                margin-top: -6px;
+                margin-bottom: -6px;
+                border-radius: 8px;
+            }
+            QPushButton {
+                background-color: #383838;
+                color: #f1f5f9;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 4px;
+                padding: 5px 10px;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #444444;
+            }
+        """)
+
+        card_layout = QVBoxLayout(self.card)
+        card_layout.setContentsMargins(16, 14, 16, 14)
+        card_layout.setSpacing(12)
+
+        # Header: Device Name
+        row_top = QHBoxLayout()
+        self.lbl_device = QLabel("Speakers (Built-in Audio)")
+        self.lbl_device.setStyleSheet("font-size: 13px; font-weight: 600; color: #f1f5f9;")
+        row_top.addWidget(self.lbl_device, 1)
+
+        btn_chime = QPushButton()
+        btn_chime.setFixedSize(28, 26)
+        btn_chime.setIcon(make_vector_sound_icon("play", 12))
+        btn_chime.setToolTip("Test sound")
+        btn_chime.clicked.connect(AudioManager.play_chime)
+        row_top.addWidget(btn_chime)
+        card_layout.addLayout(row_top)
+
+        # Volume slider row
+        row_vol = QHBoxLayout()
+        row_vol.setSpacing(10)
+
+        self.btn_mute = QPushButton()
+        self.btn_mute.setFixedSize(36, 32)
+        self.btn_mute.setIcon(make_vector_sound_icon("volume-high", 18))
+        self.btn_mute.clicked.connect(self._on_mute_clicked)
+        row_vol.addWidget(self.btn_mute)
+
+        self.slider = QSlider(Qt.Horizontal)
+        self.slider.setRange(0, 100)
+        self.slider.setValue(50)
+        self.slider.valueChanged.connect(self._on_slider_changed)
+        row_vol.addWidget(self.slider, 1)
+
+        self.lbl_pct = QLabel("50%")
+        self.lbl_pct.setStyleSheet("font-size: 13px; font-weight: 600; min-width: 38px;")
+        row_vol.addWidget(self.lbl_pct)
+        card_layout.addLayout(row_vol)
+
+        # Bottom footer: Link to more sound settings
+        row_foot = QHBoxLayout()
+        btn_more = QPushButton("Sound settings")
+        btn_more.setIcon(make_vector_sound_icon("settings", 14))
+        btn_more.clicked.connect(self._open_full_settings)
+        row_foot.addWidget(btn_more)
+        row_foot.addStretch(1)
+        card_layout.addLayout(row_foot)
+
+        layout.addWidget(self.card)
+
+    def refresh_data(self):
+        self._updating = True
+        try:
+            state = AudioManager.get_audio_state()
+            mv = state.get("master_volume", 50)
+            muted = state.get("master_muted", False)
+            self.slider.setValue(mv)
+            self.lbl_pct.setText(f"{mv}%")
+            if muted or mv == 0:
+                self.btn_mute.setIcon(make_vector_sound_icon("volume-muted", 18))
+            elif mv < 33:
+                self.btn_mute.setIcon(make_vector_sound_icon("volume-low", 18))
+            elif mv < 66:
+                self.btn_mute.setIcon(make_vector_sound_icon("volume-medium", 18))
+            else:
+                self.btn_mute.setIcon(make_vector_sound_icon("volume-high", 18))
+
+            # Current default sink name
+            def_sink = state.get("default_sink", "")
+            for s in state.get("sinks", []):
+                if s.get("name") == def_sink:
+                    self.lbl_device.setText(s.get("desc", s.get("name", "Default Audio")))
+                    break
+        finally:
+            self._updating = False
+
+    def _on_slider_changed(self, value):
+        if self._updating:
+            return
+        self.lbl_pct.setText(f"{value}%")
+        AudioManager.set_master_volume(value)
+
+    def _on_mute_clicked(self):
+        AudioManager.toggle_master_mute()
+        self.refresh_data()
+
+    def _open_full_settings(self):
+        self.hide()
+        DevOSSoundTray.instance().show_settings_window()
+
+
+# ============================================================================
+# SYSTEM TRAY CONTROLLER
+# ============================================================================
+
+class DevOSSoundTray(QObject):
+    """System Tray Icon with quick flyout and menu."""
+
+    _instance = None
+
+    @classmethod
+    def instance(cls):
+        return cls._instance
+
+    def __init__(self, app: QApplication):
+        super().__init__()
+        DevOSSoundTray._instance = self
+        self.app = app
+        self.tray = QSystemTrayIcon(self)
+        self.flyout = WindowsVolumeFlyout()
+        self.settings_window = None
+
+        self._setup_tray()
+
+        # Update timer
+        self.timer = QTimer(self)
+        self.timer.setInterval(1500)
+        self.timer.timeout.connect(self.update_tray_icon)
+        self.timer.start()
+
+        self.update_tray_icon()
+
+    def _setup_tray(self):
+        menu = QMenu()
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #2b2b2b;
+                color: #ffffff;
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                border-radius: 6px;
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 6px 20px;
+                border-radius: 4px;
+            }
+            QMenu::item:selected {
+                background-color: #0078d4;
+            }
+        """)
+
+        act_settings = menu.addAction(make_vector_sound_icon("volume-high", 16), "Sound Settings")
+        act_settings.triggered.connect(self.show_settings_window)
+
+        act_mute = menu.addAction(make_vector_sound_icon("volume-muted", 16), "Mute / Unmute")
+        act_mute.triggered.connect(self._toggle_mute)
+
+        menu.addSeparator()
+
+        act_quit = menu.addAction("Exit Sound Tray")
+        act_quit.triggered.connect(self.app.quit)
+
+        self.tray.setContextMenu(menu)
+        self.tray.activated.connect(self._on_tray_activated)
+        self.update_tray_icon()
+        self.tray.show()
+
+    def _on_tray_activated(self, reason):
+        if reason == QSystemTrayIcon.Trigger:
+            # Left click -> Toggle flyout
+            if self.flyout.isVisible():
+                self.flyout.hide()
+            else:
+                self.flyout.refresh_data()
+                # Position above tray or bottom right
+                geo = self.tray.geometry()
+                screen = QApplication.primaryScreen().availableGeometry()
+                if geo.isValid() and geo.x() > 0:
+                    x = max(10, min(geo.x() - self.flyout.width() // 2, screen.width() - self.flyout.width() - 10))
+                    y = max(10, geo.y() - self.flyout.height() - 10)
+                else:
+                    x = screen.width() - self.flyout.width() - 20
+                    y = screen.height() - self.flyout.height() - 50
+                self.flyout.move(x, y)
+                self.flyout.show()
+                self.flyout.raise_()
+                self.flyout.activateWindow()
+
+    def _toggle_mute(self):
+        AudioManager.toggle_master_mute()
+        self.update_tray_icon()
+
+    def update_tray_icon(self):
+        state = AudioManager.get_audio_state()
+        mv = state.get("master_volume", 50)
+        muted = state.get("master_muted", False)
+
+        if muted or mv == 0:
+            icon_name = "volume-muted"
+        elif mv < 33:
+            icon_name = "volume-low"
+        elif mv < 66:
+            icon_name = "volume-medium"
+        else:
+            icon_name = "volume-high"
+
+        self.tray.setIcon(make_vector_sound_icon(icon_name, 22, "#ffffff"))
+        status_text = "Muted" if muted else f"Volume: {mv}%"
+        self.tray.setToolTip(f"Speakers - {status_text}")
+
+    def show_settings_window(self):
+        if not self.settings_window:
+            self.settings_window = WindowsSoundSettingsWindow()
+        self.settings_window.show()
+        self.settings_window.raise_()
+        self.settings_window.activateWindow()
+
+
+# ============================================================================
+# MAIN ENTRYPOINT & CLI
+# ============================================================================
+
+def main():
+    parser = argparse.ArgumentParser(description="DevOS Windows 11 Sound Settings & Volume Hub")
+    parser.add_argument("--tray", action="store_true", help="Launch as resident system tray icon")
+    parser.add_argument("--volume", type=int, help="Set master volume level (0-100)")
+    parser.add_argument("--mute", action="store_true", help="Mute master audio")
+    parser.add_argument("--unmute", action="store_true", help="Unmute master audio")
+    parser.add_argument("--toggle-mute", action="store_true", help="Toggle master audio mute")
+    parser.add_argument("--status", action="store_true", help="Print audio status JSON and exit")
+    parser.add_argument("--test", action="store_true", help="Play test sound chime and exit")
+
+    args = parser.parse_args()
+
+    if args.status:
+        print(json.dumps(AudioManager.get_audio_state(), indent=2))
+        return
+
+    if args.test:
+        AudioManager.play_chime()
+        return
+
+    if args.volume is not None:
+        AudioManager.set_master_volume(args.volume)
+        print(f"Volume set to {args.volume}%")
+        return
+
+    if args.mute:
+        AudioManager.set_master_mute(True)
+        print("Audio muted")
+        return
+
+    if args.unmute:
+        AudioManager.set_master_mute(False)
+        print("Audio unmuted")
+        return
+
+    if args.toggle_mute:
+        AudioManager.toggle_master_mute()
+        print("Audio mute toggled")
+        return
+
+    # GUI Mode
+    app = QApplication(sys.argv)
+    app.setApplicationName("DevOS Sound")
+    app.setQuitOnLastWindowClosed(not args.tray)
+
+    if args.tray:
+        tray_ctl = DevOSSoundTray(app)
+        sys.exit(app.exec_())
+    else:
+        win = WindowsSoundSettingsWindow()
+        win.show()
+        sys.exit(app.exec_())
+
+
+if __name__ == "__main__":
+    main()

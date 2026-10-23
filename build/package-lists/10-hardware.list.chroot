@@ -46,6 +46,8 @@ pipewire-pulse
 pipewire-audio
 wireplumber
 alsa-utils
+plasma-pa
+pavucontrol-qt
 
 # 7. Printing & Scanning (Driverless IPP Everywhere + Legacy)
 cups
