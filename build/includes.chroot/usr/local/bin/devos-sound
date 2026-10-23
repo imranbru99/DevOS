@@ -802,12 +802,29 @@ class WindowsVolumeFlyout(QWidget):
     """Windows 11 Quick Volume & Device Flyout above System Tray."""
 
     def __init__(self, parent=None):
-        super().__init__(parent, Qt.Popup | Qt.FramelessWindowHint)
+        super().__init__(parent, Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setFixedSize(360, 200)
 
         self._setup_ui()
         self._updating = False
+        self._was_active = False
+
+    def changeEvent(self, event):
+        from PyQt5.QtCore import QEvent
+        if event.type() == QEvent.ActivationChange:
+            if self.isActiveWindow():
+                self._was_active = True
+            elif self._was_active:
+                self.hide()
+                self._was_active = False
+        super().changeEvent(event)
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Escape:
+            self.hide()
+        else:
+            super().keyPressEvent(event)
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -1012,7 +1029,7 @@ class DevOSSoundTray(QObject):
         self.tray.show()
 
     def _on_tray_activated(self, reason):
-        if reason == QSystemTrayIcon.Trigger:
+        if reason in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick):
             # Left click -> Toggle flyout
             if self.flyout.isVisible():
                 self.flyout.hide()
@@ -1042,17 +1059,21 @@ class DevOSSoundTray(QObject):
         muted = state.get("master_muted", False)
 
         if muted or mv == 0:
+            theme_name = "audio-volume-muted"
             icon_name = "volume-muted"
         elif mv < 33:
+            theme_name = "audio-volume-low"
             icon_name = "volume-low"
         elif mv < 66:
+            theme_name = "audio-volume-medium"
             icon_name = "volume-medium"
         else:
+            theme_name = "audio-volume-high"
             icon_name = "volume-high"
 
-        self.tray.setIcon(make_vector_sound_icon(icon_name, 22, "#ffffff"))
+        self.tray.setIcon(QIcon.fromTheme(theme_name, make_vector_sound_icon(icon_name, 22, "#ffffff")))
         status_text = "Muted" if muted else f"Volume: {mv}%"
-        self.tray.setToolTip(f"Speakers - {status_text}")
+        self.tray.setToolTip(f"Sound - {status_text}")
 
     def show_settings_window(self):
         if not self.settings_window:

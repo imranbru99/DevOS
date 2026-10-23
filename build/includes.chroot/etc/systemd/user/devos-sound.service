@@ -1,0 +1,17 @@
+[Unit]
+Description=DevOS Windows 11 Sound Tray
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/devos-sound --tray
+Restart=always
+RestartSec=2
+Environment=DISPLAY=:1
+Environment=WAYLAND_DISPLAY=wayland-0
+Environment=QT_QPA_PLATFORM=xcb
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+
+[Install]
+WantedBy=graphical-session.target
