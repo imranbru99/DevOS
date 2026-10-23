@@ -73,8 +73,11 @@ immutability=1
 plugin=org.kde.plasma.icontasks
 
 [Containments][3][Applets][6][Configuration][General]
-launchers=applications:devos-search.desktop,applications:devos-taskman.desktop,applications:devos-windows.desktop,applications:devos-browser.desktop,applications:devos-thispc.desktop,applications:devos-chat.desktop,applications:devos-code.desktop,applications:systemsettings.desktop,applications:devos-install.desktop
+launchers=applications:devos-search.desktop,applications:devos-taskman.desktop,applications:devos-windows.desktop,applications:google-chrome.desktop,applications:devos-thispc.desktop,applications:devos-chat.desktop,applications:devos-code.desktop,applications:systemsettings.desktop,applications:devos-install.desktop
 groupingStrategy=0
+hideActivatedLaunchers=true
+launchInPlace=true
+separateLaunchers=false
 indicateAudioStreams=true
 iconSpacing=1
 groupPopups=true
