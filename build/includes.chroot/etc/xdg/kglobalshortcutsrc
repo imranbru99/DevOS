@@ -21,6 +21,8 @@ _launch=Meta+R,none,KRunner
 
 [org.kde.spectacle.desktop]
 RectangularRegionScreenShot=Meta+Shift+S,none,Capture Rectangular Region
+RecordRegion=Meta+Shift+R\tMeta+R,Meta+Shift+R\tMeta+R,Record Selected Area
+RecordScreen=Meta+Alt+R,Meta+Alt+R,Record Entire Screen
 
 [org.kde.dolphin.desktop]
 _launch=Meta+E,none,Open File Manager (Explorer)
