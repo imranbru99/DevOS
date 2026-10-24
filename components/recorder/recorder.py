@@ -4,21 +4,25 @@ DevOS Screen Recorder (Fluent Wayland Screen & Audio Recorder)
 Provides a clean, frictionless 1-click recording interface for DevOS:
   - Native Wayland & PipeWire capture (zero setup, no warnings, no codec crashes)
   - Dedicated Audio selection: Microphone, System Sound, or Muted
+  - Built-in Audio Testing: Voice mic playback test & System chime test
   - Proper desktop identification & custom taskbar icon
   - Start, Stop, and Save buttons with instant playback and folder shortcuts
 """
 
 import glob
+import math
 import os
 import shutil
 import signal
+import struct
 import subprocess
 import sys
 import tempfile
 import time
+import wave
 from typing import Optional
 
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal
 from PyQt5.QtGui import QFont, QIcon, QPixmap
 from PyQt5.QtWidgets import (
     QApplication,
@@ -44,7 +48,6 @@ except Exception:
     HAS_GST = False
 
 SCREENCASTS_DIR = os.path.expanduser("~/Videos/Screencasts")
-AUDIO_TEMP_FILE = "/tmp/devos_recorder_audio.wav"
 
 
 def get_app_icon() -> QIcon:
@@ -72,6 +75,38 @@ def get_default_monitor_sink() -> Optional[str]:
     return None
 
 
+def play_chime():
+    """Generates and plays a pleasant 2-tone test chime."""
+    system_wav = "/usr/share/sounds/alsa/Front_Center.wav"
+    if os.path.isfile(system_wav):
+        subprocess.run(["paplay", system_wav], check=False)
+        return
+
+    sample_rate = 44100
+    tones = [(523.25, 0.12), (783.99, 0.20)]
+    frames = bytearray()
+    for freq, dur in tones:
+        num_samples = int(sample_rate * dur)
+        for i in range(num_samples):
+            t = i / sample_rate
+            envelope = math.exp(-3.5 * (i / num_samples))
+            val = int(32767.0 * 0.45 * envelope * math.sin(2.0 * math.pi * freq * t))
+            frames.extend(struct.pack("<h", val))
+            frames.extend(struct.pack("<h", val))
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    with wave.open(tmp.name, "wb") as wf:
+        wf.setnchannels(2)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        wf.writeframes(frames)
+    subprocess.run(["paplay", tmp.name], check=False)
+    try:
+        os.remove(tmp.name)
+    except Exception:
+        pass
+
+
 def mux_audio_into_video(video_path: str, audio_path: str, output_path: str) -> bool:
     """Mux video stream and audio stream into a final webm container using GStreamer."""
     if not HAS_GST or not os.path.isfile(video_path) or not os.path.isfile(audio_path):
@@ -93,6 +128,45 @@ def mux_audio_into_video(video_path: str, audio_path: str, output_path: str) -> 
         return False
 
 
+class MicTestThread(QThread):
+    status_signal = pyqtSignal(str, str)
+    finished_signal = pyqtSignal()
+
+    def run(self):
+        test_wav = f"/tmp/devos_mic_test_{int(time.time())}.wav"
+        self.status_signal.emit("🎙️ Speak now (listening 2s)...", "#f59e0b")
+        try:
+            subprocess.run(["parecord", "--channels=1", "--rate=48000", "--file-format=wav", test_wav], timeout=2.0)
+        except subprocess.TimeoutExpired:
+            pass
+        except Exception:
+            pass
+
+        if os.path.isfile(test_wav) and os.path.getsize(test_wav) > 1000:
+            self.status_signal.emit("🔊 Playing back your voice...", "#38bdf8")
+            subprocess.run(["paplay", test_wav], check=False)
+            try:
+                os.remove(test_wav)
+            except Exception:
+                pass
+            self.status_signal.emit("✅ Microphone working!", "#4ade80")
+        else:
+            self.status_signal.emit("⚠️ No audio detected", "#ef4444")
+
+        self.finished_signal.emit()
+
+
+class ChimeTestThread(QThread):
+    status_signal = pyqtSignal(str, str)
+    finished_signal = pyqtSignal()
+
+    def run(self):
+        self.status_signal.emit("🔊 Playing test sound...", "#38bdf8")
+        play_chime()
+        self.status_signal.emit("✅ Audio output working!", "#4ade80")
+        self.finished_signal.emit()
+
+
 class DevOSRecorder(QWidget):
     def __init__(self):
         super().__init__()
@@ -102,6 +176,7 @@ class DevOSRecorder(QWidget):
         self.initial_files = set()
         self.audio_proc: Optional[subprocess.Popen] = None
         self.temp_audio_file = None
+        self.test_thread: Optional[QThread] = None
 
         os.makedirs(SCREENCASTS_DIR, exist_ok=True)
         self.init_ui()
@@ -112,7 +187,7 @@ class DevOSRecorder(QWidget):
 
     def init_ui(self):
         self.setWindowTitle("Screen Recorder")
-        self.setFixedSize(480, 560)
+        self.setFixedSize(490, 600)
         self.setWindowIcon(get_app_icon())
 
         self.setStyleSheet("""
@@ -249,9 +324,49 @@ class DevOSRecorder(QWidget):
         self.audio_group.addButton(self.radio_system)
         self.audio_group.addButton(self.radio_mute)
 
+        self.radio_mic.toggled.connect(self.on_audio_mode_changed)
+        self.radio_system.toggled.connect(self.on_audio_mode_changed)
+        self.radio_mute.toggled.connect(self.on_audio_mode_changed)
+
         audio_layout.addWidget(self.radio_mic)
         audio_layout.addWidget(self.radio_system)
         audio_layout.addWidget(self.radio_mute)
+
+        # Audio Test Row
+        test_row = QHBoxLayout()
+        test_row.setSpacing(10)
+
+        self.btn_test_audio = QPushButton("🎙️ Test Microphone")
+        self.btn_test_audio.setCursor(Qt.PointingHandCursor)
+        self.btn_test_audio.setFixedHeight(30)
+        self.btn_test_audio.setStyleSheet("""
+            QPushButton {
+                background-color: #1e293b;
+                color: #38bdf8;
+                border: 1px solid #334155;
+                border-radius: 6px;
+                padding: 4px 12px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #334155;
+            }
+            QPushButton:disabled {
+                color: #64748b;
+                border-color: #1e293b;
+                background-color: #0f172a;
+            }
+        """)
+        self.btn_test_audio.clicked.connect(self.test_audio)
+        test_row.addWidget(self.btn_test_audio)
+
+        self.lbl_audio_test_status = QLabel("")
+        self.lbl_audio_test_status.setStyleSheet("font-size: 11px; color: #94a3b8;")
+        test_row.addWidget(self.lbl_audio_test_status)
+        test_row.addStretch()
+
+        audio_layout.addLayout(test_row)
         layout.addWidget(audio_card)
 
         # Options
@@ -342,6 +457,39 @@ class DevOSRecorder(QWidget):
         shortcuts_info.setAlignment(Qt.AlignCenter)
         shortcuts_info.setStyleSheet("color: #475569; font-size: 11px;")
         layout.addWidget(shortcuts_info)
+
+    def on_audio_mode_changed(self):
+        if self.radio_mic.isChecked():
+            self.btn_test_audio.setText("🎙️ Test Microphone")
+            self.btn_test_audio.setEnabled(True)
+            self.btn_test_audio.setToolTip("Record 2 seconds and play it back to check mic levels")
+        elif self.radio_system.isChecked():
+            self.btn_test_audio.setText("🔊 Test Sound Chime")
+            self.btn_test_audio.setEnabled(True)
+            self.btn_test_audio.setToolTip("Play a test chime to verify system audio playback")
+        else:
+            self.btn_test_audio.setText("🔇 Audio Muted")
+            self.btn_test_audio.setEnabled(False)
+            self.btn_test_audio.setToolTip("Audio is disabled")
+        self.lbl_audio_test_status.setText("")
+
+    def test_audio(self):
+        if self.radio_mic.isChecked():
+            self.btn_test_audio.setEnabled(False)
+            self.test_thread = MicTestThread()
+            self.test_thread.status_signal.connect(self.update_audio_test_status)
+            self.test_thread.finished_signal.connect(lambda: self.btn_test_audio.setEnabled(True))
+            self.test_thread.start()
+        elif self.radio_system.isChecked():
+            self.btn_test_audio.setEnabled(False)
+            self.test_thread = ChimeTestThread()
+            self.test_thread.status_signal.connect(self.update_audio_test_status)
+            self.test_thread.finished_signal.connect(lambda: self.btn_test_audio.setEnabled(True))
+            self.test_thread.start()
+
+    def update_audio_test_status(self, text: str, color: str):
+        self.lbl_audio_test_status.setText(text)
+        self.lbl_audio_test_status.setStyleSheet(f"font-size: 11px; color: {color};")
 
     def update_button_style(self, recording: bool):
         if recording:
