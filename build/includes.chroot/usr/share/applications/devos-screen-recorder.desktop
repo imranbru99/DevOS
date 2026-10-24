@@ -3,11 +3,12 @@ Name=Screen Recorder
 GenericName=Screen Recording Tool
 Comment=1-Click high quality screen recording for DevOS
 Exec=devos-recorder
-Icon=media-record
+Icon=devos-recorder
 Type=Application
 Categories=AudioVideo;Recorder;Video;Utility;
 Keywords=screen;record;recorder;screencast;video;capture;
 StartupNotify=true
+StartupWMClass=devos-screen-recorder
 Actions=RecordScreen;RecordRegion;RecordWindow;
 
 [Desktop Action RecordScreen]

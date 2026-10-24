@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+    <linearGradient id="camGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#0284c7"/>
+    </linearGradient>
+    <linearGradient id="recGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f87171"/>
+      <stop offset="100%" stop-color="#ef4444"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+
+  <!-- Base rounded container -->
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="url(#bgGrad)" stroke="#334155" stroke-width="2" filter="url(#shadow)"/>
+
+  <!-- Screen / Lens frame -->
+  <rect x="24" y="34" width="56" height="46" rx="10" fill="url(#camGrad)"/>
+  
+  <!-- Lens triangle / projector -->
+  <path d="M84 46 L104 36 C106 35 108 36 108 38 L108 76 C108 78 106 79 104 78 L84 68 Z" fill="url(#camGrad)"/>
+
+  <!-- Inner viewport circle -->
+  <circle cx="52" cy="57" r="14" fill="#0b1329"/>
+
+  <!-- Glowing recording light (Active red indicator) -->
+  <circle cx="94" cy="94" r="14" fill="url(#recGrad)" stroke="#ffffff" stroke-width="2.5"/>
+  <circle cx="94" cy="94" r="7" fill="#ffffff" opacity="0.8"/>
+</svg>
