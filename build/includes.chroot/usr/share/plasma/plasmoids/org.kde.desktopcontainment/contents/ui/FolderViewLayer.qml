@@ -372,14 +372,6 @@ FocusScope {
             const actionName = sharedActions[i];
             const modelAction = folderView.model.action(actionName);
             if (modelAction) {
-                if (actionName === "refresh") {
-                    modelAction.triggered.connect(() => {
-                        let desktopStr = (folderView && folderView.url) ? folderView.url.toString() : "";
-                        let homePath = desktopStr.replace(/\/Desktop\/?$/, "");
-                        let userAppPath = homePath + "/.local/share/applications/devos-refresh.desktop";
-                        Folder.AppLauncher.openUrl(userAppPath);
-                    });
-                }
                 Plasmoid.contextualActions.push(modelAction);
             }
             if (actionName === "emptyTrash") {
