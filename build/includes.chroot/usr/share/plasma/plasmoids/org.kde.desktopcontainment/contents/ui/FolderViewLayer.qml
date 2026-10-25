@@ -374,13 +374,10 @@ FocusScope {
             if (modelAction) {
                 if (actionName === "refresh") {
                     modelAction.triggered.connect(() => {
-                        try {
-                            Folder.AppLauncher.openUrl("file:///usr/share/applications/devos-refresh.desktop");
-                        } catch (e) {
-                            try {
-                                Folder.AppLauncher.openUrl("file:///usr/local/bin/devos-refresh");
-                            } catch (e2) {}
-                        }
+                        let desktopStr = (folderView && folderView.url) ? folderView.url.toString() : "";
+                        let homePath = desktopStr.replace(/\/Desktop\/?$/, "");
+                        let userAppPath = homePath + "/.local/share/applications/devos-refresh.desktop";
+                        Folder.AppLauncher.openUrl(userAppPath);
                     });
                 }
                 Plasmoid.contextualActions.push(modelAction);
