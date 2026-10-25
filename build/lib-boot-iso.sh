@@ -318,8 +318,10 @@ devos_disk_meta() {
 # Try to read the casper UUID baked into the live initrd.
 devos_initrd_casper_uuid() {
     local initrd="$1"
-    command -v lsinitramfs >/dev/null 2>&1 || return 1
-    lsinitramfs "$initrd" 2>/dev/null | sed -n 's#^conf/conf\.d/casper-uuid-generic:\s*##p' | head -1
+    # lsinitramfs in 26.04 calls 3cpio which can spin on multi-segment microcode initrds; guard with timeout
+    if command -v timeout >/dev/null 2>&1 && command -v lsinitramfs >/dev/null 2>&1; then
+        timeout 3s lsinitramfs "$initrd" 2>/dev/null | sed -n 's#^conf/conf\.d/casper-uuid-generic:\s*##p' | head -1 || true
+    fi
 }
 
 # Generate md5sum.txt for the integrity-check menu entry.
