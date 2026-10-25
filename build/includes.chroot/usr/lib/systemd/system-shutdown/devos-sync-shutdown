@@ -1,0 +1,8 @@
+#!/bin/sh
+# DevOS Clean Shutdown Flush: Ensure NVMe/SSD write buffers and Btrfs transactions are fully committed before poweroff
+sync
+if command -v btrfs >/dev/null 2>&1; then
+    btrfs filesystem sync / 2>/dev/null || true
+    btrfs filesystem sync /home 2>/dev/null || true
+fi
+exit 0
