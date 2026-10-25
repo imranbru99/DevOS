@@ -705,6 +705,47 @@ For prototype status and implementation limits, see [architecture and roadmap](d
 
 ---
 
+## 🛠️ Troubleshooting & Filesystem Recovery (Btrfs / initramfs)
+
+If your system experiences a sudden power loss, battery pull, or crash during intensive disk writes, you may encounter an interrupted tree-log replay error during startup:
+
+```text
+BTRFS error: failed to recover log trees with error: -5
+BTRFS error: open_ctree failed: -5
+(initramfs) _
+```
+
+### Why this happens
+Btrfs maintains an in-flight write log (`tree-log`). If power is abruptly cut before a transaction commits, the log may become incomplete. On reboot, the kernel refuses to mount `/` to protect data, landing you in the emergency `(initramfs)` BusyBox prompt.
+
+### How to resolve it in 60 seconds
+Inside the `(initramfs)` prompt:
+> **Note:** You are already running as `root` (do **not** use `sudo` or `apt`), and the unmount command is `umount` (without an `n`).
+
+1. **Clear the interrupted log tree:**
+   ```bash
+   btrfs rescue zero-log /dev/nvme0n1p2
+   ```
+   *(Replace `/dev/nvme0n1p2` with your root partition, e.g. `/dev/sda2`, shown in the screen message).*
+
+2. **Clear corrupted free-space cache (if extent count mismatch was reported):**
+   ```bash
+   btrfs rescue clear-space-cache v2 /dev/nvme0n1p2
+   ```
+
+3. **Reboot back to normal desktop:**
+   ```bash
+   reboot -f
+   ```
+
+### Built-in DevOS Protections (Never Face This Again)
+- **Automatic Initramfs Self-Healing (`devos-btrfs-heal`):** DevOS automatically intercepts tree-log replay failures early in boot, executes `btrfs rescue zero-log`, and mounts with `clear_cache` to self-heal and boot straight into the desktop without user intervention.
+- **Panic Emergency Screen (`devos-panic-guide`):** Displays instant step-by-step instructions if unexpected manual intervention is required.
+- **Fast 15s Shutdown (`devos-shutdown.conf`):** Terminates lingering background tasks rapidly to ensure NVMe and SSD write caches flush fully before machine poweroff.
+- See detailed documentation in [`docs/BTRFS_RECOVERY.md`](docs/BTRFS_RECOVERY.md).
+
+---
+
 ## Privacy & licensing
 
 - **Local by default:** DevOS assistant, voice and document features process locally. The Code Agent supports cloud providers and can select one when a supported API key is configured; prompts and relevant code then go to that provider. Web searches, public sharing, optional cloud backup, downloads and third-party apps have their own network behavior and terms.

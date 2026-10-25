@@ -1,0 +1,55 @@
+#!/bin/sh
+
+PREREQ=""
+prereqs()
+{
+	echo "$PREREQ"
+}
+
+case "$1" in
+	prereqs)
+		prereqs
+		exit 0
+		;;
+esac
+
+# Check if root is already successfully mounted
+if [ -x "${rootmnt}/sbin/init" ] || [ -x "${rootmnt}/bin/sh" ] || [ -x "${rootmnt}/usr/lib/systemd/systemd" ]; then
+	exit 0
+fi
+
+# Determine if the root filesystem is BTRFS
+is_btrfs=0
+if [ "${FSTYPE}" = "btrfs" ] || [ "${ROOTFSTYPE}" = "btrfs" ]; then
+	is_btrfs=1
+elif command -v blkid >/dev/null 2>&1; then
+	detected_fs=$(blkid -s TYPE -o value "${ROOT}" 2>/dev/null || true)
+	if [ "$detected_fs" = "btrfs" ]; then
+		is_btrfs=1
+	fi
+fi
+
+if [ "$is_btrfs" = 0 ]; then
+	exit 0
+fi
+
+echo "================================================================================"
+echo "DevOS Self-Healing: Root mount failed on ${ROOT}."
+echo "Detecting interrupted BTRFS tree-log / extent-count discrepancy..."
+echo "================================================================================"
+
+if command -v btrfs >/dev/null 2>&1; then
+	echo "DevOS Self-Healing: Clearing corrupted log tree ('btrfs rescue zero-log')..."
+	btrfs rescue zero-log "${ROOT}" 2>&1 || true
+
+	echo "DevOS Self-Healing: Retrying root mount with clear_cache..."
+	# shellcheck disable=SC2086
+	mount -r -t btrfs -o subvol=@,clear_cache,space_cache=v2 "${ROOT}" "${rootmnt}" 2>&1 || true
+
+	if [ -x "${rootmnt}/sbin/init" ] || [ -x "${rootmnt}/bin/sh" ] || [ -x "${rootmnt}/usr/lib/systemd/systemd" ]; then
+		echo "DevOS Self-Healing: SUCCESS! Root filesystem recovered and mounted cleanly."
+		echo "Resuming DevOS boot sequence..."
+		echo "================================================================================"
+		exit 0
+	fi
+fi

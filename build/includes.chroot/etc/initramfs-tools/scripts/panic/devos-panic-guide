@@ -1,0 +1,37 @@
+#!/bin/sh
+
+case "$1" in
+	prereqs)
+		exit 0
+		;;
+esac
+
+cat << 'EOF'
+
+================================================================================
+                    DevOS EMERGENCY FILESYSTEM RESCUE GUIDE
+================================================================================
+Your system entered the emergency shell because the root drive could not mount.
+Common Cause: Sudden power-off / kernel abort during BTRFS tree-log writes.
+
+NOTE: Do NOT type 'sudo' or 'apt' (This is a minimal recovery ramdisk; you are root #).
+      Use 'umount' (NOT 'unmount').
+
+RECOMMENDED STEP-BY-STEP RECOVERY:
+  1. Clear interrupted log tree:
+     btrfs rescue zero-log /dev/nvme0n1p2   (replace with your root drive)
+
+  2. Clear corrupted free-space cache:
+     btrfs rescue clear-space-cache v2 /dev/nvme0n1p2
+
+  3. Test mount to verify subvolumes:
+     mkdir -p /mnt/devos
+     mount -o subvol=@,clear_cache /dev/nvme0n1p2 /mnt/devos
+     ls /mnt/devos
+     umount /mnt/devos
+
+  4. Resume boot or reboot:
+     reboot -f
+================================================================================
+
+EOF

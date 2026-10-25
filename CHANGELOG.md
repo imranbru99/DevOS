@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Browser Modesty & Safety Controls**
   - Unlocked browser modesty filter policy allowing user-controlled on/off toggle.
   - Added AI chat tool integration (`sudo devos-modesty enable/disable/status`).
+- **Filesystem Resilience & Automated Btrfs Recovery**
+  - Added early boot automatic self-healing hook `devos-btrfs-heal` in `etc/initramfs-tools/scripts/local-bottom/` to clear interrupted log trees (`btrfs rescue zero-log`) and mount with `clear_cache` automatically.
+  - Added panic rescue guidance screen `devos-panic-guide` in `etc/initramfs-tools/scripts/panic/`.
+  - Added fast 15-second systemd shutdown configuration in `etc/systemd/system.conf.d/devos-shutdown.conf` to prevent unclean power-off cache issues.
+  - Documented troubleshooting and recovery instructions in `README.md` and `docs/BTRFS_RECOVERY.md`.
 
 ## [0.2.0] - 2026-10-10
 ### Added
