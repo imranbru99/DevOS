@@ -79,7 +79,7 @@ def file_url(path):
     return "file://" + path
 
 
-def build_policy(ext_id, update_url, mode, lock_private_modes=True):
+def build_policy(ext_id, update_url, mode, lock_private_modes=True, locked=False):
     """Managed policy JSON for Chromium-based browsers on Linux."""
     if mode not in MODES:
         raise ValueError("mode must be one of %s" % ", ".join(MODES))
@@ -92,7 +92,7 @@ def build_policy(ext_id, update_url, mode, lock_private_modes=True):
             }
         },
         # chrome.storage.managed for the extension (Linux JSON policy "3rdparty" key).
-        "3rdparty": {"extensions": {ext_id: {"locked": True, "mode": mode}}},
+        "3rdparty": {"extensions": {ext_id: {"locked": locked, "mode": mode}}},
     }
     if lock_private_modes:
         # Extensions do not run in Incognito/Guest windows unless the user
@@ -141,7 +141,7 @@ def pack(out_dir, codebase_dir, key_path=KEY_PATH, update_name=UPDATE_XML):
     return ext_id, version
 
 
-def enable(root="/", mode="women", lock_private_modes=True):
+def enable(root="/", mode="women", lock_private_modes=True, locked=False):
     _require_root(root)
     if mode not in MODES:
         raise ValueError("mode must be one of %s" % ", ".join(MODES))
@@ -165,14 +165,14 @@ def enable(root="/", mode="women", lock_private_modes=True):
             url = file_url("/run/host/" + FLATPAK_DIR + "/" + FLATPAK_UPDATE_XML)
         else:
             url = file_url("/" + INSTALL_DIR + "/" + UPDATE_XML)
-        policy = build_policy(ext_id, url, mode, lock_private_modes)
+        policy = build_policy(ext_id, url, mode, lock_private_modes, locked=locked)
         for d in b["policy_dirs"]:
             path = _p(root, os.path.join(d, POLICY_FILE))
             _write(path, json.dumps(policy, indent=2) + "\n")
             written.append(path)
     state = {"enabled": True, "mode": mode, "extension_id": ext_id, "version": version,
              "browsers": [b["name"] + ("" if kind == "native" else " (flatpak)") for b, kind in browsers],
-             "lock_private_modes": lock_private_modes}
+             "lock_private_modes": lock_private_modes, "locked": locked}
     _write(_p(root, STATE_FILE), json.dumps(state, indent=2) + "\n")
     return dict(state, policies=written)
 
@@ -225,11 +225,13 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="devos-modesty", description="DevOS Modesty filter (browser image/video blur)")
     ap.add_argument("--root", default=os.environ.get("DEVOS_MODESTY_ROOT", "/"), help=argparse.SUPPRESS)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    en = sub.add_parser("enable", help="turn the filter on for all users (locked)")
+    en = sub.add_parser("enable", help="turn the filter on for all users")
     en.add_argument("--mode", choices=MODES, default="women",
                     help="women: blur detected adult women body regions (default); people: blur detected person regions")
     en.add_argument("--keep-incognito", action="store_true",
                     help="do not disable Incognito and Guest windows (they would not be filtered)")
+    en.add_argument("--locked", action="store_true",
+                    help="lock filter without an off switch in browser (not recommended)")
     sub.add_parser("disable", help="turn the filter off and remove it from the browsers")
     st = sub.add_parser("status", help="show whether the filter is on")
     st.add_argument("--json", action="store_true")
@@ -237,7 +239,7 @@ def main(argv=None):
 
     try:
         if args.cmd == "enable":
-            r = enable(args.root, args.mode, not args.keep_incognito)
+            r = enable(args.root, args.mode, not args.keep_incognito, locked=args.locked)
             print("Modesty filter enabled (mode: %s)." % r["mode"])
             print("Extension %s %s, browsers: %s" % (r["extension_id"], r["version"], ", ".join(r["browsers"])))
             print("Restart the browser (or wait a few minutes) for it to appear.")
