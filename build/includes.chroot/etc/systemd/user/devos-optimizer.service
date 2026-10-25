@@ -1,0 +1,14 @@
+[Unit]
+Description=DevOS Optimizer System Tray
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/bin/bash -c "if [ -f /home/imran/project/dev-os/components/optimizer/optimizer.py ]; then exec /usr/bin/python3 /home/imran/project/dev-os/components/optimizer/optimizer.py --tray; else exec /usr/bin/python3 /usr/local/share/devos/components/optimizer/optimizer.py --tray; fi"
+Restart=always
+RestartSec=2
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=graphical-session.target
