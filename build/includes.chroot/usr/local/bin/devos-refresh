@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# DevOS Desktop & Memory Refresh
+# Refreshes desktop icons, flushes dirty pages, and compacts memory for top performance.
+
+# 1. Sync filesystem pages to prevent corruption
+sync
+
+# 2. Touch desktop to reload file watcher in Plasma folderview
+if [ -d "$HOME/Desktop" ]; then
+    touch "$HOME/Desktop" 2>/dev/null || true
+fi
+
+# 3. Reload Plasma and Dolphin directory views via D-Bus if running
+if command -v dbus-send >/dev/null 2>&1; then
+    dbus-send --type=signal / org.kde.KDirNotify.FilesChanged array:string:"file://$HOME/Desktop" 2>/dev/null || true
+fi
+
+# 4. Optional memory cache drop if running as root
+if [ "$(id -u)" -eq 0 ]; then
+    echo 3 > /proc/sys/vm/drop_caches 2>/dev/null || true
+    echo 1 > /proc/sys/vm/compact_memory 2>/dev/null || true
+fi
+
+# 5. Display quick feedback notification
+if command -v notify-send >/dev/null 2>&1; then
+    notify-send -a "DevOS" -i "view-refresh" -t 1200 -h "string:synchronous:devos-refresh" "DevOS Refreshed" "Desktop updated & memory synchronized." 2>/dev/null || true
+fi

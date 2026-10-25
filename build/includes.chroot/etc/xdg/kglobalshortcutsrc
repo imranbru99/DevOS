@@ -85,3 +85,11 @@ _launch=Meta+K
 [devos-kids-mode.desktop]
 _k_friendly_name=Kids Mode
 _launch=Meta+K,Meta+K,Kids Mode
+
+# Desktop Refresh (Ctrl+F5 and F5 like Windows)
+[services][devos-refresh.desktop]
+_launch=Ctrl+F5\tF5
+
+[devos-refresh.desktop]
+_k_friendly_name=Refresh Desktop
+_launch=Ctrl+F5\tF5,Ctrl+F5\tF5,Refresh Desktop

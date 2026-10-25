@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Service
+ServiceTypes=KonqPopupMenu/Plugin
+MimeType=inode/directory;
+Actions=RefreshDesktop;
+X-KDE-Priority=TopLevel
+
+[Desktop Action RefreshDesktop]
+Name=Refresh
+Name[bn]=রিফ্রেশ
+Icon=view-refresh
+Exec=devos-refresh

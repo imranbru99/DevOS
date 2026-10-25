@@ -104,7 +104,8 @@ class TestOptimizerScan(unittest.TestCase):
     def test_05_build_categories_respects_home_and_exclusions(self):
         cache = os.path.join(self.home, ".cache")
         write(os.path.join(cache, "devos", "state.db"), 999, age_s=2 * DAY)
-        write(os.path.join(cache, "thumbnails", "large", "t.png"), 300, age_s=2 * DAY)
+        write(os.path.join(cache, "someapp", "cache.bin"), 300, age_s=2 * DAY)
+        write(os.path.join(cache, "thumbnails", "large", "t.png"), 150, age_s=2 * DAY)
         write(os.path.join(cache, "someapp", "tmp", "scratch"), 40, age_s=2 * DAY)
         write(os.path.join(self.home, "Downloads", "old.zip"), 2000, age_s=60 * DAY)
         write(os.path.join(self.home, "Downloads", "new.zip"), 3000)
@@ -118,6 +119,7 @@ class TestOptimizerScan(unittest.TestCase):
         cats = build_categories(home=self.home, uid=self.uid, tmp_roots=(tmp_root,))
         res = {c.id: scan_category(c) for c in cats}
         self.assertEqual(res["cache"]["size"], 300)          # devos + tmp dir excluded
+        self.assertEqual(res["dailytasks"]["size"], 150)     # thumbnails in dailytasks
         self.assertEqual(res["temp"]["size"], 45)            # cache tmp dir + /tmp file
         self.assertEqual(res["downloads"]["size"], 2000)     # only > 30 days
         self.assertFalse(res["downloads"]["default_checked"])

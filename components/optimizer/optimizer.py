@@ -340,10 +340,85 @@ def build_categories(home=None, uid=None, tmp_roots=("/tmp", "/var/tmp")):
         os.path.join(cache, "pip"),
         os.path.join(home, ".npm", "_cacache"),
         os.path.join(cache, "yarn"),
+        os.path.join(local_share, "pnpm", "store"),
+        os.path.join(cache, "composer"),
         os.path.join(home, ".cargo", "registry", "cache"),
+        os.path.join(home, ".cargo", "git"),
         os.path.join(cache, "go-build"),
+        os.path.join(home, ".gradle", "caches"),
+        os.path.join(home, ".m2", "repository"),
     ]
     dev_targets = [Target(r, uid=uid) for r in dev_roots if not os.path.islink(r)]
+
+    # Daily system & desktop session caches (thumbnails, flatpak caches, media)
+    daily_patterns = [
+        os.path.join(cache, "thumbnails"),
+        os.path.join(cache, "tracker3"),
+        os.path.join(cache, "gstreamer-1.0"),
+        os.path.join(cache, "fontconfig"),
+        os.path.join(local_share, "xorg", "Xorg.*.log.old"),
+        os.path.join(local_share, "sddm", "xorg-session.log.old"),
+        os.path.join(home, ".var", "app", "*", "cache"),
+    ]
+    daily_roots = []
+    for pattern in daily_patterns:
+        for match in sorted(glob.glob(pattern)):
+            if (os.path.isdir(match) or os.path.isfile(match)) and not os.path.islink(match) and is_within(match, home):
+                daily_roots.append(match)
+    daily_targets = [Target(r, uid=uid) for r in sorted(set(daily_roots))]
+
+    # AI, Whisper voice typing and model compiler buffers
+    ai_cache_patterns = [
+        os.path.join(cache, "whisper"),
+        os.path.join(cache, "devos", "voice"),
+        os.path.join(cache, "huggingface", "hub", "tmp*"),
+        os.path.join(cache, "torch"),
+        os.path.join(cache, "triton"),
+    ]
+    ai_roots = []
+    for pattern in ai_cache_patterns:
+        for match in sorted(glob.glob(pattern)):
+            if (os.path.isdir(match) or os.path.isfile(match)) and not os.path.islink(match) and is_within(match, home):
+                ai_roots.append(match)
+    ai_targets = [Target(r, uid=uid) for r in sorted(set(ai_roots))]
+
+    # Browser Cookies & Web Storage (Chrome, Brave, Chromium, Firefox, Edge)
+    cookie_patterns = [
+        os.path.join(home, ".config", "google-chrome", "*", "Service Worker", "CacheStorage"),
+        os.path.join(home, ".config", "google-chrome", "*", "IndexedDB"),
+        os.path.join(home, ".config", "chromium", "*", "Service Worker", "CacheStorage"),
+        os.path.join(home, ".config", "chromium", "*", "IndexedDB"),
+        os.path.join(home, ".config", "BraveSoftware", "Brave-Browser", "*", "Service Worker", "CacheStorage"),
+        os.path.join(home, ".config", "BraveSoftware", "Brave-Browser", "*", "IndexedDB"),
+        os.path.join(home, ".config", "microsoft-edge", "*", "Service Worker", "CacheStorage"),
+        os.path.join(home, ".config", "microsoft-edge", "*", "IndexedDB"),
+        os.path.join(home, ".mozilla", "firefox", "*", "storage", "default"),
+    ]
+    cookie_roots = []
+    for pattern in cookie_patterns:
+        for match in sorted(glob.glob(pattern)):
+            if os.path.isdir(match) and not os.path.islink(match) and is_within(match, home):
+                cookie_roots.append(match)
+    cookie_targets = [Target(r, uid=uid) for r in sorted(set(cookie_roots))]
+
+    # Screenshots & screen recordings (Pictures/Screenshots, Videos/Screencasts, Desktop)
+    screenshot_dirs = [
+        os.path.join(home, "Pictures", "Screenshots"),
+        os.path.join(home, "Pictures", "Spectacle"),
+        os.path.join(home, "Videos", "Recordings"),
+        os.path.join(home, "Videos", "Screen-Recordings"),
+        os.path.join(home, "Videos", "Screencasts"),
+    ]
+    screenshot_targets = []
+    for sdir in screenshot_dirs:
+        if os.path.isdir(sdir) and not os.path.islink(sdir):
+            screenshot_targets.append(Target(sdir, uid=uid))
+    desktop = os.path.join(home, "Desktop")
+    if os.path.isdir(desktop) and not os.path.islink(desktop):
+        for pat in ("Screenshot*.png", "Screenshot*.jpg", "Screen Recording*.mp4", "Screencast*.mp4", "Screencast*.webm"):
+            for f in glob.glob(os.path.join(desktop, pat)):
+                if os.path.isfile(f) and not os.path.islink(f):
+                    screenshot_targets.append(Target(f, uid=uid))
 
     # Clipboard history (DevOS Clipboard JSON + KDE Klipper history files)
     clip_files = [
@@ -414,7 +489,7 @@ def build_categories(home=None, uid=None, tmp_roots=("/tmp", "/var/tmp")):
                 app_cache_roots.append(match)
 
     # Exclusions for generic ~/.cache target so items are not counted twice
-    cache_exclude = [os.path.join(cache, "devos")] + tmpish + [t.root for t in shader_targets + dev_targets + notif_targets]
+    cache_exclude = [os.path.join(cache, "devos")] + tmpish + [t.root for t in shader_targets + dev_targets + notif_targets + daily_targets + ai_targets]
     cache_targets = [Target(cache, min_age_s=3600, uid=uid, exclude=cache_exclude)]
     cache_targets += [Target(r, min_age_s=3600, uid=uid) for r in sorted(set(app_cache_roots))]
 
@@ -452,11 +527,23 @@ def build_categories(home=None, uid=None, tmp_roots=("/tmp", "/var/tmp")):
         Category("cache", "App caches",
                  "Browser caches, thumbnails, GPU/code cache and app data. Apps rebuild them as needed.",
                  cache_targets),
+        Category("cookies", "Browser cookies & web storage",
+                 "IndexedDB, Service Worker cache storage, and offline site data across all browsers.",
+                 cookie_targets, default_checked=False),
+        Category("dailytasks", "Daily tasks & desktop caches",
+                 "Desktop thumbnail database, GStreamer media cache, and Flatpak application caches.",
+                 daily_targets, default_checked=True),
+        Category("ai_cache", "AI & speech temp buffers",
+                 "Whisper voice typing temp audio chunks, PyTorch/Triton kernels, and incomplete model downloads.",
+                 ai_targets, default_checked=True),
+        Category("screenshots", "Screenshots & screen recordings",
+                 "Saved screenshots and video recordings in Pictures/Screenshots, Videos/Screencasts, and Desktop.",
+                 screenshot_targets, default_checked=False, list_files=True),
         Category("shaders", "Graphics & shader caches",
                  "Mesa, Vulkan, and OpenGL compiled shader caches. Rebuilt on demand.",
                  shader_targets),
         Category("devcache", "Package & dev caches",
-                 "Python pip wheels, NPM, and language build package caches.",
+                 "Python pip wheels, NPM, Yarn, PNPM, Composer, Rust, Gradle and language package caches.",
                  dev_targets),
         Category("notifications", "Notifications & cache",
                  "Desktop notification history, active popups, and app/browser notification caches.",
@@ -592,6 +679,10 @@ def clean_entries(entries):
         clear_live_clipboard()
     if had_notifications:
         clear_live_notifications()
+    try:
+        subprocess.run(["sync"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+    except Exception:
+        pass
     return freed, errors
 
 
@@ -1253,6 +1344,8 @@ QPushButton:hover { background: #273449; }
 QPushButton:disabled { color: #6b7280; }
 QPushButton#primary { background: #38bdf8; color: #0b0f19; font-weight: 600; font-size: 10.5pt; }
 QPushButton#primary:hover { background: #7dd3fc; }
+QPushButton#secondary { background: #111827; border: 1px solid #374151; color: #38bdf8; font-weight: 600; font-size: 9.5pt; padding: 5px 14px; border-radius: 6px; }
+QPushButton#secondary:hover { background: #1f2937; color: #7dd3fc; border-color: #38bdf8; }
 QProgressBar { background: #1f2937; border: none; border-radius: 4px; height: 8px; }
 QProgressBar::chunk { background: #38bdf8; border-radius: 4px; }
 QListWidget { background: #0b0f19; color: #cbd5e1; border: 1px solid #1f2937;
@@ -1356,6 +1449,20 @@ def run_gui(open_cleanup=False):
             grid.addWidget(self.disk_label, 2, 1, QtCore.Qt.AlignRight)
             grid.addWidget(self.disk_bar, 3, 0, 1, 2)
             outer.addWidget(sys_card)
+
+            # Quick action bar (Select All / Deselect All + guidance)
+            action_row = QtWidgets.QHBoxLayout()
+            action_row.setContentsMargins(4, 2, 4, 2)
+            self.select_all_btn = QtWidgets.QPushButton("Select all")
+            self.select_all_btn.setObjectName("secondary")
+            self.select_all_btn.setCursor(QtCore.Qt.PointingHandCursor)
+            self.select_all_btn.clicked.connect(self.toggle_select_all)
+            action_row.addWidget(self.select_all_btn)
+
+            self.quick_tip = QtWidgets.QLabel("Clean caches before shutdown for optimal performance")
+            self.quick_tip.setObjectName("muted")
+            action_row.addWidget(self.quick_tip, 1, QtCore.Qt.AlignRight)
+            outer.addLayout(action_row)
 
             scroll = QtWidgets.QScrollArea()
             scroll.setWidgetResizable(True)
@@ -1482,7 +1589,28 @@ def run_gui(open_cleanup=False):
         def selected(self):
             return [row["result"] for row in self.rows.values() if row["check"].isChecked()]
 
+        def toggle_select_all(self):
+            available = [r for r in self.rows.values() if r["check"].isEnabled()]
+            if not available:
+                return
+            all_checked = all(r["check"].isChecked() for r in available)
+            target = not all_checked
+            for r in available:
+                r["check"].blockSignals(True)
+                r["check"].setChecked(target)
+                r["check"].blockSignals(False)
+            self.update_total()
+
         def update_total(self):
+            available = [r for r in self.rows.values() if r["check"].isEnabled()]
+            if available:
+                all_checked = all(r["check"].isChecked() for r in available)
+                self.select_all_btn.setText("Deselect all" if all_checked else "Select all")
+                self.select_all_btn.setEnabled(True)
+            else:
+                self.select_all_btn.setText("Select all")
+                self.select_all_btn.setEnabled(False)
+
             total = sum(r["size"] for r in self.results)
             sel = sum(r["size"] for r in self.selected())
             text = "%s selected  ·  %s reclaimable" % (human_size(sel), human_size(total))
