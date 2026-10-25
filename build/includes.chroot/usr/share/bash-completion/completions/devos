@@ -1,0 +1,116 @@
+# DevOS Master Bash Completion
+# Provides subcommands, options, fuzzy matching, and typo suggestions
+
+_devos_completion() {
+    local cur prev words cword
+    if declare -F _init_completion >/dev/null 2>&1; then
+        _init_completion -n : 2>/dev/null || {
+            cur="${COMP_WORDS[COMP_CWORD]}"
+            prev="${COMP_WORDS[COMP_CWORD-1]}"
+            words=("${COMP_WORDS[@]}")
+            cword=$COMP_CWORD
+        }
+    else
+        cur="${COMP_WORDS[COMP_CWORD]}"
+        prev="${COMP_WORDS[COMP_CWORD-1]}"
+        words=("${COMP_WORDS[@]}")
+        cword=$COMP_CWORD
+    fi
+
+    local subcommands="dashboard setup app code serve ai win android watchdog doctor net sound driver disk storage link phone share backup models auto agents features restore vault finger domain updates update kids task recorder record modesty blur assistant chat familysafe islamic notepad notes clipboard emoji power voice voicetype optimizer broadband help"
+
+    if [[ $cword -eq 1 ]]; then
+        local matches
+        matches=$(compgen -W "$subcommands" -- "$cur")
+        if [[ -n "$matches" ]]; then
+            COMPREPLY=($(compgen -W "$subcommands" -- "$cur"))
+        else
+            # Substring and fuzzy matching fallback
+            local fuzzy=""
+            for s in $subcommands; do
+                if [[ "$s" == *"$cur"* ]]; then
+                    fuzzy="$fuzzy $s"
+                fi
+            done
+            case "$cur" in
+                blr|blur) fuzzy="$fuzzy modesty blur" ;;
+                rec|record|scr|scren|screen) fuzzy="$fuzzy recorder record" ;;
+                audio|speaker) fuzzy="$fuzzy sound" ;;
+                wifi|eth|lan) fuzzy="$fuzzy net" ;;
+                snap|snapshot) fuzzy="$fuzzy restore" ;;
+                clean|cache) fuzzy="$fuzzy optimizer" ;;
+                pray|namaz) fuzzy="$fuzzy islamic" ;;
+                chat|ask) fuzzy="$fuzzy assistant" ;;
+                top|htop|proc) fuzzy="$fuzzy task" ;;
+            esac
+            if [[ -n "$fuzzy" ]]; then
+                COMPREPLY=($(echo "$fuzzy" | tr " " "\n" | sort -u | tr "\n" " "))
+            fi
+        fi
+        return 0
+    fi
+
+    local sub="${words[1]}"
+    case "$sub" in
+        modesty|blur)
+            COMPREPLY=($(compgen -W "enable disable status config --help" -- "$cur"))
+            ;;
+        recorder|record)
+            COMPREPLY=($(compgen -W "--screen --region --window --mp4 --webm --stop --status --list --output --help" -- "$cur"))
+            ;;
+        serve)
+            COMPREPLY=($(compgen -W "start stop restart status list --help" -- "$cur"))
+            ;;
+        restore)
+            COMPREPLY=($(compgen -W "create list rollback --help" -- "$cur"))
+            ;;
+        models)
+            COMPREPLY=($(compgen -W "list api download remove status --help" -- "$cur"))
+            ;;
+        auto)
+            COMPREPLY=($(compgen -W "commit review explain summarize hook --help" -- "$cur"))
+            ;;
+        app)
+            COMPREPLY=($(compgen -W "list search install remove update --help" -- "$cur"))
+            ;;
+        update)
+            COMPREPLY=($(compgen -W "--check --version --os-upgrade --help" -- "$cur"))
+            ;;
+        sound)
+            COMPREPLY=($(compgen -W "volume status mute unmute --help" -- "$cur"))
+            ;;
+        net)
+            COMPREPLY=($(compgen -W "status connect scan disconnect --help" -- "$cur"))
+            ;;
+        disk|storage)
+            COMPREPLY=($(compgen -W "--gui status list --help" -- "$cur"))
+            ;;
+        doctor|watchdog)
+            COMPREPLY=($(compgen -W "--check --fix --json --help" -- "$cur"))
+            ;;
+        features)
+            COMPREPLY=($(compgen -W "list add remove status --help" -- "$cur"))
+            ;;
+        code|code-agent|agent)
+            COMPREPLY=($(compgen -W "--prompt --repo --agent --interactive --help" -- "$cur"))
+            ;;
+        ai|assistant|chat)
+            COMPREPLY=($(compgen -W "--chat --query --tools --help" -- "$cur"))
+            ;;
+        power)
+            COMPREPLY=($(compgen -W "status sleep suspend hibernate profile --help" -- "$cur"))
+            ;;
+        optimizer)
+            COMPREPLY=($(compgen -W "clean cache ram status --help" -- "$cur"))
+            ;;
+        broadband)
+            COMPREPLY=($(compgen -W "status connect disconnect scan --help" -- "$cur"))
+            ;;
+        *)
+            COMPREPLY=($(compgen -f -- "$cur"))
+            ;;
+    esac
+    return 0
+}
+
+complete -F _devos_completion devos

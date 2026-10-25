@@ -1,0 +1,20 @@
+# DevOS Readline Configuration
+set enable-bracketed-paste off
+
+# DevOS Smart Readline & Suggestion Autocomplete
+set show-all-if-ambiguous on
+set show-all-if-unmodified on
+set menu-complete-display-prefix on
+set colored-stats on
+set colored-completion-prefix on
+set completion-ignore-case on
+
+# Menu completion cycling
+"\t": menu-complete
+"\e[Z": menu-complete-backward
+
+# Arrow key completion cycling (Alt+Down, Alt+Up, Ctrl+Down, Ctrl+Up)
+"\e[1;5B": menu-complete
+"\e[1;5A": menu-complete-backward
+"\e\e[B": menu-complete
+"\e\e[A": menu-complete-backward

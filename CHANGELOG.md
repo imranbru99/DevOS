@@ -5,6 +5,23 @@ All notable changes to the DevOS project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-10-25
+### Added
+- **Terminal Smart Suggestions & Autocompletion System**
+  - Unified `devos` interactive menu in `components/devos_cli.py` featuring arrow-key navigation (↑/↓), real-time search/filter, and instant command execution.
+  - Typo and similar-command detector using subsequence and tag scoring (e.g. `blr` -> `modesty`, `rec` -> `recorder`, `audio` -> `sound`, `screen` -> `recorder`).
+  - Shell completion scripts (`/etc/bash_completion.d/devos`, `~/.bash_completion`, `usr/share/bash-completion/completions/devos`) with fuzzy match fallback and argument completions.
+  - Readline menu-complete and arrow-key cycling configuration (`~/.inputrc`, `build/includes.chroot/etc/inputrc`, `build/includes.chroot/etc/skel/.inputrc`).
+  - Bash `command_not_found_handle` in `~/.bashrc` and `etc/skel/.bashrc` displaying smart suggestions whenever a mistyped DevOS command is entered.
+  - Comprehensive unit test coverage for DevOS CLI catalog, fuzzy matching, and typo resolution.
+- **Screen Recorder MP4 Format & Recording Controls**
+  - Added native MP4 container recording using fragmented MP4 muxing (`-movflags +frag_keyframe+empty_moov+default_base_moof`) alongside WebM.
+  - Fixed duplicate recording indicator on dock and system tray.
+  - Spectacle region recording shortcuts configured (`Win+Shift+S`).
+- **Browser Modesty & Safety Controls**
+  - Unlocked browser modesty filter policy allowing user-controlled on/off toggle.
+  - Added AI chat tool integration (`sudo devos-modesty enable/disable/status`).
+
 ## [0.2.0] - 2026-10-10
 ### Added
 - **Phase 2: Windows-Like Desktop (`DevOS Desktop`)**

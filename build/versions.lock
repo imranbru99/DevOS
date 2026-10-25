@@ -1,7 +1,8 @@
 # DevOS Package & Component Versions Lockfile
 # Release: 26.04 LTS (Resolute Raccoon)
 # Architecture: amd64
-# Generated: 2026-10-10
+# Version: 0.3.0
+# Generated: 2026-10-25
 
 # Base Distribution
 DISTRO_RELEASE=resolute
