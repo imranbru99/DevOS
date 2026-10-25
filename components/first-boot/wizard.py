@@ -40,6 +40,8 @@ class FirstBootWizard:
             "available_locales": ["en_US.UTF-8", "bn_BD.UTF-8"],
             "keyboard": "us",
             "telemetry": False,  # Strict privacy constraint
+            "theme": "dark",
+            "available_themes": ["dark", "light"],
             "ai_tier": tier["tier"],
             "enable_winlayer": True,
             "enable_waydroid": True,
@@ -50,6 +52,17 @@ class FirstBootWizard:
         if options:
             default_choices.update(options)
 
+        # Apply chosen theme
+        selected_theme = default_choices.get("theme", "dark")
+        try:
+            settings_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../settings"))
+            if settings_dir not in sys.path:
+                sys.path.insert(0, settings_dir)
+            from theme_switcher import ThemeSwitcher
+            ThemeSwitcher.apply_theme(selected_theme)
+        except Exception:
+            pass
+
         with open(self.STATE_FILE, "w") as f:
             json.dump(default_choices, f, indent=2)
 
@@ -59,10 +72,14 @@ class FirstBootWizard:
 def main():
     parser = argparse.ArgumentParser(description="DevOS First-Boot Setup Wizard")
     parser.add_argument("--auto", action="store_true", help="Run automated default setup")
+    parser.add_argument("--theme", choices=["dark", "light"], default=None, help="Initial appearance theme (dark or light)")
     args = parser.parse_args()
 
     wizard = FirstBootWizard()
-    res = wizard.run_setup()
+    opts = {}
+    if args.theme:
+        opts["theme"] = args.theme
+    res = wizard.run_setup(options=opts if opts else None)
     print("DevOS First Boot Setup Complete:")
     print(json.dumps(res, indent=2))
 

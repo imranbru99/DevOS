@@ -79,6 +79,15 @@ class DevOSControlCenter:
         if section in self.settings and key in self.settings[section]:
             self.settings[section][key] = value
             self.save_settings()
+            if section == "appearance" and key == "theme":
+                try:
+                    sys_path = os.path.dirname(os.path.abspath(__file__))
+                    if sys_path not in sys.path:
+                        sys.path.insert(0, sys_path)
+                    from theme_switcher import ThemeSwitcher
+                    ThemeSwitcher.apply_theme(str(value))
+                except Exception:
+                    pass
             return True
         return False
 

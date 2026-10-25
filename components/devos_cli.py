@@ -173,6 +173,10 @@ COMMAND_CATALOG = {
         "desc": "System cache, RAM & disk optimizer",
         "tags": ["clean", "cache", "ram", "speed", "boost"],
     },
+    "theme": {
+        "desc": "Switch system appearance between Dark and Light theme",
+        "tags": ["appearance", "dark", "light", "colors", "style", "mode", "toggle"],
+    },
     "broadband": {
         "desc": "Mobile broadband & cellular modem connection manager",
         "tags": ["modem", "cellular", "lte", "sim", "4g", "5g"],
@@ -493,6 +497,7 @@ def main():
         "voicetype": os.path.join(COMPONENTS_DIR, "voicetype", "voicetype.py"),
         "optimizer": os.path.join(COMPONENTS_DIR, "optimizer", "optimizer.py"),
         "broadband": os.path.join(COMPONENTS_DIR, "broadband", "broadband.py"),
+        "theme": os.path.join(COMPONENTS_DIR, "settings", "theme_switcher.py"),
     }
 
     if len(sys.argv) < 2:

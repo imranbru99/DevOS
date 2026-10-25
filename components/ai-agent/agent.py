@@ -45,6 +45,14 @@ class DevOSAgent:
         # 1. System: Dark mode toggle (reversible)
         def toggle_dark_mode(enabled: bool) -> str:
             mode = "dark" if enabled else "light"
+            try:
+                settings_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../settings")
+                if settings_dir not in sys.path:
+                    sys.path.insert(0, settings_dir)
+                from theme_switcher import ThemeSwitcher
+                ThemeSwitcher.apply_theme(mode)
+            except Exception:
+                pass
             return f"System appearance set to {mode} mode."
 
         self.register_tool(
