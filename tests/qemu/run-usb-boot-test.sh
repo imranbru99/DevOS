@@ -65,7 +65,7 @@ fi
 
 echo "==> Booting USB image in QEMU (${MODE})..."
 rm -f "${LOG}"
-timeout 30 qemu-system-x86_64 "${QEMU_ARGS[@]}" > "${LOG}" 2>&1 || true
+timeout 30 qemu-system-x86_64 "${QEMU_ARGS[@]}" < /dev/null > "${LOG}" 2>&1 || true
 
 echo "==> Captured boot log (last 40 lines):"
 tail -n 40 "${LOG}" || true
