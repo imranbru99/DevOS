@@ -930,6 +930,97 @@ var data = {
    "optin": false
   },
   {
+   "id": "antigravity",
+   "category": "developer",
+   "name": "Google Antigravity AI",
+   "about": "Advanced agentic coding assistant and pair programming IDE by Google DeepMind.",
+   "size_mb": 500,
+   "windows": "Antigravity",
+   "preinstalled": false,
+   "presets": [
+    "developer"
+   ],
+   "eula": "",
+   "min_ram_gb": 4,
+   "optin": false
+  },
+  {
+   "id": "cursor",
+   "category": "developer",
+   "name": "Cursor AI Code Editor",
+   "about": "AI-first code editor with deep codebase reasoning and interactive autocomplete.",
+   "size_mb": 450,
+   "windows": "Cursor",
+   "preinstalled": false,
+   "presets": [
+    "developer"
+   ],
+   "eula": "",
+   "min_ram_gb": 4,
+   "optin": false
+  },
+  {
+   "id": "chatgpt",
+   "category": "developer",
+   "name": "ChatGPT Desktop & Coding Agent",
+   "about": "Official OpenAI ChatGPT desktop application and autonomous agent environment.",
+   "size_mb": 350,
+   "windows": "ChatGPT",
+   "preinstalled": false,
+   "presets": [
+    "developer"
+   ],
+   "eula": "",
+   "min_ram_gb": 4,
+   "optin": false
+  },
+  {
+   "id": "claude",
+   "category": "developer",
+   "name": "Claude Desktop",
+   "about": "Anthropic Claude desktop assistant with Projects, Artifacts, and prompt reasoning.",
+   "size_mb": 300,
+   "windows": "Claude",
+   "preinstalled": false,
+   "presets": [
+    "developer"
+   ],
+   "eula": "",
+   "min_ram_gb": 4,
+   "optin": false
+  },
+  {
+   "id": "codex",
+   "category": "developer",
+   "name": "DevOS Codex Agent",
+   "about": "Local autonomous coding agent with full repository indexing, task planner, and shell access.",
+   "size_mb": 250,
+   "windows": "Codex",
+   "preinstalled": false,
+   "presets": [
+    "developer"
+   ],
+   "eula": "",
+   "min_ram_gb": 4,
+   "optin": false
+  },
+  {
+   "id": "putty",
+   "category": "developer",
+   "name": "PuTTY SSH & Telnet Client",
+   "about": "Graphical SSH, Telnet, and raw socket terminal client for server and network administration.",
+   "size_mb": 10,
+   "windows": "PuTTY",
+   "preinstalled": false,
+   "presets": [
+    "developer",
+    "professional"
+   ],
+   "eula": "",
+   "min_ram_gb": 0,
+   "optin": false
+  },
+  {
    "id": "vscode",
    "category": "developer",
    "name": "Visual Studio Code",
