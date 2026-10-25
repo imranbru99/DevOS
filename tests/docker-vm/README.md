@@ -1,6 +1,6 @@
 # Run the DevOS ISO in Docker Desktop
 
-Boots `out/devos-24.04-amd64.iso` in a QEMU virtual machine inside a container
+Boots `out/devos-26.04-amd64.iso` in a QEMU virtual machine inside a container
 and shows its screen in the browser. The installer only sees the container's
 40 GB virtual disk (`tests/docker-vm/storage/data.img`), never your real drives.
 

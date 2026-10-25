@@ -3,7 +3,7 @@
 DevOS is composed of open-source components and custom integrations. No proprietary Microsoft binaries, fonts, or assets are bundled or distributed.
 
 ## 1. Operating System Base
-- **Ubuntu 24.04 LTS (Noble Numbat)** packages: Licensed under GPL-2.0, GPL-3.0, LGPL, MIT, BSD, and respective open-source licenses. Distributed under standard upstream APT repository agreements.
+- **Ubuntu 26.04 LTS (Resolute)** packages: Licensed under GPL-2.0, GPL-3.0, LGPL, MIT, BSD, and respective open-source licenses. Distributed under standard upstream APT repository agreements.
 - **Linux Kernel**: GPL-2.0 with Linux-syscall-note exception.
 - **Calamares Installer**: GPL-3.0.
 

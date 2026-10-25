@@ -2,13 +2,13 @@
 
 ## 1. Objectives & Scope
 Phase 1 establishes the reproducible foundational image and bootable hybrid BIOS+UEFI ISO for **DevOS**:
-- Base: **Ubuntu 24.04 LTS (Noble Numbat)**, strictly avoiding Snaps (using deb/Flatpak/AppImage).
+- Base: **Ubuntu 26.04 LTS (Resolute)**, strictly avoiding Snaps (using deb/Flatpak/AppImage).
 - Installer: **Calamares 3.3+** with DevOS branding, LUKS full-disk encryption, btrfs default (with zstd compression & Snapper snapshots) alongside ext4 option.
-- Kernel & Performance: HWE kernel (`linux-generic-hwe-24.04`), `zram-tools` (zstd compression), `earlyoom`, `systemd-oomd`, `fstrim.timer`.
+- Kernel & Performance: Modern kernel (`linux-generic`), `zram-tools` (zstd compression), `earlyoom`, `systemd-oomd`, `fstrim.timer`.
 - Boot Speed & Service Optimization: Disable or mask unnecessary daemons (`cups-browsed`, `ModemManager`, `avahi-daemon`, `snapd`, `apport`, `whoopsie`, `motd-news`). Minimal Plymouth splash.
-- Storage & Size Budget: ISO <= 4.0 GB; strip documentation (`/usr/share/doc`, `/usr/share/man`), clean package caches, keep only English (`en`) and Bengali (`bn`) locales initially with pluggable locale support. SquashFS compressed with `zstd -Xcompression-level 19`.
+- Storage & Size Budget: ISO <= 4.0 GB; strip documentation (`/usr/share/doc`, `/usr/share/man`), clean package caches, keep only English (`en`) and Bengali (`bn`) locales initially with pluggable locale support. SquashFS compressed with `zstd -Xcompression-level 15`.
 - Hardware & Drivers: `linux-firmware`, Mesa Vulkan drivers, `ubuntu-drivers-common` for on-demand proprietary NVIDIA driver selection, Wi-Fi/Bluetooth firmware, CUPS print subsystem on demand.
-- Build Reproducibility: Fully automated via single `make iso` command runnable natively or inside a container (`ubuntu:noble`).
+- Build Reproducibility: Fully automated via single `make iso` command runnable natively or inside a container (`ubuntu:resolute`).
 
 ---
 
@@ -23,15 +23,15 @@ Phase 1 establishes the reproducible foundational image and bootable hybrid BIOS
          |                                       |
          v                                       v
 [Host Environment]                      [Containerized Build]
-  Ubuntu 24.04 host / VM                  Docker / Podman (ubuntu:noble)
+  Ubuntu 26.04 host / VM                  Docker / Podman (ubuntu:resolute)
          |                                       |
          +-------------------+-------------------+
                              |
                              v
                  `build/scripts/build-iso.sh`
                              |
-   1. Bootstrap Chroot (debootstrap noble / mirror)
-   2. Configure APT repos (noble, noble-updates, noble-security)
+   1. Bootstrap Chroot (debootstrap resolute / mirror)
+   2. Configure APT repos (resolute, resolute-updates, resolute-security)
    3. Purge & mask snapd; pin apt against snap packages
    4. Install Package Lists:
       - 00-base.list.chroot (kernel, systemd, btrfs, zram, earlyoom)
@@ -48,7 +48,7 @@ Phase 1 establishes the reproducible foundational image and bootable hybrid BIOS
    8. Assemble ISO Image (xorriso with hybrid MBR + UEFI El Torito)
                              |
                              v
-                  `devos-24.04-amd64.iso`
+                  `devos-26.04-amd64.iso`
                              |
             +----------------+----------------+
             |                                 |
@@ -65,7 +65,7 @@ Phase 1 establishes the reproducible foundational image and bootable hybrid BIOS
 
 | Component Category | Target Compressed Size | Target Installed Size | Key Packages |
 |---|---|---|---|
-| **Kernel & Core** | ~350 MB | ~1.1 GB | `linux-generic-hwe-24.04`, `systemd`, `systemd-sysv`, `systemd-oomd`, `udev`, `dbus`, `initramfs-tools`, `casper` |
+| **Kernel & Core** | ~350 MB | ~1.1 GB | `linux-generic`, `systemd`, `systemd-sysv`, `systemd-oomd`, `udev`, `dbus`, `initramfs-tools`, `casper` |
 | **Storage & Boot** | ~60 MB | ~180 MB | `btrfs-progs`, `snapper`, `cryptsetup`, `grub-efi-amd64-signed`, `shim-signed`, `efibootmgr` |
 | **System Tuning** | ~15 MB | ~45 MB | `zram-tools`, `earlyoom`, `util-linux` (`fstrim`), `procps` |
 | **Hardware & Firmware** | ~550 MB | ~1.6 GB | `linux-firmware`, `mesa-vulkan-drivers`, `libvulkan1`, `ubuntu-drivers-common`, `wireless-regdb`, `wpasupplicant`, `bluez` |
@@ -77,7 +77,7 @@ Phase 1 establishes the reproducible foundational image and bootable hybrid BIOS
 
 ## 4. Risks & Mitigations
 
-1. **Snap Dependencies in Ubuntu Noble**:
+1. **Snap Dependencies in Ubuntu Resolute**:
    - *Risk*: `ubuntu-standard` or desktop packages may attempt to pull `snapd`.
    - *Mitigation*: Mask `snapd` via apt pin (`/etc/apt/preferences.d/nosnap.pref`), install Chromium/Firefox as deb or prepare for Flatpak in Phase 2/3.
 2. **SquashFS Compression Overhead**:
@@ -94,7 +94,7 @@ Phase 1 establishes the reproducible foundational image and bootable hybrid BIOS
 
 ## 5. Acceptance Test Criteria
 
-1. **Build Success**: `make iso` (or `make iso-docker`) produces `devos-24.04-amd64.iso` without errors.
+1. **Build Success**: `make iso` (or `make iso-docker`) produces `devos-26.04-amd64.iso` without errors.
 2. **Size Constraint**: Final ISO file size <= 4.0 GB (target: ~1.5 - 2.5 GB for base).
 3. **BIOS Boot**: Boots in QEMU (`qemu-system-x86_64`) to desktop/live user session.
 4. **UEFI Boot**: Boots in QEMU with OVMF firmware.

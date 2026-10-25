@@ -189,6 +189,22 @@ def is_within(path, root):
     return real_path.startswith(real_root.rstrip(os.sep) + os.sep)
 
 
+PROTECTED_BROWSER_KEYWORDS = (
+    "whatsapp",
+    "web.whatsapp.com",
+    "telegram",
+    "web.telegram.org",
+    "discord",
+    "signal",
+    "indexeddb",
+    "cookies",
+    "login data",
+    "web data",
+    "accounts",
+    "tokens",
+)
+
+
 def is_safe_entry(path, root, uid=None):
     """A file is safe to count/delete if it lives inside root without any
     symlink escaping it, is not a symlink pointing outside root, and (when
@@ -197,6 +213,11 @@ def is_safe_entry(path, root, uid=None):
         st = os.lstat(path)
     except OSError:
         return False
+    # Never delete authentication databases, login credentials, or messaging storage (e.g. WhatsApp, Telegram)
+    lower_path = path.lower()
+    for kw in PROTECTED_BROWSER_KEYWORDS:
+        if kw in lower_path:
+            return False
     if os.path.abspath(path) == os.path.abspath(root):
         # single-file target (e.g. ~/.xsession-errors.old): must be a real file
         return stat.S_ISREG(st.st_mode) and (uid is None or st.st_uid == uid)
@@ -411,19 +432,15 @@ def build_categories(home=None, uid=None, tmp_roots=("/tmp", "/var/tmp")):
                 ai_roots.append(match)
     ai_targets = [Target(r, uid=uid) for r in sorted(set(ai_roots))]
 
-    # Browser Cookies & Web Storage (Chrome, Brave, Chromium, Firefox, Edge, Falkon)
+    # Browser Offline Cache & Service Worker Cache (Chrome, Brave, Chromium, Firefox, Edge, Falkon)
+    # NOTE: Never include IndexedDB or Local Storage to preserve active sessions (e.g. WhatsApp Web, Telegram)
     cookie_patterns = [
         os.path.join(home, ".config", "google-chrome", "*", "Service Worker", "CacheStorage"),
-        os.path.join(home, ".config", "google-chrome", "*", "IndexedDB"),
         os.path.join(home, ".config", "google-chrome-headless", "*", "Service Worker", "CacheStorage"),
-        os.path.join(home, ".config", "google-chrome-headless", "*", "IndexedDB"),
         os.path.join(home, ".config", "chromium", "*", "Service Worker", "CacheStorage"),
-        os.path.join(home, ".config", "chromium", "*", "IndexedDB"),
         os.path.join(home, ".config", "BraveSoftware", "Brave-Browser", "*", "Service Worker", "CacheStorage"),
-        os.path.join(home, ".config", "BraveSoftware", "Brave-Browser", "*", "IndexedDB"),
         os.path.join(home, ".config", "microsoft-edge", "*", "Service Worker", "CacheStorage"),
-        os.path.join(home, ".config", "microsoft-edge", "*", "IndexedDB"),
-        os.path.join(home, ".mozilla", "firefox", "*", "storage", "default"),
+        os.path.join(home, ".mozilla", "firefox", "*", "storage", "default", "*", "cache"),
         os.path.join(cache, "falkon"),
     ]
     cookie_roots = []
@@ -565,8 +582,8 @@ def build_categories(home=None, uid=None, tmp_roots=("/tmp", "/var/tmp")):
         Category("cache", "App caches",
                  "Browser caches, thumbnails, GPU/code cache and app data. Apps rebuild them as needed.",
                  cache_targets),
-        Category("cookies", "Browser cookies & web storage",
-                 "IndexedDB, Service Worker cache storage, and offline site data across Chrome, Brave, Edge & Firefox.",
+        Category("cookies", "Browser web cache storage",
+                 "Service Worker cache storage and offline web cache across Chrome, Brave, Edge & Firefox. Session logins (WhatsApp, Telegram) are preserved.",
                  cookie_targets, default_checked=False),
         Category("dailytasks", "Daily tasks & desktop caches",
                  "KDE Plasma desktop cache, thumbnails database, GStreamer media cache, and Flatpak app caches.",
@@ -1656,6 +1673,9 @@ def run_gui(open_cleanup=False):
             all_checked = all(r["check"].isChecked() for r in available)
             target = not all_checked
             for r in available:
+                # When selecting all, do not auto-check sensitive/opt-in categories (cookies, screenshots, downloads)
+                if target and not r["result"].get("default_checked", True):
+                    continue
                 r["check"].blockSignals(True)
                 r["check"].setChecked(target)
                 r["check"].blockSignals(False)

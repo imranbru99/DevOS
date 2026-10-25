@@ -415,6 +415,42 @@ class TestIdleDecisions(unittest.TestCase):
         finally:
             shutil.rmtree(fake_home, ignore_errors=True)
 
+    def test_23_whatsapp_and_session_storage_never_deleted(self):
+        fake_home = tempfile.mkdtemp(prefix="devos-opt-wa-")
+        try:
+            uid = os.getuid()
+            # WhatsApp IndexedDB storage (login session tokens, crypto keys)
+            wa_db = os.path.join(fake_home, ".config", "google-chrome", "Default", "IndexedDB", "https_web.whatsapp.com_0.indexeddb")
+            write(os.path.join(wa_db, "000005.ldb"), 50000)
+            write(os.path.join(wa_db, "CURRENT"), 16)
+
+            # Telegram IndexedDB storage
+            tg_db = os.path.join(fake_home, ".config", "google-chrome", "Default", "IndexedDB", "https_web.telegram.org_0.indexeddb")
+            write(os.path.join(tg_db, "000003.ldb"), 25000)
+
+            # Regular disposable service worker cache storage
+            sw_cache = os.path.join(fake_home, ".config", "google-chrome", "Default", "Service Worker", "CacheStorage")
+            write(os.path.join(sw_cache, "index.txt"), 1200)
+
+            cats = optimizer.build_categories(home=fake_home, uid=uid)
+            cat_map = {c.id: optimizer.scan_category(c) for c in cats}
+
+            # WhatsApp and Telegram databases must NEVER appear in entries
+            all_entries = []
+            for cdata in cat_map.values():
+                for entry in cdata.get("_entries", []):
+                    all_entries.append(entry[0])
+
+            self.assertFalse(any("whatsapp" in p.lower() for p in all_entries), "WhatsApp session was scanned for deletion!")
+            self.assertFalse(any("telegram" in p.lower() for p in all_entries), "Telegram session was scanned for deletion!")
+            self.assertFalse(any("indexeddb" in p.lower() for p in all_entries), "IndexedDB was scanned for deletion!")
+
+            # WhatsApp files must remain intact on disk
+            self.assertTrue(os.path.exists(os.path.join(wa_db, "000005.ldb")))
+            self.assertTrue(os.path.exists(os.path.join(tg_db, "000003.ldb")))
+        finally:
+            shutil.rmtree(fake_home, ignore_errors=True)
+
 
 if __name__ == "__main__":
     unittest.main()

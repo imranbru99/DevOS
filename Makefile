@@ -34,7 +34,7 @@ iso-docker:
 	@echo "==> Building containerized build environment..."
 	docker build -t $(IMAGE_NAME) -f build/docker/Dockerfile.build .
 	@echo "==> Building DevOS ISO inside container..."
-	docker run --rm --privileged \
+	docker run --rm --privileged --net=host \
 		-e DEVOS_WORK_DIR="/workspace/build_work/resolute" \
 		-e DEVOS_ZSTD_LEVEL="15" \
 		-v "$(CURDIR):/workspace" \
