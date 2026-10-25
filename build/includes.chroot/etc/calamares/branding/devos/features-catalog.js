@@ -706,6 +706,38 @@ var data = {
    "optin": false
   },
   {
+   "id": "photopea",
+   "category": "creative",
+   "name": "Photoshop Alternative (Photopea)",
+   "about": "Full Photoshop PSD, AI, RAW and Sketch editor with identical layers, filters and shortcuts.",
+   "size_mb": 1,
+   "windows": "Photoshop",
+   "preinstalled": false,
+   "presets": [
+    "creator",
+    "windows",
+    "islamic"
+   ],
+   "eula": "",
+   "min_ram_gb": 0,
+   "optin": false
+  },
+  {
+   "id": "photoshop_web",
+   "category": "creative",
+   "name": "Adobe Photoshop Web",
+   "about": "Official Adobe Photoshop Web app in a dedicated window. Works with Adobe ID and Creative Cloud.",
+   "size_mb": 1,
+   "windows": "Adobe Photoshop",
+   "preinstalled": false,
+   "presets": [
+    "creator"
+   ],
+   "eula": "",
+   "min_ram_gb": 0,
+   "optin": false
+  },
+  {
    "id": "gimp",
    "category": "creative",
    "name": "GIMP",
@@ -1874,6 +1906,7 @@ var data = {
   "webcam",
   "recorder",
   "paint",
+  "photopea",
   "xbox",
   "vscode",
   "devservers",
