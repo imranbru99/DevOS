@@ -350,9 +350,21 @@ def build_categories(home=None, uid=None, tmp_roots=("/tmp", "/var/tmp")):
     ]
     dev_targets = [Target(r, uid=uid) for r in dev_roots if not os.path.islink(r)]
 
-    # Daily system & desktop session caches (thumbnails, flatpak caches, media)
+    # Daily system & desktop session caches (thumbnails, KDE plasma, flatpak, media)
     daily_patterns = [
         os.path.join(cache, "thumbnails"),
+        os.path.join(cache, "thumbnails", "*"),
+        os.path.join(cache, "plasmashell"),
+        os.path.join(cache, "kwin"),
+        os.path.join(cache, "krunner"),
+        os.path.join(cache, "ksplash"),
+        os.path.join(cache, "ksmserver-logout-greeter"),
+        os.path.join(cache, "sddm-greeter-qt6"),
+        os.path.join(cache, "systemsettings"),
+        os.path.join(cache, "kinfocenter"),
+        os.path.join(cache, "appstream"),
+        os.path.join(cache, "flatpak"),
+        os.path.join(cache, "glycin"),
         os.path.join(cache, "tracker3"),
         os.path.join(cache, "gstreamer-1.0"),
         os.path.join(cache, "fontconfig"),
@@ -367,8 +379,25 @@ def build_categories(home=None, uid=None, tmp_roots=("/tmp", "/var/tmp")):
                 daily_roots.append(match)
     daily_targets = [Target(r, uid=uid) for r in sorted(set(daily_roots))]
 
-    # AI, Whisper voice typing and model compiler buffers
+    # AI, ChatGPT, Antigravity, Whisper voice typing and model buffers
     ai_cache_patterns = [
+        # Antigravity crash dumps & scratch buffers
+        os.path.join(home, ".gemini", "antigravity", "crashes"),
+        os.path.join(home, ".gemini", "antigravity", "brain", "*", "scratch"),
+        # ChatGPT, Claude & AI Assistants caches
+        os.path.join(home, ".config", "ChatGPT", "Cache"),
+        os.path.join(home, ".config", "ChatGPT", "Code Cache"),
+        os.path.join(home, ".config", "ChatGPT", "GPUCache"),
+        os.path.join(home, ".config", "chatgpt", "Cache"),
+        os.path.join(cache, "chatgpt"),
+        os.path.join(cache, "ChatGPT"),
+        os.path.join(home, ".config", "Claude", "Cache"),
+        os.path.join(cache, "Claude"),
+        os.path.join(cache, "Codex"),
+        os.path.join(home, ".config", "Codex", "Cache"),
+        os.path.join(home, ".config", "Codex", "GPUCache"),
+        os.path.join(cache, "codex-runtimes"),
+        # Whisper voice typing, Torch & neural compiler kernels
         os.path.join(cache, "whisper"),
         os.path.join(cache, "devos", "voice"),
         os.path.join(cache, "huggingface", "hub", "tmp*"),
@@ -382,10 +411,12 @@ def build_categories(home=None, uid=None, tmp_roots=("/tmp", "/var/tmp")):
                 ai_roots.append(match)
     ai_targets = [Target(r, uid=uid) for r in sorted(set(ai_roots))]
 
-    # Browser Cookies & Web Storage (Chrome, Brave, Chromium, Firefox, Edge)
+    # Browser Cookies & Web Storage (Chrome, Brave, Chromium, Firefox, Edge, Falkon)
     cookie_patterns = [
         os.path.join(home, ".config", "google-chrome", "*", "Service Worker", "CacheStorage"),
         os.path.join(home, ".config", "google-chrome", "*", "IndexedDB"),
+        os.path.join(home, ".config", "google-chrome-headless", "*", "Service Worker", "CacheStorage"),
+        os.path.join(home, ".config", "google-chrome-headless", "*", "IndexedDB"),
         os.path.join(home, ".config", "chromium", "*", "Service Worker", "CacheStorage"),
         os.path.join(home, ".config", "chromium", "*", "IndexedDB"),
         os.path.join(home, ".config", "BraveSoftware", "Brave-Browser", "*", "Service Worker", "CacheStorage"),
@@ -393,6 +424,7 @@ def build_categories(home=None, uid=None, tmp_roots=("/tmp", "/var/tmp")):
         os.path.join(home, ".config", "microsoft-edge", "*", "Service Worker", "CacheStorage"),
         os.path.join(home, ".config", "microsoft-edge", "*", "IndexedDB"),
         os.path.join(home, ".mozilla", "firefox", "*", "storage", "default"),
+        os.path.join(cache, "falkon"),
     ]
     cookie_roots = []
     for pattern in cookie_patterns:
@@ -507,6 +539,12 @@ def build_categories(home=None, uid=None, tmp_roots=("/tmp", "/var/tmp")):
     win_targets = [Target(r, uid=uid) for r in win_roots]
 
     downloads_targets = [Target(os.path.join(home, "Downloads"), min_age_s=30 * DAY, uid=uid)]
+    dl_dir = os.path.join(home, "Downloads")
+    if os.path.isdir(dl_dir) and not os.path.islink(dl_dir):
+        for pat in ("*.crdownload", "*.part", "*.tmp"):
+            for f in glob.glob(os.path.join(dl_dir, pat)):
+                if os.path.isfile(f) and not os.path.islink(f):
+                    downloads_targets.append(Target(f, uid=uid))
 
     log_targets = []
     for logs in sorted(glob.glob(os.path.join(local_share, "*", "logs"))):
@@ -528,13 +566,13 @@ def build_categories(home=None, uid=None, tmp_roots=("/tmp", "/var/tmp")):
                  "Browser caches, thumbnails, GPU/code cache and app data. Apps rebuild them as needed.",
                  cache_targets),
         Category("cookies", "Browser cookies & web storage",
-                 "IndexedDB, Service Worker cache storage, and offline site data across all browsers.",
+                 "IndexedDB, Service Worker cache storage, and offline site data across Chrome, Brave, Edge & Firefox.",
                  cookie_targets, default_checked=False),
         Category("dailytasks", "Daily tasks & desktop caches",
-                 "Desktop thumbnail database, GStreamer media cache, and Flatpak application caches.",
+                 "KDE Plasma desktop cache, thumbnails database, GStreamer media cache, and Flatpak app caches.",
                  daily_targets, default_checked=True),
-        Category("ai_cache", "AI & speech temp buffers",
-                 "Whisper voice typing temp audio chunks, PyTorch/Triton kernels, and incomplete model downloads.",
+        Category("ai_cache", "AI & assistant temp caches",
+                 "Antigravity crash/scratch buffers, ChatGPT/Claude caches, and Whisper voice typing audio buffers.",
                  ai_targets, default_checked=True),
         Category("screenshots", "Screenshots & screen recordings",
                  "Saved screenshots and video recordings in Pictures/Screenshots, Videos/Screencasts, and Desktop.",
@@ -558,8 +596,8 @@ def build_categories(home=None, uid=None, tmp_roots=("/tmp", "/var/tmp")):
         Category("recent", "Recent files history",
                  "Recently opened document history in file picker and desktop menus.",
                  recent_targets, default_checked=False),
-        Category("downloads", "Old downloads",
-                 "Files in Downloads older than 30 days. Review before selecting.",
+        Category("downloads", "Old & broken downloads",
+                 "Incomplete download fragments (.part, .crdownload) and downloads older than 30 days.",
                  downloads_targets, default_checked=False, list_files=True),
         Category("logs", "Crash reports & logs",
                  "App logs older than 7 days, crash dumps, and old session error logs.", log_targets),
@@ -1324,31 +1362,37 @@ def cmd_idle_report(interval=2.0):
 # ---------------------------------------------------------------------------
 
 STYLE = """
-QDialog, QWidget#toast { background: #0b0f19; color: #e5e7eb;
-  font-family: "Inter", "Noto Sans", sans-serif; font-size: 10.5pt; }
-QFrame.card, QFrame#card { background: #111827; border-radius: 12px;
-  border: 1px solid #1f2937; }
-QLabel { color: #e5e7eb; background: transparent; }
-QLabel#title { font-size: 18pt; font-weight: 600; color: #f9fafb; }
-QLabel#muted { color: #9ca3af; font-size: 9.5pt; }
-QLabel#size { color: #38bdf8; font-weight: 600; }
-QLabel#total { color: #38bdf8; font-size: 11.5pt; font-weight: 600; }
-QLabel#ai { color: #cbd5e1; background: #0f172a; border-radius: 10px; padding: 10px; }
-QCheckBox { color: #f3f4f6; font-weight: 600; spacing: 10px; background: transparent; }
-QCheckBox::indicator { width: 18px; height: 18px; border-radius: 5px;
-  border: 1px solid #374151; background: #0b0f19; }
-QCheckBox::indicator:checked { background: #38bdf8; border-color: #38bdf8; }
-QPushButton { background: #1f2937; color: #e5e7eb; border: none; border-radius: 8px;
-  padding: 7px 14px; font-weight: 500; font-size: 10pt; }
-QPushButton:hover { background: #273449; }
-QPushButton:disabled { color: #6b7280; }
-QPushButton#primary { background: #38bdf8; color: #0b0f19; font-weight: 600; font-size: 10.5pt; }
-QPushButton#primary:hover { background: #7dd3fc; }
-QPushButton#secondary { background: #111827; border: 1px solid #374151; color: #38bdf8; font-weight: 600; font-size: 9.5pt; padding: 5px 14px; border-radius: 6px; }
-QPushButton#secondary:hover { background: #1f2937; color: #7dd3fc; border-color: #38bdf8; }
-QProgressBar { background: #1f2937; border: none; border-radius: 4px; height: 8px; }
-QProgressBar::chunk { background: #38bdf8; border-radius: 4px; }
-QListWidget { background: #0b0f19; color: #cbd5e1; border: 1px solid #1f2937;
+QDialog, QWidget#toast { background: #080d1a; color: #f1f5f9;
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, "Noto Sans", sans-serif; font-size: 10pt; }
+QFrame.card, QFrame#card { background: #0f172a; border-radius: 12px;
+  border: 1px solid #1e293b; }
+QFrame#card:hover { border-color: #334155; }
+QFrame#action_card { background: #091224; border-radius: 10px; border: 1px solid #1e3a5f; }
+QLabel { color: #f1f5f9; background: transparent; }
+QLabel#title { font-size: 19pt; font-weight: 700; color: #ffffff; letter-spacing: -0.5px; }
+QLabel#muted { color: #94a3b8; font-size: 9pt; }
+QLabel#size { color: #38bdf8; font-weight: 700; font-size: 10.5pt; }
+QLabel#badge { color: #38bdf8; background: #0c4a6e; border: 1px solid #0284c7; border-radius: 8px; padding: 3px 9px; font-size: 8.5pt; font-weight: 600; }
+QLabel#total { color: #38bdf8; font-size: 11pt; font-weight: 600; }
+QLabel#ai { color: #cbd5e1; background: #0f172a; border: 1px solid #1e293b; border-radius: 10px; padding: 12px; }
+QCheckBox { color: #f8fafc; font-weight: 600; font-size: 10.5pt; spacing: 10px; background: transparent; }
+QCheckBox::indicator { width: 19px; height: 19px; border-radius: 6px;
+  border: 1.5px solid #475569; background: #080d1a; }
+QCheckBox::indicator:hover { border-color: #38bdf8; }
+QCheckBox::indicator:checked { background: #0ea5e9; border-color: #38bdf8; }
+QPushButton { background: #1e293b; color: #f1f5f9; border: 1px solid #334155; border-radius: 8px;
+  padding: 8px 16px; font-weight: 600; font-size: 9.5pt; }
+QPushButton:hover { background: #334155; border-color: #475569; }
+QPushButton:disabled { color: #475569; border-color: #1e293b; background: #0f172a; }
+QPushButton#primary { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0284c7, stop:1 #38bdf8); color: #020617; font-weight: 700; font-size: 10.5pt; border: none; border-radius: 8px; }
+QPushButton#primary:hover { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0369a1, stop:1 #7dd3fc); }
+QPushButton#primary:disabled { background: #1e293b; color: #475569; }
+QPushButton#secondary { background: #091224; border: 1.5px solid #0284c7; color: #38bdf8; font-weight: 600; font-size: 9.5pt; padding: 6px 16px; border-radius: 8px; }
+QPushButton#secondary:hover { background: #0c4a6e; color: #7dd3fc; border-color: #38bdf8; }
+QPushButton#secondary:disabled { border-color: #1e293b; color: #475569; }
+QProgressBar { background: #080d1a; border: 1px solid #1e293b; border-radius: 5px; height: 8px; }
+QProgressBar::chunk { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0284c7, stop:1 #38bdf8); border-radius: 4px; }
+QListWidget { background: #080d1a; color: #cbd5e1; border: 1px solid #1e293b;
   border-radius: 8px; font-size: 9pt; }
 QScrollArea { background: transparent; border: none; }
 """
@@ -1450,19 +1494,27 @@ def run_gui(open_cleanup=False):
             grid.addWidget(self.disk_bar, 3, 0, 1, 2)
             outer.addWidget(sys_card)
 
-            # Quick action bar (Select All / Deselect All + guidance)
-            action_row = QtWidgets.QHBoxLayout()
-            action_row.setContentsMargins(4, 2, 4, 2)
+            # Quick action bar (Select All / Deselect All + counter badge)
+            action_frame = card()
+            action_frame.setObjectName("action_card")
+            action_row = QtWidgets.QHBoxLayout(action_frame)
+            action_row.setContentsMargins(14, 10, 14, 10)
+            action_row.setSpacing(12)
+
             self.select_all_btn = QtWidgets.QPushButton("Select all")
             self.select_all_btn.setObjectName("secondary")
             self.select_all_btn.setCursor(QtCore.Qt.PointingHandCursor)
             self.select_all_btn.clicked.connect(self.toggle_select_all)
             action_row.addWidget(self.select_all_btn)
 
+            self.select_badge = QtWidgets.QLabel("")
+            self.select_badge.setObjectName("badge")
+            action_row.addWidget(self.select_badge)
+
             self.quick_tip = QtWidgets.QLabel("Clean caches before shutdown for optimal performance")
             self.quick_tip.setObjectName("muted")
             action_row.addWidget(self.quick_tip, 1, QtCore.Qt.AlignRight)
-            outer.addLayout(action_row)
+            outer.addWidget(action_frame)
 
             scroll = QtWidgets.QScrollArea()
             scroll.setWidgetResizable(True)
@@ -1504,13 +1556,21 @@ def run_gui(open_cleanup=False):
             footer.addLayout(top_row)
 
             btn_row = QtWidgets.QHBoxLayout()
+            btn_row.setSpacing(10)
             self.ai_btn = QtWidgets.QPushButton("Ask DevOS AI")
             self.ai_btn.setCursor(QtCore.Qt.PointingHandCursor)
+
+            self.bottom_select_all_btn = QtWidgets.QPushButton("Select all")
+            self.bottom_select_all_btn.setObjectName("secondary")
+            self.bottom_select_all_btn.setCursor(QtCore.Qt.PointingHandCursor)
+            self.bottom_select_all_btn.clicked.connect(self.toggle_select_all)
+
             self.clean_btn = QtWidgets.QPushButton("Clean selected")
             self.clean_btn.setObjectName("primary")
             self.clean_btn.setCursor(QtCore.Qt.PointingHandCursor)
-            self.clean_btn.setMinimumHeight(38)
+            self.clean_btn.setMinimumHeight(42)
             btn_row.addWidget(self.ai_btn)
+            btn_row.addWidget(self.bottom_select_all_btn)
             btn_row.addWidget(self.clean_btn, 1)
             footer.addLayout(btn_row)
 
@@ -1603,21 +1663,35 @@ def run_gui(open_cleanup=False):
 
         def update_total(self):
             available = [r for r in self.rows.values() if r["check"].isEnabled()]
-            if available:
-                all_checked = all(r["check"].isChecked() for r in available)
-                self.select_all_btn.setText("Deselect all" if all_checked else "Select all")
-                self.select_all_btn.setEnabled(True)
-            else:
-                self.select_all_btn.setText("Select all")
-                self.select_all_btn.setEnabled(False)
+            checked_count = sum(1 for r in available if r["check"].isChecked())
+            all_checked = bool(available) and (checked_count == len(available))
+
+            btn_text = "Deselect all" if all_checked else "Select all"
+            self.select_all_btn.setText(btn_text)
+            self.bottom_select_all_btn.setText(btn_text)
+            self.select_all_btn.setEnabled(bool(available))
+            self.bottom_select_all_btn.setEnabled(bool(available))
 
             total = sum(r["size"] for r in self.results)
             sel = sum(r["size"] for r in self.selected())
+
+            if available:
+                self.select_badge.setText("%d of %d selected" % (checked_count, len(available)))
+                self.select_badge.show()
+            else:
+                self.select_badge.hide()
+
             text = "%s selected  ·  %s reclaimable" % (human_size(sel), human_size(total))
             if self.freed_msg:
                 text = self.freed_msg + "  ·  " + text
             self.total_label.setText(text)
-            self.clean_btn.setEnabled(sel > 0)
+
+            if sel > 0:
+                self.clean_btn.setText("Clean selected (%s)" % human_size(sel))
+                self.clean_btn.setEnabled(True)
+            else:
+                self.clean_btn.setText("Clean selected")
+                self.clean_btn.setEnabled(False)
 
         def clean(self):
             chosen = self.selected()
