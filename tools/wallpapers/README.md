@@ -2,22 +2,44 @@
 
 `make_wallpapers.py` procedurally renders 80 DevOS premium wallpapers
 (20 designs, each in four palettes). numpy + Pillow only, fixed seeds, so the
-output is reproducible. The desktop shows one and changes to another every
-12 hours.
+output is reproducible.
 
-Each design is rendered at 3840x2160 (a few soft designs at 1920x1080 and
-upscaled), tone-mapped, vignetted, dithered with light film grain and saved as
-a KDE Plasma wallpaper package:
+`make_ai_era_wallpapers.py` procedurally renders 100 AI-era ultra-premium QHD
+wallpapers (2560x1440) across 10 futuristic themes (Neural Synapses, Quantum Silicon,
+Cyberpunk Megacities, Latent Diffusion, Bio-Synthetic Organics, Dyson Computing, Liquid
+Titanium, Holographic Auroras, Algorithmic Architecture, and Audio Synthesis). All 100
+are deployed to the `DevOS-Slideshow` suite for dynamic KDE Plasma desktop cycling.
+
+Each design is rendered at 2560x1440 or 3840x2160, tone-mapped with photographic
+S-curves, ergonomically protected for desktop icon contrast, film-grain dithered, and
+saved as KDE Plasma wallpaper packages:
 
     build/includes.chroot/usr/share/wallpapers/DevOS-<Name>/
         metadata.json
         contents/images/2560x1440.jpg
         contents/screenshot.jpg
 
+    build/includes.chroot/usr/share/wallpapers/DevOS-Slideshow/
+        01_...
+        ...
+        AI_001_Neural_Synapse_Matrix.jpg
+        ...
+        AI_100_Sonic_Singularity_Dawn.jpg
+
 `preview.jpg` in this folder is a contact sheet for review only; it is not
 installed into the image.
 
-## Regenerate
+## Regenerate AI-Era Wallpapers
+
+Run locally or via Docker:
+
+    python tools/wallpapers/make_ai_era_wallpapers.py
+
+All 100 AI-era wallpapers are generated and synchronized to both the OS build tree
+(`build/includes.chroot/usr/share/wallpapers/DevOS-Slideshow/`) and the live host
+desktop environment (`~/.local/share/wallpapers/DevOS-Slideshow/`).
+
+## Regenerate Base Wallpapers
 
 No Python is needed on the host; run it in Docker from the repo root:
 

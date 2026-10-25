@@ -99,7 +99,9 @@ class TestInstalledSystemBoot(unittest.TestCase):
         win = read("build/includes.chroot/usr/share/applications/devos-winlayer.desktop")
         apk = read("build/includes.chroot/usr/share/applications/devos-apphub.desktop")
 
-        self.assertIn("initialPartitioningChoice: erase", partition)
+        self.assertIn("initialPartitioningChoice: manual", partition)
+        self.assertIn("allowManualPartitioning: true", partition)
+        self.assertIn("alwaysShowPartitionLabels: true", partition)
         show = read("build/includes.chroot/etc/calamares/settings.conf").split("- exec:")[0]
         # Calamares 3.3.5 keeps Next disabled on the disk page when it comes
         # before the welcome page (its requirements gate the whole sequence).
@@ -315,6 +317,16 @@ class TestDevOSIdentity(unittest.TestCase):
         self.assertIn("presets:", users)
         finalize = read("build/includes.chroot/usr/local/sbin/devos-install-finalize")
         self.assertIn("zz-devos-autologin.conf", finalize)
+
+
+    def test_slideshow_ai_era_collection_has_over_100_images(self):
+        slideshow_dir = os.path.join(ROOT, "build/includes.chroot/usr/share/wallpapers/DevOS-Slideshow")
+        self.assertTrue(os.path.isdir(slideshow_dir))
+        files = os.listdir(slideshow_dir)
+        ai_images = [f for f in files if f.startswith("AI_") and f.endswith(".jpg")]
+        self.assertEqual(len(ai_images), 100)
+        total_images = [f for f in files if f.endswith(".jpg") or f.endswith(".png")]
+        self.assertGreaterEqual(len(total_images), 130)
 
 
 if __name__ == "__main__":
