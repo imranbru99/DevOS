@@ -2189,4 +2189,35 @@ class TestMultiStepChaining(unittest.TestCase):
         # Non-fast path goes to normal model
         self.assertIsNone(engine.fast_chat_reply("what is docker"))
 
+    def test_modesty_filter_routing_and_execution(self):
+        ctx = tools.ToolContext(root="/nonexistent", which=lambda n: None, launcher=lambda a: True)
+        # Sudo CLI phrasing
+        r_disable = tools.route("sudo devos-modesty disable", ctx=ctx)
+        self.assertEqual(len(r_disable.actions), 1)
+        self.assertEqual(r_disable.actions[0].name, "modesty")
+        self.assertEqual(r_disable.actions[0].args.get("op"), "disable")
+
+        r_enable = tools.route("sudo devos-modesty enable", ctx=ctx)
+        self.assertEqual(len(r_enable.actions), 1)
+        self.assertEqual(r_enable.actions[0].name, "modesty")
+        self.assertEqual(r_enable.actions[0].args.get("op"), "enable")
+
+        # Natural language phrasing
+        r_turn_off = tools.route("turn off blur", ctx=ctx)
+        self.assertEqual(r_turn_off.actions[0].name, "modesty")
+        self.assertEqual(r_turn_off.actions[0].args.get("op"), "disable")
+
+        r_stop = tools.route("stop blur", ctx=ctx)
+        self.assertEqual(r_stop.actions[0].name, "modesty")
+        self.assertEqual(r_stop.actions[0].args.get("op"), "disable")
+
+        r_turn_on = tools.route("turn on blur", ctx=ctx)
+        self.assertEqual(r_turn_on.actions[0].name, "modesty")
+        self.assertEqual(r_turn_on.actions[0].args.get("op"), "enable")
+
+        # Dry run execution
+        res = tools.execute(r_disable.actions[0], ctx, dry_run=True)
+        self.assertTrue(res.ok)
+        self.assertIn("disable", res.text.lower())
+
 

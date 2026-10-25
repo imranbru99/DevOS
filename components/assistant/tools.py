@@ -1422,6 +1422,40 @@ def _islamic_action(c: str, context: Optional[List[str]] = None) -> Optional[Act
     return None
 
 
+def _modesty_action(c: str) -> Optional[Action]:
+    # Match direct CLI command: (sudo )devos-modesty (enable|disable|status)
+    m = re.search(r"\b(?:sudo\s+)?(?:devos[-_])?modesty\s+(?P<cmd>enable|disable|status)\b", c)
+    if m:
+        cmd = m.group("cmd").lower()
+        mode = "people" if "people" in c else "women"
+        if cmd == "disable":
+            return Action("modesty", {"op": "disable"}, label="Disable Modesty Blur Filter")
+        elif cmd == "enable":
+            return Action("modesty", {"op": "enable", "mode": mode}, label="Enable Modesty Blur Filter")
+        elif cmd == "status":
+            return Action("modesty", {"op": "status"}, label="Check Modesty Filter Status")
+
+    # Match natural language:
+    # Disable / Stop / Turn off blur
+    if _has(r"\b(?:turn\s+off|disable|stop|shut\s+off|deactivate|remove)\s+(?:the\s+)?(?:modesty|blur|modesty\s+filter|browser\s+blur|video\s+blur)\b"
+             r"|\b(?:modesty|blur|modesty\s+filter)\s+(?:off|disable|stop)\b"
+             r"|\b(?:stop\s+blurring|don'?t\s+blur|no\s+more\s+blur)\b", c):
+        return Action("modesty", {"op": "disable"}, label="Disable Modesty Blur Filter")
+
+    # Enable / Start / Turn on blur
+    if _has(r"\b(?:turn\s+on|enable|start|activate)\s+(?:the\s+)?(?:modesty|blur|modesty\s+filter|browser\s+blur|video\s+blur)\b"
+             r"|\b(?:modesty|blur|modesty\s+filter)\s+(?:on|enable|start)\b", c):
+        mode = "people" if _has(r"\bpeople|all\b", c) else "women"
+        return Action("modesty", {"op": "enable", "mode": mode}, label="Enable Modesty Blur Filter")
+
+    # Status
+    if _has(r"\b(?:status\s+of|is|check)\s+(?:the\s+)?(?:modesty|blur|modesty\s+filter)\b"
+             r"|\b(?:modesty|blur|modesty\s+filter)\s+(?:status|state|on\s+or\s+off)\b", c):
+        return Action("modesty", {"op": "status"}, label="Check Modesty Filter Status")
+
+    return None
+
+
 def route_clause(c: str, ctx: Optional[ToolContext] = None, context: Optional[List[str]] = None) -> Optional[List[Action]]:
     if not c:
         return None
@@ -1547,6 +1581,10 @@ def route_clause(c: str, ctx: Optional[ToolContext] = None, context: Optional[Li
     ia = _islamic_action(c, context=context)
     if ia:
         return [ia]
+
+    ma = _modesty_action(c)
+    if ma:
+        return [ma]
 
     try:
         _here = os.path.dirname(os.path.abspath(__file__))
@@ -2876,6 +2914,90 @@ def _x_islamic(a: Action, ctx: ToolContext, dry: bool) -> ToolResult:
     return ToolResult("\n".join(lines).strip(), ok=True, buttons=buttons)
 
 
+def _x_modesty(a: Action, ctx: ToolContext, dry: bool) -> ToolResult:
+    op = str(a.args.get("op") or "status").lower()
+    mode = str(a.args.get("mode") or "women").lower()
+
+    modesty_dir = os.path.join(COMPONENTS, "modesty")
+    if modesty_dir not in sys.path:
+        sys.path.insert(0, modesty_dir)
+
+    try:
+        import modesty
+    except Exception as exc:
+        return ToolResult(f"Modesty component could not be loaded: {exc}", ok=False)
+
+    if op == "status":
+        try:
+            s = modesty.status()
+            is_on = s.get("enabled", False)
+            current_mode = s.get("mode", "women")
+            if is_on:
+                txt = f"🛡️ **Modesty filter is ON** (Mode: {current_mode}).\n\n" \
+                      f"Detected body regions are blurred in Chrome. You can also toggle blur directly from the Chrome toolbar icon."
+                buttons = [("Turn Off Blur", Action("modesty", {"op": "disable"}))]
+            else:
+                txt = "⚪ **Modesty filter is OFF**.\n\nAll videos, images, and text display normally without blur."
+                buttons = [("Turn On Blur", Action("modesty", {"op": "enable", "mode": "women"}))]
+            return ToolResult(txt, ok=True, buttons=buttons)
+        except Exception as e:
+            return ToolResult(f"Could not check modesty status: {e}", ok=False)
+
+    if dry:
+        return ToolResult(f"Modesty filter: {op}.", ok=True)
+
+    script_path = shutil.which("devos-modesty") or "/usr/local/sbin/devos-modesty"
+    if not os.path.exists(script_path):
+        script_path = os.path.join(modesty_dir, "modesty.py")
+
+    if op == "disable":
+        if os.geteuid() == 0:
+            cmd = ["python3", script_path, "disable"]
+        else:
+            cmd = ["pkexec", script_path, "disable"]
+
+        try:
+            rc, out = run_capture(cmd, timeout=30)
+            if rc == 0:
+                return ToolResult(
+                    "✅ **Modesty filter has been disabled.**\n\n"
+                    "All blurring on videos, text, and images is stopped. "
+                    "Reload your browser tabs (or restart Chrome) for the change to take full effect.",
+                    ok=True,
+                    buttons=[("Turn Blur Back On", Action("modesty", {"op": "enable", "mode": "women"}))]
+                )
+            elif rc in (126, 127):
+                return ToolResult("Action cancelled: administrator password was not entered.", ok=False)
+            else:
+                return ToolResult(f"Could not disable modesty filter: {out.strip() or 'Unknown error'}", ok=False)
+        except Exception as e:
+            return ToolResult(f"Failed to execute disable: {e}", ok=False)
+
+    elif op == "enable":
+        if os.geteuid() == 0:
+            cmd = ["python3", script_path, "enable", "--mode", mode]
+        else:
+            cmd = ["pkexec", script_path, "enable", "--mode", mode]
+
+        try:
+            rc, out = run_capture(cmd, timeout=30)
+            if rc == 0:
+                return ToolResult(
+                    f"✅ **Modesty filter is now enabled** (Mode: {mode}).\n\n"
+                    "The filter policy is unlocked so you can also toggle 'Filter on [✔]' directly from the Chrome toolbar icon anytime.",
+                    ok=True,
+                    buttons=[("Turn Off Blur", Action("modesty", {"op": "disable"}))]
+                )
+            elif rc in (126, 127):
+                return ToolResult("Action cancelled: administrator password was not entered.", ok=False)
+            else:
+                return ToolResult(f"Could not enable modesty filter: {out.strip() or 'Unknown error'}", ok=False)
+        except Exception as e:
+            return ToolResult(f"Failed to execute enable: {e}", ok=False)
+
+    return ToolResult("Unknown modesty operation.", ok=False)
+
+
 
 # ---------------------------------------------------------------------------
 # Notes, typing, email, reminders, folders, files, media, closing apps
@@ -3480,7 +3602,7 @@ _EXECUTORS = {
     "open_settings": _x_open_settings, "open_folder": _x_open_folder, "volume": _x_volume,
     "brightness": _x_brightness, "screenshot": _x_screenshot, "lock": _x_lock, "power": _x_power,
     "uninstall": _x_uninstall, "open_tool": _x_open_tool, "cleanup_scan": _x_cleanup_scan,
-    "solve": _x_solve, "time": _x_time, "islamic": _x_islamic,
+    "solve": _x_solve, "time": _x_time, "islamic": _x_islamic, "modesty": _x_modesty,
     "write_note": _x_write_note, "type_text": _x_type_text, "open_app_and_type": _x_open_app_and_type,
     "compose_email": _x_compose_email, "reminder": _x_reminder, "create_folder": _x_create_folder,
     "open_path": _x_open_path, "media": _x_media, "close_app": _x_close_app,
