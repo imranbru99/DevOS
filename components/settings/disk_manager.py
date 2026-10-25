@@ -2,15 +2,16 @@
 """
 DevOS Disk & Storage Controller
 Inspects storage devices, partition tables (GPT vs MBR/DOS), filesystem sizes,
-and provides guidance for partition scheme conversion and boot targets.
+and provides Windows-like partition formatting, wipe, storage setup, and boot targets.
 """
 
 import sys
 import os
+import re
 import json
 import shutil
 import subprocess
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Tuple
 
 
 def format_size(bytes_val: int) -> str:
@@ -28,7 +29,7 @@ def format_size(bytes_val: int) -> str:
     return f"{int(val)} {units[unit_idx]}"
 
 
-LSBLK_COLUMNS = "NAME,SIZE,TYPE,FSTYPE,MOUNTPOINTS,MODEL,TRAN,ROTA,PTTYPE,LABEL,PARTLABEL,PARTTYPE"
+LSBLK_COLUMNS = "NAME,SIZE,FSAVAIL,FSUSED,FSUSE%,TYPE,FSTYPE,MOUNTPOINTS,MODEL,TRAN,ROTA,PTTYPE,LABEL,PARTLABEL,PARTTYPE"
 # Older util-linux has no MOUNTPOINTS; same data with the single-mount column.
 LSBLK_COLUMNS_OLD = LSBLK_COLUMNS.replace("MOUNTPOINTS", "MOUNTPOINT")
 ESP_PARTTYPE = "c12a7328-f81f-11d2-ba4b-00a0c93ec93b"
@@ -112,9 +113,20 @@ def disk_description(dev: Dict[str, Any]) -> str:
     return f"{model} · {kind}"
 
 
+def parse_partition_parent(device_path: str) -> Tuple[str, str]:
+    """
+    Given a partition device like /dev/sda1 or /dev/nvme0n1p2,
+    returns (parent_disk, partition_number), e.g. ('/dev/sda', '1') or ('/dev/nvme0n1', '2').
+    """
+    m = re.match(r"^(/dev/(?:nvme\d+n\d+|mmcblk\d+|[a-zA-Z]+))p?(\d+)$", device_path.strip())
+    if m:
+        return m.group(1), m.group(2)
+    return "", ""
+
+
 def parse_lsblk(data: Dict[str, Any], subvolumes: Dict[str, List[Dict[str, str]]] = None,
                 is_uefi: bool = None, live: bool = None) -> List[Dict[str, Any]]:
-    """Turns `lsblk -J -b` output into the dashboard's disk cards. Pure, so it is testable."""
+    """Turns `lsblk -J -b` output into structured disk cards with Windows-like size info."""
     subvolumes = subvolumes or {}
     if is_uefi is None:
         is_uefi = DiskManager.is_uefi_system()
@@ -149,6 +161,8 @@ def parse_lsblk(data: Dict[str, Any], subvolumes: Dict[str, List[Dict[str, str]]
             "partition_table": table_label,
             "raw_pttype": pttype or "unknown",
             "partitions": [],
+            "unallocated_bytes": 0,
+            "unallocated_human": "0 B",
             "is_system_disk": False,
             "is_live_media": False,
         }
@@ -158,10 +172,29 @@ def parse_lsblk(data: Dict[str, Any], subvolumes: Dict[str, List[Dict[str, str]]
             # Filesystem written straight onto the disk, without a partition table.
             disk_mounts = _mounts_of(dev)
             disk_entry["whole_disk_fs"] = dev["fstype"]
+            fsavail = _as_int(dev.get("fsavail"))
+            fsused = _as_int(dev.get("fsused"))
+            fsuse_pct = str(dev.get("fsuse%") or "").strip()
+            used_free_str = ""
+            if fsused > 0 and fsavail > 0:
+                used_free_str = f"{format_size(fsused)} used / {format_size(fsavail)} free"
+                if fsuse_pct:
+                    used_free_str += f" ({fsuse_pct})"
+            elif fsused > 0:
+                used_free_str = f"{format_size(fsused)} used"
+            elif fsavail > 0:
+                used_free_str = f"{format_size(fsavail)} free"
+
             disk_entry["partitions"].append({
                 "device": disk_entry["device"],
                 "size_bytes": size_bytes,
                 "size_human": disk_entry["size_human"],
+                "fs_avail_bytes": fsavail,
+                "fs_avail_human": format_size(fsavail) if fsavail > 0 else "",
+                "fs_used_bytes": fsused,
+                "fs_used_human": format_size(fsused) if fsused > 0 else "",
+                "fs_use_percent": fsuse_pct,
+                "used_free_human": used_free_str,
                 "fstype": dev["fstype"],
                 "mountpoint": ", ".join(dict.fromkeys(disk_mounts)),
                 "mounted": bool(disk_mounts),
@@ -194,10 +227,30 @@ def parse_lsblk(data: Dict[str, Any], subvolumes: Dict[str, List[Dict[str, str]]
                 disk_entry["is_live_media"] = True
             parttype = (part.get("parttype") or "").lower()
             part_size = _as_int(part.get("size"))
+            fsavail = _as_int(part.get("fsavail"))
+            fsused = _as_int(part.get("fsused"))
+            fsuse_pct = str(part.get("fsuse%") or "").strip()
+
+            used_free_str = ""
+            if fsused > 0 and fsavail > 0:
+                used_free_str = f"{format_size(fsused)} used / {format_size(fsavail)} free"
+                if fsuse_pct:
+                    used_free_str += f" ({fsuse_pct})"
+            elif fsused > 0:
+                used_free_str = f"{format_size(fsused)} used"
+            elif fsavail > 0:
+                used_free_str = f"{format_size(fsavail)} free"
+
             disk_entry["partitions"].append({
                 "device": part_dev,
                 "size_bytes": part_size,
                 "size_human": format_size(part_size),
+                "fs_avail_bytes": fsavail,
+                "fs_avail_human": format_size(fsavail) if fsavail > 0 else "",
+                "fs_used_bytes": fsused,
+                "fs_used_human": format_size(fsused) if fsused > 0 else "",
+                "fs_use_percent": fsuse_pct,
+                "used_free_human": used_free_str,
                 "fstype": fstype or "unknown",
                 "mountpoint": mount_text,
                 "mounted": bool(all_targets),
@@ -205,6 +258,12 @@ def parse_lsblk(data: Dict[str, Any], subvolumes: Dict[str, List[Dict[str, str]]
                 "is_esp": parttype == ESP_PARTTYPE,
                 "is_bios_boot": parttype == BIOS_BOOT_PARTTYPE,
             })
+
+        # Calculate unallocated free space across the disk
+        total_part_size = sum(p["size_bytes"] for p in disk_entry["partitions"])
+        unalloc = max(0, size_bytes - total_part_size)
+        disk_entry["unallocated_bytes"] = unalloc
+        disk_entry["unallocated_human"] = format_size(unalloc)
 
         disk_entry["issues"] = DiskManager.diagnose_disk(disk_entry, is_uefi=is_uefi, live=live)
         disks.append(disk_entry)
@@ -276,7 +335,7 @@ class DiskManager:
                 "type": "live_media",
                 "severity": "info",
                 "title": "DevOS USB you started from",
-                "description": "This is the installer drive. Do not install onto it.",
+                "description": "This is the installer drive. Protected from formatting.",
                 "action_id": "",
                 "action_label": "",
             }]
@@ -286,7 +345,7 @@ class DiskManager:
                 "type": "system_disk",
                 "severity": "success",
                 "title": "DevOS is installed on this disk",
-                "description": f"System disk with a {table} partition table, booting in {boot_mode} mode.",
+                "description": f"Active system disk with a {table} partition table, booting in {boot_mode} mode.",
                 "action_id": "",
                 "action_label": "",
             }]
@@ -296,13 +355,13 @@ class DiskManager:
             in_use = any(p.get("mounted") for p in partitions)
             return [{
                 "type": "whole_disk_fs",
-                "severity": "info",
-                "title": f"Whole disk formatted as {fs}",
+                "severity": "warning",
+                "title": f"Whole disk formatted as {fs} without partition table",
                 "description": ("In use. " if in_use else "") +
                                f"The disk has a {fs} filesystem but no partition table. "
-                               "Back up its files before reformatting it for DevOS.",
-                "action_id": "",
-                "action_label": "",
+                               "Initialize as GPT to use with modern operating systems.",
+                "action_id": "format_storage",
+                "action_label": "Format as GPT Storage Drive",
             }]
 
         # Check for unpartitioned drive
@@ -311,9 +370,9 @@ class DiskManager:
                 "type": "unpartitioned",
                 "severity": "warning",
                 "title": "Unallocated / Unpartitioned Disk",
-                "description": "Drive has no partition table. Needs GPT table and filesystem formatting.",
-                "action_id": "format_devos",
-                "action_label": "Initialize as GPT & Format for DevOS"
+                "description": "Drive has no partition table. Initialize as GPT and format for DevOS or Storage.",
+                "action_id": "format_storage",
+                "action_label": "Format as Fast Storage Drive (GPT + Ext4)"
             })
             return issues
 
@@ -325,7 +384,7 @@ class DiskManager:
                 "title": "Legacy MBR Partition Table on UEFI Motherboard",
                 "description": "Your computer booted in modern UEFI mode, but this drive uses legacy MBR (dos).",
                 "action_id": "convert_gpt",
-                "action_label": "Convert MBR to GPT (Safe One-Click)"
+                "action_label": "Convert MBR to GPT (Safe Non-Destructive)"
             })
 
         # Check BIOS vs GPT mismatch
@@ -357,7 +416,7 @@ class DiskManager:
                 "title": "Missing 512 MB EFI System Partition (ESP)",
                 "description": "UEFI requires a dedicated FAT32 EFI partition at /boot/efi to boot installed system.",
                 "action_id": "format_devos",
-                "action_label": "Format with DevOS Standard Layout (EFI + BTRFS)"
+                "action_label": "Setup DevOS Layout (512MB EFI + Ext4)"
             })
 
         # Check for unformatted data partitions on secondary / non-system disks
@@ -369,9 +428,9 @@ class DiskManager:
                         "type": "unformatted_partition",
                         "severity": "warning",
                         "title": f"Unformatted Storage Partition ({p['device']})",
-                        "description": f"Partition {p['device']} ({p['size_human']}) has no filesystem. Format it to use as Storage in DevOS.",
-                        "action_id": f"format_partition:{p['device']}",
-                        "action_label": f"Format {p['device']} (BTRFS Storage)"
+                        "description": f"Partition {p['device']} ({p['size_human']}) has no filesystem. Format it to use as Storage.",
+                        "action_id": f"format_partition:{p['device']}:ext4:Storage",
+                        "action_label": f"Format {p['device']} (Ext4 Storage)"
                     })
 
         if not issues:
@@ -388,23 +447,28 @@ class DiskManager:
                 issues.append({
                     "type": "healthy",
                     "severity": "success",
-                    "title": "Partition table looks healthy",
+                    "title": "Drive is healthy and ready",
                     "description": f"{raw_pt.upper()} partition table matches this PC's {boot_mode} boot mode.",
-                    "action_id": "",
-                    "action_label": ""
+                    "action_id": "format_storage",
+                    "action_label": "Format as Fast Storage Drive (Ext4)"
                 })
 
         return issues
 
     @classmethod
-    def apply_solution(cls, device: str, action_id: str) -> Dict[str, Any]:
-        """Applies one-click resolution for storage/partition issues."""
+    def apply_solution(cls, device: str, action_id: str, fs_type: str = "ext4",
+                       label: str = "", **kwargs) -> Dict[str, Any]:
+        """
+        Applies one-click resolution for storage/partition issues.
+        Includes robust unmounting, swap deactivation, and signature wiping to prevent EBUSY.
+        """
         if action_id == "reboot_system":
             try:
                 subprocess.Popen(["systemctl", "reboot"])
                 return {"success": True, "message": "Initiating reboot... Remove USB when screen turns dark."}
             except Exception as e:
                 return {"success": False, "error": str(e)}
+
         if action_id == "launch_installer":
             if not is_live_system():
                 return {"success": False, "error": "DevOS is already installed on this PC."}
@@ -416,22 +480,86 @@ class DiskManager:
             except Exception as e:
                 return {"success": False, "error": str(e)}
             return {"success": True, "message": "Calamares Installer launched successfully."}
+
+        # Parse compound action_ids (e.g. format_partition:/dev/sda2:ext4:Storage)
+        if ":" in action_id:
+            parts = action_id.split(":")
+            base_action = parts[0]
+            if len(parts) >= 2 and not device:
+                device = parts[1]
+            if len(parts) >= 3 and not fs_type:
+                fs_type = parts[2]
+            if len(parts) >= 4 and not label:
+                label = parts[3]
+            action_id = base_action
+
         if not device.startswith("/dev/") or not all(c.isalnum() or c in "/-_" for c in device):
             return {"success": False, "error": f"Invalid device '{device}'"}
-        if action_id in ("convert_gpt", "convert_mbr", "format_devos"):
-            # Never rewrite a disk that is in use (the running system, the live USB, mounted data).
-            disk = next((d for d in cls.get_storage_info() if d["device"] == device), None)
-            if disk is None:
-                return {"success": False, "error": f"{device} is not a disk on this PC."}
-            if (disk.get("is_system_disk") or disk.get("is_live_media")
-                    or any(p.get("mounted") for p in disk.get("partitions", []))):
-                return {"success": False, "error": f"{device} is in use (mounted). Unmount it first."}
 
+        # Validate filesystem selection
+        fs_type = (fs_type or "ext4").lower().strip()
+        if fs_type not in ("ext4", "btrfs", "exfat", "vfat", "ntfs"):
+            fs_type = "ext4"
+
+        needs_pkexec = (os.geteuid() != 0 and shutil.which("pkexec") is not None)
+
+        def run_script(bash_script: str) -> Tuple[bool, str]:
+            runner = ["pkexec", "bash", "-c", bash_script] if needs_pkexec else ["bash", "-c", bash_script]
+            proc = subprocess.run(runner, capture_output=True, text=True)
+            if proc.returncode == 0:
+                return True, proc.stdout.strip()
+            return False, proc.stderr.strip() or f"Command failed with code {proc.returncode}"
+
+        # ------------------ MOUNT / UNMOUNT PARTITION ------------------
+        if action_id in ("mount_partition", "mount"):
+            try:
+                res = subprocess.run(["udisksctl", "mount", "-b", device], capture_output=True, text=True)
+                if res.returncode == 0:
+                    return {"success": True, "message": f"Successfully mounted {device}."}
+                return {"success": False, "error": res.stderr.strip() or "Failed to mount partition."}
+            except Exception as exc:
+                return {"success": False, "error": str(exc)}
+
+        if action_id in ("unmount_partition", "unmount"):
+            try:
+                res = subprocess.run(["udisksctl", "unmount", "-b", device], capture_output=True, text=True)
+                if res.returncode == 0:
+                    return {"success": True, "message": f"Successfully unmounted {device}."}
+                # Fallback to umount
+                ok, err = run_script(f"umount -f -l {device}")
+                if ok:
+                    return {"success": True, "message": f"Successfully unmounted {device}."}
+                return {"success": False, "error": err}
+            except Exception as exc:
+                return {"success": False, "error": str(exc)}
+
+        # ------------------ PROTECT ACTIVE SYSTEM & LIVE MEDIA ------------------
+        disks = cls.get_storage_info()
+        target_disk = next((d for d in disks if d["device"] == device), None)
+        parent_disk, part_num = parse_partition_parent(device)
+
+        if not target_disk and parent_disk:
+            target_disk = next((d for d in disks if d["device"] == parent_disk), None)
+
+        if target_disk:
+            if target_disk.get("is_live_media"):
+                return {"success": False, "error": f"{device} is the DevOS live installer USB. Protected from modifications."}
+            if target_disk.get("is_system_disk") and not is_live_system():
+                # Allow formatting only non-root partitions on system disk, but never whole disk
+                if action_id in ("convert_gpt", "convert_mbr", "format_devos", "format_storage", "wipe_disk"):
+                    return {"success": False, "error": f"{device} is the running system disk. Cannot erase while running DevOS."}
+
+        # Check if specific partition is root / boot
+        if parent_disk:
+            for d in disks:
+                for p in d.get("partitions", []):
+                    if p["device"] == device and any(m in ("/", "/boot", "/boot/efi") for m in p.get("mountpoint", "").split(", ")):
+                        if not is_live_system():
+                            return {"success": False, "error": f"Cannot modify partition {device}: mounted as active system root."}
+
+        # ------------------ ACTIONS IMPLEMENTATION ------------------
         try:
-            needs_pkexec = (os.geteuid() != 0 and shutil.which("pkexec") is not None)
-
             if action_id == "convert_gpt":
-                # Use sgdisk to convert MBR to GPT non-destructively
                 if shutil.which("sgdisk"):
                     cmd = ["sgdisk", "-g", device]
                     if needs_pkexec:
@@ -440,7 +568,7 @@ class DiskManager:
                     if proc.returncode == 0:
                         return {"success": True, "message": f"Successfully converted {device} from MBR to GPT!"}
                     return {"success": False, "error": proc.stderr.strip() or f"sgdisk exited with code {proc.returncode}"}
-                return {"success": False, "error": "sgdisk tool not found in live system."}
+                return {"success": False, "error": "sgdisk tool not found."}
 
             elif action_id == "convert_mbr":
                 if shutil.which("parted"):
@@ -453,46 +581,132 @@ class DiskManager:
                     return {"success": False, "error": proc.stderr.strip() or f"parted exited with code {proc.returncode}"}
                 return {"success": False, "error": "parted tool not found."}
 
+            elif action_id == "wipe_disk":
+                # Clean wipe of partition table and signatures with safe unmounting
+                script = (
+                    f"set -e\n"
+                    f"for p in $(lsblk -lno NAME {device} 2>/dev/null); do\n"
+                    f"    swapoff /dev/$p 2>/dev/null || true\n"
+                    f"    umount -f -l /dev/$p 2>/dev/null || true\n"
+                    f"done\n"
+                    f"wipefs -af {device} 2>/dev/null || true\n"
+                    f"parted {device} --script mklabel gpt\n"
+                    f"udevadm settle || sleep 1\n"
+                )
+                ok, err = run_script(script)
+                if ok:
+                    return {"success": True, "message": f"Successfully wiped and initialized {device} with clean GPT table."}
+                return {"success": False, "error": f"Wiping failed: {err}"}
+
             elif action_id == "format_devos":
-                # Standard DevOS layout: GPT + 512MB EFI (vfat) + remainder BTRFS
-                if shutil.which("parted") and shutil.which("mkfs.vfat") and shutil.which("mkfs.btrfs"):
-                    part1 = f"{device}1" if "nvme" not in device else f"{device}p1"
-                    part2 = f"{device}2" if "nvme" not in device else f"{device}p2"
+                # Standard DevOS layout: GPT + 512MB EFI (vfat) + remainder OS Root
+                target_label = label or "DevOS"
+                part1 = f"{device}1" if "nvme" not in device and "mmc" not in device else f"{device}p1"
+                part2 = f"{device}2" if "nvme" not in device and "mmc" not in device else f"{device}p2"
 
-                    script = (
-                        f"set -e\n"
-                        f"parted {device} --script mklabel gpt\n"
-                        f"parted {device} --script mkpart DEVOS_EFI fat32 1MiB 513MiB\n"
-                        f"parted {device} --script set 1 esp on\n"
-                        f"parted {device} --script mkpart DEVOS_ROOT btrfs 513MiB 100%\n"
-                        f"udevadm settle || sleep 1\n"
-                        f"mkfs.vfat -F32 -n DEVOS_EFI {part1}\n"
-                        f"mkfs.btrfs -f -L DEVOS_ROOT {part2}\n"
-                    )
+                mkfs_root = f"mkfs.ext4 -F -L {target_label} {part2}"
+                if fs_type == "btrfs":
+                    mkfs_root = f"mkfs.btrfs -f -L {target_label} {part2}"
 
-                    runner = ["pkexec", "bash", "-c", script] if needs_pkexec else ["bash", "-c", script]
-                    proc = subprocess.run(runner, capture_output=True, text=True)
-                    if proc.returncode == 0:
-                        return {"success": True, "message": f"Successfully formatted {device} with DevOS standard EFI + BTRFS layout!"}
-                    return {"success": False, "error": proc.stderr.strip() or f"Formatting failed with exit code {proc.returncode}"}
-                return {"success": False, "error": "parted, mkfs.vfat and mkfs.btrfs are needed to format a disk."}
+                script = (
+                    f"set -e\n"
+                    f"for p in $(lsblk -lno NAME {device} 2>/dev/null); do\n"
+                    f"    swapoff /dev/$p 2>/dev/null || true\n"
+                    f"    umount -f -l /dev/$p 2>/dev/null || true\n"
+                    f"done\n"
+                    f"wipefs -af {device} 2>/dev/null || true\n"
+                    f"parted {device} --script mklabel gpt\n"
+                    f"parted {device} --script mkpart DEVOS_EFI fat32 1MiB 513MiB\n"
+                    f"parted {device} --script set 1 esp on\n"
+                    f"parted {device} --script mkpart {target_label} {fs_type} 513MiB 100%\n"
+                    f"udevadm settle || sleep 1\n"
+                    f"mkfs.vfat -F32 -n DEVOS_EFI {part1}\n"
+                    f"{mkfs_root}\n"
+                    f"udevadm settle || sleep 1\n"
+                )
+                ok, err = run_script(script)
+                if ok:
+                    return {"success": True, "message": f"Successfully formatted {device} with DevOS EFI + {fs_type.upper()} layout!"}
+                return {"success": False, "error": f"DevOS formatting failed: {err}"}
 
-            elif action_id.startswith("format_partition:"):
-                part_dev = action_id.split(":", 1)[1]
-                if not part_dev.startswith("/dev/") or not all(c.isalnum() or c in "/-_" for c in part_dev):
-                    return {"success": False, "error": f"Invalid partition device '{part_dev}'"}
-                if not shutil.which("mkfs.btrfs"):
-                    return {"success": False, "error": "mkfs.btrfs tool not found."}
-                script = f"mkfs.btrfs -f -L Storage {part_dev} && udevadm settle"
-                runner = ["pkexec", "bash", "-c", script] if needs_pkexec else ["bash", "-c", script]
-                proc = subprocess.run(runner, capture_output=True, text=True)
-                if proc.returncode == 0:
-                    try:
-                        subprocess.run(["udisksctl", "mount", "-b", part_dev], capture_output=True, text=True)
-                    except Exception:
-                        pass
-                    return {"success": True, "message": f"Successfully formatted and mounted {part_dev} as BTRFS Storage!"}
-                return {"success": False, "error": proc.stderr.strip() or f"Formatting failed with code {proc.returncode}"}
+            elif action_id == "format_storage":
+                # Single large GPT storage partition spanning 100% of the drive
+                target_label = label or "Storage"
+                part1 = f"{device}1" if "nvme" not in device and "mmc" not in device else f"{device}p1"
+
+                if fs_type == "btrfs":
+                    mkfs_cmd = f"mkfs.btrfs -f -L {target_label} {part1}"
+                elif fs_type == "exfat":
+                    mkfs_cmd = f"mkfs.exfat -n {target_label} {part1}"
+                elif fs_type == "ntfs":
+                    mkfs_cmd = f"mkfs.ntfs -f -L {target_label} {part1}"
+                elif fs_type == "vfat":
+                    mkfs_cmd = f"mkfs.vfat -F32 -n {target_label} {part1}"
+                else:
+                    mkfs_cmd = f"mkfs.ext4 -F -L {target_label} {part1}"
+
+                script = (
+                    f"set -e\n"
+                    f"for p in $(lsblk -lno NAME {device} 2>/dev/null); do\n"
+                    f"    swapoff /dev/$p 2>/dev/null || true\n"
+                    f"    umount -f -l /dev/$p 2>/dev/null || true\n"
+                    f"done\n"
+                    f"wipefs -af {device} 2>/dev/null || true\n"
+                    f"parted {device} --script mklabel gpt\n"
+                    f"parted {device} --script mkpart {target_label} {fs_type} 1MiB 100%\n"
+                    f"udevadm settle || sleep 1\n"
+                    f"{mkfs_cmd}\n"
+                    f"udevadm settle || sleep 1\n"
+                    f"udisksctl mount -b {part1} 2>/dev/null || true\n"
+                )
+                ok, err = run_script(script)
+                if ok:
+                    return {"success": True, "message": f"Successfully formatted {device} as {fs_type.upper()} Storage ({target_label})!"}
+                return {"success": False, "error": f"Storage formatting failed: {err}"}
+
+            elif action_id in ("format_partition", "format"):
+                target_label = label or "Storage"
+
+                if fs_type == "btrfs":
+                    mkfs_cmd = f"mkfs.btrfs -f -L {target_label} {device}"
+                elif fs_type == "exfat":
+                    mkfs_cmd = f"mkfs.exfat -n {target_label} {device}"
+                elif fs_type == "ntfs":
+                    mkfs_cmd = f"mkfs.ntfs -f -L {target_label} {device}"
+                elif fs_type == "vfat":
+                    mkfs_cmd = f"mkfs.vfat -F32 -n {target_label} {device}"
+                else:
+                    mkfs_cmd = f"mkfs.ext4 -F -L {target_label} {device}"
+
+                script = (
+                    f"set -e\n"
+                    f"swapoff {device} 2>/dev/null || true\n"
+                    f"umount -f -l {device} 2>/dev/null || true\n"
+                    f"wipefs -af {device} 2>/dev/null || true\n"
+                    f"{mkfs_cmd}\n"
+                    f"udevadm settle || sleep 1\n"
+                    f"udisksctl mount -b {device} 2>/dev/null || true\n"
+                )
+                ok, err = run_script(script)
+                if ok:
+                    return {"success": True, "message": f"Successfully formatted {device} as {fs_type.upper()} ({target_label})!"}
+                return {"success": False, "error": f"Partition formatting failed: {err}"}
+
+            elif action_id in ("delete_partition", "delete"):
+                if not parent_disk or not part_num:
+                    return {"success": False, "error": f"Cannot determine parent disk for partition '{device}'"}
+                script = (
+                    f"set -e\n"
+                    f"swapoff {device} 2>/dev/null || true\n"
+                    f"umount -f -l {device} 2>/dev/null || true\n"
+                    f"wipefs -af {device} 2>/dev/null || true\n"
+                    f"parted {parent_disk} --script rm {part_num}\n"
+                    f"udevadm settle || sleep 1\n"
+                )
+                ok, err = run_script(script)
+                if ok:
+                    return {"success": True, "message": f"Successfully deleted partition {device}."}
+                return {"success": False, "error": f"Failed to delete partition: {err}"}
 
             return {"success": False, "error": f"Unknown action '{action_id}'"}
         except Exception as e:
@@ -500,34 +714,40 @@ class DiskManager:
 
     @classmethod
     def print_storage_table(cls):
-        """Prints a visual overview of all storage devices and partition schemes."""
+        """Prints a visual overview of all storage devices, partition schemes, and space usage."""
         disks = cls.get_storage_info()
 
-        print("\n================================================================================")
-        print("                        DevOS Storage & Disk Manager                            ")
-        print("================================================================================")
+        print("\n==========================================================================================")
+        print("                               DevOS Storage & Disk Manager                               ")
+        print("==========================================================================================")
 
         for disk in disks:
             print(f"\n[Disk Device]       {disk['device']}")
             print(f"  Model:            {disk['model']}")
             print(f"  Capacity:         {disk['size_human']} ({disk['size_bytes']:,} bytes)")
             print(f"  Partition Table:  {disk['partition_table']}")
+            if disk.get("unallocated_bytes", 0) > 1024 * 1024:
+                print(f"  Unallocated:      {disk['unallocated_human']}")
 
             if disk["partitions"]:
                 print("  Partitions:")
-                print("    " + f"{'PARTITION':<16} {'SIZE':<12} {'FILESYSTEM':<18} {'MOUNTPOINT / ROLE'}")
-                print("    " + "-" * 68)
+                print("    " + f"{'PARTITION':<16} {'SIZE':<10} {'USED / FREE':<26} {'FSTYPE':<10} {'MOUNT / ROLE'}")
+                print("    " + "-" * 78)
                 for part in disk["partitions"]:
                     mount_info = part["mountpoint"] or (f"Label: {part['label']}" if part['label'] else "[unmounted]")
-                    print("    " + f"{part['device']:<16} {part['size_human']:<12} {part['fstype']:<18} {mount_info}")
+                    used_free = part.get("used_free_human") or "-"
+                    print("    " + f"{part['device']:<16} {part['size_human']:<10} {used_free:<26} {part['fstype']:<10} {mount_info}")
             else:
                 print("  Partitions:       (None - Disk is unallocated)")
 
-        print("\n--------------------------------------------------------------------------------")
-        print("  Bootloader Target Recommendations:")
-        print("    * UEFI Systems: Select the GPT disk (e.g., /dev/sda). EFI partition: 512MB FAT32.")
-        print("    * BIOS Systems: Select the MBR/DOS disk (e.g., /dev/sda).")
-        print("================================================================================\n")
+        print("\n------------------------------------------------------------------------------------------")
+        print("  Quick CLI Actions:")
+        print("    * Format Partition:      devos disk format <partition> [--fs ext4|btrfs|exfat] [--label LABEL]")
+        print("    * Format Entire Storage: devos disk format-storage <disk> [--fs ext4|btrfs|exfat] [--label LABEL]")
+        print("    * Setup DevOS Boot Disk: devos disk setup-devos <disk> [--fs ext4|btrfs]")
+        print("    * Wipe Disk Clean:       devos disk wipe <disk>")
+        print("    * Open Visual GUI:       devos disk --gui (or devos-disk-gui)")
+        print("==========================================================================================\n")
 
     @staticmethod
     def print_conversion_guide():
@@ -558,7 +778,7 @@ class DiskManager:
      sudo parted /dev/sdX --script mklabel msdos
 
 4. IN THE DEVOS CALAMARES INSTALLER GUI:
-   * To automatically format and apply GPT with DevOS BTRFS + zstd compression:
+   * To automatically format and apply GPT with DevOS Ext4:
      Select: [ Erase disk ] -> Choose your drive from the dropdown.
    * To manually adjust partition tables:
      Select: [ Manual partitioning ] -> Select Drive -> Click [ New Partition Table ]
@@ -573,14 +793,65 @@ class DiskManager:
 
 
 def main():
-    if len(sys.argv) > 1 and sys.argv[1] in ("-c", "--convert", "help-convert"):
-        DiskManager.print_conversion_guide()
-    elif len(sys.argv) > 1 and sys.argv[1] in ("-j", "--json", "json"):
-        print(json.dumps(DiskManager.get_storage_info(), indent=2))
-    else:
+    args = sys.argv[1:]
+    if not args or args[0] in ("-t", "--table", "table", "status"):
         DiskManager.print_storage_table()
-        if len(sys.argv) > 1 and sys.argv[1] in ("-h", "--help"):
-            DiskManager.print_conversion_guide()
+        return
+
+    cmd = args[0]
+    if cmd in ("-c", "--convert", "help-convert"):
+        DiskManager.print_conversion_guide()
+        return
+    if cmd in ("-j", "--json", "json"):
+        print(json.dumps(DiskManager.get_storage_info(), indent=2))
+        return
+    if cmd in ("-h", "--help", "help"):
+        DiskManager.print_storage_table()
+        DiskManager.print_conversion_guide()
+        return
+
+    # CLI Actions: format, format-storage, setup-devos, wipe, delete, mount, unmount
+    if cmd in ("format", "format-partition", "format-storage", "setup-devos", "wipe", "delete", "mount", "unmount"):
+        if len(args) < 2:
+            print(f"Error: Missing device path for '{cmd}'. Example: devos disk {cmd} /dev/sda1")
+            sys.exit(1)
+        device = args[1]
+        fs_type = "ext4"
+        label = ""
+
+        # parse flags
+        i = 2
+        while i < len(args):
+            if args[i] in ("--fs", "-f") and i + 1 < len(args):
+                fs_type = args[i + 1]
+                i += 2
+            elif args[i] in ("--label", "-l") and i + 1 < len(args):
+                label = args[i + 1]
+                i += 2
+            else:
+                i += 1
+
+        action_map = {
+            "format": "format_partition",
+            "format-partition": "format_partition",
+            "format-storage": "format_storage",
+            "setup-devos": "format_devos",
+            "wipe": "wipe_disk",
+            "delete": "delete_partition",
+            "mount": "mount_partition",
+            "unmount": "unmount_partition"
+        }
+        action_id = action_map[cmd]
+        res = DiskManager.apply_solution(device, action_id, fs_type=fs_type, label=label)
+        if res.get("success"):
+            print(f"✓ Success: {res.get('message')}")
+        else:
+            print(f"✗ Error: {res.get('error')}")
+            sys.exit(1)
+        return
+
+    # Fallback default
+    DiskManager.print_storage_table()
 
 
 if __name__ == "__main__":
