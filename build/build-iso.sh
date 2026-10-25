@@ -37,9 +37,16 @@ cleanup() {
     echo "==> Cleaning up chroot mount points..."
     for mnt in "${CHROOT_DIR}/dev/pts" "${CHROOT_DIR}/dev" "${CHROOT_DIR}/proc" "${CHROOT_DIR}/sys"; do
         if mountpoint -q "$mnt" 2>/dev/null; then
-            umount --recursive --lazy "$mnt" || true
+            umount -l "$mnt" 2>/dev/null || umount -lf "$mnt" 2>/dev/null || true
         fi
     done
+    sleep 1
+    # Safety catch: unmount any residual child mounts under chroot
+    if mountpoint -q "${CHROOT_DIR}/sys" 2>/dev/null || mountpoint -q "${CHROOT_DIR}/proc" 2>/dev/null || mountpoint -q "${CHROOT_DIR}/dev" 2>/dev/null; then
+        awk -v prefix="${CHROOT_DIR}" '$2 ~ "^" prefix {print $2}' /proc/mounts | sort -r | while read -r pt; do
+            umount -l "$pt" 2>/dev/null || true
+        done
+    fi
 }
 trap cleanup EXIT
 
@@ -260,6 +267,9 @@ cp "$INITRD" "${ISODIR}/casper/initrd"
 # 8. Unmount chroot before building SquashFS
 cleanup
 for virtual in dev proc sys; do
+    if mountpoint -q "${CHROOT_DIR}/${virtual}"; then
+        umount -lf "${CHROOT_DIR}/${virtual}" 2>/dev/null || true
+    fi
     if mountpoint -q "${CHROOT_DIR}/${virtual}"; then
         echo "ERROR: ${virtual} is still mounted; refusing to package virtual filesystems." >&2
         exit 1
