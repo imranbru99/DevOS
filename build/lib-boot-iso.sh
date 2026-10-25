@@ -375,8 +375,7 @@ devos_master_iso() {
     [ -f "${GRUB_PC_DIR}/boot_hybrid.img" ] || _devos_die "GRUB boot_hybrid.img not found at ${GRUB_PC_DIR}"
 
     mkdir -p "$(dirname "$out_iso")"
-    staged_iso="$(mktemp /tmp/devos-iso-XXXXXX.iso)"
-    rm -f "$staged_iso" "$out_iso"
+    rm -f "$out_iso"
 
     xorriso -as mkisofs \
         -iso-level 3 \
@@ -393,9 +392,6 @@ devos_master_iso() {
         -appended_part_as_gpt \
         -e '--interval:appended_partition_2:all::' \
         -no-emul-boot \
-        -output "$staged_iso" \
+        -output "$out_iso" \
         "$stage"
-
-    cp -f "$staged_iso" "$out_iso"
-    rm -f "$staged_iso"
 }

@@ -126,7 +126,8 @@ if command -v lsinitramfs >/dev/null 2>&1 && command -v xorriso >/dev/null 2>&1;
     xorriso -osirrox on -indev "$ISO" -extract /casper/initrd "$INITRD" >/dev/null 2>&1 || true
     if [ -f "$INITRD" ]; then
         INITRD_LIST="${TMP}/initrd.list"
-        lsinitramfs "$INITRD" 2>/dev/null > "$INITRD_LIST" || true
+        # lsinitramfs in 26.04 uses 3cpio which can spin on multi-segment microcode; guard with timeout
+        timeout 5s lsinitramfs "$INITRD" 2>/dev/null > "$INITRD_LIST" || true
 
         for mod in isofs overlay usb-storage uas xhci-pci xhci-hcd nvme ahci vmd hid usbhid e1000e r8169; do
             if grep -qE "/${mod}\.ko" "$INITRD_LIST"; then
