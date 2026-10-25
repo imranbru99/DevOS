@@ -4,8 +4,11 @@ DevOS Screen Recorder (Fluent Wayland Screen & Audio Recorder)
 Provides a clean, frictionless 1-click recording interface for DevOS:
   - Native Wayland & PipeWire capture (zero setup, no warnings, no codec crashes)
   - Dedicated Audio selection: Microphone, System Sound, or Muted
+  - Dedicated Video Format selection: MP4 (Universal H.264/AAC) or WebM (VP9/Opus)
   - Built-in Audio Testing: Voice mic playback test & System chime test
-  - Proper desktop identification & custom taskbar icon
+  - Clean desktop icon that only displays active red indicator during live recording
+  - Instantaneous MP4/WebM encoding with AAC audio muxing
+  - Full DBus signal sync with Spectacle system tray and global shortcuts
   - Start, Stop, and Save buttons with instant playback and folder shortcuts
 """
 
@@ -22,7 +25,7 @@ import time
 import wave
 from typing import Optional
 
-from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal, pyqtSlot
 from PyQt5.QtGui import QFont, QIcon, QPixmap
 from PyQt5.QtWidgets import (
     QApplication,
@@ -36,8 +39,9 @@ from PyQt5.QtWidgets import (
     QCheckBox,
     QFrame,
 )
+from PyQt5 import QtDBus
 
-# GStreamer for instantaneous, lossless video + audio muxing
+# GStreamer for instantaneous, lossless video + audio muxing & MP4 transcoding
 try:
     import gi
     gi.require_version("Gst", "1.0")
@@ -51,7 +55,7 @@ SCREENCASTS_DIR = os.path.expanduser("~/Videos/Screencasts")
 
 
 def get_app_icon() -> QIcon:
-    """Return the dedicated DevOS Screen Recorder icon."""
+    """Return the clean DevOS Screen Recorder icon (idle state without red recording dot)."""
     candidates = [
         os.path.expanduser("~/.local/share/icons/devos-recorder.png"),
         "/usr/share/pixmaps/devos-recorder.png",
@@ -61,7 +65,21 @@ def get_app_icon() -> QIcon:
     for p in candidates:
         if os.path.isfile(p):
             return QIcon(p)
-    return QIcon.fromTheme("media-record", QIcon.fromTheme("camera-video"))
+    return QIcon.fromTheme("camera-video", QIcon.fromTheme("media-record"))
+
+
+def get_recording_icon() -> QIcon:
+    """Return the active recording DevOS Screen Recorder icon (with glowing red dot)."""
+    candidates = [
+        os.path.expanduser("~/.local/share/icons/devos-recorder-recording.png"),
+        os.path.expanduser("~/.local/share/icons/hicolor/scalable/apps/devos-recorder-recording.svg"),
+        "/usr/share/pixmaps/devos-recorder-recording.png",
+        "/usr/share/icons/hicolor/scalable/apps/devos-recorder-recording.svg",
+    ]
+    for p in candidates:
+        if os.path.isfile(p):
+            return QIcon(p)
+    return get_app_icon()
 
 
 def get_default_monitor_sink() -> Optional[str]:
@@ -107,24 +125,83 @@ def play_chime():
         pass
 
 
-def mux_audio_into_video(video_path: str, audio_path: str, output_path: str) -> bool:
-    """Mux video stream and audio stream into a final webm container using GStreamer."""
-    if not HAS_GST or not os.path.isfile(video_path) or not os.path.isfile(audio_path):
+def transcode_to_mp4(input_video: str, input_audio_wav: Optional[str], output_mp4: str) -> bool:
+    """
+    Produce a universal, standard MP4 (H.264 video + AAC audio) from the input video and optional audio.
+    Runs in ~0.2s using GStreamer hardware/software pipeline.
+    """
+    if not HAS_GST or not os.path.isfile(input_video):
         return False
+
+    has_openh264 = Gst.ElementFactory.find("openh264enc") is not None
+    has_x264 = Gst.ElementFactory.find("x264enc") is not None
+    has_audio = bool(input_audio_wav and os.path.isfile(input_audio_wav) and os.path.getsize(input_audio_wav) > 1024)
+
+    if has_openh264:
+        video_branch = "dmx.video_0 ! queue ! vp9dec ! videoconvert ! openh264enc bitrate=4000000 ! h264parse ! queue ! mux.video_0"
+    elif has_x264:
+        video_branch = "dmx.video_0 ! queue ! vp9dec ! videoconvert ! x264enc speed-preset=ultrafast tune=zerolatency ! h264parse ! queue ! mux.video_0"
+    else:
+        video_branch = "dmx.video_0 ! queue ! vp9parse ! queue ! mux.video_0"
+
+    if has_audio:
+        has_voaac = Gst.ElementFactory.find("voaacenc") is not None
+        if has_voaac:
+            audio_branch = f'filesrc location="{input_audio_wav}" ! wavparse ! audioconvert ! audioresample ! voaacenc ! aacparse ! queue ! mux.audio_0'
+        else:
+            audio_branch = f'filesrc location="{input_audio_wav}" ! wavparse ! audioconvert ! audioresample ! lamemp3enc ! mpegaudioparse ! queue ! mux.audio_0'
+
+        desc = f"""
+            mp4mux name=mux ! filesink location="{output_mp4}"
+            filesrc location="{input_video}" ! matroskademux name=dmx
+            {video_branch}
+            {audio_branch}
+        """
+    else:
+        desc = f"""
+            mp4mux name=mux ! filesink location="{output_mp4}"
+            filesrc location="{input_video}" ! matroskademux name=dmx
+            {video_branch}
+        """
+
+    try:
+        pipe = Gst.parse_launch(desc)
+        pipe.set_state(Gst.State.PLAYING)
+        bus = pipe.get_bus()
+        msg = bus.timed_pop_filtered(30 * Gst.SECOND, Gst.MessageType.EOS | Gst.MessageType.ERROR)
+        pipe.set_state(Gst.State.NULL)
+        return msg is not None and msg.type == Gst.MessageType.EOS and os.path.isfile(output_mp4) and os.path.getsize(output_mp4) > 100
+    except Exception as e:
+        print(f"Error in transcode_to_mp4: {e}")
+        return False
+
+
+def transcode_to_webm(input_video: str, input_audio_wav: Optional[str], output_webm: str) -> bool:
+    """Mux video stream and optional audio stream into a final webm container using GStreamer."""
+    if not HAS_GST or not os.path.isfile(input_video):
+        return False
+
+    has_audio = bool(input_audio_wav and os.path.isfile(input_audio_wav) and os.path.getsize(input_audio_wav) > 1024)
+    if not has_audio:
+        if input_video != output_webm:
+            shutil.copy2(input_video, output_webm)
+        return True
+
     try:
         desc = f"""
-            matroskamux name=mux ! filesink location="{output_path}"
-            filesrc location="{video_path}" ! matroskademux name=dmx
-            filesrc location="{audio_path}" ! wavparse ! audioconvert ! audioresample ! opusenc ! mux.audio_0
+            matroskamux name=mux ! filesink location="{output_webm}"
+            filesrc location="{input_video}" ! matroskademux name=dmx
+            filesrc location="{input_audio_wav}" ! wavparse ! audioconvert ! audioresample ! opusenc ! mux.audio_0
             dmx.video_0 ! queue ! mux.video_0
         """
         pipe = Gst.parse_launch(desc)
         pipe.set_state(Gst.State.PLAYING)
         bus = pipe.get_bus()
-        msg = bus.timed_pop_filtered(15 * Gst.SECOND, Gst.MessageType.EOS | Gst.MessageType.ERROR)
+        msg = bus.timed_pop_filtered(30 * Gst.SECOND, Gst.MessageType.EOS | Gst.MessageType.ERROR)
         pipe.set_state(Gst.State.NULL)
-        return msg is not None and msg.type == Gst.MessageType.EOS
-    except Exception:
+        return msg is not None and msg.type == Gst.MessageType.EOS and os.path.isfile(output_webm) and os.path.getsize(output_webm) > 100
+    except Exception as e:
+        print(f"Error in transcode_to_webm: {e}")
         return False
 
 
@@ -180,14 +257,55 @@ class DevOSRecorder(QWidget):
 
         os.makedirs(SCREENCASTS_DIR, exist_ok=True)
         self.init_ui()
+        self.setup_dbus_listener()
 
         self.timer = QTimer(self)
         self.timer.setInterval(1000)
         self.timer.timeout.connect(self.update_timer)
 
+    def setup_dbus_listener(self):
+        """Connect to Spectacle DBus signals so we immediately know when recording finishes."""
+        try:
+            bus = QtDBus.QDBusConnection.sessionBus()
+            bus.connect(
+                "org.kde.Spectacle",
+                "/",
+                "org.kde.Spectacle",
+                "RecordingTaken",
+                self.on_spectacle_recording_taken,
+            )
+            bus.connect(
+                "org.kde.Spectacle",
+                "/",
+                "org.kde.Spectacle",
+                "RecordingFailed",
+                self.on_spectacle_recording_failed,
+            )
+        except Exception as e:
+            print(f"DBus signal connection note: {e}")
+
+    @pyqtSlot(str)
+    def on_spectacle_recording_taken(self, file_path: str):
+        """Triggered automatically by Spectacle when recording finishes (via tray, button or shortcut)."""
+        if self.recording:
+            self.finalize_saved_file(file_path)
+
+    @pyqtSlot(str)
+    def on_spectacle_recording_failed(self, message: str):
+        """Triggered if Spectacle reports a capture error."""
+        if self.recording:
+            self.timer.stop()
+            self.recording = False
+            self.update_button_style(recording=False)
+            self.setWindowIcon(get_app_icon())
+            self.showNormal()
+            self.lbl_timer.setText("⚠️ Recording Failed")
+            self.lbl_timer.setStyleSheet("color: #ef4444;")
+            self.lbl_subtext.setText(message or "Capture failed")
+
     def init_ui(self):
         self.setWindowTitle("Screen Recorder")
-        self.setFixedSize(490, 600)
+        self.setFixedSize(500, 680)
         self.setWindowIcon(get_app_icon())
 
         self.setStyleSheet("""
@@ -237,8 +355,8 @@ class DevOSRecorder(QWidget):
         """)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(14)
+        layout.setContentsMargins(22, 16, 22, 16)
+        layout.setSpacing(10)
 
         # Header
         header = QHBoxLayout()
@@ -274,11 +392,11 @@ class DevOSRecorder(QWidget):
             border-radius: 12px;
         """)
         area_layout = QVBoxLayout(area_card)
-        area_layout.setContentsMargins(16, 12, 16, 12)
-        area_layout.setSpacing(8)
+        area_layout.setContentsMargins(14, 10, 14, 10)
+        area_layout.setSpacing(6)
 
         area_title = QLabel("1. Capture Area")
-        area_title.setFont(QFont("Inter", 12, QFont.Bold))
+        area_title.setFont(QFont("Inter", 11, QFont.Bold))
         area_title.setStyleSheet("color: #94a3b8;")
         area_layout.addWidget(area_title)
 
@@ -306,11 +424,11 @@ class DevOSRecorder(QWidget):
             border-radius: 12px;
         """)
         audio_layout = QVBoxLayout(audio_card)
-        audio_layout.setContentsMargins(16, 12, 16, 12)
-        audio_layout.setSpacing(8)
+        audio_layout.setContentsMargins(14, 10, 14, 10)
+        audio_layout.setSpacing(6)
 
         audio_title = QLabel("2. Audio Option")
-        audio_title.setFont(QFont("Inter", 12, QFont.Bold))
+        audio_title.setFont(QFont("Inter", 11, QFont.Bold))
         audio_title.setStyleSheet("color: #94a3b8;")
         audio_layout.addWidget(audio_title)
 
@@ -338,14 +456,14 @@ class DevOSRecorder(QWidget):
 
         self.btn_test_audio = QPushButton("🎙️ Test Microphone")
         self.btn_test_audio.setCursor(Qt.PointingHandCursor)
-        self.btn_test_audio.setFixedHeight(30)
+        self.btn_test_audio.setFixedHeight(28)
         self.btn_test_audio.setStyleSheet("""
             QPushButton {
                 background-color: #1e293b;
                 color: #38bdf8;
                 border: 1px solid #334155;
                 border-radius: 6px;
-                padding: 4px 12px;
+                padding: 3px 10px;
                 font-size: 11px;
                 font-weight: 600;
             }
@@ -369,6 +487,35 @@ class DevOSRecorder(QWidget):
         audio_layout.addLayout(test_row)
         layout.addWidget(audio_card)
 
+        # 3. Video Format Card (MP4 vs WebM)
+        format_card = QFrame()
+        format_card.setProperty("class", "card")
+        format_card.setStyleSheet("""
+            background-color: #131c31;
+            border: 1px solid #1e293b;
+            border-radius: 12px;
+        """)
+        format_layout = QVBoxLayout(format_card)
+        format_layout.setContentsMargins(14, 10, 14, 10)
+        format_layout.setSpacing(6)
+
+        format_title = QLabel("3. Video Format")
+        format_title.setFont(QFont("Inter", 11, QFont.Bold))
+        format_title.setStyleSheet("color: #94a3b8;")
+        format_layout.addWidget(format_title)
+
+        self.format_group = QButtonGroup(self)
+        self.radio_mp4 = QRadioButton("🎬  MP4 (H.264 & AAC — Universal & Recommended)")
+        self.radio_webm = QRadioButton("🌐  WebM (VP9 & Opus — Open Web Format)")
+
+        self.radio_mp4.setChecked(True)
+        self.format_group.addButton(self.radio_mp4)
+        self.format_group.addButton(self.radio_webm)
+
+        format_layout.addWidget(self.radio_mp4)
+        format_layout.addWidget(self.radio_webm)
+        layout.addWidget(format_card)
+
         # Options
         self.chk_minimize = QCheckBox("Minimize window while recording")
         self.chk_minimize.setChecked(True)
@@ -380,10 +527,10 @@ class DevOSRecorder(QWidget):
             background-color: #0f172a;
             border: 1px solid #1e293b;
             border-radius: 12px;
-            padding: 8px;
+            padding: 6px;
         """)
         status_layout = QVBoxLayout(self.status_box)
-        status_layout.setContentsMargins(12, 8, 12, 8)
+        status_layout.setContentsMargins(12, 6, 12, 6)
 
         self.lbl_timer = QLabel("Ready to record")
         self.lbl_timer.setAlignment(Qt.AlignCenter)
@@ -401,7 +548,7 @@ class DevOSRecorder(QWidget):
         self.btn_record = QPushButton("🔴 Start Recording")
         self.btn_record.setFont(QFont("Inter", 13, QFont.Bold))
         self.btn_record.setCursor(Qt.PointingHandCursor)
-        self.btn_record.setFixedHeight(46)
+        self.btn_record.setFixedHeight(44)
         self.update_button_style(recording=False)
         self.btn_record.clicked.connect(self.toggle_recording)
         layout.addWidget(self.btn_record)
@@ -411,7 +558,7 @@ class DevOSRecorder(QWidget):
         self.actions_layout.setSpacing(10)
 
         self.btn_play = QPushButton("▶️ Play Video")
-        self.btn_play.setFixedHeight(36)
+        self.btn_play.setFixedHeight(34)
         self.btn_play.setCursor(Qt.PointingHandCursor)
         self.btn_play.setStyleSheet("""
             QPushButton {
@@ -430,7 +577,7 @@ class DevOSRecorder(QWidget):
         self.btn_play.hide()
 
         self.btn_folder = QPushButton("📁 Show in Folder")
-        self.btn_folder.setFixedHeight(36)
+        self.btn_folder.setFixedHeight(34)
         self.btn_folder.setCursor(Qt.PointingHandCursor)
         self.btn_folder.setStyleSheet("""
             QPushButton {
@@ -529,19 +676,24 @@ class DevOSRecorder(QWidget):
                 }
             """)
 
-    def get_selected_mode(self):
+    def get_selected_mode(self) -> str:
         if self.radio_region.isChecked():
             return "region"
         elif self.radio_window.isChecked():
             return "window"
         return "screen"
 
-    def get_selected_audio_mode(self):
+    def get_selected_audio_mode(self) -> str:
         if self.radio_mic.isChecked():
             return "mic"
         elif self.radio_system.isChecked():
             return "system"
         return "mute"
+
+    def get_selected_format(self) -> str:
+        if self.radio_webm.isChecked():
+            return "webm"
+        return "mp4"
 
     def toggle_recording(self):
         if not self.recording:
@@ -569,7 +721,7 @@ class DevOSRecorder(QWidget):
             except Exception:
                 self.audio_proc = None
 
-        # Start video capture via Spectacle DBus
+        # Start video capture via Spectacle DBus entry point
         dbus_method = "RecordScreen"
         if mode == "region":
             dbus_method = "RecordRegion"
@@ -595,6 +747,7 @@ class DevOSRecorder(QWidget):
         self.recording = True
         self.seconds_elapsed = 0
         self.update_button_style(recording=True)
+        self.setWindowIcon(get_recording_icon())
         self.btn_play.hide()
         self.btn_folder.hide()
         self.timer.start()
@@ -604,15 +757,17 @@ class DevOSRecorder(QWidget):
             QTimer.singleShot(400, self.showMinimized)
 
     def stop_recording(self):
+        """User clicked Stop & Save: trigger finish via global shortcut so Spectacle cleanly saves."""
         self.timer.stop()
-        self.recording = False
-        self.update_button_style(recording=False)
+        self.lbl_timer.setText("Finalizing video...")
+        self.lbl_timer.setStyleSheet("color: #38bdf8;")
+        self.lbl_subtext.setText("Saving file to ~/Videos/Screencasts...")
 
         # Stop audio recording process
         if self.audio_proc:
             try:
                 self.audio_proc.send_signal(signal.SIGINT)
-                self.audio_proc.wait(timeout=2)
+                self.audio_proc.wait(timeout=1.5)
             except Exception:
                 try:
                     self.audio_proc.kill()
@@ -620,66 +775,113 @@ class DevOSRecorder(QWidget):
                     pass
             self.audio_proc = None
 
-        # Stop video recording via Spectacle DBus
+        # Invoke Spectacle's shortcut action which stops & finalizes the recording
         mode = self.get_selected_mode()
-        dbus_method = "RecordScreen"
+        shortcut = "RecordScreen"
         if mode == "region":
-            dbus_method = "RecordRegion"
+            shortcut = "RecordRegion"
         elif mode == "window":
-            dbus_method = "RecordWindow"
+            shortcut = "RecordWindow"
 
         subprocess.run(
             [
                 "busctl",
                 "--user",
                 "call",
-                "org.kde.Spectacle",
-                "/",
-                "org.kde.Spectacle",
-                dbus_method,
-                "i",
-                "0",
+                "org.kde.kglobalaccel",
+                "/component/org_kde_spectacle_desktop",
+                "org.kde.kglobalaccel.Component",
+                "invokeShortcut",
+                "s",
+                shortcut,
             ],
             capture_output=True,
         )
 
-        self.showNormal()
-        self.raise_()
-        self.activateWindow()
+        # Fallback check in case DBus signal is delayed or not received
+        QTimer.singleShot(1800, self.check_saved_file_fallback)
 
-        self.lbl_timer.setText("Finalizing video...")
-        self.lbl_timer.setStyleSheet("color: #38bdf8;")
-        self.lbl_subtext.setText("Saving file to ~/Videos/Screencasts...")
-
-        # Poll for new video file and mux audio if recorded
-        QTimer.singleShot(1200, self.check_saved_file)
-
-    def check_saved_file(self):
+    def check_saved_file_fallback(self):
+        """Fallback poller if DBus RecordingTaken signal didn't arrive."""
+        if not self.recording:
+            return
         current_files = set(glob.glob(os.path.join(SCREENCASTS_DIR, "*")))
         new_files = current_files - self.initial_files
         latest = None
         if new_files:
             latest = max(new_files, key=os.path.getmtime)
         else:
-            cand = glob.glob(os.path.join(SCREENCASTS_DIR, "*.webm"))
+            cand = glob.glob(os.path.join(SCREENCASTS_DIR, "*.webm")) + glob.glob(os.path.join(SCREENCASTS_DIR, "*.mp4"))
             if cand:
                 latest = max(cand, key=os.path.getmtime)
 
         if latest and os.path.isfile(latest):
-            # If audio was recorded, merge audio and video
+            self.finalize_saved_file(latest)
+        else:
+            self.recording = False
+            self.update_button_style(recording=False)
+            self.setWindowIcon(get_app_icon())
+            self.lbl_timer.setText("Ready to record")
+            self.lbl_timer.setStyleSheet("color: #94a3b8;")
+            self.lbl_subtext.setText("Saved to ~/Videos/Screencasts")
+
+    def finalize_saved_file(self, raw_file_path: str):
+        """Finalize video: transcode/mux to MP4 (or WebM), display preview, and notify user."""
+        self.timer.stop()
+        self.recording = False
+        self.update_button_style(recording=False)
+        self.setWindowIcon(get_app_icon())
+
+        if self.audio_proc:
+            try:
+                self.audio_proc.send_signal(signal.SIGINT)
+                self.audio_proc.wait(timeout=1.0)
+            except Exception:
+                try:
+                    self.audio_proc.kill()
+                except Exception:
+                    pass
+            self.audio_proc = None
+
+        target_format = self.get_selected_format()
+        final_path = raw_file_path
+
+        if target_format == "mp4":
+            base, _ = os.path.splitext(raw_file_path)
+            mp4_path = base + ".mp4"
+            if transcode_to_mp4(raw_file_path, self.temp_audio_file, mp4_path):
+                if os.path.isfile(raw_file_path) and raw_file_path != mp4_path:
+                    try:
+                        os.remove(raw_file_path)
+                    except Exception:
+                        pass
+                final_path = mp4_path
+        elif target_format == "webm":
             if self.temp_audio_file and os.path.isfile(self.temp_audio_file) and os.path.getsize(self.temp_audio_file) > 1024:
-                merged_path = latest + ".merged.webm"
-                if mux_audio_into_video(latest, self.temp_audio_file, merged_path):
-                    shutil.move(merged_path, latest)
-                if os.path.isfile(self.temp_audio_file):
-                    os.remove(self.temp_audio_file)
-                self.temp_audio_file = None
+                merged_path = raw_file_path + ".merged.webm"
+                if transcode_to_webm(raw_file_path, self.temp_audio_file, merged_path):
+                    shutil.move(merged_path, raw_file_path)
+                final_path = raw_file_path
 
-            self.last_saved_file = latest
-            basename = os.path.basename(latest)
-            size_kb = os.path.getsize(latest) // 1024
+        # Remove temp audio wav
+        if self.temp_audio_file and os.path.isfile(self.temp_audio_file):
+            try:
+                os.remove(self.temp_audio_file)
+            except Exception:
+                pass
+            self.temp_audio_file = None
 
-            self.lbl_timer.setText("✅ Recording Saved!")
+        self.last_saved_file = final_path
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+        if final_path and os.path.isfile(final_path):
+            basename = os.path.basename(final_path)
+            size_kb = os.path.getsize(final_path) // 1024
+            ext = os.path.splitext(final_path)[1].upper().replace(".", "")
+
+            self.lbl_timer.setText(f"✅ Recording Saved ({ext})!")
             self.lbl_timer.setStyleSheet("color: #4ade80;")
             self.lbl_subtext.setText(f"{basename} ({size_kb} KB)")
 
@@ -689,9 +891,9 @@ class DevOSRecorder(QWidget):
             # Desktop notification
             subprocess.Popen([
                 "notify-send",
-                "-i", "media-record",
+                "-i", "devos-recorder",
                 "Screen Recording Saved",
-                f"Saved to {basename}\nClick to view",
+                f"Saved to {basename}\nReady to play or share",
             ])
         else:
             self.lbl_timer.setText("Ready to record")

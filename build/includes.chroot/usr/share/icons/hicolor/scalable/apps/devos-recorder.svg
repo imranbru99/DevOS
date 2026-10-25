@@ -8,10 +8,6 @@
       <stop offset="0%" stop-color="#38bdf8"/>
       <stop offset="100%" stop-color="#0284c7"/>
     </linearGradient>
-    <linearGradient id="recGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#f87171"/>
-      <stop offset="100%" stop-color="#ef4444"/>
-    </linearGradient>
     <filter id="shadow" x="-10%" y="-10%" width="130%" height="130%">
       <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.4"/>
     </filter>
@@ -26,10 +22,8 @@
   <!-- Lens triangle / projector -->
   <path d="M84 46 L104 36 C106 35 108 36 108 38 L108 76 C108 78 106 79 104 78 L84 68 Z" fill="url(#camGrad)"/>
 
-  <!-- Inner viewport circle -->
+  <!-- Inner viewport circle & glass reflection -->
   <circle cx="52" cy="57" r="14" fill="#0b1329"/>
-
-  <!-- Glowing recording light (Active red indicator) -->
-  <circle cx="94" cy="94" r="14" fill="url(#recGrad)" stroke="#ffffff" stroke-width="2.5"/>
-  <circle cx="94" cy="94" r="7" fill="#ffffff" opacity="0.8"/>
+  <circle cx="52" cy="57" r="9" fill="#132238" stroke="#38bdf8" stroke-width="1.5" stroke-opacity="0.7"/>
+  <circle cx="48" cy="53" r="3" fill="#ffffff" opacity="0.55"/>
 </svg>
