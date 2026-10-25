@@ -34,6 +34,21 @@ class TestSystemWatchdog(unittest.TestCase):
         self.assertIn("zstd:3", opt["btrfs_compression"])
         self.assertIn("deduplicat", opt["reflink_deduplication"].lower())
 
+    def test_04_btrfs_health_check(self):
+        health = SystemWatchdog.check_btrfs_health()
+        self.assertIn("is_btrfs", health)
+        self.assertIn("status", health)
+        self.assertIn(health["status"], ["healthy", "warning"])
+        self.assertIn("corruption_errors", health)
+
+    def test_05_btrfs_fix_cache_interface(self):
+        # Verify fix_btrfs_cache callable returns a dict with status
+        with unittest.mock.patch("subprocess.run") as mock_sub:
+            mock_sub.return_value = unittest.mock.MagicMock(returncode=0)
+            res = SystemWatchdog.fix_btrfs_cache()
+            self.assertEqual(res["status"], "SUCCESS")
+            self.assertIn("successfully cleared", res["message"])
+
 
 if __name__ == "__main__":
     unittest.main()

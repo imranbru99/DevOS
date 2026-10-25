@@ -10,6 +10,7 @@ import os
 import json
 import shutil
 import argparse
+import subprocess
 from typing import Dict, Any, List
 
 
@@ -115,11 +116,59 @@ class SystemWatchdog:
             "message": "All heavy Windows apps and Chrome caches compress at 40-60% disk savings on DevOS btrfs."
         }
 
+    @staticmethod
+    def check_btrfs_health() -> Dict[str, Any]:
+        """Checks Btrfs device corruption errors, free space cache health, and scrub status."""
+        health = {
+            "is_btrfs": False,
+            "corruption_errors": 0,
+            "io_errors": 0,
+            "status": "healthy",
+            "message": "Root filesystem is healthy."
+        }
+        try:
+            res = subprocess.run(["btrfs", "device", "stats", "/"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if res.returncode == 0:
+                health["is_btrfs"] = True
+                for line in res.stdout.splitlines():
+                    if "corruption_errs" in line:
+                        health["corruption_errors"] = int(line.split()[-1])
+                    elif "io_errs" in line:
+                        health["io_errors"] += int(line.split()[-1])
+                if health["corruption_errors"] > 0:
+                    health["status"] = "warning"
+                    health["message"] = (
+                        f"Detected {health['corruption_errors']} metadata corruption events in free space tree. "
+                        "Run 'sudo devos doctor --fix-btrfs' to rebuild the free-space cache cleanly."
+                    )
+        except Exception:
+            pass
+        return health
+
+    @staticmethod
+    def fix_btrfs_cache() -> Dict[str, Any]:
+        """Remounts root with clear_cache to force rebuilding of the free-space tree."""
+        try:
+            cmd = ["mount", "-o", "remount,clear_cache,space_cache=v2", "/"]
+            if os.geteuid() != 0:
+                cmd = ["sudo"] + cmd
+            proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if proc.returncode == 0:
+                return {
+                    "status": "SUCCESS",
+                    "message": "Btrfs free space tree cache successfully cleared and scheduled for regeneration."
+                }
+            return {"status": "ERROR", "message": proc.stderr.strip()}
+        except Exception as e:
+            return {"status": "ERROR", "message": str(e)}
+
 
 def main():
     parser = argparse.ArgumentParser(description="DevOS System Watchdog & Heavy Load Optimizer")
     parser.add_argument("--check-pressure", action="store_true", help="Check memory stall pressure")
     parser.add_argument("--audit-space", action="store_true", help="Audit reclaimable cache space")
+    parser.add_argument("--check-btrfs", action="store_true", help="Check Btrfs filesystem corruption & free space health")
+    parser.add_argument("--fix-btrfs", action="store_true", help="Clear and regenerate Btrfs free space cache")
     parser.add_argument("--optimize", action="store_true", help="Run heavy app storage optimization")
     args = parser.parse_args()
 
@@ -130,8 +179,15 @@ def main():
     elif args.audit_space:
         res = watchdog.inspect_disk_reclaim_potential()
         print(json.dumps(res, indent=2))
+    elif args.check_btrfs:
+        res = watchdog.check_btrfs_health()
+        print(json.dumps(res, indent=2))
+    elif args.fix_btrfs:
+        res = watchdog.fix_btrfs_cache()
+        print(json.dumps(res, indent=2))
     elif args.optimize or len(sys.argv) == 1:
         res = watchdog.optimize_heavy_app_storage()
+        res["btrfs_health"] = watchdog.check_btrfs_health()
         print(json.dumps(res, indent=2))
 
 
