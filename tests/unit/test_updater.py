@@ -141,6 +141,12 @@ class UpdaterTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "symlink"):
             updater.install(self.root, self.manifest, self.files)
 
+    def test_authentication_style_uses_one_reviewed_service_override(self):
+        name = "overlay/etc/systemd/user/plasma-polkit-agent.service.d/20-devos-style.conf"
+        self.assertEqual(updater.destination(name), name.removeprefix("overlay/"))
+        with self.assertRaises(ValueError):
+            updater.destination("overlay/etc/systemd/user/unrelated.service")
+
     def test_release_tag_cannot_inject_an_api_path(self):
         with self.assertRaises(ValueError):
             updater.release("../../evil")

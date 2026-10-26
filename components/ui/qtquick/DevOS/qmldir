@@ -1,0 +1,5 @@
+module DevOS
+ApplicationWindow 2.15 ApplicationWindow.qml
+Button 2.15 Button.qml
+TextField 2.15 TextField.qml
+import QtQuick.Controls.Basic auto

@@ -23,6 +23,7 @@ MAX_BYTES = 128 * 1024 * 1024
 DESKTOP_FILES = {
     "overlay/usr/share/applications/devos-kids-mode.desktop",
     "overlay/etc/xdg/kglobalshortcutsrc",
+    "overlay/etc/systemd/user/plasma-polkit-agent.service.d/20-devos-style.conf",
 }
 KIDS_PACKAGES = ("python3-gi", "python3-cairo", "python3-gi-cairo", "gir1.2-gtk-3.0", "gir1.2-gtklayershell-0.1")
 

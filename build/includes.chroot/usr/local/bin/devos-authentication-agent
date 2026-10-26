@@ -1,0 +1,20 @@
+#!/bin/sh
+# Style KDE's real authentication agent; keep its Polkit/PAM implementation.
+set -eu
+agent=
+for candidate in /usr/lib/x86_64-linux-gnu/libexec/polkit-kde-authentication-agent-1 /usr/lib/polkit-kde-authentication-agent-1 /usr/libexec/polkit-kde-authentication-agent-1; do
+    if [ -x "$candidate" ]; then agent=$candidate; break; fi
+done
+[ -n "$agent" ] || { echo 'KDE authentication agent is missing.' >&2; exit 1; }
+style_root=/usr/local/share/devos/components/ui/qtquick
+version=$(dpkg-query -W -f='${Version}' polkit-kde-agent-1 2>/dev/null || true)
+case "$version" in
+    *:6.*|6.*)
+        if [ -r "$style_root/DevOS/qmldir" ] && [ -r "$style_root/DevOS/Button.qml" ] && [ -r "$style_root/DevOS/TextField.qml" ] && [ -r "$style_root/DevOS/ApplicationWindow.qml" ]; then
+            export QML_IMPORT_PATH="$style_root${QML_IMPORT_PATH:+:$QML_IMPORT_PATH}"
+            export QT_QUICK_CONTROLS_STYLE=DevOS
+            export QT_QUICK_CONTROLS_FALLBACK_STYLE=Basic
+        fi
+        ;;
+esac
+exec "$agent" "$@"

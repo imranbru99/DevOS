@@ -23,7 +23,7 @@ def package(root, output, version):
                 raise ValueError(f"Release source contains a symlink: {path}")
             if path.is_file() and "__pycache__" not in path.parts and path.suffix not in (".pyc", ".pyo"):
                 files[prefix + "/" + path.relative_to(source).as_posix()] = path.read_bytes()
-    for rel in ("usr/share/applications/devos-kids-mode.desktop", "etc/xdg/kglobalshortcutsrc"):
+    for rel in ("usr/share/applications/devos-kids-mode.desktop", "etc/xdg/kglobalshortcutsrc", "etc/systemd/user/plasma-polkit-agent.service.d/20-devos-style.conf"):
         path = root / "build/includes.chroot" / rel
         if path.is_file() and not path.is_symlink():
             files["overlay/" + rel] = path.read_bytes()

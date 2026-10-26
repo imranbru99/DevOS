@@ -69,13 +69,18 @@ The current release build uses `out/devos-26.04-amd64-final.iso` and its `.sha25
 | Feature | How to use it |
 | --- | --- |
 | Installer and SSD/HDD storage | Start **Install DevOS**. Choose **Manual partitioning** to create or resize a layout; **Erase disk** automatically formats the chosen system disk. **Data drives** optionally creates one, two, or three ext4 data volumes (A/B/C labels, custom sizes). Review every disk in Summary before Install. Drives you do not select are preserved. |
-| Modern dialogs | DevOS applications share spaced confirmation/input dialogs, readable labels, keyboard focus, and consistent buttons. Optimizer uses **Delete selected files** with **Cancel** as the default. Qt 5 and Qt 6 native theme plugins are included for system dialogs, including the real Polkit password agent. |
+| Modern dialogs | DevOS applications share spaced confirmation/input dialogs, readable labels, keyboard focus, and consistent buttons. Optimizer uses **Delete selected files** with **Cancel** as the default. The real KDE/Polkit password agent uses a dedicated DevOS Quick Controls style with a dark blue background, rounded larger password field, cyan focus outline and larger buttons; its authentication backend remains intact. |
 | Wallpapers and appearance | Open **Settings → Appearance** or the desktop wallpaper picker. The source includes 252 validated wallpaper images. Dark/light appearance and display scaling remain configurable. |
 | Storage after installation | Open **This PC** for files or `devos disk` for Storage & Boot Doctor. Formatting deletes the selected volume; back up its contents first. A/B/C are volume labels, rather than Windows drive letters. See [storage instructions](docs/STORAGE_MANAGEMENT.md). |
 | Screen recording and editing | Run `devos recorder`. Select audio, turn on listening to inspect the live signal meter, then record. Use the recording toolbar/tray to stop and save. Open the clip editor to trim, copy or cut ranges, retain/mute sound, or replace/mix a voice track. Export creates a new MP4. [Recorder guide](docs/SCREEN_RECORDER.md). |
 | Optimizer and safe automatic cleanup | Open Optimizer from the tray or run `devos optimizer --cleanup`. Review sizes and categories before manual deletion. Toggle automatic cleanup in its tray menu; `devos optimizer --auto-scan` previews the bounded automatic policy. Automatic cleanup only targets aged disposable thumbnail/DevOS temporary caches; personal files, recordings, models, Trash and Downloads require separate choices. [Performance and cleanup guide](docs/HEAVY_LOAD_AND_STORAGE_OPTIMIZATION.md). |
 | AI workflow queue | Run `devos pipeline gui`, add tasks, select provider/project and optional delay, then run the queue. Tasks run in order; failed or submitted tasks block successors until resolved. Antigravity submission requires **Confirm completed** after the work actually finishes. Codex dispatch requires its installed, authenticated CLI. [Pipeline guide](docs/AI_PIPELINE.md). |
 | Heavy workloads | Hardware tuning adapts to SSD/HDD and CPU capabilities; compressed RAM, bounded logs and separate AI workload limits reduce resource contention. Use `devos doctor` for health checks. Keep backups and updates; ten years of daily use requires ongoing maintenance and supported hardware. [Maintenance guide](docs/LONG_TERM_MAINTENANCE.md). |
+
+The authentication screenshot below was captured from the real KDE/Polkit
+agent in the installed disposable VM, using the DevOS style (not a mock password form).
+
+![Native DevOS authentication dialog](docs/images/devos_authentication_vm.png)
 
 ### Enable Islamic features and prayer reminders
 

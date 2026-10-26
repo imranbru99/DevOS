@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Dedicated native authentication style for KDE/Polkit: larger rounded password field and buttons, cyan keyboard focus and dark blue surfaces; retains PAM, identity switching, errors, Cancel and password visibility controls.
 - Shared DevOS confirmation/input dialog styling, explicit Optimizer delete action with safe Cancel default, and Qt 6 native theme support for system authentication dialogs.
 - README operating guide for current storage, recorder, optimizer, pipeline, Islamic reminders, live browser blur controls, and safe component updates.
 - Live recorder loudness meter, recording toolbar/tray signal bars, background MP4/WebM saves, and a non-destructive trim/copy/cut editor with audio mute/replace/mix exports.

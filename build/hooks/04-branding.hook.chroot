@@ -8,6 +8,11 @@ if [ -f /usr/local/sbin/devos-apply-branding ]; then
     /bin/bash /usr/local/sbin/devos-apply-branding
 fi
 
+# The fallback autostart route must use the same native authentication style.
+if [ -f /etc/xdg/autostart/polkit-kde-authentication-agent-1.desktop ]; then
+    sed -i 's|^Exec=.*polkit-kde-authentication-agent-1.*$|Exec=/usr/local/bin/devos-authentication-agent|' /etc/xdg/autostart/polkit-kde-authentication-agent-1.desktop
+fi
+
 # casper.conf names the system DevOS. Casper then leaves MP_QUIET empty and
 # runs: modprobe "${MP_QUIET}" -b overlay
 # The empty word is taken as the module name, modprobe fails, and the USB
