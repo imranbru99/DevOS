@@ -4,28 +4,29 @@ set -euo pipefail
 
 echo "==> Running DevOS 03-tune-performance hook..."
 
-# 1. Configure zramswap for zstd compression and 50% RAM allocation
+# 1. Configure zramswap for zstd compression and 100% RAM allocation
 mkdir -p /etc/default
 cat << 'EOF' > /etc/default/zramswap
-# DevOS zram configuration
+# DevOS zram configuration: 100% RAM allocation with multi-threaded zstd
 ALGO=zstd
-PERCENT=50
+PERCENT=100
 PRIORITY=100
 EOF
 
 systemctl enable zramswap.service || true
 
-# 2. Configure earlyoom (kill memory hog before kernel OOM panic)
+# 2. Configure earlyoom (kill memory hog before kernel OOM panic, shield desktop & DevOS)
 cat << 'EOF' > /etc/default/earlyoom
-# DevOS earlyoom configuration
-EARLYOOM_ARGS="-m 5 -s 10 --avoid '^(systemd|Xorg|kwin_x11|kwin_wayland|plasmashell|sddm)$' --prefer '^(chrome|firefox|code)$'"
+# DevOS earlyoom anti-hang configuration
+EARLYOOM_ARGS="-m 4 -s 10 -r 60 --notify --avoid '(^|/)(systemd|kwin.*|plasmashell|Xwayland|Xorg|agentapi|devos.*|sshd|bash|zsh)$' --prefer '(^|/)(Web Content|Isolated Web Co|chrome.*|python.*|node)$'"
 EOF
 
 systemctl enable earlyoom || true
 
-# 3. Ensure systemd-oomd is enabled
+# 3. Ensure systemd-oomd, thermald, and hardware performance services are enabled
 systemctl enable systemd-oomd || true
 systemctl enable devos-hardware.service || true
+systemctl enable devos-performance-tune.service || true
 systemctl enable thermald.service || true
 
 # 4. Kernel sysctl tuning for zram and responsiveness

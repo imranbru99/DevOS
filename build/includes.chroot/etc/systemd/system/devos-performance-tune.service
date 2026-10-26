@@ -1,0 +1,14 @@
+[Unit]
+Description=DevOS Maximum Performance & Low-Latency Hardware Tuning Engine
+Documentation=file:///usr/local/sbin/devos-performance-tune
+DefaultDependencies=no
+After=local-fs.target systemd-sysctl.service
+Before=sysinit.target display-manager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/devos-performance-tune
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target

@@ -1,0 +1,5 @@
+# DevOS Anti-Freeze Out-Of-Memory Daemon Configuration
+# Intervenes in milliseconds before memory exhaustion can freeze the mouse, keyboard, or desktop.
+
+# Available minimum memory: 4%, minimum swap: 10%, report every 60s
+EARLYOOM_ARGS="-m 4 -s 10 -r 60 --notify --avoid '(^|/)(systemd|kwin.*|plasmashell|Xwayland|Xorg|agentapi|devos.*|sshd|bash|zsh)$' --prefer '(^|/)(Web Content|Isolated Web Co|chrome.*|python.*|node)$'"

@@ -1,0 +1,11 @@
+# DevOS High-Speed In-Memory Swap Configuration
+# Provides 2x-3x effective memory capacity using high-speed multi-threaded zstd compression.
+
+# Compression algorithm: zstd provides superior compression ratio with ultra-fast decompression
+ALGO=zstd
+
+# Allocate 100% of RAM as compressed virtual swap in memory (effectively doubling usable memory)
+PERCENT=100
+
+# High priority ensures memory compression occurs in RAM before touching any physical disk
+PRIORITY=100
