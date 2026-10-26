@@ -141,7 +141,7 @@ FEATURES: List[Dict] = [
     F("winapp", "internet", "Windows App (Microsoft)",
       "Microsoft's own Windows App: Windows 365 cloud PCs, Azure Virtual Desktop, Dev Box and remote apps, "
       "in its own window. Connecting a Cloud PC stays in this app. Same app Microsoft offers for every "
-      "browser; no third-party software.", 1,
+      "browser. DevOS adds a lightweight local reminder with an Open Windows App notification action.", 1,
       win="Windows App", presets=("windows", "developer"), webapp={"url": "https://windows.cloud.microsoft/",
                                                                   "icon": "preferences-desktop-remote-desktop",
                                                                   "names": ["Windows App"]}),

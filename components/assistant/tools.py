@@ -3022,7 +3022,8 @@ PROTECTED_PROCESSES = frozenset((
     "wireplumber", "pulseaudio", "polkitd", "polkit-kde-authentication-agent-1", "login", "bash", "sh", "zsh",
     "sudo", "pkexec", "networkmanager", "kwalletd5", "kwalletd6", "xdg-desktop-portal", "agetty", "sshd",
 ))
-PYTHON_EXES = ("python3", "python", "python3.12")
+def is_python_executable(name):
+    return re.fullmatch(r"python(?:[0-9]+(?:\.[0-9]+)*)?", name) is not None
 
 
 def window_class_for(app: DesktopApp) -> str:
@@ -3033,7 +3034,7 @@ def window_class_for(app: DesktopApp) -> str:
     argv = exec_to_argv(app.exec)
     if argv:
         exe = os.path.basename(argv[0])
-        if exe in PYTHON_EXES and len(argv) > 1:
+        if is_python_executable(exe) and len(argv) > 1:
             return os.path.basename(argv[1])
         return exe
     return app.desktop_id.split(".")[-1]
@@ -3444,7 +3445,7 @@ def _proc_user_pids(ctx: ToolContext, exe: str, script: str = "") -> List[int]:
             continue
         a0 = os.path.basename(argv[0])
         if script:
-            if a0 in PYTHON_EXES and len(argv) > 1 and os.path.basename(argv[1]) == script:
+            if is_python_executable(a0) and len(argv) > 1 and os.path.basename(argv[1]) == script:
                 out.append(pid)
         elif a0 == exe:
             out.append(pid)
@@ -3470,7 +3471,7 @@ def _x_close_app(a, ctx, dry):
         return ToolResult(f"I couldn't find an app called **{name}**.{hint}", ok=False)
     argv0 = exec_to_argv(app.exec)
     exe = os.path.basename(argv0[0]) if argv0 else ""
-    script = os.path.basename(argv0[1]) if exe in PYTHON_EXES and len(argv0) > 1 else ""
+    script = os.path.basename(argv0[1]) if is_python_executable(exe) and len(argv0) > 1 else ""
     if exe.lower() in PROTECTED_PROCESSES or app.desktop_id in ("devos-chat",):
         return ToolResult(f"**{app.name}** is part of the desktop and can't be closed from here.", ok=False)
     cls = window_class_for(app).lower()

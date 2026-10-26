@@ -23,6 +23,7 @@ MAX_BYTES = 128 * 1024 * 1024
 DESKTOP_FILES = {
     "overlay/usr/share/applications/devos-kids-mode.desktop",
     "overlay/etc/xdg/kglobalshortcutsrc",
+    "overlay/etc/xdg/kded6rc",
     "overlay/etc/systemd/user/plasma-polkit-agent.service.d/20-devos-style.conf",
 }
 KIDS_PACKAGES = ("python3-gi", "python3-cairo", "python3-gi-cairo", "gir1.2-gtk-3.0", "gir1.2-gtklayershell-0.1")
@@ -59,6 +60,10 @@ def destination(name):
     if name.startswith("components/") and len(path.parts) > 1:
         return "usr/local/share/devos/" + name
     if name.startswith(("overlay/usr/local/bin/", "overlay/usr/local/sbin/")) and len(path.parts) == 5:
+        return name.removeprefix("overlay/")
+    if re.fullmatch(r"overlay/usr/share/applications/devos-[a-z0-9-]+\.desktop", name):
+        return name.removeprefix("overlay/")
+    if re.fullmatch(r"overlay/usr/share/icons/hicolor/(?:[0-9]+x[0-9]+|scalable)/apps/devos-[a-z0-9-]+\.(?:png|svg)", name):
         return name.removeprefix("overlay/")
     if name in DESKTOP_FILES:
         return name.removeprefix("overlay/")
@@ -206,6 +211,16 @@ def prepare_dependencies(files):
 
 
 def refresh_enabled_features():
+    # Refresh an already-enabled launcher; do not enable an unselected feature.
+    entry = Path("/usr/local/share/applications/devos-web-winapp.desktop")
+    if entry.is_file() and not entry.is_symlink():
+        contents = entry.read_text()
+        if "X-DevOS-WebApp=true" in contents and "Hidden=true" not in contents:
+            feature_dir = Path(__file__).resolve().parents[1] / "features"
+            sys.path.insert(0, str(feature_dir))
+            import features_cli
+            feature = features_cli.catalog.feature("winapp")
+            entry.write_text(features_cli.webapp_entry(feature))
     state = Path("/etc/devos/modesty.json")
     if state.exists():
         settings = json.loads(state.read_text())

@@ -2136,6 +2136,8 @@ def main(argv=None) -> int:
     app.setApplicationName("devos-notes")
     app.setApplicationDisplayName("Notes")
     app.setDesktopFileName("devos-notes")
+    from app_identity import apply as apply_identity
+    apply_identity(app, "devos-notes")
     if _send_to_running(cmd, QLocalSocket):
         return 0
     store.load()

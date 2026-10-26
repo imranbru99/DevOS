@@ -865,3 +865,41 @@ I am open to **Senior Remote Full-Stack Roles, AI Platform Architecture Contract
 ---
 
 **DevOS** © 2026 Imran Ahmed. Released under the [MIT License](LICENSE).
+
+### Windows App reminders and application icons
+
+Enable **Windows App** in **DevOS Features**, then open it from the application menu.
+The DevOS companion opens Microsoft's Windows App and starts a local ten-minute
+reminder. It warns two minutes before that timer ends, with an **Open Windows App**
+notification button. Both times are adjustable. After using your Cloud PC, click
+**I've used the Cloud PC** to restart the reminder; **Pause reminders** stops it.
+Closing the companion keeps it in the system tray; **Quit companion** exits it.
+You can also open the reminder with `devos cloudpc`.
+
+This timer cannot observe activity inside Microsoft's remote session. Opening a
+window does not prove activity or reset the server's timeout. It sends no artificial
+clicks and does not change your organization's inactivity policy. After suspend,
+the timer includes the time asleep and asks you to check the session when due.
+
+DevOS Qt applications now use their launcher names, desktop identities, and
+individual icons in windows and dialogs. Extra branded icons cover voice typing,
+clipboard, sharing, broadband, disk tools, power, features, family safety, emoji,
+AI actions, and Windows App. Restart an already running app after updating to load
+its new identity. Existing Windows App installations should be removed and added
+again through DevOS Features to regenerate the companion launcher; this does not
+delete the Cloud PC or its remote files.
+
+### Ubuntu 24.04 to 26.04 migration checks
+
+The current image targets **Ubuntu 26.04 (Resolute)**. Its build verifies the genuine
+Ubuntu identity preserved by `base-files` before and after branding, and repairs a
+contaminated cached identity using the signed Ubuntu package. App/process matching
+accepts versioned Python executables, including Python 3.14, rather than assuming
+Python 3.12. KDE 6 defaults and protected core packages are included. Build-only pip
+downloads are removed before packing; user documents, models, and browser profiles
+are not part of this cleanup.
+
+References to 24.04 in supported upgrade paths, update-bundle compatibility, tests,
+and build-host CI remain intentional. Installing a DevOS component update does not
+perform an Ubuntu release upgrade. Use the documented OS upgrade flow and retain a
+separate backup before changing the base release.

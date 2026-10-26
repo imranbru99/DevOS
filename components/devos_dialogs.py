@@ -40,7 +40,7 @@ class DialogStyle(QtCore.QObject):
                             label.setWordWrap(True)
                             label.setMaximumWidth(520)
                             label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse | QtCore.Qt.LinksAccessibleByMouse)
-                widget.setWindowIcon(QtGui.QIcon('/usr/share/pixmaps/devos-logo.png'))
+                widget.setWindowIcon(QtWidgets.QApplication.windowIcon())
         return False
 
 

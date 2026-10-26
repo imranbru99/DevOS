@@ -1399,17 +1399,21 @@ def run_gui():
                 self.progress_label.setText(last)
             self.refresh()
 
-    qapp = QtWidgets.QApplication(sys.argv)
     # Keep confirmation and input dialogs consistent across DevOS apps.
     import sys as _dialog_sys
     from pathlib import Path as _DialogPath
     _dialog_sys.path.insert(0, str(_DialogPath(__file__).resolve().parent.parent))
     from devos_dialogs import install as _install_dialog_style
+    from app_identity import prepare as prepare_identity
+    prepare_identity("devos-backup")
+    qapp = QtWidgets.QApplication(sys.argv)
     _install_dialog_style(qapp)
     qapp.setApplicationName("devos-backup")
     qapp.setApplicationDisplayName("Cloud Backup")
     if hasattr(qapp, "setDesktopFileName"):
         qapp.setDesktopFileName("devos-backup")
+        from app_identity import apply as apply_identity
+        apply_identity(qapp, "devos-backup")
     font = QtGui.QFont("Inter")
     if not QtGui.QFontInfo(font).exactMatch():
         font = QtGui.QFont("Noto Sans")

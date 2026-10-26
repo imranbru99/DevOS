@@ -1983,17 +1983,21 @@ def run_gui(open_cleanup=False):
                                 "your home folder" if d["path"] != "/" else "the system disk"),
                             [("Clean up", self.open_cleanup), ("Later", lambda: None)])
 
-    qapp = QtWidgets.QApplication(sys.argv)
     # Keep confirmation and input dialogs consistent across DevOS apps.
     import sys as _dialog_sys
     from pathlib import Path as _DialogPath
     _dialog_sys.path.insert(0, str(_DialogPath(__file__).resolve().parent.parent))
     from devos_dialogs import install as _install_dialog_style
+    from app_identity import prepare as prepare_identity
+    prepare_identity("devos-optimizer")
+    qapp = QtWidgets.QApplication(sys.argv)
     _install_dialog_style(qapp)
     qapp.setApplicationName("devos-optimizer")
     qapp.setApplicationDisplayName("DevOS Optimizer")
     if hasattr(qapp, "setDesktopFileName"):
         qapp.setDesktopFileName("devos-optimizer")
+        from app_identity import apply as apply_identity
+        apply_identity(qapp, "devos-optimizer")
     qapp.setQuitOnLastWindowClosed(False)
     font = QtGui.QFont("Inter")
     if not QtGui.QFontInfo(font).exactMatch():

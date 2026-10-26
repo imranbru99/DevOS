@@ -1854,6 +1854,9 @@ def create_app(argv=None, store=None):
     argv = list(sys.argv if argv is None else argv)
     files = [os.path.abspath(os.path.expanduser(a)) for a in argv[1:] if not a.startswith("-")]
     gui = _load_gui()
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from app_identity import prepare
+    prepare("devos-notepad")
     app = gui["QApplication"].instance() or gui["QApplication"](argv)
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from devos_dialogs import install as install_dialogs
@@ -1862,6 +1865,8 @@ def create_app(argv=None, store=None):
     app.setApplicationDisplayName("Notepad")
     if hasattr(app, "setDesktopFileName"):
         app.setDesktopFileName("devos-notepad")
+        from app_identity import apply as apply_identity
+        apply_identity(app, "devos-notepad")
     instance = gui["SingleInstance"]()
     if instance.forward(files):
         return app, None

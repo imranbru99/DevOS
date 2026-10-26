@@ -2442,16 +2442,20 @@ class AgentWindow(QtWidgets.QMainWindow):
 # ==============================================================================
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
-    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(["devos-ai-code-agent"] + sys.argv[1:])
     # Keep confirmation and input dialogs consistent across DevOS apps.
     import sys as _dialog_sys
     from pathlib import Path as _DialogPath
     _dialog_sys.path.insert(0, str(_DialogPath(__file__).resolve().parent.parent))
     from devos_dialogs import install as _install_dialog_style
+    from app_identity import prepare as prepare_identity
+    prepare_identity("devos-ai-code-agent")
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(["devos-ai-code-agent"] + sys.argv[1:])
     _install_dialog_style(app)
     app.setApplicationName("devos-ai-code-agent")
     app.setApplicationDisplayName("DevOS AI Code Agent")
     app.setDesktopFileName("devos-ai-code-agent")
+    from app_identity import apply as apply_identity
+    apply_identity(app, "devos-ai-code-agent")
     app.setWindowIcon(get_app_icon())
     folder = next((a for a in argv if not a.startswith("-")), "")
     if folder and not os.path.isdir(folder):

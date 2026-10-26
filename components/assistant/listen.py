@@ -432,14 +432,18 @@ def make_app(argv):
     QtCore, QtGui, QtWidgets = _qt()
     QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling, True)
     QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_UseHighDpiPixmaps, True)
-    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(argv)
     # Keep confirmation and input dialogs consistent across DevOS apps.
     import sys as _dialog_sys
     from pathlib import Path as _DialogPath
     _dialog_sys.path.insert(0, str(_DialogPath(__file__).resolve().parent.parent))
     from devos_dialogs import install as _install_dialog_style
+    from app_identity import prepare as prepare_identity
+    prepare_identity({"notes.py": "devos-notes", "voicetype.py": "devos-voice-typing", "aiactions.py": "devos-ai-actions"}.get(_DialogPath(argv[0]).name if argv else "", "devos-voice"))
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(argv)
     _install_dialog_style(app)
     app.setApplicationName("DevOS AI")
+    from app_identity import apply as apply_identity
+    apply_identity(app, "devos-voice")
     app.setQuitOnLastWindowClosed(False)
     font = QtGui.QFont()
     fams = QtGui.QFontDatabase().families()

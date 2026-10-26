@@ -1655,16 +1655,20 @@ def run_gui():
                 self.codes.clear()
             super().closeEvent(event)
 
-    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     # Keep confirmation and input dialogs consistent across DevOS apps.
     import sys as _dialog_sys
     from pathlib import Path as _DialogPath
     _dialog_sys.path.insert(0, str(_DialogPath(__file__).resolve().parent.parent))
     from devos_dialogs import install as _install_dialog_style
+    from app_identity import prepare as prepare_identity
+    prepare_identity("devos-phonelink")
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     _install_dialog_style(app)
     app.setApplicationName("devos-phonelink")
     app.setApplicationDisplayName("Phone Link")
     app.setDesktopFileName("devos-phonelink")
+    from app_identity import apply as apply_identity
+    apply_identity(app, "devos-phonelink")
     win = Window()
     win.show()
     return app.exec_()

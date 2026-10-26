@@ -626,6 +626,8 @@ def main(argv=None) -> int:
     import listen
     app = listen.make_app(argv)
     app.setApplicationName(APP_NAME)
+    from app_identity import apply as apply_identity
+    apply_identity(app, "devos-ai-actions")
     app.setQuitOnLastWindowClosed(True)
     pop = Popup(text, source, window, ns.file or "", typer)
     if ns.file:

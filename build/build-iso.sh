@@ -127,6 +127,16 @@ chroot "${CHROOT_DIR}" apt-get update
 # Replace the old APT branding callback before any package operation. Older
 # images modified compiled KDE strings after dpkg, undoing a clean reinstall.
 install -m 755 "${ROOT_DIR}/build/includes.chroot/usr/local/sbin/devos-debrand-desktop" "${CHROOT_DIR}/usr/local/sbin/devos-debrand-desktop"
+# Preserve the genuine upstream identity BEFORE overlaying DevOS branding.
+# Older cached builds diverted an already branded file; repair from signed APT.
+if ! chroot "${CHROOT_DIR}" dpkg-divert --list /usr/lib/os-release | grep -q 'diversion of /usr/lib/os-release'; then
+    chroot "${CHROOT_DIR}" dpkg-divert --local --rename --divert /usr/lib/os-release.ubuntu --add /usr/lib/os-release
+fi
+if ! python3 "${SCRIPT_DIR}/verify-base-release.py" --root "${CHROOT_DIR}" --version "${DISTRO_VERSION}" --codename "${DISTRO_RELEASE}"; then
+    chroot "${CHROOT_DIR}" env DEBIAN_FRONTEND=noninteractive apt-get install -y --reinstall base-files
+fi
+python3 "${SCRIPT_DIR}/verify-base-release.py" --root "${CHROOT_DIR}" --version "${DISTRO_VERSION}" --codename "${DISTRO_RELEASE}"
+
 # A cached rootfs must not carry damaged executable libraries into a release.
 mapfile -t DAMAGED_PACKAGES < <(python3 "${SCRIPT_DIR}/verify-package-binaries.py" --root "${CHROOT_DIR}" --packages)
 if [ "${#DAMAGED_PACKAGES[@]}" -gt 0 ]; then
@@ -322,9 +332,15 @@ if [ -n "$world_writable" ]; then
     exit 1
 fi
 
+# Build-only pip downloads are not runtime dependencies or user data.
+if [ ! -L "${CHROOT_DIR}/root" ] && [ ! -L "${CHROOT_DIR}/root/.cache" ]; then
+    rm -rf -- "${CHROOT_DIR}/root/.cache/pip"
+fi
+python3 "${SCRIPT_DIR}/verify-base-release.py" --root "${CHROOT_DIR}" --version "${DISTRO_VERSION}" --codename "${DISTRO_RELEASE}"
+
 # 9. Create SquashFS with zstd
 # 1 MiB blocks give better sequential throughput during Calamares unpack
-# while zstd level 15 keeps the image under 4 GB without level-19 CPU cost.
+# while zstd level 15 balances image size against compression CPU cost.
 echo "==> Step 8: Creating filesystem.squashfs (zstd level ${ZSTD_LEVEL}, 1M blocks)..."
 rm -f "${ISODIR}/casper/filesystem.squashfs"
 mksquashfs "${CHROOT_DIR}" "${ISODIR}/casper/filesystem.squashfs" \

@@ -79,14 +79,14 @@ PROTECTED_PACKAGES = {
     "network-manager", "plasma-nm", "pipewire", "pipewire-pulse",
     "wireplumber", "pulseaudio", "plasma-pa", "kinfocenter",
     "plasma-systemmonitor", "kde-cli-tools", "khelpcenter", "kscreen",
-    "powerdevil", "bluedevil", "plasma-discover", "kio", "kded5",
+    "powerdevil", "bluedevil", "plasma-discover", "kio", "kded5", "kded6",
     "xdg-desktop-portal-kde", "xorg", "xserver-xorg-core", "policykit-1",
     "polkit-kde-agent-1", "pkexec", "polkitd", "systemd", "sudo", "apt",
     "dpkg", "flatpak", "waydroid", "wine", "wine64", "wine32",
     "kubuntu-desktop", "ubuntu-minimal", "ubuntu-standard", "linux-generic",
     "grub-efi-amd64", "grub-pc", "shim-signed", "snapper", "breeze",
     "plasma-integration", "frameworkintegration", "kmenuedit", "kscreenlocker",
-    "kwalletmanager", "kwallet", "libkf5wallet-bin", "ark",
+    "kwalletmanager", "kwallet", "libkf5wallet-bin", "libkf6wallet-bin", "kwalletd6", "ark",
 }
 PROTECTED_PRIORITIES = {"required", "important"}
 
@@ -1296,7 +1296,7 @@ def find_app(apps: List[App], key: str) -> Optional[App]:
             first = os.path.basename(argv[0])
             for a in apps:
                 aa = exec_to_argv(a.exec)
-                if aa and os.path.basename(aa[0]) == first and first not in ("env", "python3", "sh", "bash"):
+                if aa and os.path.basename(aa[0]) == first and first not in ("env", "sh", "bash") and not re.fullmatch(r"python(?:[0-9]+(?:\.[0-9]+)*)?", first):
                     return a
         key = base[:-8] if base.endswith(".desktop") else base
     for a in apps:
@@ -1904,16 +1904,20 @@ def run_gui(focus: Optional[str] = None, discovery: Optional[AppDiscovery] = Non
 
     QtCore.QCoreApplication.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling, True)
     QtCore.QCoreApplication.setAttribute(QtCore.Qt.AA_UseHighDpiPixmaps, True)
-    qapp = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     # Keep confirmation and input dialogs consistent across DevOS apps.
     import sys as _dialog_sys
     from pathlib import Path as _DialogPath
     _dialog_sys.path.insert(0, str(_DialogPath(__file__).resolve().parent.parent))
     from devos_dialogs import install as _install_dialog_style
+    from app_identity import prepare as prepare_identity
+    prepare_identity("devos-apps")
+    qapp = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     _install_dialog_style(qapp)
     qapp.setApplicationName("devos-apps")
     qapp.setApplicationDisplayName("DevOS Apps")
     qapp.setDesktopFileName("devos-apps")
+    from app_identity import apply as apply_identity
+    apply_identity(qapp, "devos-apps")
     if QtGui.QIcon.themeName() in ("", "hicolor"):
         QtGui.QIcon.setThemeName("breeze-dark")
     font = QtGui.QFont("Inter")

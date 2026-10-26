@@ -792,6 +792,8 @@ def run_toggle(argv=None) -> int:
     import overlay
     app = make_app(argv or sys.argv)
     app.setApplicationName("DevOS Voice Typing")
+    from app_identity import apply as apply_identity
+    apply_identity(app, "devos-voice-typing")
     cfg = load_config()
     pill = MicPill(cfg["language"], cfg["ai_cleanup"])
     bridge = overlay.Bridge()

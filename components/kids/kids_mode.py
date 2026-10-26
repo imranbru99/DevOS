@@ -114,6 +114,9 @@ def main():
         return True
 
     def make_window(monitor):
+        GLib.set_prgname('devos-kids-mode')
+        GLib.set_application_name('DevOS Kids Mode')
+        Gtk.Window.set_default_icon_name('applications-games')
         window = Gtk.Window(title='DevOS Kids Mode')
         window.set_decorated(False)
         window.set_keep_above(True)

@@ -27,8 +27,13 @@ if command -v kwriteconfig5 >/dev/null 2>&1 \
     done
 fi
 
+# Repair only DevOS-owned legacy Windows App shortcut stubs.
+if [ -f /usr/local/share/devos/components/cloudpc/launchers.py ]; then
+    python3 /usr/local/share/devos/components/cloudpc/launchers.py || true
+fi
+
 qdbus_bin=""
-for candidate in qdbus qdbus-qt5 qdbus6 qdbus-qt6; do
+for candidate in qdbus6 qdbus-qt6 qdbus qdbus-qt5; do
     if command -v "${candidate}" >/dev/null 2>&1; then
         qdbus_bin="${candidate}"
         break

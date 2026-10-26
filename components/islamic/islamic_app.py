@@ -916,16 +916,20 @@ def run_gui(screenshot=None):
                 n.setStyleSheet("color: %s; font-weight: 600;" % ("#e0f2fe" if is_next else
                                                                     ("#64748b" if key == "sunrise" else "#94a3b8")))
 
-    app = QtWidgets.QApplication(sys.argv)
     # Keep confirmation and input dialogs consistent across DevOS apps.
     import sys as _dialog_sys
     from pathlib import Path as _DialogPath
     _dialog_sys.path.insert(0, str(_DialogPath(__file__).resolve().parent.parent))
     from devos_dialogs import install as _install_dialog_style
+    from app_identity import prepare as prepare_identity
+    prepare_identity("devos-islamic")
+    app = QtWidgets.QApplication(sys.argv)
     _install_dialog_style(app)
     app.setApplicationName("devos-islamic")
     app.setApplicationDisplayName("DevOS Islamic")
     app.setDesktopFileName("devos-islamic")
+    from app_identity import apply as apply_identity
+    apply_identity(app, "devos-islamic")
     window = IslamicWindow()
     window.show()
     if screenshot:

@@ -9,6 +9,7 @@ A live USB (the installer) does nothing: there is no previous task to keep.
 """
 
 import json
+import re
 import os
 import shlex
 import shutil
@@ -50,8 +51,12 @@ ALIASES = {
 }
 
 INTERPRETERS = {
-    "python", "python3", "python3.11", "python3.12", "bash", "sh", "perl", "ruby",
+    "bash", "sh", "perl", "ruby",
 }
+
+def is_interpreter(name):
+    return name in INTERPRETERS or re.fullmatch(r"python(?:[0-9]+(?:\.[0-9]+)*)?", name) is not None
+
 
 READY = False
 
@@ -191,7 +196,7 @@ def _names(argv):
     a name of its own. Those apps are matched by their script path instead.
     """
     base = os.path.basename(argv[0]) if argv else ""
-    if not base or base in INTERPRETERS:
+    if not base or is_interpreter(base):
         return []
     names = set(ALIASES.get(base, ()))
     names.add(base)
@@ -202,7 +207,7 @@ def _tokens(argv):
     tokens = []
     for part in argv:
         base = os.path.basename(part)
-        if base in INTERPRETERS or part.startswith("-"):
+        if is_interpreter(base) or part.startswith("-"):
             continue
         tokens.append(part)
     return tokens
@@ -246,7 +251,7 @@ def _cmdline_has(cmdline, app):
     bases = {os.path.basename(part) for part in parts}
     for token in app["tokens"]:
         base = os.path.basename(token).lower()
-        if base in INTERPRETERS or len(base) < 3:
+        if is_interpreter(base) or len(base) < 3:
             continue
         if token.lower() in parts or base in bases:
             return True
@@ -334,7 +339,7 @@ def _script_tokens(app):
     tokens = []
     for token in app.get("tokens") or []:
         base = os.path.basename(token)
-        if base.lower() in INTERPRETERS:
+        if is_interpreter(base.lower()):
             continue
         if "/" in token or base.endswith(".py"):
             tokens.append(token)

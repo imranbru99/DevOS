@@ -803,16 +803,20 @@ def build_window(QtCore, QtWidgets):
 def main():
     from PyQt5 import QtCore, QtWidgets
 
-    app = QtWidgets.QApplication(sys.argv)
     # Keep confirmation and input dialogs consistent across DevOS apps.
     import sys as _dialog_sys
     from pathlib import Path as _DialogPath
     _dialog_sys.path.insert(0, str(_DialogPath(__file__).resolve().parent.parent))
     from devos_dialogs import install as _install_dialog_style
+    from app_identity import prepare as prepare_identity
+    prepare_identity("devos-features")
+    app = QtWidgets.QApplication(sys.argv)
     _install_dialog_style(app)
     app.setApplicationName("devos-features")
     app.setApplicationDisplayName("DevOS Features")
     app.setDesktopFileName("devos-features")
+    from app_identity import apply as apply_identity
+    apply_identity(app, "devos-features")
     window = build_window(QtCore, QtWidgets)()
     window.show()
     if os.environ.get("DEVOS_FEATURES_SCREENSHOT"):

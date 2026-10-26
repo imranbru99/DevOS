@@ -200,16 +200,19 @@ def webapp_entry(feature: dict) -> str:
     """First-launch Start-menu entry for a vendor web app. devos-pwa opens the
     app Chrome installed from CHROME_POLICY and then hides this entry in
     favour of Chrome's own launcher, which carries the vendor's real icon.
+    Windows App keeps its DevOS companion entry for session reminders.
     A Cloud PC connection stays in that app because Chrome's launcher keeps
     the new window there."""
     web = feature["webapp"]
     names = "|".join(web.get("names") or [feature["name"].split(" (")[0]])
+    command = ('/usr/local/bin/devos-windows-app' if feature['id'] == 'winapp' else
+               f'/usr/local/bin/devos-pwa {web["url"]} "{names}" devos-web-{feature["id"]}.desktop')
     return (
         "[Desktop Entry]\nType=Application\n"
         f"Name={feature['name'].split(' (')[0]}\n"
         f"Comment={feature['about']}\n"
-        f"Exec=/usr/local/bin/devos-pwa {web['url']} \"{names}\" devos-web-{feature['id']}.desktop\n"
-        f"Icon={web.get('icon', 'applications-internet')}\n"
+        f"Exec={command}\n"
+        f"Icon={'devos-web-winapp' if feature['id'] == 'winapp' else web.get('icon', 'applications-internet')}\n"
         "Categories=Network;Office;\nTerminal=false\nX-DevOS-WebApp=true\n"
     )
 

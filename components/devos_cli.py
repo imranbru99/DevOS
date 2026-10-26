@@ -129,6 +129,10 @@ COMMAND_CATALOG = {
         "desc": "Task Manager: processes, performance, startup apps",
         "tags": ["taskman", "process", "kill", "cpu", "performance", "top"],
     },
+    "cloudpc": {
+        "desc": "Windows App launcher and Cloud PC inactivity reminders",
+        "tags": ["windows", "cloud", "remote", "rdp", "reminder"],
+    },
     "recorder": {
         "desc": "Screen, Window & Region Video Recorder (MP4 / WebM)",
         "tags": ["record", "recording", "screencast", "video", "capture", "mp4", "webm", "screen"],
@@ -487,6 +491,7 @@ def main():
         "update": os.path.join(COMPONENTS_DIR, "updater", "updater.py"),
         "task": os.path.join(COMPONENTS_DIR, "taskman", "taskman.py"),
         "tasks": os.path.join(COMPONENTS_DIR, "taskman", "taskman.py"),
+        "cloudpc": os.path.join(COMPONENTS_DIR, "cloudpc", "cloudpc.py"),
         "recorder": os.path.join(COMPONENTS_DIR, "recorder", "recorder.py"),
         "record": os.path.join(COMPONENTS_DIR, "recorder", "recorder.py"),
         "modesty": os.path.join(COMPONENTS_DIR, "modesty", "modesty.py"),

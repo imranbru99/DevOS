@@ -349,17 +349,21 @@ def run_gui() -> int:
 
     app = QtWidgets.QApplication.instance()
     if app is None:
-        app = QtWidgets.QApplication(sys.argv)
         # Keep confirmation and input dialogs consistent across DevOS apps.
         import sys as _dialog_sys
         from pathlib import Path as _DialogPath
         _dialog_sys.path.insert(0, str(_DialogPath(__file__).resolve().parent.parent))
         from devos_dialogs import install as _install_dialog_style
+        from app_identity import prepare as prepare_identity
+        prepare_identity("devos-power")
+        app = QtWidgets.QApplication(sys.argv)
         _install_dialog_style(app)
     app.setApplicationName("devos-power")
     app.setApplicationDisplayName("Power & sleep")
     if hasattr(app, "setDesktopFileName"):
         app.setDesktopFileName("devos-power")
+        from app_identity import apply as apply_identity
+        apply_identity(app, "devos-power")
 
     class WindowsCard(QtWidgets.QFrame):
         """Card matching Windows 11 Fluent container styling."""

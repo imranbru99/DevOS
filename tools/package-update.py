@@ -27,6 +27,14 @@ def package(root, output, version):
         path = root / "build/includes.chroot" / rel
         if path.is_file() and not path.is_symlink():
             files["overlay/" + rel] = path.read_bytes()
+    overlay = root / "build/includes.chroot"
+    assets = list((overlay / "usr/share/applications").glob("devos-*.desktop"))
+    assets += list((overlay / "usr/share/icons/hicolor").glob("*/apps/devos-*.png"))
+    assets += list((overlay / "usr/share/icons/hicolor").glob("*/apps/devos-*.svg"))
+    assets += [overlay / "etc/xdg/kded6rc"]
+    for path in assets:
+        if path.is_file() and not path.is_symlink():
+            files["overlay/" + path.relative_to(overlay).as_posix()] = path.read_bytes()
     manifest = {"format": 1, "version": version, "ubuntu_series": ["24.04", "26.04"],
                 "files": {name: hashlib.sha256(body).hexdigest() for name, body in files.items()}}
     files["manifest.json"] = json.dumps(manifest, sort_keys=True).encode()
