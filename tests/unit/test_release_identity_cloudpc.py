@@ -10,7 +10,7 @@ sys.path.insert(0, str(ROOT/'components'))
 sys.path.insert(0, str(ROOT/'components/cloudpc'))
 from session import Reminder
 from cloudpc import save_settings, load_settings, open_windows_app
-from launchers import integrate
+from launchers import integrate, restore_companion
 from app_identity import desktop_metadata
 
 spec = importlib.util.spec_from_file_location('base_release', ROOT/'build/verify-base-release.py')
@@ -68,6 +68,25 @@ class ReminderTests(unittest.TestCase):
 
 
 class IdentityTests(unittest.TestCase):
+    def test_python_versions_are_interpreters_without_matching_unrelated_apps(self):
+        import runpy
+        session = runpy.run_path(str(ROOT/'build/includes.chroot/usr/local/bin/devos-session'))
+        for name in ('python', 'python3', 'python3.12', 'python3.14', 'python3.15'):
+            self.assertTrue(session['is_interpreter'](name), name)
+        for name in ('python-helper', 'python3.desktop', 'mypython3', 'python3.14evil'):
+            self.assertFalse(session['is_interpreter'](name), name)
+
+    def test_restore_only_owned_historical_shortcut(self):
+        with tempfile.TemporaryDirectory() as directory:
+            entry = Path(directory)/'global.desktop'
+            entry.write_text('[Desktop Entry]\nExec=/usr/local/bin/devos-windows-app\n')
+            stub = Path(directory)/'devos-web-winapp.desktop'
+            stub.write_text('[Desktop Entry]\nType=Application\nHidden=true\nX-DevOS-Hidden=true\n')
+            self.assertTrue(restore_companion(directory, entry))
+            stub.write_text('[Desktop Entry]\nHidden=true\nComment=My choice\n')
+            self.assertFalse(restore_companion(directory, entry))
+            self.assertTrue(stub.exists())
+
     def test_desktop_name_icon_and_wm_class(self):
         self.assertEqual(desktop_metadata('devos-optimizer'),('DevOS Optimizer','devos-optimizer','devos-optimizer'))
         self.assertIsNone(desktop_metadata('../outside'))

@@ -868,6 +868,8 @@ I am open to **Senior Remote Full-Stack Roles, AI Platform Architecture Contract
 
 ### Windows App reminders and application icons
 
+![Windows App companion](docs/images/devos_windows_app.png)
+
 Enable **Windows App** in **DevOS Features**, then open it from the application menu.
 The DevOS companion opens Microsoft's Windows App and starts a local ten-minute
 reminder. It warns two minutes before that timer ends, with an **Open Windows App**
@@ -885,9 +887,10 @@ DevOS Qt applications now use their launcher names, desktop identities, and
 individual icons in windows and dialogs. Extra branded icons cover voice typing,
 clipboard, sharing, broadband, disk tools, power, features, family safety, emoji,
 AI actions, and Windows App. Restart an already running app after updating to load
-its new identity. Existing Windows App installations should be removed and added
-again through DevOS Features to regenerate the companion launcher; this does not
-delete the Cloud PC or its remote files.
+its new identity. The component updater refreshes an already-enabled Windows App launcher. Sign out
+and back in to migrate the old DevOS-owned hidden shortcut. If updating from an
+older manual checkout, remove and add Windows App again through DevOS Features;
+this does not delete the Cloud PC or its remote files.
 
 ### Ubuntu 24.04 to 26.04 migration checks
 
