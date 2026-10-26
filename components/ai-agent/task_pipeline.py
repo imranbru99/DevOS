@@ -250,6 +250,57 @@ def create_github_repo(
         return False, res.stderr or "Failed to create repo via gh"
 
 
+def is_antigravity_working() -> bool:
+    """Checks if any Antigravity conversation is currently executing a turn or tool."""
+    brain_dir = Path.home() / ".gemini/antigravity/brain"
+    if not brain_dir.exists():
+        return False
+    transcripts = list(brain_dir.glob("*/.system_generated/logs/transcript.jsonl"))
+    if not transcripts:
+        return False
+    latest = max(transcripts, key=os.path.getmtime)
+    try:
+        with open(latest, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+            if lines:
+                data = json.loads(lines[-1])
+                return data.get("status") == "RUNNING"
+    except Exception:
+        pass
+    return False
+
+
+def is_codex_working() -> bool:
+    """Checks if Codex desktop app is actively running a turn, container, or command."""
+    # Check if sandbox or host execution processes are running
+    res = subprocess.run(["pgrep", "-f", "codex-linux-sandbox|codex-code-mode-host"], capture_output=True)
+    if res.returncode == 0:
+        return True
+
+    # Check recent session rollout updates (within 6 seconds)
+    sessions_dir = Path.home() / ".codex/sessions"
+    if sessions_dir.exists():
+        rollouts = list(sessions_dir.glob("*/*/*.jsonl"))
+        if rollouts:
+            latest = max(rollouts, key=os.path.getmtime)
+            if (time.time() - os.path.getmtime(latest)) < 6.0:
+                return True
+    return False
+
+
+def is_agent_working(agent: str) -> bool:
+    """Universal status check: returns True if the specified agent is actively busy."""
+    ag = agent.lower()
+    if ag == "antigravity":
+        return is_antigravity_working()
+    elif ag in ("chatgpt", "codex"):
+        return is_codex_working()
+    elif ag == "local":
+        res = subprocess.run(["pgrep", "-f", "devos-ai-code|ollama_llama_server"], capture_output=True)
+        return res.returncode == 0
+    return False
+
+
 def parse_reset_time(text: str) -> Optional[datetime.datetime]:
     """Extracts rate-limit reset time from messages like:
 
@@ -375,6 +426,11 @@ class TaskPipeline:
                 resolved_prompt = resolved_prompt.replace(f"{{{k}}}", str(v))
             task["resolved_prompt"] = resolved_prompt
 
+            # If target agent is currently busy doing work, wait for current turn to complete
+            if is_agent_working(task["agent"]):
+                print(f"[{task['agent'].upper()}] Agent is currently working. Waiting for turn to finish before dispatching...")
+                continue
+
             # Run this task
             task["status"] = "RUNNING"
             self._save()
@@ -456,24 +512,46 @@ class TaskPipeline:
             else:
                 return False, "Antigravity CLI (agentapi) not found"
 
-        elif agent == "chatgpt":
+        elif agent in ("chatgpt", "codex"):
             # For desktop window automation via xdotool or Codex window
-            # Look for running Codex / ChatGPT window
-            find_win = subprocess.run(["xdotool", "search", "--name", "Codex"], capture_output=True, text=True)
+            # Look for running Codex / ChatGPT desktop app
+            find_win = subprocess.run(["xdotool", "search", "--class", "chatgpt"], capture_output=True, text=True)
             win_id = find_win.stdout.strip().splitlines()[0] if find_win.stdout.strip() else None
-            
+            if not win_id:
+                find_win = subprocess.run(["xdotool", "search", "--name", "Codex"], capture_output=True, text=True)
+                win_id = find_win.stdout.strip().splitlines()[0] if find_win.stdout.strip() else None
+
             if win_id:
                 try:
+                    # Wait up to 300s if currently working
+                    start_wait = time.time()
+                    while is_codex_working() and (time.time() - start_wait < 300):
+                        time.sleep(2)
+
                     # Activate window, type prompt, press Return
                     subprocess.run(["xdotool", "windowactivate", win_id], check=False)
                     time.sleep(0.5)
                     subprocess.run(["xdotool", "type", "--delay", "10", prompt], check=False)
                     subprocess.run(["xdotool", "key", "Return"], check=False)
-                    return True, "Dispatched prompt to Codex/ChatGPT desktop window via xdotool"
+
+                    # Wait until the turn finishes before returning success
+                    time.sleep(3)
+                    start_exec = time.time()
+                    while is_codex_working() and (time.time() - start_exec < 600):
+                        time.sleep(2)
+
+                    return True, "Dispatched and completed via Codex/ChatGPT desktop app"
                 except Exception as e:
                     return False, f"xdotool error: {e}"
             else:
-                # If window is not open, simulate response or call API
+                # If window is not open, check if codex CLI exists
+                codex_bin = shutil.which("codex") or (Path.home() / ".npm-global/bin/codex")
+                if codex_bin and Path(codex_bin).exists():
+                    try:
+                        res = subprocess.run([str(codex_bin), "exec", prompt], capture_output=True, text=True, timeout=300)
+                        return res.returncode == 0, res.stdout or res.stderr
+                    except Exception as e:
+                        return False, f"Codex CLI error: {e}"
                 return True, f"Simulated ChatGPT command completed: {prompt[:40]}"
 
         elif agent == "local":

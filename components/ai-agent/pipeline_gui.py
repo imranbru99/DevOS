@@ -19,7 +19,7 @@ from PyQt5.QtWidgets import QLineEdit
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "components" / "ai-agent"))
-from task_pipeline import TaskPipeline, parse_reset_time, discover_agents
+from task_pipeline import TaskPipeline, parse_reset_time, discover_agents, is_agent_working
 
 
 def get_app_icon():
@@ -173,7 +173,10 @@ class TaskCard(QtWidgets.QFrame):
         status_text = f"Status: {status}"
         status_color = "#94a3b8"
 
-        if status == "RUNNING":
+        if status == "QUEUED" and is_agent_working(agent):
+            status_text = "⏳ WAITING: Agent is currently busy working..."
+            status_color = "#38bdf8"
+        elif status == "RUNNING":
             status_text = "⚡ RUNNING: In progress..."
             status_color = "#38bdf8"
         elif status == "RATE_LIMITED":
