@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=DevOS Storage Access Check
+Exec=/usr/local/bin/devos-storage-check --notify
+NoDisplay=true
+X-KDE-autostart-phase=2

@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /usr/bin/python3 /usr/local/share/devos/components/settings/storage_access.py "$@"

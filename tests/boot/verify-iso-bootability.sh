@@ -1,7 +1,7 @@
 #!/bin/bash
-# DevOS hardware-boot verification gate.
-# Validates that an ISO is a real hybrid image: bootable on a dd-written USB
-# under Legacy BIOS/CSM, UEFI, and Secure Boot on/off.
+# DevOS ISO boot-layout verification gate.
+# Checks hybrid image structures needed for USB boot. Actual BIOS, UEFI and
+# Secure Boot operation still requires booting the image on test machines.
 # Exits 0 if all checks pass; non-zero with details otherwise.
 set -euo pipefail
 
@@ -27,8 +27,13 @@ if command -v xorriso >/dev/null 2>&1; then
     xorriso -indev "$ISO" -find / -type f -exec echo 2>/dev/null |
         sed "s/^'//; s/'$//" > "$ISO_LIST" || true
 elif command -v 7z >/dev/null 2>&1; then
-    7z l -ba "$ISO" | awk '{print $6}' > "$ISO_LIST" || true
+    # Structured output preserves spaces; 7z paths lack the leading slash.
+    7z l -slt "$ISO" | sed -n 's|^Path = |/|p' > "$ISO_LIST"
+else
+    echo "ERROR: Install xorriso or 7z to inspect the ISO." >&2
+    exit 2
 fi
+[ -s "$ISO_LIST" ] || { echo "ERROR: Could not list ISO contents." >&2; exit 2; }
 iso_has() { grep -qFx "$1" "$ISO_LIST" 2>/dev/null; }
 
 # --- 1. Basic ISO image sanity ---

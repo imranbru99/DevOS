@@ -55,6 +55,7 @@ class PureTests(unittest.TestCase):
 
 def model_available() -> bool:
     try:
+        import llama_cpp  # noqa: F401
         import server
         return bool(server.engine._find_model("code"))
     except Exception:

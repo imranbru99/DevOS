@@ -1,0 +1,6 @@
+// Do not retain downloaded packages after successful installation.
+APT::Keep-Downloaded-Packages "false";
+Binary::apt::APT::Keep-Downloaded-Packages "false";
+Binary::apt-get::APT::Keep-Downloaded-Packages "false";
+// Remove obsolete cached packages during the normal APT maintenance cycle.
+APT::Periodic::AutocleanInterval "7";

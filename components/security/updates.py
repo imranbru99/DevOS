@@ -45,14 +45,14 @@ APT::Periodic::Update-Package-Lists "1";
 APT::Periodic::Unattended-Upgrade "{flag}";
 APT::Periodic::AutocleanInterval "7";
 
-// Security pockets only (the release pocket never changes after release
-// but carries dependencies a security fix may need).
+// Archive origins remain Ubuntu even though lsb_release identifies DevOS.
+// Security pockets only; the release pocket carries required dependencies.
 #clear Unattended-Upgrade::Allowed-Origins;
 Unattended-Upgrade::Allowed-Origins {{
-        "${{distro_id}}:${{distro_codename}}";
-        "${{distro_id}}:${{distro_codename}}-security";
-        "${{distro_id}}ESMApps:${{distro_codename}}-apps-security";
-        "${{distro_id}}ESM:${{distro_codename}}-infra-security";
+        "Ubuntu:${{distro_codename}}";
+        "Ubuntu:${{distro_codename}}-security";
+        "UbuntuESMApps:${{distro_codename}}-apps-security";
+        "UbuntuESM:${{distro_codename}}-infra-security";
 }};
 
 // Never restart the PC by itself: DevOS Security tells the user instead.
@@ -73,6 +73,23 @@ def parse_enabled(text):
         if line.startswith('APT::Periodic::Unattended-Upgrade'):
             return '"1"' in line
     return None
+
+
+def repair_origins(root="/"):
+    """Migrate our old origin templates without changing the update preference."""
+    path = CONF if root == "/" else os.path.join(root, CONF.lstrip("/"))
+    text = common.read_text(path)
+    if text is None:
+        return False
+    repaired = text
+    for old, new in (("${distro_id}ESMApps:", "UbuntuESMApps:"),
+                     ("${distro_id}ESM:", "UbuntuESM:"),
+                     ("${distro_id}:", "Ubuntu:")):
+        repaired = repaired.replace('"' + old, '"' + new)
+    if repaired == text:
+        return False
+    common.write_text(path, repaired, 0o644)
+    return True
 
 
 def installed():
@@ -152,10 +169,15 @@ def upgrade_now(runner=None, snapshot=None):
                 "message": snapshot.get("message")}
     run = runner or _default_run
     steps = []
+    code, out, err = run(["apt-get", "-o", "APT::Update::Error-Mode=any", "update"])
+    if code != 0:
+        return {"status": "FAILED", "snapshot": snapshot,
+                "steps": [{"step": "refresh", "code": code,
+                           "error": (err or out).strip()[-400:]}],
+                "message": "Package lists could not be refreshed. No upgrades were started."}
+    steps.append({"step": "refresh", "code": 0})
     code, out, err = run(["unattended-upgrade"])
-    if code == 127:
-        steps.append({"step": "security", "code": 127, "skipped": True})
-    elif code != 0:
+    if code != 0:
         steps.append({"step": "security", "code": code, "error": (err or out).strip()[-400:]})
         return {"status": "FAILED", "snapshot": snapshot, "steps": steps,
                 "message": "Security updates did not finish. The restore point is still there."}

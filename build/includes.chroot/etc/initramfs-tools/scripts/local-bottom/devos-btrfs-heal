@@ -1,71 +1,25 @@
 #!/bin/sh
-
-PREREQ=""
-prereqs()
-{
-	echo "$PREREQ"
-}
-
-case "$1" in
-	prereqs)
-		prereqs
-		exit 0
-		;;
+# Diagnose only: filesystem corruption must never trigger automatic repair writes.
+# Retain this filename so previously built initramfs hooks remain compatible.
+case "${1:-}" in
+    prereqs) exit 0 ;;
 esac
 
-# Check if root is already successfully mounted and writable
-if [ -x "${rootmnt}/sbin/init" ] || [ -x "${rootmnt}/bin/sh" ] || [ -x "${rootmnt}/usr/lib/systemd/systemd" ]; then
-	# If mounted read-only due to an earlier abort, try remounting read-write with clean space-cache
-	if ! touch "${rootmnt}/.devos-write-test" 2>/dev/null; then
-		echo "DevOS Self-Healing: Root is mounted read-only. Remounting read-write..."
-		mount -o remount,rw,clear_cache,space_cache=v2 "${rootmnt}" 2>&1 || true
-		rm -f "${rootmnt}/.devos-write-test" 2>/dev/null || true
-	else
-		rm -f "${rootmnt}/.devos-write-test" 2>/dev/null || true
-		exit 0
-	fi
-	exit 0
+# A root filesystem mounted read-only here is normal: systemd remounts it later.
+# A failed write alone cannot distinguish this from ENOSPC, I/O or permissions.
+target="${rootmnt:-/root}"
+if [ -x "$target/sbin/init" ] || [ -x "$target/bin/sh" ] || [ -x "$target/usr/lib/systemd/systemd" ]; then
+    exit 0
 fi
 
-# Determine if the root filesystem is BTRFS
-is_btrfs=0
-if [ "${FSTYPE}" = "btrfs" ] || [ "${ROOTFSTYPE}" = "btrfs" ]; then
-	is_btrfs=1
-elif command -v blkid >/dev/null 2>&1; then
-	detected_fs=$(blkid -s TYPE -o value "${ROOT}" 2>/dev/null || true)
-	if [ "$detected_fs" = "btrfs" ]; then
-		is_btrfs=1
-	fi
+[ -n "${ROOT:-}" ] || exit 0
+kind="${ROOTFSTYPE:-${FSTYPE:-}}"
+if [ -z "$kind" ] && command -v blkid >/dev/null 2>&1; then
+    kind=$(blkid -s TYPE -o value "$ROOT" 2>/dev/null || true)
 fi
+[ "$kind" = btrfs ] || exit 0
 
-if [ "$is_btrfs" = 0 ]; then
-	exit 0
-fi
-
-echo "================================================================================"
-echo "DevOS Self-Healing: Root mount failed or read-only on ${ROOT}."
-echo "Detecting interrupted BTRFS tree-log / extent-count discrepancy..."
-echo "================================================================================"
-
-if command -v btrfs >/dev/null 2>&1; then
-	echo "DevOS Self-Healing: Clearing corrupted log tree ('btrfs rescue zero-log')..."
-	btrfs rescue zero-log "${ROOT}" 2>&1 || true
-
-	echo "DevOS Self-Healing: Clearing corrupted free space cache ('btrfs rescue clear-space-cache v2')..."
-	btrfs rescue clear-space-cache v2 "${ROOT}" 2>&1 || true
-
-	echo "DevOS Self-Healing: Retrying root mount in read-write mode with clear_cache..."
-	# shellcheck disable=SC2086
-	mount -t btrfs -o rw,subvol=@,clear_cache,space_cache=v2 "${ROOT}" "${rootmnt}" 2>&1 || \
-		mount -t btrfs -o rw,clear_cache,space_cache=v2 "${ROOT}" "${rootmnt}" 2>&1 || true
-
-	if [ -x "${rootmnt}/sbin/init" ] || [ -x "${rootmnt}/bin/sh" ] || [ -x "${rootmnt}/usr/lib/systemd/systemd" ]; then
-		# Ensure filesystem is writable
-		mount -o remount,rw,clear_cache,space_cache=v2 "${rootmnt}" 2>&1 || true
-		touch "${rootmnt}/.devos-write-test" 2>/dev/null && rm -f "${rootmnt}/.devos-write-test" 2>/dev/null || true
-		echo "DevOS Self-Healing: SUCCESS! Root filesystem recovered and mounted read-write."
-		echo "Resuming DevOS boot sequence..."
-		echo "================================================================================"
-		exit 0
-	fi
-fi
+echo "DevOS: the Btrfs root filesystem is not available at $target."
+echo "No automatic repair or forced write mount was attempted."
+echo "Use the live USB to inspect the drive, preserve your files and diagnose the kernel error."
+exit 0

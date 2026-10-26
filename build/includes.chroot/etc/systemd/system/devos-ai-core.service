@@ -1,6 +1,8 @@
 [Unit]
 Description=DevOS Local AI Core
 After=network.target
+StartLimitIntervalSec=300
+StartLimitBurst=3
 
 [Service]
 Type=simple
@@ -8,12 +10,17 @@ WorkingDirectory=/usr/local/share/devos/components/ai-core
 ExecStart=/usr/bin/python3 /usr/local/share/devos/components/ai-core/server.py
 Restart=on-failure
 RestartSec=3
-# A reply should beat background scans for CPU time. The service also switches
-# the CPU out of powersave while a reply is generating, then puts it back.
-Nice=-2
-CPUWeight=150
-# Lets big PCs lock the weights in RAM (use_mlock). Unused on smaller PCs.
-LimitMEMLOCK=infinity
+# Isolate optional AI work so it can yield resources to the desktop.
+Slice=devos-workloads.slice
+Nice=5
+CPUWeight=50
+IOWeight=50
+MemoryAccounting=yes
+MemoryHigh=60%
+MemoryMax=75%
+MemorySwapMax=1G
+LimitMEMLOCK=64M
+OOMPolicy=stop
 
 [Install]
 WantedBy=multi-user.target

@@ -43,6 +43,7 @@ EOF
 
 # 3. Enable fstrim.timer for SSD health
 systemctl enable fstrim.timer || true
+systemctl enable snapper-cleanup.timer || true
 
 # NetworkManager owns Ethernet and Wi-Fi. A masked networkd cannot take the cable.
 systemctl enable NetworkManager.service || true

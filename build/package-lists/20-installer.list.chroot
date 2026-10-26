@@ -9,6 +9,7 @@ cryptsetup
 cryptsetup-initramfs
 snapper
 ntfs-3g
+exfatprogs
 os-prober
 partitionmanager
 # grub-mkconfig / update-grub for Calamares' grubcfg and bootloader steps.

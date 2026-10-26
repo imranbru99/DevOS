@@ -520,6 +520,7 @@ def diskguard_enable():
 
 def boot():
     """devos-security-firstboot.service: defaults once, repairs every boot."""
+    updates.repair_origins()
     state = common.load_state()
     web = webprotect.WebProtect()
     if state.get("defaults") != "1":

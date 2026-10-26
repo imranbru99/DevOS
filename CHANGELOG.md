@@ -5,6 +5,30 @@ All notable changes to the DevOS project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Live recorder loudness meter, recording toolbar/tray signal bars, background MP4/WebM saves, and a non-destructive trim/copy/cut editor with audio mute/replace/mix exports.
+- Daily bounded Optimizer cache care with an opt-out setting; preserves user files, active caches, recordings and offline models.
+- Optional installer Data drives page with explicit selection, confirmation and automatic ext4 A/B/C layouts; leaves Calamares-managed disks and unselected storage intact.
+- Storage volume planner for SSD/HDD/USB devices, size previews, protected system-disk cards and an advanced partition-editor entry point.
+- Desktop-user home/settings write checks during installation and at login, with distinct permission, read-only, full-disk, quota and I/O error reporting.
+
+### Fixed
+- Newly formatted Linux data volumes receive the invoking/installed user's ownership instead of remaining unwritable root-owned volumes. Unknown, mounted, read-only and active system targets are rejected; disk identity is rechecked before whole-disk changes.
+- Security settings use unique temporary files and durable writes, preserve the old file on write failure, and avoid predictable temporary-file symlinks.
+- Replace unsafe automatic Btrfs log clearing/forced write remounts with diagnostic guidance; remove claims that recovery can never fail.
+- Security updates match Ubuntu archive origins despite DevOS branding; old generated origin templates are repaired on boot while preserving disabled updates and local settings.
+- Manual security updates refresh package lists and fail clearly when the security updater is missing.
+- ISO validation normalizes 7z paths instead of reporting existing boot files missing. CI runs installer/update tests and the boot-layout gate, and reports QEMU startup errors.
+
+### Changed
+- Consolidate hardware tuning, cap pending disk writes, isolate optional AI resources and monitor application slices for memory pressure. Bound journal/crash/package cache retention without deleting useful caches for supposed speed gains.
+- Bound pre-update snapshot creation to 30 seconds, skip its Python backend on ext4, enable scheduled Snapper cleanup, and rotate security/snapshot logs. Limit runtime journal usage and retain system journal entries for at most 30 days.
+- Raise the installer disk-space gate to 32 GB and use a 64 GB sparse disk for new QEMU test targets.
+- Add a shared installer animation toggle, keyboard-accessible navigation with focus outlines, a scrolling welcome page, responsive sidebar spacing, and a lightweight vector background.
+- Default to manual partitioning for explicit formatting choices; retain automatic single-disk installation. Animate the boot logo and loading indicator.
+
 ## [0.3.0] - 2026-10-25
 ### Added
 - **Terminal Smart Suggestions & Autocompletion System**

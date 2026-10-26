@@ -93,6 +93,17 @@ chmod 644 /etc/sddm.conf.d/devos-theme.conf
 # The live account "devos" does not exist on the disk. Run the dashboard as
 # the account the installer just created (uid 1000).
 owner="$(getent passwd 1000 | cut -d: -f1)"
+# Test as the actual desktop user; root can hide ownership mistakes.
+if [ -n "$owner" ]; then
+    if ! runuser -u "$owner" -- /usr/local/bin/devos-storage-check; then
+        echo "The installed account cannot write its home or settings folders. Installation has not been marked complete. Inspect the reported path and filesystem before rebooting." >&2
+        exit 1
+    fi
+else
+    echo "No desktop account was created. Installation has not been marked complete." >&2
+    exit 1
+fi
+
 if [ -n "$owner" ] && [ -f /etc/systemd/system/devos-dashboard.service ]; then
     mkdir -p /etc/systemd/system/devos-dashboard.service.d
     printf '[Service]\nUser=%s\n' "$owner" > /etc/systemd/system/devos-dashboard.service.d/user.conf

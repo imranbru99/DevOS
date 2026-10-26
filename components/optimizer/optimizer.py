@@ -140,7 +140,7 @@ def clamp_idle_minutes(value):
 
 def load_config(path=None):
     path = path or config_path()
-    cfg = {"idle_minutes": DEFAULT_IDLE_MINUTES, "never_ask": [], "paused_until": 0}
+    cfg = {"idle_minutes": DEFAULT_IDLE_MINUTES, "never_ask": [], "paused_until": 0, "auto_cleanup": True}
     try:
         with open(path, "r", encoding="utf-8") as fh:
             data = json.load(fh)
@@ -148,6 +148,7 @@ def load_config(path=None):
             cfg.update({k: data[k] for k in cfg if k in data})
     except (OSError, ValueError):
         pass
+    cfg["auto_cleanup"] = cfg["auto_cleanup"] is True
     cfg["idle_minutes"] = clamp_idle_minutes(cfg["idle_minutes"])
     if not isinstance(cfg["never_ask"], list):
         cfg["never_ask"] = []
@@ -1488,7 +1489,7 @@ def run_gui(open_cleanup=False):
 
             title = QtWidgets.QLabel("Clean up")
             title.setObjectName("title")
-            sub = QtWidgets.QLabel("Free space safely. Only your own files are touched.")
+            sub = QtWidgets.QLabel("Automatic care clears stale disposable caches. Review other files below.")
             sub.setObjectName("muted")
             outer.addWidget(title)
             outer.addWidget(sub)
@@ -1528,7 +1529,7 @@ def run_gui(open_cleanup=False):
             self.select_badge.setObjectName("badge")
             action_row.addWidget(self.select_badge)
 
-            self.quick_tip = QtWidgets.QLabel("Clean caches before shutdown for optimal performance")
+            self.quick_tip = QtWidgets.QLabel("Useful caches make apps faster; clear only what you need")
             self.quick_tip.setObjectName("muted")
             action_row.addWidget(self.quick_tip, 1, QtCore.Qt.AlignRight)
             outer.addWidget(action_frame)
@@ -1820,6 +1821,11 @@ def run_gui(open_cleanup=False):
             self.tray.setToolTip(APP_NAME)
             menu = QtWidgets.QMenu()
             menu.addAction("Clean up…", self.open_cleanup)
+            self.auto_action = menu.addAction("Automatic cache care")
+            self.auto_action.setCheckable(True)
+            self.auto_action.setChecked(self.cfg["auto_cleanup"])
+            self.auto_action.setToolTip("Clears old disposable previews and temporary caches daily")
+            self.auto_action.toggled.connect(self.set_auto_cleanup)
             menu.addAction("DevOS Security…", open_security)
             menu.addAction("Pause suggestions for 1 hour", self.pause_hour)
             sub = menu.addMenu("Settings: idle minutes")
@@ -1888,6 +1894,11 @@ def run_gui(open_cleanup=False):
                 save_config(self.cfg)
             except OSError:
                 pass
+
+        def set_auto_cleanup(self, enabled):
+            self.cfg["auto_cleanup"] = bool(enabled)
+            self.save()
+            self.notify_plain("Automatic cache care " + ("enabled." if enabled else "disabled."))
 
         def set_idle(self, minutes):
             self.tracker.idle_minutes = clamp_idle_minutes(minutes)
@@ -1998,11 +2009,23 @@ def main(argv=None):
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--tray", action="store_true", help="start the tray app (default)")
     mode.add_argument("--cleanup", action="store_true", help="open the Clean up dialog")
+    mode.add_argument("--auto-clean", action="store_true", help="bounded scheduled cleanup of stale disposable caches")
+    mode.add_argument("--auto-scan", action="store_true", help="preview automatic cleanup without deleting files")
     mode.add_argument("--scan", action="store_true", help="print reclaimable sizes as JSON")
     mode.add_argument("--idle-report", action="store_true",
                       help="print tracked GUI apps as JSON after one sample")
     args = parser.parse_args(argv)
 
+    if args.auto_clean or args.auto_scan:
+        if is_live_session():
+            print(json.dumps({"skipped": "Live installer session"}))
+            return 0
+        if args.auto_clean and not load_config()["auto_cleanup"]:
+            print(json.dumps({"skipped": "Automatic cache care disabled"}))
+            return 0
+        from auto_cleanup import run_scheduled
+        print(json.dumps(run_scheduled(dry_run=args.auto_scan)))
+        return 0
     if args.scan:
         return cmd_scan()
     if args.idle_report:

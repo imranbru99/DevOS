@@ -17,6 +17,10 @@ for pref in /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference; 
     echo balance_performance > "$pref" 2>/dev/null || true
 done
 
+if [ -f /sys/kernel/mm/transparent_hugepage/defrag ]; then
+    echo defer+madvise > /sys/kernel/mm/transparent_hugepage/defrag 2>/dev/null || true
+fi
+
 if [ -f /sys/kernel/mm/transparent_hugepage/enabled ]; then
     echo madvise > /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null || true
 fi
@@ -29,16 +33,22 @@ for dev in /sys/block/*; do
     sched="$dev/queue/scheduler"
     [ -f "$sched" ] || continue
     rot="$(cat "$dev/queue/rotational" 2>/dev/null || echo 1)"
-    if printf '%s' "$name" | grep -q '^nvme'; then
-        echo none > "$sched" 2>/dev/null || echo mq-deadline > "$sched" 2>/dev/null || true
-        echo 128 > "$dev/queue/read_ahead_kb" 2>/dev/null || true
-    elif [ "$rot" = "0" ]; then
-        echo mq-deadline > "$sched" 2>/dev/null || true
-        echo 128 > "$dev/queue/read_ahead_kb" 2>/dev/null || true
-    else
-        echo bfq > "$sched" 2>/dev/null || echo mq-deadline > "$sched" 2>/dev/null || true
-        echo 1024 > "$dev/queue/read_ahead_kb" 2>/dev/null || true
+    available="$(tr -d '[]' < "$sched" 2>/dev/null || true)"
+    choices="mq-deadline bfq"
+    ahead=128
+    if [[ "$name" == nvme* ]]; then
+        choices="none mq-deadline"
+    elif [ "$rot" != "0" ]; then
+        choices="bfq mq-deadline"
+        ahead=1024
     fi
+    for candidate in $choices; do
+        if printf '%s' "$available" | grep -qw "$candidate"; then
+            echo "$candidate" > "$sched" 2>/dev/null || true
+            break
+        fi
+    done
+    echo "$ahead" > "$dev/queue/read_ahead_kb" 2>/dev/null || true
 done
 
 exit 0

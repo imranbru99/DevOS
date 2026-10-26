@@ -1,37 +1,24 @@
 #!/bin/sh
-
-case "$1" in
-	prereqs)
-		exit 0
-		;;
+case "${1:-}" in
+    prereqs) exit 0 ;;
 esac
+cat <<'GUIDE'
 
-cat << 'EOF'
+===============================================================================
+                         DevOS storage recovery
+===============================================================================
+The system could not finish booting. This does not by itself identify a disk
+permission problem. A missing drive, incorrect boot configuration, full disk,
+filesystem damage or hardware I/O error can also cause this screen.
 
-================================================================================
-                    DevOS EMERGENCY FILESYSTEM RESCUE GUIDE
-================================================================================
-Your system entered the emergency shell because the root drive could not mount.
-Common Cause: Sudden power-off / kernel abort during BTRFS tree-log writes.
+1. Record the error above and identify the drive using: blkid
+2. Inspect recent kernel messages using: dmesg | tail -n 60
+3. Boot the DevOS live USB to copy important files to a separate disk and
+   inspect device health before choosing a filesystem-specific repair.
 
-NOTE: Do NOT type 'sudo' or 'apt' (This is a minimal recovery ramdisk; you are root #).
-      Use 'umount' (NOT 'unmount').
-
-RECOMMENDED STEP-BY-STEP RECOVERY:
-  1. Clear interrupted log tree:
-     btrfs rescue zero-log /dev/nvme0n1p2   (replace with your root drive)
-
-  2. Clear corrupted free-space cache:
-     btrfs rescue clear-space-cache v2 /dev/nvme0n1p2
-
-  3. Test mount to verify subvolumes:
-     mkdir -p /mnt/devos
-     mount -o subvol=@,clear_cache /dev/nvme0n1p2 /mnt/devos
-     ls /mnt/devos
-     umount /mnt/devos
-
-  4. Resume boot or reboot:
-     reboot -f
-================================================================================
-
-EOF
+Do not force a damaged filesystem read-write, run recursive chmod/chown on /,
+use btrfs check --repair, or clear filesystem logs as a general-purpose fix.
+Btrfs log clearing can discard recent changes and needs a specific diagnosis.
+This rescue shell already runs as root; sudo and apt are not available here.
+===============================================================================
+GUIDE

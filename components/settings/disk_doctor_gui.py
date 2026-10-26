@@ -7,9 +7,11 @@ used/free size breakdown, and Windows-Setup-style partition formatting and wipe 
 
 import sys
 import os
+import shutil
+import subprocess
 
 try:
-    from PyQt5.QtCore import Qt, QTimer
+    from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal
     from PyQt5.QtGui import QFont, QColor
     from PyQt5.QtWidgets import (
         QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -27,6 +29,22 @@ if SYS_PATH not in sys.path:
     sys.path.insert(0, SYS_PATH)
 
 from disk_manager import DiskManager, is_live_system
+from storage_widgets import VolumeMap, PartitionLayoutDialog
+
+
+class DiskOperation(QThread):
+    result = pyqtSignal(dict)
+
+    def __init__(self, device, action, kwargs, parent):
+        super().__init__(parent)
+        self.device, self.action, self.kwargs = device, action, kwargs
+
+    def run(self):
+        try:
+            result = DiskManager.apply_solution(self.device, self.action, **self.kwargs)
+        except Exception as exc:
+            result = {"success": False, "error": str(exc)}
+        self.result.emit(result)
 
 
 class FormatPartitionDialog(QDialog):
@@ -143,7 +161,8 @@ class FormatDiskDialog(QDialog):
         layout.addLayout(form)
 
         if mode == "devos":
-            note = QLabel("ℹ️ Creates a modern GPT table, a 512 MB FAT32 EFI partition (/boot/efi), and formats the remaining drive for DevOS.")
+            boot_space = "a 512 MiB FAT32 EFI partition" if DiskManager.is_uefi_system() else "a 2 MiB BIOS boot partition"
+            note = QLabel(f"Creates a GPT table, {boot_space}, and a system partition for DevOS. This prepares the disk; use the installer to install the OS.")
         else:
             note = QLabel("ℹ️ Creates a modern GPT table and formats 100% of the drive as a clean data storage volume.")
         note.setWordWrap(True)
@@ -175,13 +194,16 @@ class DiskDoctorWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("DevOS Storage & Boot Doctor")
-        self.resize(960, 680)
+        self.resize(1180, 780)
+        self._operation = None
         self.setStyleSheet("""
             QMainWindow { background-color: #0b0f19; color: #f8fafc; }
             QLabel { color: #f8fafc; font-family: 'Inter', sans-serif; }
-            QGroupBox { border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 12px; margin-top: 14px; padding: 14px; color: #38bdf8; font-weight: bold; background: #0f172a; }
-            QPushButton { border-radius: 6px; padding: 6px 14px; font-weight: bold; font-size: 12px; }
-            QTableWidget { background-color: #131d33; border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 8px; color: #f8fafc; gridline-color: rgba(255, 255, 255, 0.06); }
+            QFrame#diskCard { border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 12px; margin-top: 14px; padding: 14px; color: #38bdf8; font-weight: bold; background: #0f172a; }
+            QPushButton { background:#17253c; color:#e2e8f0; border:1px solid #2b3c56; border-radius:8px; padding:7px 14px; font-weight:bold; font-size:12px; }
+            QPushButton:hover { border-color:#38bdf8; }
+            QPushButton:focus { border:2px solid #7dd3fc; }
+            QTableWidget { background-color: #131d33; alternate-background-color:#17243b; border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 8px; color: #f8fafc; gridline-color: rgba(255, 255, 255, 0.06); }
             QHeaderView::section { background-color: #1e293b; color: #94a3b8; padding: 6px; font-weight: bold; border: none; font-size: 12px; }
         """)
 
@@ -194,14 +216,19 @@ class DiskDoctorWindow(QMainWindow):
         # Header Title
         title_box = QHBoxLayout()
         header_text = QVBoxLayout()
-        title = QLabel("DevOS Storage & Boot Doctor")
-        title.setStyleSheet("font-size: 22px; font-weight: 800; color: #38bdf8;")
-        sub = QLabel("Visual disk manager: inspect drives, view sizes & free space, format disks for DevOS or storage, like Windows Setup.")
+        title = QLabel("Storage & volumes")
+        title.setStyleSheet("font-size: 28px; font-weight: 700; color: #f8fafc;")
+        sub = QLabel("SSD · HDD · USB  |  Clear volume maps, custom sizes and Windows-compatible data formats.")
+        sub.setWordWrap(True)
         sub.setStyleSheet("font-size: 13px; color: #94a3b8;")
         header_text.addWidget(title)
         header_text.addWidget(sub)
         title_box.addLayout(header_text)
         title_box.addStretch()
+        advanced_btn = QPushButton("Partition editor…")
+        advanced_btn.setToolTip("Create, resize and manage partitions in KDE Partition Manager")
+        advanced_btn.clicked.connect(self.open_partition_editor)
+        title_box.addWidget(advanced_btn)
 
         refresh_btn = QPushButton("🔄 Refresh")
         refresh_btn.setStyleSheet("background: #1e293b; color: #38bdf8; border: 1px solid #38bdf8;")
@@ -261,17 +288,23 @@ class DiskDoctorWindow(QMainWindow):
 
         # Clear existing disk cards
         for i in reversed(range(self.card_layout.count())):
-            widget = self.card_layout.itemAt(i).widget()
+            item = self.card_layout.takeAt(i)
+            widget = item.widget()
             if widget:
-                widget.setParent(None)
+                widget.deleteLater()
 
         disks = DiskManager.get_storage_info()
+        if not disks:
+            empty = QLabel(DiskManager.last_error or "No physical drives detected. Connect a drive and refresh.")
+            empty.setWordWrap(True)
+            self.card_layout.addWidget(empty)
         for idx, disk in enumerate(disks):
             card = self.create_disk_card(disk, idx)
             self.card_layout.addWidget(card)
 
     def create_disk_card(self, disk: dict, drive_idx: int):
-        group = QGroupBox()
+        group = QFrame()
+        group.setObjectName("diskCard")
         vbox = QVBoxLayout(group)
         vbox.setSpacing(10)
 
@@ -280,6 +313,7 @@ class DiskDoctorWindow(QMainWindow):
         drive_icon = "🔌" if disk.get("is_live_media") else ("🖥️" if disk.get("is_system_disk") else "💽")
         title_text = f"{drive_icon} Drive {drive_idx}: {disk['device']}  —  {disk['model']}  ({disk['size_human']})"
         drive_title = QLabel(title_text)
+        drive_title.setWordWrap(True)
         drive_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #38bdf8;")
         header_row.addWidget(drive_title)
         header_row.addStretch()
@@ -295,6 +329,8 @@ class DiskDoctorWindow(QMainWindow):
             badge = QLabel("Running System Drive (Protected)")
             badge.setStyleSheet("background: #10b981; color: #022c22; font-weight: bold; padding: 3px 8px; border-radius: 4px; font-size: 11px;")
             header_row.addWidget(badge)
+        elif disk.get("read_only"):
+            header_row.addWidget(QLabel("Read-only drive · inspect before editing"))
         else:
             # Secondary / Target Disk Action Buttons (Windows Setup Style)
             setup_devos_btn = QPushButton("⚙️ Setup for DevOS")
@@ -316,6 +352,12 @@ class DiskDoctorWindow(QMainWindow):
             header_row.addWidget(wipe_btn)
 
         vbox.addLayout(header_row)
+        if not is_sys and not is_usb and not disk.get("read_only"):
+            layout_btn = QPushButton("Create A / B / C volumes…")
+            layout_btn.setStyleSheet("background:#1e3a5f; color:#bae6fd; padding:9px 16px;")
+            layout_btn.clicked.connect(lambda _, d=disk: self.open_layout_dialog(d))
+            vbox.addWidget(layout_btn)
+        vbox.addWidget(VolumeMap(disk['size_bytes'], disk['partitions']))
 
         # Scheme & Unallocated info
         info_row = QHBoxLayout()
@@ -339,6 +381,8 @@ class DiskDoctorWindow(QMainWindow):
         table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
         table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeToContents)
+        table.setEditTriggers(QTableWidget.NoEditTriggers)
+        table.setAlternatingRowColors(True)
         table.verticalHeader().setVisible(False)
         table.setRowCount(len(disk["partitions"]))
 
@@ -359,7 +403,7 @@ class DiskDoctorWindow(QMainWindow):
             cell_layout.setSpacing(6)
 
             is_root_part = any(m in ("/", "/boot", "/boot/efi") for m in part.get("mountpoint", "").split(", "))
-            protected_part = (is_sys and is_root_part) or is_usb
+            protected_part = is_sys or is_usb or disk.get("read_only") or part.get("read_only")
 
             if protected_part:
                 prot_lbl = QLabel("Protected")
@@ -409,6 +453,7 @@ class DiskDoctorWindow(QMainWindow):
             ititle = QLabel(f"<b>{issue['title']}</b>")
             ititle.setStyleSheet("font-size: 12px;")
             idesc = QLabel(issue["description"])
+            idesc.setWordWrap(True)
             idesc.setStyleSheet("color: #cbd5e1; font-size: 11px;")
             info_box.addWidget(ititle)
             info_box.addWidget(idesc)
@@ -431,78 +476,79 @@ class DiskDoctorWindow(QMainWindow):
 
         return group
 
-    def open_format_partition_dialog(self, part: dict):
-        dialog = FormatPartitionDialog(part["device"], default_label=part.get("label") or "Storage", parent=self)
-        if dialog.exec_() == QDialog.Accepted:
-            fs, label = dialog.get_values()
-            res = DiskManager.apply_solution(part["device"], "format_partition", fs_type=fs, label=label)
-            if res.get("success"):
-                QMessageBox.information(self, "Success", res.get("message", "Partition formatted successfully."))
-                self.refresh_disks()
-            else:
-                QMessageBox.critical(self, "Formatting Error", res.get("error", "Formatting failed."))
+    def start_disk_action(self, device, action, **kwargs):
+        if self._operation is not None:
+            return
+        self.centralWidget().setEnabled(False)
+        self.statusBar().showMessage("Applying storage changes… Keep this computer powered on.")
+        self._operation = DiskOperation(device, action, kwargs, self)
+        self._operation.result.connect(self.disk_action_finished)
+        self._operation.finished.connect(self.disk_thread_finished)
+        self._operation.start()
 
-    def open_format_disk_dialog(self, disk: dict, mode: str):
-        dialog = FormatDiskDialog(disk["device"], disk["model"], disk["size_human"], mode=mode, parent=self)
-        if dialog.exec_() == QDialog.Accepted:
-            fs, label = dialog.get_values()
-            action_id = "format_devos" if mode == "devos" else "format_storage"
-            res = DiskManager.apply_solution(disk["device"], action_id, fs_type=fs, label=label)
-            if res.get("success"):
-                QMessageBox.information(self, "Success", res.get("message", "Disk formatted successfully."))
-                self.refresh_disks()
-            else:
-                QMessageBox.critical(self, "Disk Format Error", res.get("error", "Disk format failed."))
-
-    def confirm_wipe_disk(self, device: str):
-        confirm = QMessageBox.warning(
-            self, "Wipe Entire Disk",
-            f"Are you sure you want to completely erase {device}?\n\n"
-            "This will permanently delete all partitions and initialize a clean GPT partition table.",
-            QMessageBox.Yes | QMessageBox.No
-        )
-        if confirm == QMessageBox.Yes:
-            res = DiskManager.apply_solution(device, "wipe_disk")
-            if res.get("success"):
-                QMessageBox.information(self, "Success", res.get("message", "Disk wiped successfully."))
-                self.refresh_disks()
-            else:
-                QMessageBox.critical(self, "Error", res.get("error", "Wipe failed."))
-
-    def confirm_delete_partition(self, device: str):
-        confirm = QMessageBox.warning(
-            self, "Delete Partition",
-            f"Are you sure you want to delete partition {device}?\n\nAll data on this partition will be lost.",
-            QMessageBox.Yes | QMessageBox.No
-        )
-        if confirm == QMessageBox.Yes:
-            res = DiskManager.apply_solution(device, "delete_partition")
-            if res.get("success"):
-                QMessageBox.information(self, "Success", res.get("message", "Partition deleted."))
-                self.refresh_disks()
-            else:
-                QMessageBox.critical(self, "Error", res.get("error", "Deletion failed."))
-
-    def toggle_mount(self, device: str, action: str):
-        res = DiskManager.apply_solution(device, f"{action}_partition")
-        if res.get("success"):
-            self.refresh_disks()
+    def disk_action_finished(self, result):
+        self.statusBar().showMessage("Storage updated" if result.get("success") else "Storage change stopped")
+        if result.get("success"):
+            QMessageBox.information(self, "Storage updated", result.get("message", "Done."))
         else:
-            QMessageBox.critical(self, "Mount Error", res.get("error", f"Failed to {action} partition."))
+            QMessageBox.critical(self, "Storage change stopped", result.get("error", "No successful result was reported."))
+        self.refresh_disks()
 
-    def run_action(self, device: str, action_id: str):
-        confirm = QMessageBox.question(
-            self, "Confirm Disk Action",
-            f"Are you sure you want to perform action '{action_id}' on {device}?",
-            QMessageBox.Yes | QMessageBox.No
-        )
-        if confirm == QMessageBox.Yes:
-            res = DiskManager.apply_solution(device, action_id)
-            if res.get("success"):
-                QMessageBox.information(self, "Success", res.get("message", "Action completed."))
-                self.refresh_disks()
-            else:
-                QMessageBox.critical(self, "Error", res.get("error", "Action failed."))
+    def disk_thread_finished(self):
+        self._operation.deleteLater()
+        self._operation = None
+        self.centralWidget().setEnabled(True)
+
+    def closeEvent(self, event):
+        if self._operation is not None:
+            QMessageBox.information(self, "Storage changes in progress", "Wait for the current operation to finish before closing this window.")
+            event.ignore()
+        else:
+            event.accept()
+
+    def open_partition_editor(self):
+        executable = shutil.which("partitionmanager")
+        if not executable:
+            QMessageBox.information(self, "Partition editor", "KDE Partition Manager is not installed.")
+            return
+        subprocess.Popen([executable])
+
+    def open_layout_dialog(self, disk):
+        dialog = PartitionLayoutDialog(disk, self)
+        if dialog.exec_() == QDialog.Accepted:
+            self.start_disk_action(disk["device"], "partition_storage", volumes=dialog.get_volumes(), expected_identity=disk)
+
+    def open_format_partition_dialog(self, part):
+        dialog = FormatPartitionDialog(part["device"], part.get("label") or "Storage", self)
+        if dialog.exec_() == QDialog.Accepted:
+            fs, label = dialog.get_values()
+            self.start_disk_action(part["device"], "format_partition", fs_type=fs, label=label)
+
+    def open_format_disk_dialog(self, disk, mode):
+        dialog = FormatDiskDialog(disk["device"], disk["model"], disk["size_human"], mode, self)
+        if dialog.exec_() == QDialog.Accepted:
+            fs, label = dialog.get_values()
+            self.start_disk_action(disk["device"], "format_devos" if mode == "devos" else "format_storage", fs_type=fs, label=label, expected_identity=disk)
+
+    def confirm_wipe_disk(self, device):
+        if QMessageBox.warning(self, "Erase entire disk", f"Erase every partition on {device}? Other disks are unchanged.",
+                               QMessageBox.Yes | QMessageBox.No, QMessageBox.No) == QMessageBox.Yes:
+            self.start_disk_action(device, "wipe_disk")
+
+    def confirm_delete_partition(self, device):
+        if QMessageBox.warning(self, "Delete partition", f"Delete {device}? Its data will be lost.",
+                               QMessageBox.Yes | QMessageBox.No, QMessageBox.No) == QMessageBox.Yes:
+            self.start_disk_action(device, "delete_partition")
+
+    def toggle_mount(self, device, action):
+        self.start_disk_action(device, action + "_partition")
+
+    def run_action(self, device, action):
+        description = (f"Erase every partition on {device} and create an MBR table? All data on that disk will be lost."
+                       if action == "convert_mbr" else f"Apply {action} to {device}? Review your backup before changing its layout.")
+        if QMessageBox.warning(self, "Confirm storage change", description,
+                               QMessageBox.Yes | QMessageBox.No, QMessageBox.No) == QMessageBox.Yes:
+            self.start_disk_action(device, action)
 
     def confirm_reboot(self):
         confirm = QMessageBox.question(

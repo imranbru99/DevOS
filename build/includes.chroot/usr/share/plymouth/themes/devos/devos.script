@@ -79,8 +79,12 @@ fun place() {
     span = track_w - thumb_w;
     if (span < 1)
         span = 1;
-    travel = Math.Int(Plymouth.GetTime() * 80);
-    offset = travel - (Math.Int(travel / span) * span);
+    # Bounce smoothly across the track rather than jumping back to the start.
+    travel = Plymouth.GetTime() * 80;
+    cycle = travel - (Math.Int(travel / (span * 2)) * span * 2);
+    offset = cycle;
+    if (cycle > span)
+        offset = span * 2 - cycle;
     thumb.sprite.SetX(track_x + offset);
     thumb.sprite.SetY(track_y);
 }
@@ -95,6 +99,11 @@ fun boot_progress_callback(duration, progress) {
 
 fun refresh_callback() {
     now = Plymouth.GetTime();
+    # A gentle breathing logo keeps the wait visibly alive at very low cost.
+    pulse = now - Math.Int(now / 3) * 3;
+    if (pulse > 1.5)
+        pulse = 3 - pulse;
+    logo.sprite.SetOpacity(0.78 + pulse * 0.14);
     phrase = Math.Int(now / 2.4);
     if (phrase != last_phrase) {
         global.last_phrase = phrase;

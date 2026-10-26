@@ -3,6 +3,7 @@ import io.calamares.ui 1.0
 import io.calamares.core 1.0
 
 import QtQuick 2.15
+import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.3
 
 Rectangle {
@@ -16,34 +17,36 @@ Rectangle {
         color: "#1b2438"
     }
 
-    component NavButton: Rectangle {
+    component NavButton: Button {
         id: btn
         property string label: ""
         property bool primary: false
-        signal clicked()
+        text: label.replace(/&/g, "")
+        Accessible.name: text
         implicitWidth: Math.max(120, caption.implicitWidth + 44)
         implicitHeight: 44
-        radius: 12
         opacity: enabled ? 1.0 : 0.35
-        color: primary ? (area.containsMouse ? "#5ec8ff" : "#38bdf8")
-                       : (area.containsMouse ? "#1c2740" : "#141b2d")
-        border.width: primary ? 0 : 1
-        border.color: "#26324d"
-        Behavior on color { ColorAnimation { duration: 120 } }
-        Text {
+        hoverEnabled: true
+        focusPolicy: Qt.StrongFocus
+        background: Rectangle {
+            radius: 12
+            color: btn.primary ? (btn.down ? "#0ea5e9" : btn.hovered ? "#5ec8ff" : "#38bdf8")
+                               : (btn.down ? "#263754" : btn.hovered ? "#1c2740" : "#141b2d")
+            border.width: btn.activeFocus ? 2 : btn.primary ? 0 : 1
+            border.color: btn.activeFocus ? "#f8fafc" : "#26324d"
+            Behavior on color {
+                enabled: InstallerAppearance.motionEnabled
+                ColorAnimation { duration: 120 }
+            }
+        }
+        contentItem: Text {
             id: caption
-            anchors.centerIn: parent
-            text: btn.label.replace("&", "")
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            text: btn.text
             color: btn.primary ? "#04121f" : "#e2e8f0"
             font.pixelSize: 15
             font.weight: Font.DemiBold
-        }
-        MouseArea {
-            id: area
-            anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            onClicked: if (btn.enabled) btn.clicked()
         }
     }
 

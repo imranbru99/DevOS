@@ -142,7 +142,11 @@ class TestDiskManager(unittest.TestCase):
             "raw_pttype": "dos",
             "partitions": []
         }
+        # MBR is valid for a data drive on a UEFI desktop; it is only an
+        # installation compatibility warning while preparing a boot disk.
         issues = DiskManager.diagnose_disk(mbr_disk, is_uefi=True, live=False)
+        self.assertFalse(any(i["type"] == "mbr_on_uefi" for i in issues))
+        issues = DiskManager.diagnose_disk(mbr_disk, is_uefi=True, live=True)
         self.assertTrue(any(i["type"] == "mbr_on_uefi" for i in issues))
 
     def test_apply_solution_safety_guards(self):

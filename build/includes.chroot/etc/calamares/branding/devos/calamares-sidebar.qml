@@ -3,6 +3,7 @@ import io.calamares.ui 1.0
 import io.calamares.core 1.0
 
 import QtQuick 2.15
+import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.3
 
 Rectangle {
@@ -29,10 +30,9 @@ Rectangle {
         RowLayout {
             spacing: 12
             Layout.bottomMargin: 34
-            Image {
+            MotionLogo {
+                animated: sideBar.visible && InstallerAppearance.motionEnabled
                 source: "file:/" + Branding.imagePath(Branding.ProductLogo)
-                sourceSize.width: 44
-                sourceSize.height: 44
                 Layout.preferredWidth: 44
                 Layout.preferredHeight: 44
             }
@@ -53,10 +53,11 @@ Rectangle {
         }
 
         Repeater {
+            id: stepRepeater
             model: ViewManager
             Item {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 48
+                Layout.preferredHeight: Math.min(48, Math.max(30, (sideBar.height - 210) / Math.max(1, stepRepeater.count)))
                 readonly property bool current: index === ViewManager.currentStepIndex
                 readonly property bool done: index < ViewManager.currentStepIndex
 
@@ -64,10 +65,11 @@ Rectangle {
                 Rectangle {
                     visible: index > 0
                     x: 15
-                    y: -24
+                    y: 14 - parent.height / 2
                     width: 2
-                    height: 34
+                    height: Math.max(2, parent.height - 28)
                     color: (done || current) ? "#38bdf8" : "#1f2a40"
+                    Behavior on color { ColorAnimation { duration: 350 } }
                 }
 
                 Rectangle {
@@ -76,10 +78,17 @@ Rectangle {
                     radius: 10
                     color: current ? "#13203a" : "transparent"
                     border.color: current ? "#1e3a5f" : "transparent"
+                    Behavior on color { ColorAnimation { duration: 300 } }
                 }
 
                 Rectangle {
                     id: dot
+                    SequentialAnimation on scale {
+                        running: current && sideBar.visible && InstallerAppearance.motionEnabled
+                        loops: Animation.Infinite
+                        NumberAnimation { to: 1.08; duration: 1100; easing.type: Easing.InOutSine }
+                        NumberAnimation { to: 1; duration: 1100; easing.type: Easing.InOutSine }
+                    }
                     x: 2
                     anchors.verticalCenter: parent.verticalCenter
                     width: 28
@@ -110,6 +119,20 @@ Rectangle {
         }
 
         Item { Layout.fillHeight: true }
+
+        CheckBox {
+            text: "Animations"
+            checked: InstallerAppearance.motionEnabled
+            onToggled: InstallerAppearance.motionEnabled = checked
+            Accessible.name: "Installer animations"
+            contentItem: Text {
+                text: parent.text
+                leftPadding: parent.indicator.width + parent.spacing
+                verticalAlignment: Text.AlignVCenter
+                color: "#cbd5e1"
+                font.pixelSize: 13
+            }
+        }
 
         Text {
             Layout.fillWidth: true

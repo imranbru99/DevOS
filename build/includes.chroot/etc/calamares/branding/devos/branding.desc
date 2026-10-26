@@ -21,14 +21,14 @@ strings:
     versionedName: DevOS 26.04 LTS
     shortVersionedName: DevOS 26.04
     bootloaderEntryName: DevOS
-    productUrl: https://github.com/imranbru99/DevOS
+    productUrl: https://imrandev.bd
     supportUrl: https://github.com/imranbru99/DevOS/issues
     releaseNotesUrl: https://github.com/imranbru99/DevOS
 
 images:
     productIcon: "logo.png"
     productLogo: "logo.png"
-    productWelcome: "wallpaper.jpg"
+    productWelcome: "installer-background.svg"
 
 style:
     SidebarBackground: "#080b14"

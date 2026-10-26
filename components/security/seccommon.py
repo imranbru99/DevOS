@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import time
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 COMPONENTS = os.path.dirname(HERE)
@@ -97,14 +98,18 @@ def write_text(path, text, mode=0o644):
     folder = os.path.dirname(path)
     if folder:
         os.makedirs(folder, exist_ok=True)
-    tmp = path + ".devos-new"
-    with open(tmp, "w", encoding="utf-8", newline="\n") as handle:
-        handle.write(text)
+    # A unique, private temporary file avoids collisions and predictable symlinks.
+    fd, tmp = tempfile.mkstemp(prefix=".devos-", dir=folder or ".")
     try:
-        os.chmod(tmp, mode)
-    except OSError:
-        pass
-    os.replace(tmp, path)
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            os.fchmod(handle.fileno(), mode)
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
 
 
 def write_json(path, data, mode=0o644):

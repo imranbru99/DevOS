@@ -133,8 +133,10 @@ class TestAppHubAndLayers(unittest.TestCase):
         sys.path.insert(0, SYS_PATH_AI)
         import server
         gen, batch = server.thread_plan(20, 14, 4)
-        self.assertGreaterEqual(gen, 6)
-        self.assertGreaterEqual(batch, 16)
+        self.assertGreaterEqual(gen, 1)
+        self.assertLessEqual(gen * 4, 19)
+        self.assertGreaterEqual(batch, gen)
+        self.assertLessEqual(batch * 4, 19)
 
 
 if __name__ == "__main__":

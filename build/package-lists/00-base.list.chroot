@@ -12,6 +12,7 @@ sudo
 bash
 coreutils
 findutils
+logrotate
 grep
 sed
 gawk

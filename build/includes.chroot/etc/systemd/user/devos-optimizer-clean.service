@@ -1,0 +1,16 @@
+[Unit]
+Description=DevOS automatic disposable cache care
+ConditionKernelCommandLine=!boot=casper
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/share/devos/components/optimizer/optimizer.py --auto-clean
+Slice=background.slice
+Nice=19
+IOSchedulingClass=idle
+CPUWeight=10
+IOWeight=10
+CPUQuota=20%
+MemoryMax=96M
+TimeoutStartSec=45s
+NoNewPrivileges=yes

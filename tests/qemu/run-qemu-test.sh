@@ -25,8 +25,8 @@ fi
 
 # Prepare temporary test virtual disk for Calamares target
 if [ ! -f "${DISK_IMAGE}" ]; then
-    echo "==> Creating 20GB test virtual disk (${DISK_IMAGE})..."
-    qemu-img create -f qcow2 "${DISK_IMAGE}" 20G
+    echo "==> Creating 64GB sparse test virtual disk (${DISK_IMAGE})..."
+    qemu-img create -f qcow2 "${DISK_IMAGE}" 64G
 fi
 
 QEMU_ARGS=(

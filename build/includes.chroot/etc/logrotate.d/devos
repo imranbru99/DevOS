@@ -1,0 +1,12 @@
+# App helpers open these files for each message; no service restart is needed.
+/var/log/devos-security.log /var/log/devos-snapshot.log {
+    weekly
+    maxsize 1M
+    rotate 4
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 root adm
+    su root adm
+}

@@ -14,6 +14,16 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      - name: Test Installer and Update Safety
+        run: |
+          python3 -m unittest discover -s tests/unit -p 'test_install*.py'
+          python3 -m unittest discover -s tests/unit -p 'test_storage*.py'
+          python3 -m unittest discover -s tests/unit -p test_disk_manager.py
+          python3 -m unittest discover -s tests/unit -p test_security_updates.py
+          python3 -m unittest discover -s tests/unit -p test_updater.py
+          python3 -m unittest discover -s tests/unit -p 'test_optimizer*.py'
+          python3 -m unittest discover -s tests/unit -p test_responsiveness.py
+
       - name: Install Host Dependencies
         run: |
           sudo apt-get update
@@ -30,7 +40,12 @@ jobs:
             zstd \
             qemu-system-x86 \
             ovmf \
-            shellcheck
+            shellcheck \
+            ffmpeg \
+            python3-pyqt5
+
+      - name: Test Recorder Media Exports
+        run: /usr/bin/python3 tests/unit/test_recorder_edit.py
 
       - name: Lint Shell Scripts
         run: |
@@ -39,6 +54,9 @@ jobs:
       - name: Build DevOS ISO
         run: |
           sudo DEVOS_ZSTD_LEVEL=15 bash ./build/build-iso.sh
+
+      - name: Verify ISO Boot Layout
+        run: bash tests/boot/verify-iso-bootability.sh out/devos-26.04-amd64.iso
 
       - name: Verify ISO Size and Checksum
         run: |
@@ -53,15 +71,31 @@ jobs:
           fi
           sha256sum "$ISO_FILE"
 
-      - name: Run QEMU Headless Smoke Test (BIOS)
+      # A bounded observation catches QEMU startup errors. It is not proof
+      # that the desktop or a complete installation works.
+      - name: Observe BIOS Startup
         run: |
+          rc=0
           timeout 60s qemu-system-x86_64 \
             -m 2048 \
             -smp 2 \
             -cdrom out/devos-26.04-amd64.iso \
             -display none \
             -vga virtio \
-            -serial stdio || true
+            -serial stdio > out/qemu-bios.log 2>&1 || rc=$?
+          cat out/qemu-bios.log
+          case "$rc" in
+            0|124) echo "BIOS observation finished; desktop readiness requires a runtime test." ;;
+            *) echo "::error::QEMU failed with exit code $rc"; exit "$rc" ;;
+          esac
+
+      - name: Upload Boot Diagnostics
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: devos-boot-diagnostics
+          path: out/qemu-bios.log
+          if-no-files-found: ignore
 
       - name: Upload ISO and Artifacts
         uses: actions/upload-artifact@v4

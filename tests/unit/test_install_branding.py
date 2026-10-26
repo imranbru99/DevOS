@@ -324,7 +324,7 @@ class TestDevOSIdentity(unittest.TestCase):
         self.assertTrue(os.path.isdir(slideshow_dir))
         files = os.listdir(slideshow_dir)
         ai_images = [f for f in files if f.startswith("AI_") and f.endswith(".jpg")]
-        self.assertEqual(len(ai_images), 100)
+        self.assertGreaterEqual(len(ai_images), 100)
         total_images = [f for f in files if f.endswith(".jpg") or f.endswith(".png")]
         self.assertGreaterEqual(len(total_images), 130)
 

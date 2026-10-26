@@ -44,6 +44,13 @@ xhost +si:localuser:root >/dev/null 2>&1 || true
 xhost +local: >/dev/null 2>&1 || true
 xhost + >/dev/null 2>&1 || true
 
+# Refresh hardware facts without formatting or mounting any drive.
+if [ "$(id -u)" -eq 0 ]; then
+    /usr/local/sbin/devos-storage-probe || true
+else
+    sudo -n /usr/local/sbin/devos-storage-probe || true
+fi
+
 run_calamares() {
     if [ "$(id -u)" -eq 0 ]; then
         calamares "$@"
@@ -65,19 +72,8 @@ echo "==> $(date) installer start, kernel: $(uname -r), cmdline: $(cat /proc/cmd
 fails=0
 [ -f /run/devos-installer-safe-mode ] && fails=1
 
-# Pre-flight: Deactivate swap partitions and unmount any non-system automounts
-# so Calamares formatting/partitioning never fails with "Device or resource busy"
-if [ "$(id -u)" -eq 0 ]; then
-    swapoff -a 2>/dev/null || true
-    for mnt in $(lsblk -lno MOUNTPOINT 2>/dev/null | grep -E '^/(media|run/media)/'); do
-        umount -f "$mnt" 2>/dev/null || true
-    done
-else
-    sudo swapoff -a 2>/dev/null || true
-    for mnt in $(lsblk -lno MOUNTPOINT 2>/dev/null | grep -E '^/(media|run/media)/'); do
-        sudo umount -f "$mnt" 2>/dev/null || true
-    done
-fi
+# Calamares manages mount changes for the partitions the user selects.
+# Do not force-unmount unrelated drives or globally disable swap on launch.
 
 while true; do
     started=$(date +%s)

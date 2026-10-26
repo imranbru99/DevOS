@@ -1,0 +1,19 @@
+#!/usr/bin/python3
+"""Publish read-only disk facts for the additional-drive installer page."""
+import json
+import os
+from pathlib import Path
+import sys
+import tempfile
+sys.path.insert(0, '/usr/local/share/devos/components/settings')
+from installer_storage import inventory
+path = Path('/etc/calamares/branding/devos/storage-devices.js')
+fd, name = tempfile.mkstemp(dir=path.parent, prefix='.storage-')
+try:
+    with os.fdopen(fd, 'w') as stream:
+        stream.write('.pragma library\nvar disks = ' + json.dumps(inventory()) + ';\n')
+        os.fchmod(stream.fileno(), 0o644)
+    os.replace(name, path)
+finally:
+    if os.path.exists(name):
+        os.unlink(name)

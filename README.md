@@ -31,6 +31,8 @@ third-party apps. See [Ubuntu's release list](https://ubuntu.com/project/docs/re
 
 Read the [complete current feature inventory](docs/FEATURES.md),
 [latest changes](CHANGELOG.md), and [update guide](docs/UPDATES.md).
+See the [long-term maintenance guide](docs/LONG_TERM_MAINTENANCE.md) for recovery,
+storage, update coverage, and release-validation requirements.
 The Google Drive link is for previously published images; source screenshots and
 features below do not certify that an older download contains the latest changes.
 Build output is `out/devos-26.04-amd64.iso`; verify the checksum supplied with the image.
@@ -87,15 +89,17 @@ DevOS exists to give people — especially Windows users and developers — **an
 | 📝 **Notepad** | Windows 11-style tabs; **unsaved text survives crashes and power cuts**. |
 | 💻 **Developer ready** | VS Code, Git, Node.js, Python, PHP + Composer, MariaDB, PostgreSQL, Redis, SQLite, Podman (Docker-compatible). |
 | 🎨 **Premium look** | Dark DevOS theme, icons-only taskbar, **25+ wallpapers**, a modern installer, DevOS names everywhere (Files, Terminal, Settings…). |
-| ⚡ **Small & fast** | ISO size checked during build; boots straight to the desktop, compressed RAM swap, btrfs + zstd storage, memory-hog protection. |
+| ⚡ **Small & fast** | ISO size checked during build; boots straight to the desktop, compressed RAM swap, optional btrfs + zstd storage, memory-hog protection. |
 
 ---
 
 ## What you get
 
 ### 1. Installer
-- Guided Calamares installer: welcome, location, keyboard, disk, local account, AI model, user type, apps, summary and progress.
-- **Erase disk** creates an EFI partition plus a btrfs system (subvolumes for `/`, `/home`, `/.snapshots`, `/var/log`, `/var/cache`; zstd compression). Manual partitioning and full-disk encryption (LUKS) are available too.
+- Guided Calamares installer: welcome, location, keyboard, disk, local account, additional data drives, AI model, user type, apps, summary and progress.
+- **Manual partitioning** is selected by default. Click **Next** to open the partition editor, switch between detected drives, and explicitly create, delete, or format partitions. Assign the DevOS system partition to `/`; for UEFI installations, assign a FAT32 EFI system partition to `/boot/efi` with the boot flag. Partitions you leave untouched retain their data. You can queue changes on multiple drives and review them in the summary before installation.
+- **Erase disk** remains available for automatic installation: it wipes all partitions on the selected physical disk and creates an EFI partition plus an ext4 system by default (btrfs is also available). Other physical disks are left untouched. Full-disk encryption (LUKS) is available in automatic partitioning.
+- **Data drives:** optionally select all eligible additional SSDs/HDDs or specific ones, and plan one to three ext4 volumes with custom sizes. Formatting is off until explicitly confirmed and runs after **Install**. The installation disk and manual layouts are handled by the Partitions step; unselected disks remain unchanged. [Storage guide](docs/STORAGE_MANAGEMENT.md).
 - **A local account is created; no online account is needed.** Account details are pre-filled; leave the password empty and DevOS signs in automatically (you can add a password later).
 - Boots on **UEFI and legacy BIOS** PCs, from USB or DVD. After install it starts **straight to the desktop** — no boot menu wait (the menu still appears when Windows is installed alongside).
 
@@ -212,7 +216,7 @@ Shut down, restart and uninstall always ask for confirmation first.
 
 - **Local AI Code Agent & Engine**: Hardware-accelerated local inference API listening at `http://127.0.0.1:11434/v1` (OpenAI & Ollama compatible). Zero telemetry, 0 token costs, 100% offline. Pre-wired into VS Code via Continue (Ctrl+L).
 - **Windows 11 Fluent Task Manager**: Modernized system performance and resource monitor (`Ctrl + Shift + Esc`) with anti-aliased gradient utilization curves, clean KPI cards, friendly network interface mapping (`Ethernet`, `Wi-Fi`, `Virtual Bridge`), and colored status badges.
-- **Self-Hosting Day-by-Day OS Development**: Develop and customize DevOS directly while using it as your daily operating system. Native Python/Qt components live directly under `/usr/local/share/devos/components/` — edit code in VS Code, hit Save, and your changes take effect instantly. Backed by automatic Btrfs/Snapper instant rollback snapshots.
+- **Self-Hosting Day-by-Day OS Development**: Develop and customize DevOS directly while using it as your daily operating system. Native Python/Qt components live directly under `/usr/local/share/devos/components/` — edit code in VS Code, hit Save, and your changes take effect instantly. On a configured Btrfs installation, Snapper restore points can help recover system changes; ext4 installations need a separate backup method.
 - **Full Developer Stack**: VS Code (“DevOS Code”), Git, Git LFS, GitHub CLI, Node.js + npm, Python 3 + pip/venv/pipx, Ubuntu-provided PHP (FPM + common extensions) + Composer, MariaDB, PostgreSQL, Redis, SQLite, Podman / podman-compose (Docker-compatible), Neovim, tmux, ripgrep, fzf, btop, jq.
 - `devos serve` scaffolds Laravel, Next.js and FastAPI projects and shows the status of local services.
 
@@ -491,7 +495,7 @@ DevOS includes a dark dashboard for hardware status, storage tools, local runtim
 |---|---|---|
 | Processor | 64-bit (x86-64), 2 cores | 4+ cores |
 | Memory | 4 GB | **8 GB** (for Android apps + AI + browser at the same time) |
-| Storage | 30 GB | 64 GB+ SSD |
+| Storage | 32 GB | 64 GB+ SSD |
 | Firmware | UEFI or legacy BIOS | UEFI |
 | Graphics | Any | Intel or AMD (hardware-accelerated Android apps) |
 
@@ -557,8 +561,8 @@ Choose whichever tool is easiest for you:
   1. The **DevOS Installer** opens automatically on the desktop.
   2. Follow the friendly prompts: **Welcome → Location & Language → Keyboard → Partitions → Account → AI → User type → Apps → Summary**.
   3. Under *Partitions*, select:
-     - **Erase disk:** Best for a clean system; sets up high-speed compressed storage automatically.
-     - **Manual partitioning / alongside (when offered):** Choose an appropriate dual-boot layout and review the summary before writing changes. Back up existing data first.
+     - **Manual partitioning (default):** Click **Next** to see the partition editor. Select each drive from the storage selector, then create, delete, or edit its partitions. Enable formatting only for partitions you want erased. Assign `/` to the DevOS system partition and, for UEFI, `/boot/efi` to a FAT32 EFI partition with the boot flag. Leave other partitions unchanged to preserve them. You can edit multiple drives before proceeding.
+     - **Erase disk:** Automatically prepares the selected physical disk for DevOS; every partition on that disk is erased. Other disks retain their data. Back up existing data before changing partitions.
   4. Create your account name (password is optional; if left blank, DevOS signs in automatically).
   5. Review the summary, then click **Install**. Installation time depends on the drive, hardware and selected downloads.
   6. When finished, restart your PC and remove the USB drive when the screen turns off.
@@ -718,31 +722,19 @@ BTRFS error: open_ctree failed: -5
 ### Why this happens
 Btrfs maintains an in-flight write log (`tree-log`). If power is abruptly cut before a transaction commits, the log may become incomplete. On reboot, the kernel refuses to mount `/` to protect data, landing you in the emergency `(initramfs)` BusyBox prompt.
 
-### How to resolve it in 60 seconds
-Inside the `(initramfs)` prompt:
-> **Note:** You are already running as `root` (do **not** use `sudo` or `apt`), and the unmount command is `umount` (without an `n`).
+### Diagnose before repairing
 
-1. **Clear the interrupted log tree:**
-   ```bash
-   btrfs rescue zero-log /dev/nvme0n1p2
-   ```
-   *(Replace `/dev/nvme0n1p2` with your root partition, e.g. `/dev/sda2`, shown in the screen message).*
+A mount failure is not necessarily a file-permission problem. A full disk,
+incorrect boot configuration, hardware I/O errors, and filesystem corruption
+require different remedies. Boot the live USB, preserve important files on a
+separate disk, and inspect the kernel error before selecting a repair.
 
-2. **Clear corrupted free-space cache (if extent count mismatch was reported):**
-   ```bash
-   btrfs rescue clear-space-cache v2 /dev/nvme0n1p2
-   ```
-
-3. **Reboot back to normal desktop:**
-   ```bash
-   reboot -f
-   ```
-
-### Built-in DevOS Protections (Never Face This Again)
-- **Automatic Initramfs Self-Healing (`devos-btrfs-heal`):** DevOS automatically intercepts tree-log replay failures early in boot, executes `btrfs rescue zero-log`, and mounts with `clear_cache` to self-heal and boot straight into the desktop without user intervention.
-- **Panic Emergency Screen (`devos-panic-guide`):** Displays instant step-by-step instructions if unexpected manual intervention is required.
-- **Fast 15s Shutdown (`devos-shutdown.conf`):** Terminates lingering background tasks rapidly to ensure NVMe and SSD write caches flush fully before machine poweroff.
-- See detailed documentation in [`docs/BTRFS_RECOVERY.md`](docs/BTRFS_RECOVERY.md).
+DevOS's initramfs helper provides diagnostics without clearing logs or forcing
+write access. A read-only root during early boot can also be normal. Btrfs
+`zero-log` is a targeted recovery command that can discard recent changes; it
+must not run automatically for every failed write or mount. See the
+[Btrfs recovery guide](docs/BTRFS_RECOVERY.md) and the
+[upstream rescue documentation](https://btrfs.readthedocs.io/en/latest/btrfs-rescue.html).
 
 ---
 

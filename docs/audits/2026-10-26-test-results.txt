@@ -1,0 +1,33 @@
+Module	Exit	Result
+test_2027_features.py	0	6 passed in 0.01s
+test_ai_agent.py	timeout	Timed out; incomplete
+test_ai_core.py	1	2 passed, 6 errors in 0.14s
+test_apphub_and_layers.py	0	10 passed in 0.04s
+test_apps_manager.py	0	34 passed in 0.03s
+test_archive.py	0	4 passed in 0.04s
+test_assistant.py	1	4 failed, 139 passed, 140 subtests passed in 2.32s
+test_batch_decode.py	1	4 passed, 3 errors in 0.17s
+test_code_agent_brief.py	0	60 passed, 27 warnings in 2.97s
+test_code_agent_engine.py	1	1 failed, 29 passed in 0.08s
+test_code_agent_gui.py	0	38 passed in 0.84s
+test_dashboard_and_security.py	1	7 errors in 0.08s
+test_devos_cli.py	0	5 passed in 0.02s
+test_disk_manager.py	0	6 passed in 0.01s
+test_display.py	0	2 passed in 0.01s
+test_explorer_state.py	0	11 passed in 1.16s
+test_features_notice.py	0	5 passed in 0.01s
+test_file_picker.py	0	2 passed in 0.10s
+test_hardware_manager.py	0	9 passed in 0.01s
+test_install_branding.py	0	9 passed in 0.01s
+test_installer_boot.py	0	4 passed in 0.01s
+test_kids_mode.py	0	1 passed in 0.01s
+test_modesty.py	0	4 passed in 0.29s
+test_native_alternatives.py	0	5 passed in 0.01s
+test_notepad.py	0	18 passed in 0.04s
+test_optimizer.py	0	25 passed in 0.97s
+test_power_settings.py	0	6 passed in 0.03s
+test_sddm_theme_runtime.py	0	1 passed in 2.04s
+test_sound_manager.py	0	5 passed in 0.09s
+test_theme_switcher.py	timeout	Timed out; incomplete
+test_updater.py	0	14 passed, 5 subtests passed in 0.02s
+test_watchdog.py	0	5 passed in 0.05s

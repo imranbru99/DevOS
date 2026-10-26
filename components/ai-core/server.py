@@ -4,8 +4,8 @@ DevOS Local AI Inference Server (ai-core)
 Provides an offline OpenAI-compatible HTTP service on 127.0.0.1:11434.
 Zero external dependencies required (uses built-in http.server & json).
 
-Speed is chosen from this PC: prompt processing uses every thread, replies use
-one thread per physical core, and flash attention plus a compact KV cache are
+Speed is chosen from this PC: concurrent slots share a CPU budget, and
+flash attention plus a compact KV cache are
 turned on when this build of the engine accepts them. Docs: GET /docs.
 """
 
@@ -198,11 +198,11 @@ def thread_plan(logical: int, physical: int, parallel: int) -> Tuple[int, int]:
     logical = max(1, logical)
     physical = max(1, min(physical, logical))
     slots = max(1, parallel)
-    if slots <= 1:
-        gen = min(12, physical)
-    else:
-        gen = min(12, max(4, (physical * 3) // max(2, slots + 1)))
-    batch = max(gen, logical)
+    # Leave one logical CPU available on PCs with more than two threads, and
+    # share the remaining default budget across simultaneous model slots.
+    budget = max(1, (logical - 1 if logical > 2 else logical) // slots)
+    gen = min(12, physical, budget)
+    batch = budget
     gen = max(1, min(_int_env("DEVOS_AI_THREADS", gen), logical))
     batch = max(gen, min(_int_env("DEVOS_AI_BATCH_THREADS", batch), logical))
     return gen, batch
@@ -238,8 +238,8 @@ def llama_speed_kwargs(kind: str, ram_gb: float, parallel: int, gpu_layers: int,
         "n_ubatch": min(512, n_batch),
         "n_gpu_layers": gpu_layers,
         "use_mmap": True,
-        # Locking a multi-GB file on a 32 GB PC (reported ~31.1 GB) keeps it locked in RAM with 0 cold-start latency.
-        "use_mlock": ram_gb >= 24 and gpu_layers == 0,
+        # Keep model pages reclaimable when other applications need memory.
+        "use_mlock": False,
         "verbose": False,
     }
     if fast_mode(fast):
@@ -437,6 +437,9 @@ class _CpuBoost:
         return found
 
     def enter(self):
+        # Respect the user's power profile unless boosting was explicitly enabled.
+        if os.environ.get("DEVOS_AI_CPU_BOOST", "0") != "1":
+            return
         with self._lock:
             self._depth += 1
             if self._depth != 1:

@@ -1,0 +1,9 @@
+[Unit]
+Description=DevOS optional resource-intensive services
+
+[Slice]
+CPUWeight=50
+IOWeight=50
+MemoryAccounting=yes
+ManagedOOMMemoryPressure=kill
+ManagedOOMMemoryPressureLimit=50%

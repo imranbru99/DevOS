@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000">
+  <defs>
+    <linearGradient id="base" x2="1" y2="1">
+      <stop stop-color="#070a12"/>
+      <stop offset="1" stop-color="#0b1930"/>
+    </linearGradient>
+    <radialGradient id="halo">
+      <stop stop-color="#126b91" stop-opacity=".45"/>
+      <stop offset="1" stop-color="#126b91" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="arc" x2="1" y2="1">
+      <stop stop-color="#38bdf8" stop-opacity="0"/>
+      <stop offset=".55" stop-color="#38bdf8" stop-opacity=".32"/>
+      <stop offset="1" stop-color="#818cf8" stop-opacity=".08"/>
+    </linearGradient>
+  </defs>
+  <path fill="url(#base)" d="M0 0h1600v1000H0z"/>
+  <ellipse cx="1300" cy="360" rx="700" ry="660" fill="url(#halo)"/>
+  <g fill="none" stroke="url(#arc)">
+    <ellipse cx="1320" cy="360" rx="470" ry="470" stroke-width="2"/>
+    <ellipse cx="1320" cy="360" rx="510" ry="510" stroke-width="1"/>
+    <ellipse cx="1320" cy="360" rx="625" ry="625" stroke-width="1"/>
+    <path d="M300 1100C700 700 900 950 1050 500S1410 40 1750 200" stroke-width="3"/>
+    <path d="M320 1130C720 730 920 980 1070 530S1430 70 1770 230" stroke-width="1"/>
+  </g>
+  <g fill="#7dd3fc" fill-opacity=".5">
+    <circle cx="901" cy="147" r="3"/>
+    <circle cx="1070" cy="801" r="3"/>
+    <circle cx="1438" cy="824" r="2"/>
+  </g>
+</svg>
