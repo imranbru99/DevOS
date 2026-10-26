@@ -182,11 +182,11 @@ COMMAND_CATALOG = {
         "tags": ["modem", "cellular", "lte", "sim", "4g", "5g"],
     },
     "queue": {
-        "desc": "AI Multi-Agent Pipeline & Rate-Limit Scheduler (ChatGPT, Antigravity, Local)",
+        "desc": "DevOS AI Command Pipeline & Rate-Limit Scheduler (ChatGPT, Antigravity, Local)",
         "tags": ["pipeline", "scheduler", "queue", "serial", "chain", "chatgpt", "antigravity", "cron", "cooldown"],
     },
     "pipeline": {
-        "desc": "AI Multi-Agent Pipeline & Rate-Limit Scheduler (ChatGPT, Antigravity, Local)",
+        "desc": "DevOS AI Command Pipeline & Rate-Limit Scheduler (ChatGPT, Antigravity, Local)",
         "tags": ["pipeline", "scheduler", "queue", "serial", "chain", "chatgpt", "antigravity", "cron", "cooldown"],
     },
 }

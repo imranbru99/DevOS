@@ -13,12 +13,34 @@ import time
 from pathlib import Path
 
 from PyQt5 import QtCore, QtGui, QtWidgets
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt, QTimer, QCoreApplication
+from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QLineEdit
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "components" / "ai-agent"))
 from task_pipeline import TaskPipeline, parse_reset_time
+
+
+def get_app_icon():
+    """Resolve the highest-fidelity DevOS AI Pipeline application icon."""
+    icon = QIcon.fromTheme("devos-ai-pipeline")
+    if not icon.isNull():
+        return icon
+
+    search_paths = [
+        Path.home() / ".local/share/icons/hicolor/scalable/apps/devos-ai-pipeline.svg",
+        Path.home() / ".local/share/icons/hicolor/256x256/apps/devos-ai-pipeline.png",
+        ROOT / "build/includes.chroot/usr/share/icons/hicolor/scalable/apps/devos-ai-pipeline.svg",
+        ROOT / "build/includes.chroot/usr/share/icons/hicolor/256x256/apps/devos-ai-pipeline.png",
+        ROOT / "build/includes.chroot/usr/share/icons/hicolor/512x512/apps/devos-ai-pipeline.png",
+        Path("/usr/share/icons/hicolor/scalable/apps/devos-ai-pipeline.svg"),
+        Path("/usr/share/icons/hicolor/256x256/apps/devos-ai-pipeline.png"),
+    ]
+    for p in search_paths:
+        if p.exists():
+            return QIcon(str(p))
+    return icon
 
 STYLE = """
 QWidget {
@@ -193,6 +215,10 @@ class PipelineWindow(QtWidgets.QMainWindow):
         super().__init__()
         self.pipeline = TaskPipeline()
         self.setWindowTitle("DevOS AI Command Pipeline & Scheduler")
+        self.setObjectName("devos-ai-pipeline")
+        icon = get_app_icon()
+        if not icon.isNull():
+            self.setWindowIcon(icon)
         self.resize(880, 720)
         self.setStyleSheet(STYLE)
         self.init_ui()
@@ -216,10 +242,18 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
         # Header
         header_layout = QtWidgets.QHBoxLayout()
+        header_layout.setSpacing(14)
+
+        icon_lbl = QtWidgets.QLabel()
+        app_icon = get_app_icon()
+        if not app_icon.isNull():
+            icon_lbl.setPixmap(app_icon.pixmap(46, 46))
+        header_layout.addWidget(icon_lbl)
+
         header_vbox = QtWidgets.QVBoxLayout()
-        title = QtWidgets.QLabel("AI Multi-Agent Command Pipeline")
+        title = QtWidgets.QLabel("DevOS AI Command Pipeline")
         title.setObjectName("title")
-        subtitle = QtWidgets.QLabel("Serial execution & auto-scheduling across ChatGPT, Antigravity & Local AI")
+        subtitle = QtWidgets.QLabel("Serial multi-agent execution & auto-scheduling across ChatGPT, Antigravity & Local AI")
         subtitle.setObjectName("subtitle")
         header_vbox.addWidget(title)
         header_vbox.addWidget(subtitle)
@@ -430,8 +464,16 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
 def main():
     app = QtWidgets.QApplication(sys.argv)
-    app.setApplicationName("DevOS AI Pipeline")
+    app.setDesktopFileName("devos-ai-pipeline")
+    QCoreApplication.setApplicationName("devos-ai-pipeline")
+    QCoreApplication.setApplicationDisplayName("DevOS AI Command Pipeline")
+    icon = get_app_icon()
+    if not icon.isNull():
+        app.setWindowIcon(icon)
+
     win = PipelineWindow()
+    if not icon.isNull():
+        win.setWindowIcon(icon)
     win.show()
     sys.exit(app.exec_())
 
