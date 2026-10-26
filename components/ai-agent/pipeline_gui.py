@@ -201,6 +201,15 @@ class TaskCard(QtWidgets.QFrame):
 
         layout.addLayout(center_box, stretch=1)
 
+        # GitHub Repo Link button if repo was created
+        github_url = self.task.get("github_url")
+        if github_url:
+            btn_repo = QtWidgets.QPushButton("🐙 Open GitHub")
+            btn_repo.setToolTip(github_url)
+            btn_repo.setStyleSheet("background-color: #238636; color: white; font-weight: 600; padding: 6px 12px; border-radius: 6px;")
+            btn_repo.clicked.connect(lambda: subprocess.Popen(["xdg-open", github_url]))
+            layout.addWidget(btn_repo)
+
         # Failover action button if rate limited
         if status == "RATE_LIMITED" and self.on_failover:
             btn_failover = QtWidgets.QPushButton("⚡ Switch to Antigravity")
@@ -324,6 +333,25 @@ class PipelineWindow(QtWidgets.QMainWindow):
         input_row.addWidget(btn_add)
 
         form_layout.addLayout(input_row)
+
+        # GitHub Automation Row
+        gh_row = QtWidgets.QHBoxLayout()
+        gh_row.setSpacing(10)
+
+        self.gh_check = QtWidgets.QCheckBox("🐙 Auto-Create GitHub Repo & Push Code (README included)")
+        self.gh_check.setStyleSheet("color: #38bdf8; font-weight: 500;")
+        gh_row.addWidget(self.gh_check)
+
+        self.gh_name_input = QLineEdit()
+        self.gh_name_input.setPlaceholderText("Repo Name (e.g. 'laravel-auth' or auto)")
+        self.gh_name_input.setMaximumWidth(220)
+        gh_row.addWidget(self.gh_name_input)
+
+        self.gh_desc_input = QLineEdit()
+        self.gh_desc_input.setPlaceholderText("Description (e.g. 'Production auth module')")
+        gh_row.addWidget(self.gh_desc_input, stretch=1)
+
+        form_layout.addLayout(gh_row)
         main_layout.addWidget(form_card)
 
         # Task List Area
@@ -356,9 +384,24 @@ class PipelineWindow(QtWidgets.QMainWindow):
         if not prompt:
             return
         agent = self.agent_combo.currentData()
-        self.pipeline.add(prompt, agent=agent)
+        create_repo = self.gh_check.isChecked()
+        repo_name = self.gh_name_input.text().strip()
+        repo_desc = self.gh_desc_input.text().strip()
+
+        self.pipeline.add(
+            prompt,
+            agent=agent,
+            create_repo=create_repo,
+            repo_name=repo_name,
+            repo_desc=repo_desc,
+        )
         self.prompt_input.clear()
-        self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Queued [{agent.upper()}]: {prompt}")
+        self.gh_name_input.clear()
+        self.gh_desc_input.clear()
+        self.gh_check.setChecked(False)
+
+        tag = f" [🐙 GH Repo: {repo_name or 'auto'}]" if create_repo else ""
+        self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Queued [{agent.upper()}]{tag}: {prompt}")
         self.refresh_queue()
 
     def refresh_queue(self):

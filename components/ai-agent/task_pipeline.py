@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 STATE_FILE = Path(os.path.expanduser("~/.local/share/devos/ai-pipeline.json"))
+CONTEXT_FILE = Path(os.path.expanduser("~/.local/share/devos/ai-pipeline-context.json"))
 AGENTAPI_BIN = Path(os.path.expanduser("~/.gemini/antigravity/bin/agentapi"))
 
 
@@ -42,6 +43,92 @@ def notify(title: str, message: str, urgency: str = "normal"):
         )
     except Exception:
         pass
+
+
+def extract_repo_metadata(text: str) -> tuple[Optional[str], Optional[str]]:
+    """Extracts proposed repository name and description from AI response or prompt."""
+    name = None
+    desc = None
+    # Pattern: repo: name or repo_name: name or repository: name
+    m_name = re.search(r"(?:repo(?:sitory)?(?:_name)?|github_repo)\s*[:=]\s*[`'\"]?([a-zA-Z0-9_\-\.]+)[`'\"]?", text, re.IGNORECASE)
+    if m_name:
+        name = m_name.group(1).strip()
+
+    # Pattern: description: ...
+    m_desc = re.search(r"desc(?:ription)?\s*[:=]\s*[`'\"]?([^`'\n]+)[`'\"]?", text, re.IGNORECASE)
+    if m_desc:
+        desc = m_desc.group(1).strip()
+
+    return name, desc
+
+
+def create_github_repo(
+    repo_name: str,
+    description: str = "",
+    project_dir: str = "",
+    public: bool = True,
+    push: bool = True,
+    open_browser: bool = True,
+) -> tuple[bool, str]:
+    """Creates a GitHub repository under the logged-in account, pushes code, and opens it in the browser."""
+    clean_name = re.sub(r"[^a-zA-Z0-9_\-\.]", "-", repo_name.strip()).strip("-")
+    if not clean_name:
+        return False, "Invalid repository name"
+
+    p_path = Path(project_dir).resolve() if project_dir else Path.cwd()
+    if not p_path.exists():
+        p_path.mkdir(parents=True, exist_ok=True)
+
+    # Check gh auth status
+    gh_check = subprocess.run(["gh", "auth", "status"], capture_output=True, text=True)
+    if gh_check.returncode != 0:
+        # Fallback to opening browser create form
+        url = f"https://github.com/new?name={clean_name}&description={description}"
+        if open_browser:
+            subprocess.Popen(["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True, url
+
+    # Ensure git repo is initialized locally
+    if not (p_path / ".git").exists():
+        subprocess.run(["git", "init", "-b", "main"], cwd=str(p_path), check=False)
+
+    # Enforce developer identity
+    subprocess.run(["git", "config", "user.name", "Imran Ahmed"], cwd=str(p_path), check=False)
+    subprocess.run(["git", "config", "user.email", "me@imrandev.bd"], cwd=str(p_path), check=False)
+
+    # Ensure README.md exists
+    readme_path = p_path / "README.md"
+    if not readme_path.exists():
+        with open(readme_path, "w", encoding="utf-8") as f:
+            f.write(
+                f"# {clean_name}\n\n"
+                f"{description or 'Created with DevOS AI Task Pipeline.'}\n\n"
+                f"---\n*Developed by [Imran Ahmed](https://imrandev.bd)*\n"
+            )
+
+    # Add and commit if there are changes
+    subprocess.run(["git", "add", "."], cwd=str(p_path), check=False)
+    subprocess.run(["git", "commit", "-m", f"Initial commit: {clean_name}"], cwd=str(p_path), check=False)
+
+    vis_flag = "--public" if public else "--private"
+    cmd = ["gh", "repo", "create", f"imranbru99/{clean_name}", vis_flag]
+    if description:
+        cmd.extend(["-d", description])
+    if push:
+        cmd.extend(["--source", str(p_path), "--remote", "origin", "--push"])
+
+    res = subprocess.run(cmd, cwd=str(p_path), capture_output=True, text=True)
+    full_url = f"https://github.com/imranbru99/{clean_name}"
+
+    if res.returncode == 0 or "already exists" in (res.stderr or "").lower():
+        if open_browser:
+            subprocess.Popen(["xdg-open", full_url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True, full_url
+    else:
+        fallback_url = f"https://github.com/new?name={clean_name}&description={description}"
+        if open_browser:
+            subprocess.Popen(["xdg-open", fallback_url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return False, res.stderr or "Failed to create repo via gh"
 
 
 def parse_reset_time(text: str) -> Optional[datetime.datetime]:
@@ -76,10 +163,12 @@ def parse_reset_time(text: str) -> Optional[datetime.datetime]:
 
 
 class TaskPipeline:
-    def __init__(self, state_file: Path = STATE_FILE):
+    def __init__(self, state_file: Path = STATE_FILE, context_file: Path = CONTEXT_FILE):
         self.state_file = state_file
+        self.context_file = context_file
         self.state_file.parent.mkdir(parents=True, exist_ok=True)
         self.queue: List[Dict[str, Any]] = self._load()
+        self.context: Dict[str, Any] = self._load_context()
 
     def _load(self) -> List[Dict[str, Any]]:
         if self.state_file.exists():
@@ -94,7 +183,29 @@ class TaskPipeline:
         with open(self.state_file, "w", encoding="utf-8") as f:
             json.dump(self.queue, f, indent=2)
 
-    def add(self, prompt: str, agent: str = "antigravity", project: str = "", delay_seconds: int = 0) -> str:
+    def _load_context(self) -> Dict[str, Any]:
+        if self.context_file.exists():
+            try:
+                with open(self.context_file, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                return {}
+        return {}
+
+    def _save_context(self):
+        with open(self.context_file, "w", encoding="utf-8") as f:
+            json.dump(self.context, f, indent=2)
+
+    def add(
+        self,
+        prompt: str,
+        agent: str = "antigravity",
+        project: str = "",
+        delay_seconds: int = 0,
+        create_repo: bool = False,
+        repo_name: str = "",
+        repo_desc: str = "",
+    ) -> str:
         task_id = f"task_{int(time.time() * 1000)}"
         run_at = (datetime.datetime.now() + datetime.timedelta(seconds=delay_seconds)).isoformat()
         item = {
@@ -107,6 +218,10 @@ class TaskPipeline:
             "retry_at": None,
             "created_at": datetime.datetime.now().isoformat(),
             "output": None,
+            "create_repo": create_repo,
+            "repo_name": repo_name,
+            "repo_desc": repo_desc,
+            "github_url": None,
         }
         self.queue.append(item)
         self._save()
@@ -135,12 +250,20 @@ class TaskPipeline:
                     print(f"[Rate-Limited] {task['id']} ({task['agent']}) waiting until {retry_time.strftime('%I:%M %p')} ({remaining}s remaining)")
                     continue
 
+            # Resolve context variables in prompt: e.g. {github_repo}, {repo_url}, {repo_name}
+            resolved_prompt = task["prompt"]
+            for k, v in self.context.items():
+                resolved_prompt = resolved_prompt.replace(f"{{{k}}}", str(v))
+            task["resolved_prompt"] = resolved_prompt
+
             # Run this task
             task["status"] = "RUNNING"
             self._save()
-            notify("Executing Task", f"[{task['agent'].upper()}] Starting command: {task['prompt'][:60]}...")
+            notify("Executing Task", f"[{task['agent'].upper()}] Starting command: {resolved_prompt[:60]}...")
 
-            success, output = self._dispatch(task)
+            task_dispatch = dict(task)
+            task_dispatch["prompt"] = resolved_prompt
+            success, output = self._dispatch(task_dispatch)
             task["output"] = output
 
             # Check if rate-limited
@@ -165,6 +288,30 @@ class TaskPipeline:
 
             if success:
                 task["status"] = "COMPLETED"
+                # Check if GitHub repository creation is requested or proposed
+                if task.get("create_repo") or task.get("repo_name") or "@create-repo" in task["prompt"]:
+                    r_name = task.get("repo_name") or ""
+                    r_desc = task.get("repo_desc") or ""
+                    if not r_name:
+                        ext_name, ext_desc = extract_repo_metadata(output)
+                        r_name = ext_name or f"devos-project-{int(time.time())}"
+                        r_desc = r_desc or (ext_desc or "")
+                    
+                    ok_repo, repo_info = create_github_repo(
+                        repo_name=r_name,
+                        description=r_desc,
+                        project_dir=task.get("project", ""),
+                        push=True,
+                        open_browser=True,
+                    )
+                    if ok_repo:
+                        task["github_url"] = repo_info
+                        self.context["github_repo"] = repo_info
+                        self.context["repo_url"] = repo_info
+                        self.context["repo_name"] = r_name
+                        self._save_context()
+                        notify("GitHub Repo Created", f"Created & pushed: {repo_info}")
+                
                 notify("Task Completed", f"[{task['agent'].upper()}] Command finished! Ready for next in chain.")
             else:
                 task["status"] = "FAILED"
@@ -250,6 +397,9 @@ def main():
     add_p.add_argument("--agent", choices=["chatgpt", "antigravity", "local"], default="antigravity", help="Target AI agent")
     add_p.add_argument("--project", default="", help="Project path or context")
     add_p.add_argument("--delay", type=int, default=0, help="Delay in seconds before running")
+    add_p.add_argument("--create-repo", action="store_true", help="Auto-create GitHub repo and push")
+    add_p.add_argument("--repo-name", default="", help="GitHub repository name")
+    add_p.add_argument("--repo-desc", default="", help="GitHub repository description")
 
     sub.add_parser("list", help="List all queued and running commands")
     sub.add_parser("run", help="Run the pipeline loop until all tasks complete")
@@ -264,7 +414,15 @@ def main():
         return
 
     elif args.cmd == "add":
-        tid = pipeline.add(args.prompt, agent=args.agent, project=args.project, delay_seconds=args.delay)
+        tid = pipeline.add(
+            args.prompt,
+            agent=args.agent,
+            project=args.project,
+            delay_seconds=args.delay,
+            create_repo=args.create_repo,
+            repo_name=args.repo_name,
+            repo_desc=args.repo_desc,
+        )
         print(f"Task queued: {tid} [{args.agent.upper()}] -> '{args.prompt}'")
 
     elif args.cmd == "list":
