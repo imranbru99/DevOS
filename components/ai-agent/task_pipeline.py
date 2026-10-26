@@ -21,15 +21,87 @@ import datetime
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
+import urllib.parse
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 STATE_FILE = Path(os.path.expanduser("~/.local/share/devos/ai-pipeline.json"))
 CONTEXT_FILE = Path(os.path.expanduser("~/.local/share/devos/ai-pipeline-context.json"))
 AGENTAPI_BIN = Path(os.path.expanduser("~/.gemini/antigravity/bin/agentapi"))
+CUSTOM_AGENTS_DIR = Path.expanduser(Path("~/.config/devos/agents"))
+
+
+def discover_agents() -> Dict[str, Dict[str, Any]]:
+    """Auto-detects available AI agents on the system and in custom directories."""
+    agents = {}
+
+    # 1. Google Antigravity
+    ag_bin = shutil.which("antigravity") or AGENTAPI_BIN
+    ag_ok = bool(ag_bin and Path(ag_bin).exists())
+    agents["antigravity"] = {
+        "name": "Google Antigravity",
+        "bin": str(ag_bin) if ag_ok else None,
+        "color": "#2563eb",
+        "available": ag_ok,
+    }
+
+    # 2. ChatGPT / Codex CLI
+    codex_candidates = [
+        shutil.which("codex"),
+        Path.home() / ".npm-global/bin/codex",
+        Path("/usr/local/bin/codex"),
+    ]
+    codex_bin = next((str(p) for p in codex_candidates if p and Path(p).exists()), None)
+    agents["chatgpt"] = {
+        "name": "ChatGPT / Codex",
+        "bin": codex_bin,
+        "color": "#10a37f",
+        "available": True,
+    }
+
+    # 3. Claude Code CLI
+    claude_bin = shutil.which("claude")
+    agents["claude"] = {
+        "name": "Claude Code",
+        "bin": claude_bin,
+        "color": "#d97706",
+        "available": bool(claude_bin),
+    }
+
+    # 4. Aider Multi-Model Pair Programmer
+    aider_bin = shutil.which("aider")
+    agents["aider"] = {
+        "name": "Aider Pair Programmer",
+        "bin": aider_bin,
+        "color": "#059669",
+        "available": bool(aider_bin),
+    }
+
+    # 5. DevOS Local AI / Ollama
+    ollama_bin = shutil.which("ollama")
+    agents["local"] = {
+        "name": "DevOS Local AI",
+        "bin": ollama_bin,
+        "color": "#7c3aed",
+        "available": True,
+    }
+
+    # 6. Custom Agents directory: ~/.config/devos/agents/
+    if CUSTOM_AGENTS_DIR.exists():
+        for script in list(CUSTOM_AGENTS_DIR.glob("*.sh")) + list(CUSTOM_AGENTS_DIR.glob("*.py")):
+            key = script.stem.lower()
+            agents[key] = {
+                "name": f"Custom: {script.stem.title()}",
+                "bin": str(script),
+                "color": "#ec4899",
+                "available": True,
+            }
+
+    return agents
 
 
 def notify(title: str, message: str, urgency: str = "normal"):
@@ -39,13 +111,10 @@ def notify(title: str, message: str, urgency: str = "normal"):
             ["notify-send", "-a", "DevOS AI Pipeline", "-u", urgency, title, message],
             check=False,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
+            stderr=subprocess.DEVNULL,
         )
     except Exception:
         pass
-
-
-import urllib.parse
 
 
 def copy_to_clipboard(text: str):
@@ -427,6 +496,52 @@ class TaskPipeline:
                     return True, content
             except Exception as e:
                 return False, f"Local AI Error: {e}"
+
+        known_agents = discover_agents()
+
+        # Claude Code
+        if agent == "claude":
+            bin_path = known_agents.get("claude", {}).get("bin") or shutil.which("claude")
+            if bin_path:
+                try:
+                    res = subprocess.run([bin_path, "-p", prompt], capture_output=True, text=True, timeout=300)
+                    return res.returncode == 0, res.stdout or res.stderr
+                except Exception as e:
+                    return False, f"Claude CLI error: {e}"
+            return False, "Claude CLI (claude) not installed"
+
+        # Aider Pair Programmer
+        elif agent == "aider":
+            bin_path = known_agents.get("aider", {}).get("bin") or shutil.which("aider")
+            if bin_path:
+                try:
+                    res = subprocess.run([bin_path, "--message", prompt, "--no-auto-commits"], capture_output=True, text=True, timeout=300)
+                    return res.returncode == 0, res.stdout or res.stderr
+                except Exception as e:
+                    return False, f"Aider CLI error: {e}"
+            return False, "Aider CLI (aider) not installed"
+
+        # Custom agent scripts in ~/.config/devos/agents/
+        if agent in known_agents and known_agents[agent].get("bin"):
+            bin_path = known_agents[agent]["bin"]
+            try:
+                if bin_path.endswith(".py"):
+                    cmd = [sys.executable, bin_path, prompt]
+                else:
+                    cmd = [bin_path, prompt]
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                return res.returncode == 0, res.stdout or res.stderr
+            except Exception as e:
+                return False, f"Custom agent '{agent}' error: {e}"
+
+        # Universal fallback: any CLI tool on PATH
+        generic_bin = shutil.which(agent)
+        if generic_bin:
+            try:
+                res = subprocess.run([generic_bin, prompt], capture_output=True, text=True, timeout=300)
+                return res.returncode == 0, res.stdout or res.stderr
+            except Exception as e:
+                return False, f"Agent '{agent}' execution error: {e}"
 
         return False, f"Unknown agent: {agent}"
 

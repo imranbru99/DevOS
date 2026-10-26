@@ -12,7 +12,7 @@ import shutil
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "components" / "ai-agent"))
-from task_pipeline import TaskPipeline, parse_reset_time, extract_repo_metadata
+from task_pipeline import TaskPipeline, parse_reset_time, extract_repo_metadata, discover_agents
 
 
 class TestTaskPipeline(unittest.TestCase):
@@ -24,6 +24,14 @@ class TestTaskPipeline(unittest.TestCase):
 
     def tearDown(self):
         shutil.rmtree(self.test_dir)
+
+    def test_discover_agents(self):
+        agents = discover_agents()
+        self.assertIn("antigravity", agents)
+        self.assertIn("chatgpt", agents)
+        self.assertIn("claude", agents)
+        self.assertIn("aider", agents)
+        self.assertIn("local", agents)
 
     def test_parse_reset_time_from_codex_banner(self):
         # Text from user's screenshot

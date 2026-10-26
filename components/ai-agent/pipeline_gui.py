@@ -19,7 +19,7 @@ from PyQt5.QtWidgets import QLineEdit
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "components" / "ai-agent"))
-from task_pipeline import TaskPipeline, parse_reset_time
+from task_pipeline import TaskPipeline, parse_reset_time, discover_agents
 
 
 def get_app_icon():
@@ -150,17 +150,14 @@ class TaskCard(QtWidgets.QFrame):
 
         # Agent icon / badge
         agent = self.task.get("agent", "antigravity").lower()
-        badge = QtWidgets.QLabel()
+        known = discover_agents()
+        agent_info = known.get(agent, {
+            "name": agent.title(),
+            "color": "#475569"
+        })
+        badge = QtWidgets.QLabel(agent_info["name"])
         badge.setObjectName("badge_agent")
-        if agent == "chatgpt":
-            badge.setText("ChatGPT / Codex")
-            badge.setStyleSheet("background-color: #10a37f; color: white;")
-        elif agent == "antigravity":
-            badge.setText("Google Antigravity")
-            badge.setStyleSheet("background-color: #2563eb; color: white;")
-        else:
-            badge.setText("DevOS Local AI")
-            badge.setStyleSheet("background-color: #7c3aed; color: white;")
+        badge.setStyleSheet(f"background-color: {agent_info['color']}; color: white;")
         layout.addWidget(badge)
 
         # Center info: prompt & status
@@ -327,9 +324,10 @@ class PipelineWindow(QtWidgets.QMainWindow):
         input_row.setSpacing(10)
 
         self.agent_combo = QtWidgets.QComboBox()
-        self.agent_combo.addItem("ChatGPT / Codex", "chatgpt")
-        self.agent_combo.addItem("Google Antigravity", "antigravity")
-        self.agent_combo.addItem("DevOS Local AI", "local")
+        known = discover_agents()
+        for k, v in known.items():
+            avail_bullet = "● " if v.get("available") else "○ "
+            self.agent_combo.addItem(f"{avail_bullet}{v['name']}", k)
         input_row.addWidget(self.agent_combo)
 
         self.prompt_input = QLineEdit()
