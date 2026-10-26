@@ -1,6 +1,6 @@
 # DevOS current feature inventory
 
-Reviewed against the source tree on **October 22, 2026**. This inventory describes
+Reviewed against the source tree on **October 26, 2026**. This inventory describes
 implemented components and configured installation options. It is not a claim
 that every app, hardware device or installation path has been tested. The current
 source targets Ubuntu 26.04 LTS (Resolute), amd64. An older published ISO may not
@@ -19,6 +19,13 @@ contain these changes.
 - Hybrid BIOS/UEFI build and safe-graphics boot option; boot artifact verification
   checks the image structure. Secure Boot requires separate verification of the exact image.
 - First-boot dashboard with machine statistics, setup guidance, storage tools and runtimes.
+- Animated installer backgrounds and persistent DevOS emblem; ext4 default, manual
+  partitioning and optional explicitly confirmed ext4 A/B/C layouts on additional disks.
+- Shared Qt application dialogs with clearer delete actions and safe defaults;
+  native Qt 5/6 theme support and a targeted migration of old default fonts.
+- See the [README daily-use guide](../README.md#latest-changes-and-daily-use-guide)
+  for current recorder editing, cache care, ordered AI workflow queues, Islamic
+  reminders, live Modesty Filter controls, and component update/recovery commands.
 
 ## Everyday tools and hardware
 

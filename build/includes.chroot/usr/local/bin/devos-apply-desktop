@@ -52,6 +52,25 @@ for candidate in kwriteconfig6 kwriteconfig5; do
     fi
 done
 
+# Migrate only our exact old font defaults, preserving custom fonts and sizes.
+# This also gives native password/confirmation dialogs readable default text.
+font_stamp="${HOME}/.config/devos-dialog-fonts-v1.stamp"
+read_bin="$(command -v kreadconfig6 || command -v kreadconfig5 || true)"
+if [ ! -e "${font_stamp}" ] && [ -n "${kw_bin}" ] && [ -n "${read_bin}" ]; then
+    font_ok=1
+    for key in font menuFont toolBarFont smallestReadableFont; do
+        old_size=9
+        new_size=10
+        if [ "${key}" = smallestReadableFont ]; then old_size=8; new_size=9; fi
+        old="Inter,${old_size},-1,5,50,0,0,0,0,0"
+        current="$("${read_bin}" --file kdeglobals --group General --key "${key}")"
+        if [ "${current}" = "${old}" ]; then
+            "${kw_bin}" --file kdeglobals --group General --key "${key}" "Inter,${new_size},-1,5,50,0,0,0,0,0" || font_ok=0
+        fi
+    done
+    [ "${font_ok}" -ne 1 ] || touch "${font_stamp}"
+fi
+
 # Register the launcher for existing accounts as well as fresh installations.
 if [ -n "${kw_bin}" ]; then
     "${kw_bin}" --file kglobalshortcutsrc --group devos-kids-mode.desktop --key _k_friendly_name "Kids Mode"

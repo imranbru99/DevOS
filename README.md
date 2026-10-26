@@ -134,7 +134,8 @@ Close and reopen DevOS apps after updating; restart browsers and sign out/back i
 for desktop changes. Component updates preserve personal documents and user
 configuration files; they do not copy a whole `/etc` or home folder over your setup.
 An already-enabled Modesty filter is refreshed with its saved mode, private-window
-policy and locked setting. Qt theme dependencies are installed when needed.
+policy and locked setting. Qt theme dependencies are installed when needed. At login, the font migration only
+replaces exact old DevOS Inter defaults; custom fonts and sizes are preserved.
 The updater keeps the previous component files for `devos update --rollback` and
 rejects incompatible Ubuntu bases. Back up your files before major changes.
 

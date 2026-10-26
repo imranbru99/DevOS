@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Desktop-user home/settings write checks during installation and at login, with distinct permission, read-only, full-disk, quota and I/O error reporting.
 
 ### Fixed
+- Update new-account dialog fonts and migrate only exact old DevOS font defaults on login; preserve custom fonts and sizes.
 - Stop editing compiled KDE branding strings; repair damaged cached native packages and gate ISO builds on ELF checksums and critical disk-tool execution.
 - Preserve Modesty Filter locked state and private-window policy during updates; install missing Qt theme dependencies.
 - Choose automatic partition tables for the current firmware, show readable drive/volume review, refresh hardware facts on each installer retry, and skip root Snapper boot jobs without a configuration.
