@@ -4,11 +4,22 @@
 (20 designs, each in four palettes). numpy + Pillow only, fixed seeds, so the
 output is reproducible.
 
-`make_ai_era_wallpapers.py` procedurally renders 100 AI-era ultra-premium QHD
-wallpapers (2560x1440) across 10 futuristic themes (Neural Synapses, Quantum Silicon,
-Cyberpunk Megacities, Latent Diffusion, Bio-Synthetic Organics, Dyson Computing, Liquid
-Titanium, Holographic Auroras, Algorithmic Architecture, and Audio Synthesis). All 100
-are deployed to the `DevOS-Slideshow` suite for dynamic KDE Plasma desktop cycling.
+`make_ai_era_wallpapers.py` renders the 100 AI-era masterpiece QHD wallpapers
+(2560x1440) across 10 flagship themes with dedicated Dark and Light editions:
+1. Flagship 3D Fluid Glass Ribbon (Dark Series: AI_001 - AI_010)
+2. Flagship Frosted Crystal Infinity Ribbon (Light Series: AI_011 - AI_020)
+3. Cyber Sapphire Aurora Wave (Dark Series: AI_021 - AI_030)
+4. Cyber Fluid Silk Waves (Light Series: AI_031 - AI_040)
+5. Golden Cloudscape & Alpine Mirror Lake (Warm Sunset Series: AI_041 - AI_050)
+6. Alpine Lake & Blooming Wildflowers (Daylight / Light Series: AI_051 - AI_060)
+7. Cosmic Earth Orbit & Golden City Lights (Night / Space Series: AI_061 - AI_070)
+8. Frosted Prism Floral Bloom (Light Series: AI_071 - AI_080)
+9. Bioluminescent Neural Flora (Dark Series: AI_081 - AI_090)
+10. Futuristic Architectural Pavilion & Desert Dunes (Dusk Series: AI_091 - AI_100)
+
+All 100 wallpapers are processed from photorealistic 8K AI master renders with
+unsharp-mask clarity, cinematic color grading, desktop icon safe-zone contrast,
+and film-grain dithering for both Dark and Light theme desktop harmony.
 
 Each design is rendered at 2560x1440 or 3840x2160, tone-mapped with photographic
 S-curves, ergonomically protected for desktop icon contrast, film-grain dithered, and
