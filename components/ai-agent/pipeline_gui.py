@@ -309,9 +309,19 @@ class PipelineWindow(QtWidgets.QMainWindow):
         form_layout.setContentsMargins(16, 14, 16, 14)
         form_layout.setSpacing(10)
 
+        form_title_row = QtWidgets.QHBoxLayout()
         form_title = QtWidgets.QLabel("Queue a New Command in Chain")
         form_title.setStyleSheet("font-weight: 600; font-size: 14px; color: #f8fafc;")
-        form_layout.addWidget(form_title)
+        form_title_row.addWidget(form_title)
+        form_title_row.addStretch()
+
+        btn_seo = QtWidgets.QPushButton("⚡ SEO Repo Ranking Preset")
+        btn_seo.setToolTip("Auto-fill prompt for best ranking repo name & 400-char SEO description")
+        btn_seo.setStyleSheet("background-color: #1e293b; color: #38bdf8; font-size: 11px; padding: 4px 8px; border: 1px solid #334155; border-radius: 6px;")
+        btn_seo.clicked.connect(self.fill_seo_prompt)
+        form_title_row.addWidget(btn_seo)
+
+        form_layout.addLayout(form_title_row)
 
         input_row = QtWidgets.QHBoxLayout()
         input_row.setSpacing(10)
@@ -378,6 +388,15 @@ class PipelineWindow(QtWidgets.QMainWindow):
         main_layout.addWidget(self.log_box)
 
         self.refresh_queue()
+
+    def fill_seo_prompt(self):
+        prompt = (
+            "Based on this project, give me the best github repo name with 400 character description "
+            "for reaching organically to rank or any related search our repo will be searchable rank in google or github"
+        )
+        self.prompt_input.setText(prompt)
+        self.gh_check.setChecked(True)
+        self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Loaded SEO Ranking Prompt Preset into input.")
 
     def add_task(self):
         prompt = self.prompt_input.text().strip()

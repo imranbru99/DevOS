@@ -45,19 +45,60 @@ def notify(title: str, message: str, urgency: str = "normal"):
         pass
 
 
+import urllib.parse
+
+
+def copy_to_clipboard(text: str):
+    """Copies text to the Linux system clipboard using xclip or wl-copy."""
+    for cmd in (["xclip", "-selection", "clipboard"], ["wl-copy"]):
+        try:
+            p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            p.communicate(input=text.encode("utf-8"), timeout=2)
+            if p.returncode == 0:
+                return
+        except Exception:
+            continue
+
+
 def extract_repo_metadata(text: str) -> tuple[Optional[str], Optional[str]]:
-    """Extracts proposed repository name and description from AI response or prompt."""
+    """Extracts proposed SEO repository name and description from AI response or prompt."""
     name = None
     desc = None
-    # Pattern: repo: name or repo_name: name or repository: name
-    m_name = re.search(r"(?:repo(?:sitory)?(?:_name)?|github_repo)\s*[:=]\s*[`'\"]?([a-zA-Z0-9_\-\.]+)[`'\"]?", text, re.IGNORECASE)
-    if m_name:
-        name = m_name.group(1).strip()
 
-    # Pattern: description: ...
-    m_desc = re.search(r"desc(?:ription)?\s*[:=]\s*[`'\"]?([^`'\n]+)[`'\"]?", text, re.IGNORECASE)
-    if m_desc:
-        desc = m_desc.group(1).strip()
+    # Search for repo name in various markdown and plain text formats
+    name_patterns = [
+        r"^[ \t]*(?:\*\*|###|#)?[ \t]*(?:best\s+)?(?:github\s+)?repo(?:sitory)?[ \t]*(?:name)?[ \t]*(?:\*\*|###|#)?[ \t]*[:\-=][ \t]*[`'\"]?([a-zA-Z0-9_\-\.]+)[`'\"]?",
+        r"(?:\*\*|###|#)?[ \t]*(?:github\s+)?repo(?:sitory)?[ \t]*(?:name)?[ \t]*(?:\*\*|###|#)?[ \t]*[:\-=][ \t]*[`'\"]?([a-zA-Z0-9_\-\.]+)[`'\"]?",
+        r"(?:repo(?:sitory)?(?:_name)?|github_repo)\s*[:=]\s*[`'\"]?([a-zA-Z0-9_\-\.]+)[`'\"]?",
+        r"`([a-z0-9]+(?:-[a-z0-9]+)+)`",
+    ]
+    for p in name_patterns:
+        m = re.search(p, text, re.IGNORECASE | re.MULTILINE)
+        if m:
+            candidate = m.group(1).strip()
+            # Ignore generic placeholders
+            if candidate.lower() not in ("name", "repo", "repository", "none", "best"):
+                name = candidate
+                break
+
+    # Search for description (up to 350-400 chars for maximum SEO reach)
+    desc_patterns = [
+        r"(?:\*\*|###|#)?[ \t]*(?:seo\s+)?desc(?:ription)?(?:\s*\([^\)]*\))?(?:\*\*|###|#)?[ \t]*[:\-=][ \t]*[`'\"]?([^\n\r]+(?:\n[^\n\r#*]+)*)",
+        r"desc(?:ription)?\s*[:=]\s*[`'\"]?([^`'\n]+)",
+    ]
+    for p in desc_patterns:
+        m = re.search(p, text, re.IGNORECASE)
+        if m:
+            raw_desc = m.group(1).strip()
+            # Clean up markdown formatting and multi-line wrapping
+            clean_desc = re.sub(r"\s+", " ", raw_desc).strip("`'\"*# ")
+            # Strip trailing tags or headers
+            clean_desc = re.split(r"###|\*\*Tags|Tags:", clean_desc)[0].strip()
+            # GitHub description has a 350 character maximum limit
+            if len(clean_desc) > 350:
+                clean_desc = clean_desc[:347].rsplit(" ", 1)[0] + "..."
+            desc = clean_desc
+            break
 
     return name, desc
 
@@ -75,18 +116,27 @@ def create_github_repo(
     if not clean_name:
         return False, "Invalid repository name"
 
+    # Copy description and name to system clipboard so user has it instantly
+    clipboard_content = f"{clean_name}\n\n{description}" if description else clean_name
+    copy_to_clipboard(clipboard_content)
+
     p_path = Path(project_dir).resolve() if project_dir else Path.cwd()
     if not p_path.exists():
         p_path.mkdir(parents=True, exist_ok=True)
 
+    # Pre-generate populated browser URL for github.com/new
+    query_params = {"name": clean_name}
+    if description:
+        query_params["description"] = description
+    browser_new_url = f"https://github.com/new?{urllib.parse.urlencode(query_params)}"
+
     # Check gh auth status
     gh_check = subprocess.run(["gh", "auth", "status"], capture_output=True, text=True)
     if gh_check.returncode != 0:
-        # Fallback to opening browser create form
-        url = f"https://github.com/new?name={clean_name}&description={description}"
+        # Fallback to opening browser create form directly
         if open_browser:
-            subprocess.Popen(["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return True, url
+            subprocess.Popen(["xdg-open", browser_new_url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True, browser_new_url
 
     # Ensure git repo is initialized locally
     if not (p_path / ".git").exists():
@@ -125,9 +175,9 @@ def create_github_repo(
             subprocess.Popen(["xdg-open", full_url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return True, full_url
     else:
-        fallback_url = f"https://github.com/new?name={clean_name}&description={description}"
+        # If gh failed, open browser new repo page with name & description prefilled
         if open_browser:
-            subprocess.Popen(["xdg-open", fallback_url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.Popen(["xdg-open", browser_new_url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return False, res.stderr or "Failed to create repo via gh"
 
 
