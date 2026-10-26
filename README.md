@@ -31,6 +31,7 @@ third-party apps. See [Ubuntu's release list](https://ubuntu.com/project/docs/re
 
 Read the [complete current feature inventory](docs/FEATURES.md),
 [latest changes](CHANGELOG.md), and [update guide](docs/UPDATES.md).
+Read the [October 26 release validation and remaining hardware checks](docs/RELEASE_VALIDATION_2026-10-26.md).
 See the [long-term maintenance guide](docs/LONG_TERM_MAINTENANCE.md) for recovery,
 storage, update coverage, and release-validation requirements.
 The Google Drive link is for previously published images; source screenshots and
@@ -76,6 +77,10 @@ The current release build uses `out/devos-26.04-amd64-final.iso` and its `.sha25
 | Optimizer and safe automatic cleanup | Open Optimizer from the tray or run `devos optimizer --cleanup`. Review sizes and categories before manual deletion. Toggle automatic cleanup in its tray menu; `devos optimizer --auto-scan` previews the bounded automatic policy. Automatic cleanup only targets aged disposable thumbnail/DevOS temporary caches; personal files, recordings, models, Trash and Downloads require separate choices. [Performance and cleanup guide](docs/HEAVY_LOAD_AND_STORAGE_OPTIMIZATION.md). |
 | AI workflow queue | Run `devos pipeline gui`, add tasks, select provider/project and optional delay, then run the queue. Tasks run in order; failed or submitted tasks block successors until resolved. Antigravity submission requires **Confirm completed** after the work actually finishes. Codex dispatch requires its installed, authenticated CLI. [Pipeline guide](docs/AI_PIPELINE.md). |
 | Heavy workloads | Hardware tuning adapts to SSD/HDD and CPU capabilities; compressed RAM, bounded logs and separate AI workload limits reduce resource contention. Use `devos doctor` for health checks. Keep backups and updates; ten years of daily use requires ongoing maintenance and supported hardware. [Maintenance guide](docs/LONG_TERM_MAINTENANCE.md). |
+
+The native authentication style requires KDE/Qt 6. Older Qt 5 agents keep their
+normal interface until the supported base upgrade; the wrapper falls back to
+the installed agent.
 
 The authentication screenshot below was captured from the real KDE/Polkit
 agent in the installed disposable VM, using the DevOS style (not a mock password form).
