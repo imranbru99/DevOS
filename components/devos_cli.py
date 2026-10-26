@@ -181,6 +181,14 @@ COMMAND_CATALOG = {
         "desc": "Mobile broadband & cellular modem connection manager",
         "tags": ["modem", "cellular", "lte", "sim", "4g", "5g"],
     },
+    "queue": {
+        "desc": "AI Multi-Agent Pipeline & Rate-Limit Scheduler (ChatGPT, Antigravity, Local)",
+        "tags": ["pipeline", "scheduler", "queue", "serial", "chain", "chatgpt", "antigravity", "cron", "cooldown"],
+    },
+    "pipeline": {
+        "desc": "AI Multi-Agent Pipeline & Rate-Limit Scheduler (ChatGPT, Antigravity, Local)",
+        "tags": ["pipeline", "scheduler", "queue", "serial", "chain", "chatgpt", "antigravity", "cron", "cooldown"],
+    },
 }
 
 
@@ -497,6 +505,8 @@ def main():
         "voicetype": os.path.join(COMPONENTS_DIR, "voicetype", "voicetype.py"),
         "optimizer": os.path.join(COMPONENTS_DIR, "optimizer", "optimizer.py"),
         "broadband": os.path.join(COMPONENTS_DIR, "broadband", "broadband.py"),
+        "queue": os.path.join(COMPONENTS_DIR, "ai-agent", "task_pipeline.py"),
+        "pipeline": os.path.join(COMPONENTS_DIR, "ai-agent", "task_pipeline.py"),
         "theme": os.path.join(COMPONENTS_DIR, "settings", "theme_switcher.py"),
     }
 
