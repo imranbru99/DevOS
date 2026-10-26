@@ -10,7 +10,7 @@ import QtQuick.Layouts 1.3
 
 Page {
     id: usersPage
-    background: Rectangle { color: "#0b0f1a" }
+    background: InstallerBackground {}
 
     component Field: TextField {
         id: field

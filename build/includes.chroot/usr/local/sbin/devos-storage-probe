@@ -8,12 +8,25 @@ import tempfile
 sys.path.insert(0, '/usr/local/share/devos/components/settings')
 from installer_storage import inventory
 path = Path('/etc/calamares/branding/devos/storage-devices.js')
+disks = inventory()
 fd, name = tempfile.mkstemp(dir=path.parent, prefix='.storage-')
 try:
     with os.fdopen(fd, 'w') as stream:
-        stream.write('.pragma library\nvar disks = ' + json.dumps(inventory()) + ';\n')
+        stream.write('.pragma library\nvar disks = ' + json.dumps(disks) + ';\n')
         os.fchmod(stream.fileno(), 0o644)
     os.replace(name, path)
+finally:
+    if os.path.exists(name):
+        os.unlink(name)
+
+# Identity facts are separate from the human-readable selection in Summary.
+snapshot = path.with_suffix('.json')
+fd, name = tempfile.mkstemp(dir=path.parent, prefix='.storage-identity-')
+try:
+    with os.fdopen(fd, 'w') as stream:
+        json.dump(disks, stream)
+        os.fchmod(stream.fileno(), 0o644)
+    os.replace(name, snapshot)
 finally:
     if os.path.exists(name):
         os.unlink(name)

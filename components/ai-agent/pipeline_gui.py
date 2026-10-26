@@ -7,6 +7,7 @@ rate-limit detection and countdown timers.
 """
 
 import datetime
+import functools
 import os
 import sys
 import time
@@ -135,11 +136,37 @@ QScrollBar::handle:vertical {
 """
 
 
+def queue_error_to_log(method):
+    @functools.wraps(method)
+    def wrapped(self, *args, **kwargs):
+        try:
+            return method(self, *args, **kwargs)
+        except (OSError, RuntimeError, ValueError) as exc:
+            self.log_box.append("Queue unchanged: " + str(exc))
+    return wrapped
+
+
+class PipelineWorker(QtCore.QThread):
+    result = QtCore.pyqtSignal(str)
+
+    def __init__(self, pipeline, parent):
+        super().__init__(parent)
+        self.pipeline = pipeline
+
+    def run(self):
+        try:
+            self.pipeline.execute_next()
+            self.result.emit("")
+        except Exception as exc:
+            self.result.emit(str(exc))
+
+
 class TaskCard(QtWidgets.QFrame):
-    def __init__(self, task: dict, on_failover=None, parent=None):
+    def __init__(self, task: dict, on_failover=None, parent=None, on_confirm=None):
         super().__init__(parent)
         self.task = task
         self.on_failover = on_failover
+        self.on_confirm = on_confirm
         self.setObjectName("card")
         self.init_ui()
 
@@ -173,10 +200,7 @@ class TaskCard(QtWidgets.QFrame):
         status_text = f"Status: {status}"
         status_color = "#94a3b8"
 
-        if status == "QUEUED" and is_agent_working(agent):
-            status_text = "⏳ WAITING: Agent is currently busy working..."
-            status_color = "#38bdf8"
-        elif status == "RUNNING":
+        if status == "RUNNING":
             status_text = "⚡ RUNNING: In progress..."
             status_color = "#38bdf8"
         elif status == "RATE_LIMITED":
@@ -187,6 +211,9 @@ class TaskCard(QtWidgets.QFrame):
                     status_text = f"⏸ RATE LIMITED: Cooldown active until {dt.strftime('%I:%M %p')}"
                 except Exception:
                     status_text = "⏸ RATE LIMITED"
+            status_color = "#fbbf24"
+        elif status == "SUBMITTED":
+            status_text = "Submitted • verify completion in the agent"
             status_color = "#fbbf24"
         elif status == "COMPLETED":
             status_text = "✓ COMPLETED"
@@ -210,6 +237,11 @@ class TaskCard(QtWidgets.QFrame):
             btn_repo.clicked.connect(lambda: subprocess.Popen(["xdg-open", github_url]))
             layout.addWidget(btn_repo)
 
+        if status == "SUBMITTED" and self.on_confirm:
+            button = QtWidgets.QPushButton("Confirm completed")
+            button.clicked.connect(lambda: self.on_confirm(self.task["id"]))
+            layout.addWidget(button)
+
         # Failover action button if rate limited
         if status == "RATE_LIMITED" and self.on_failover:
             btn_failover = QtWidgets.QPushButton("⚡ Switch to Antigravity")
@@ -223,6 +255,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         self.pipeline = TaskPipeline()
+        self.worker = None
         self.setWindowTitle("DevOS AI Command Pipeline & Scheduler")
         self.setObjectName("devos-ai-pipeline")
         icon = get_app_icon()
@@ -399,7 +432,11 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.gh_check.setChecked(True)
         self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Loaded SEO Ranking Prompt Preset into input.")
 
+    @queue_error_to_log
     def add_task(self):
+        if self.busy():
+            self.log_box.append("Wait for the current task to finish before changing the queue.")
+            return
         prompt = self.prompt_input.text().strip()
         if not prompt:
             return
@@ -467,7 +504,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
             self.task_list_layout.insertWidget(0, empty_lbl)
         else:
             for idx, task in enumerate(tasks):
-                card = TaskCard(task, on_failover=self.failover_single_task)
+                card = TaskCard(task, on_failover=self.failover_single_task, on_confirm=self.confirm_completed)
                 self.task_list_layout.insertWidget(idx, card)
 
     def toggle_runner(self):
@@ -486,40 +523,80 @@ class PipelineWindow(QtWidgets.QMainWindow):
             self.runner_timer.stop()
             self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Pipeline paused by user.")
 
-    def run_step(self):
-        if not self.is_running:
-            return
-        has_more = self.pipeline.execute_next()
-        self.refresh_queue()
-        if not has_more:
-            # If nothing was eligible, check if all done
-            rate_limited = [t for t in self.pipeline.list() if t["status"] == "RATE_LIMITED"]
-            if not rate_limited:
-                self.toggle_runner()
-                self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] All pipeline commands completed!")
+    def busy(self):
+        return self.worker is not None and self.worker.isRunning()
 
+    def run_step(self):
+        if not self.is_running or self.busy():
+            return
+        self.worker = PipelineWorker(self.pipeline, self)
+        self.worker.result.connect(self.step_finished)
+        self.worker.start()
+
+    def step_finished(self, error):
+        if error:
+            self.log_box.append("Pipeline error: " + error)
+        self.refresh_queue()
+        tasks = self.pipeline.list()
+        pending = [t for t in tasks if t["status"] not in ("COMPLETED", "FAILED")]
+        blocked = any(t["status"] in ("RUNNING", "SUBMITTED") for t in pending) or (bool(pending) and any(t["status"] == "FAILED" for t in tasks))
+        if (not pending or blocked or error) and self.is_running:
+            self.toggle_runner()
+            if blocked:
+                self.log_box.append("Paused: resolve the failed task or verify submitted work before continuing.")
+            elif not pending:
+                failed = any(t["status"] == "FAILED" for t in tasks)
+                self.log_box.append("Finished with failed tasks." if failed else "All pipeline commands completed.")
+
+    @queue_error_to_log
+    def confirm_completed(self, task_id):
+        if self.busy():
+            return
+        answer = QtWidgets.QMessageBox.question(self, "Verify task result",
+            "Have you checked in the agent that this task completed successfully? This allows the next task to run.")
+        if answer != QtWidgets.QMessageBox.Yes:
+            return
+        for task in self.pipeline.queue:
+            if task["id"] == task_id and task["status"] == "SUBMITTED":
+                self.pipeline.update_task(task_id, {"status":"COMPLETED", "completion_verified_by_user":True})
+                self.refresh_queue()
+                break
+
+    def closeEvent(self, event):
+        if self.busy():
+            self.log_box.append("Pause stops the next task; wait for the current command to finish before closing.")
+            event.ignore()
+        else:
+            event.accept()
+
+    @queue_error_to_log
     def failover_single_task(self, task_id: str):
+        if self.busy():
+            self.log_box.append("Wait for the current task to finish before changing the queue.")
+            return
         for t in self.pipeline.queue:
             if t["id"] == task_id:
-                t["agent"] = "antigravity"
-                t["status"] = "QUEUED"
-                t["retry_at"] = None
-                self.pipeline._save()
+                self.pipeline.update_task(task_id, {"agent":"antigravity", "status":"QUEUED", "retry_at":None})
                 self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Task {task_id} switched to Antigravity!")
                 self.refresh_queue()
                 break
 
+    @queue_error_to_log
     def failover_all_rate_limited(self):
+        if self.busy():
+            self.log_box.append("Wait for the current task to finish before changing the queue.")
+            return
         for t in self.pipeline.queue:
             if t["status"] == "RATE_LIMITED":
-                t["agent"] = "antigravity"
-                t["status"] = "QUEUED"
-                t["retry_at"] = None
-        self.pipeline._save()
+                self.pipeline.update_task(t["id"], {"agent":"antigravity", "status":"QUEUED", "retry_at":None})
         self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] All rate-limited tasks switched to Antigravity!")
         self.refresh_queue()
 
+    @queue_error_to_log
     def clear_queue(self):
+        if self.busy():
+            self.log_box.append("Wait for the current task to finish before changing the queue.")
+            return
         self.pipeline.clear()
         self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Pipeline cleared.")
         self.refresh_queue()
@@ -527,6 +604,12 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
 def main():
     app = QtWidgets.QApplication(sys.argv)
+    # Keep confirmation and input dialogs consistent across DevOS apps.
+    import sys as _dialog_sys
+    from pathlib import Path as _DialogPath
+    _dialog_sys.path.insert(0, str(_DialogPath(__file__).resolve().parent.parent))
+    from devos_dialogs import install as _install_dialog_style
+    _install_dialog_style(app)
     app.setDesktopFileName("devos-ai-pipeline")
     QCoreApplication.setApplicationName("devos-ai-pipeline")
     QCoreApplication.setApplicationDisplayName("DevOS AI Command Pipeline")

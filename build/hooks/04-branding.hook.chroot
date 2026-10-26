@@ -32,7 +32,9 @@ for base in [Path("/usr/share/initramfs-tools"), Path("/usr/share/casper")]:
     for p in base.rglob("*"):
         if p.is_file() and not p.is_symlink():
             try:
-                txt = p.read_text(encoding="utf-8", errors="ignore")
+                txt = p.read_text(encoding="utf-8", errors="strict")
+                if "\0" in txt:
+                    continue
                 mod = False
                 if 'modprobe "${MP_QUIET}"' in txt:
                     txt = txt.replace('modprobe "${MP_QUIET}"', "modprobe ${MP_QUIET}")
@@ -115,8 +117,10 @@ for root in roots:
         try:
             if path.stat().st_size > 1_000_000:
                 continue
-            text = path.read_text(encoding="utf-8", errors="ignore")
-        except OSError:
+            text = path.read_text(encoding="utf-8", errors="strict")
+        except (OSError, UnicodeError):
+            continue
+        if "\0" in text:
             continue
         if needle not in text:
             # Already rewritten by an earlier build of the same chroot.

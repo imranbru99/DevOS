@@ -220,6 +220,12 @@ def run_qt(args) -> int:
     QCoreApplication.setApplicationName(wmc)
     QCoreApplication.setOrganizationName("DevOS")
     app = QApplication([sys.argv[0]])
+    # Keep confirmation and input dialogs consistent across DevOS apps.
+    import sys as _dialog_sys
+    from pathlib import Path as _DialogPath
+    _dialog_sys.path.insert(0, str(_DialogPath(__file__).resolve().parent.parent))
+    from devos_dialogs import install as _install_dialog_style
+    _install_dialog_style(app)
     app.setApplicationDisplayName(args.title)
     if hasattr(app, "setDesktopFileName"):
         app.setDesktopFileName(args.desktop_file)

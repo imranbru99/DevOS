@@ -3903,6 +3903,12 @@ def main(argv=None):
     QtWidgets.QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     QtWidgets.QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
     app = QtWidgets.QApplication(argv)
+    # Keep confirmation and input dialogs consistent across DevOS apps.
+    import sys as _dialog_sys
+    from pathlib import Path as _DialogPath
+    _dialog_sys.path.insert(0, str(_DialogPath(__file__).resolve().parent.parent))
+    from devos_dialogs import install as _install_dialog_style
+    _install_dialog_style(app)
     app.setApplicationName(APP_TITLE)
     app.setApplicationDisplayName(APP_TITLE)
     app.setDesktopFileName("devos-chat")

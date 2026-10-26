@@ -1,13 +1,18 @@
 """Apply reviewed data-disk choices after Calamares has mounted its own layout."""
 import json
 import sys
+from pathlib import Path
 import libcalamares
 sys.path.insert(0, '/usr/local/share/devos/components/settings')
 import installer_storage
 
 
 def selection():
-    return libcalamares.globalstorage.value('packagechooser_storage') or '{}'
+    choice = libcalamares.globalstorage.value('packagechooser_storage') or ''
+    if not choice or choice == 'Preserve all additional drives':
+        return '{}'
+    snapshot = json.loads(Path('/etc/calamares/branding/devos/storage-devices.json').read_text())
+    return installer_storage.parse_choice(choice, snapshot)
 
 
 def pretty_name():
@@ -15,7 +20,7 @@ def pretty_name():
         chosen = json.loads(selection())
         if chosen.get('confirmed'):
             return 'Apply selected data-drive plan (OS/manual disks excluded): ' + ', '.join(d['device'] for d in chosen.get('drives', []))
-    except (ValueError, TypeError, KeyError):
+    except (OSError, ValueError, TypeError, KeyError):
         pass
     return 'Preserve additional data disks'
 

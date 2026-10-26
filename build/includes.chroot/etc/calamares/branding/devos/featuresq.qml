@@ -21,7 +21,7 @@ import "aimodel-hw.js" as HW
 
 Page {
     id: page
-    background: Rectangle { color: "#0b0f1a" }
+    background: InstallerBackground {}
 
     readonly property real ramGb: HW.hw.ram_gb
     readonly property real diskGb: HW.hw.disk_gb

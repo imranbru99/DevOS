@@ -22,7 +22,7 @@
 
 ---
 
-## Current source — October 22, 2026
+## Current source — October 26, 2026
 
 The source targets **Ubuntu 26.04 LTS (Resolute Raccoon), amd64**. Ubuntu's
 26.04.1 point release is available; standard support for the Ubuntu base runs
@@ -35,7 +35,7 @@ See the [long-term maintenance guide](docs/LONG_TERM_MAINTENANCE.md) for recover
 storage, update coverage, and release-validation requirements.
 The Google Drive link is for previously published images; source screenshots and
 features below do not certify that an older download contains the latest changes.
-Build output is `out/devos-26.04-amd64.iso`; verify the checksum supplied with the image.
+The current release build uses `out/devos-26.04-amd64-final.iso` and its `.sha256` file. The default source-build filename is `out/devos-26.04-amd64.iso`. Verify the checksum and release validation notes before installing; file size alone does not establish readiness.
 
 **Recently added and improved**
 
@@ -63,6 +63,89 @@ Build output is `out/devos-26.04-amd64.iso`; verify the checksum supplied with t
   <img src="tools/wallpapers/preview.jpg" alt="Preview grid of the DevOS wallpaper collection" width="900">
   <br><em>DevOS wallpaper collection. Desktop and dashboard screenshots elsewhere in this README show earlier source builds.</em>
 </p>
+
+## Latest changes and daily-use guide
+
+| Feature | How to use it |
+| --- | --- |
+| Installer and SSD/HDD storage | Start **Install DevOS**. Choose **Manual partitioning** to create or resize a layout; **Erase disk** automatically formats the chosen system disk. **Data drives** optionally creates one, two, or three ext4 data volumes (A/B/C labels, custom sizes). Review every disk in Summary before Install. Drives you do not select are preserved. |
+| Modern dialogs | DevOS applications share spaced confirmation/input dialogs, readable labels, keyboard focus, and consistent buttons. Optimizer uses **Delete selected files** with **Cancel** as the default. Qt 5 and Qt 6 native theme plugins are included for system dialogs, including the real Polkit password agent. |
+| Wallpapers and appearance | Open **Settings → Appearance** or the desktop wallpaper picker. The source includes 252 validated wallpaper images. Dark/light appearance and display scaling remain configurable. |
+| Storage after installation | Open **This PC** for files or `devos disk` for Storage & Boot Doctor. Formatting deletes the selected volume; back up its contents first. A/B/C are volume labels, rather than Windows drive letters. See [storage instructions](docs/STORAGE_MANAGEMENT.md). |
+| Screen recording and editing | Run `devos recorder`. Select audio, turn on listening to inspect the live signal meter, then record. Use the recording toolbar/tray to stop and save. Open the clip editor to trim, copy or cut ranges, retain/mute sound, or replace/mix a voice track. Export creates a new MP4. [Recorder guide](docs/SCREEN_RECORDER.md). |
+| Optimizer and safe automatic cleanup | Open Optimizer from the tray or run `devos optimizer --cleanup`. Review sizes and categories before manual deletion. Toggle automatic cleanup in its tray menu; `devos optimizer --auto-scan` previews the bounded automatic policy. Automatic cleanup only targets aged disposable thumbnail/DevOS temporary caches; personal files, recordings, models, Trash and Downloads require separate choices. [Performance and cleanup guide](docs/HEAVY_LOAD_AND_STORAGE_OPTIMIZATION.md). |
+| AI workflow queue | Run `devos pipeline gui`, add tasks, select provider/project and optional delay, then run the queue. Tasks run in order; failed or submitted tasks block successors until resolved. Antigravity submission requires **Confirm completed** after the work actually finishes. Codex dispatch requires its installed, authenticated CLI. [Pipeline guide](docs/AI_PIPELINE.md). |
+| Heavy workloads | Hardware tuning adapts to SSD/HDD and CPU capabilities; compressed RAM, bounded logs and separate AI workload limits reduce resource contention. Use `devos doctor` for health checks. Keep backups and updates; ten years of daily use requires ongoing maintenance and supported hardware. [Maintenance guide](docs/LONG_TERM_MAINTENANCE.md). |
+
+### Enable Islamic features and prayer reminders
+
+Open **DevOS Islamic** from the app menu or run:
+
+```sh
+devos islamic gui
+devos islamic enable     # Fetch missing verified texts and start this user's reminders
+devos islamic times      # Print today's prayer times
+devos islamic today      # Show today's Islamic information
+devos islamic disable    # Stop reminders; downloaded texts are kept
+```
+
+Choose your city and reminder preferences in the Islamic window. Settings are in
+`~/.config/devos/islamic.json`. First-time text downloads need internet; saving
+shared texts may request administrator authentication. Prayer reminders and
+browser blurring are separate features: switching one off does not switch off the other.
+
+### Enable, pause or remove Islamic Modesty blur while using the OS
+
+Enable the browser filter for detected adult women, or change it to all detected people:
+
+```sh
+sudo devos modesty enable --mode women
+sudo devos modesty enable --mode people
+devos modesty status
+```
+
+Restart Chrome, Chromium, Edge or Brave after enabling or refreshing the filter.
+Open the browser's **Extensions → Modesty filter** popup (pin its icon for easy access).
+The **Filter on** switch pauses/resumes filtering while browsing; the **Blur** menu
+selects **Adult women** or **All people**. Refresh an already-open page if it has not
+updated. To remove the system-managed filter and its policies:
+
+```sh
+sudo devos modesty disable
+```
+
+Restart the browser or wait for its policy refresh. An administrator can install
+with `--locked`; that hides the popup off switch, so an administrator must disable
+it with the command above. Incognito/Guest browsing is disabled by default when the
+filter is enabled; `--keep-incognito` permits private windows that are not filtered.
+Detection runs on the PC and can miss or misclassify people. Unsupported media and
+some cross-origin video cannot be checked; this is not a guarantee of complete coverage.
+See the [filter's exact capabilities and limits](components/modesty/README.md).
+
+### Update an existing installation without replacing personal settings
+
+```sh
+devos update --check       # Look for a published stable DevOS component bundle
+devos update               # Verify checksums, ask for administrator access, install
+devos updates now          # Ubuntu security packages and Flatpak updates
+```
+
+Close and reopen DevOS apps after updating; restart browsers and sign out/back in
+for desktop changes. Component updates preserve personal documents and user
+configuration files; they do not copy a whole `/etc` or home folder over your setup.
+An already-enabled Modesty filter is refreshed with its saved mode, private-window
+policy and locked setting. Qt theme dependencies are installed when needed.
+The updater keeps the previous component files for `devos update --rollback` and
+rejects incompatible Ubuntu bases. Back up your files before major changes.
+
+A GitHub source push does **not** publish an installed-system update: maintainers
+must publish the tested stable release and update bundle. If no bundle exists,
+`--check` reports that rather than treating source commits as an installed release.
+Use `devos update --os-upgrade` only for the separate supported Ubuntu-base upgrade.
+Do not replace APT suite names manually or delete old settings folders blindly.
+When diagnosing an old configuration, back up the affected file, change only the
+relevant setting, and reopen that app; no updater can promise that all historical
+custom configurations will remain compatible forever. See the [full update and recovery guide](docs/UPDATES.md).
 
 ## Our aim
 
@@ -222,8 +305,8 @@ Shut down, restart and uninstall always ask for confirmation first.
 
 ### 8. Performance and reliability
 - **zram** compressed swap in RAM (zstd, 50%) and tuned kernel settings for heavy loads.
-- **earlyoom + systemd-oomd** stop runaway programs before the desktop freezes.
-- **btrfs with zstd compression** saves disk space and is snapshot-ready (Snapper installed).
+- **systemd-oomd** handles sustained memory pressure; duplicate earlyoom management is disabled. Resource limits help isolate runaway workloads, but cannot guarantee that hardware or software never hangs.
+- **ext4 is the automatic installer default**. Btrfs is optional for compression and snapshots; Snapper boot snapshots only run with a configured Btrfs root. zstd compresses the ISO and zram; it is not a partition filesystem.
 - Unneeded services (snapd, apport, telemetry) are removed or masked; boots straight to the desktop.
 
 ### 9. Hardware, Networking & Display
@@ -601,7 +684,7 @@ docker run --rm --privileged \
   devos-builder:26.04 bash ./build/build-iso.sh
 ```
 
-Useful options: `DEVOS_ISO_NAME` (output file name), `DEVOS_ZSTD_LEVEL` (15 = faster build, 19 = smaller ISO), `UBUNTU_MIRROR`. The build fails on purpose if the ISO exceeds 4 GB or if any system file is world-writable.
+Useful options: `DEVOS_ISO_NAME` (output file name), `DEVOS_ZSTD_LEVEL` (15 = faster build, 19 = smaller ISO), `UBUNTU_MIRROR`. The build reports the actual ISO size. CI verifies its boot layout and enforces a 5 GiB release budget (configurable with `DEVOS_MAX_ISO_BYTES`); write the image directly to an 8 GB or larger USB drive.
 
 **Tests**
 ```bash

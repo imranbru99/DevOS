@@ -88,16 +88,18 @@ class InstallerStorageTests(unittest.TestCase):
     def test_calamares_job_forwards_root_and_partition_map(self):
         import importlib.util
         from types import SimpleNamespace
-        values={'packagechooser_storage':selection([disk()]),'rootMountPoint':'/tmp/example-target','partitions':OS_PARTITIONS}
+        choice='Erase selected additional drives (ext4):<br/>/dev/sdb → A remaining<br/>OS and manually configured disks are excluded.'
+        raw=storage.parse_choice(choice,[disk()])
+        values={'packagechooser_storage':choice,'rootMountPoint':'/tmp/example-target','partitions':OS_PARTITIONS}
         lib=SimpleNamespace(globalstorage=SimpleNamespace(value=lambda key: values.get(key)))
         path=ROOT/'build/includes.chroot/usr/lib/x86_64-linux-gnu/calamares/modules/devosstorage/main.py'
         with patch.dict(sys.modules,{'libcalamares':lib}):
             spec=importlib.util.spec_from_file_location('devosstorage_job_test',path)
             job=importlib.util.module_from_spec(spec);spec.loader.exec_module(job)
-            with patch.object(storage,'apply') as apply:
+            with patch.object(job.Path,'read_text',return_value=json.dumps([disk()])), patch.object(storage,'apply') as apply:
                 self.assertIsNone(job.run())
-                apply.assert_called_once_with(values['packagechooser_storage'],values['rootMountPoint'],OS_PARTITIONS)
-            with patch.object(storage,'apply',side_effect=ValueError('drive changed')):
+                apply.assert_called_once_with(raw,values['rootMountPoint'],OS_PARTITIONS)
+            with patch.object(job.Path,'read_text',return_value=json.dumps([disk()])), patch.object(storage,'apply',side_effect=ValueError('drive changed')):
                 self.assertIn('drive changed',job.run()[1])
 
     def test_data_drive_job_runs_after_user_creation_before_finalize(self):
@@ -105,3 +107,16 @@ class InstallerStorageTests(unittest.TestCase):
         sequence=text.split('- exec:')[1].split('- show:')[0]
         self.assertLess(sequence.index('- usersq'),sequence.index('- devosstorage'))
         self.assertLess(sequence.index('- devosstorage'),sequence.index('- shellprocess@finalize'))
+
+    def test_human_review_round_trips_abc_layout_and_scanned_identity(self):
+        choice='Erase selected additional drives (ext4):<br/>/dev/sdb → Work A 100 GiB · B 150.5 GiB · C remaining<br/>OS and manually configured disks are excluded.'
+        plan=json.loads(storage.parse_choice(choice,[disk()]))
+        self.assertTrue(plan['confirmed'])
+        self.assertEqual(plan['drives'][0]['serial'],disk()['serial'])
+        self.assertEqual([v['size_gib'] for v in plan['drives'][0]['volumes']],[100,150.5,0])
+        self.assertEqual(plan['drives'][0]['volumes'][0]['label'],'Work A')
+
+    def test_unknown_disks_and_unreviewed_strings_are_rejected(self):
+        for choice in ('anything', 'Erase selected additional drives (ext4):<br/>/dev/sdc → A remaining<br/>OS and manually configured disks are excluded.'):
+            with self.assertRaises(ValueError):storage.parse_choice(choice,[disk()])
+        self.assertEqual(storage.parse_choice('Preserve all additional drives',[]),'{}')

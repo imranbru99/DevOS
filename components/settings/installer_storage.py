@@ -1,9 +1,38 @@
 """Explicit additional-disk plans for the installer; default is to preserve disks."""
 import json
+import re
 from pathlib import Path
 import shutil
 from disk_manager import DiskManager, parse_partition_parent
 from storage_layout import plan_layout
+
+
+def parse_choice(choice, snapshot):
+    """Decode the human-readable installer summary against its root-owned scan."""
+    if not choice or choice == 'Preserve all additional drives':
+        return '{}'
+    prefix = 'Erase selected additional drives (ext4):<br/>'
+    suffix = '<br/>OS and manually configured disks are excluded.'
+    if not choice.startswith(prefix) or not choice.endswith(suffix):
+        raise ValueError('Storage selection is not a reviewed drive plan.')
+    expected = {d['device']: d for d in snapshot}
+    drives = []
+    for line in choice[len(prefix):-len(suffix)].split('<br/>'):
+        device, sep, volumes_text = line.partition(' → ')
+        if not sep or device not in expected:
+            raise ValueError('A selected disk is absent from the reviewed hardware scan.')
+        volumes = []
+        for description in volumes_text.split(' · '):
+            match = re.fullmatch(r'([A-Za-z0-9][A-Za-z0-9 _.-]{0,15}) (remaining|[0-9]+(?:\.[0-9]+)? GiB)', description)
+            if not match:
+                raise ValueError('Invalid volume description in storage review.')
+            label, size = match.groups()
+            volumes.append({'label': label, 'filesystem': 'ext4',
+                            'size_gib': 0 if size == 'remaining' else float(size[:-4])})
+        original = expected[device]
+        drives.append(dict(device=device, model=original['model'], serial=original.get('serial', ''),
+                           size_bytes=original['size_bytes'], volumes=volumes))
+    return json.dumps({'confirmed': True, 'drives': drives})
 
 
 def protected_devices(partitions):

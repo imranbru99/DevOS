@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Shared DevOS confirmation/input dialog styling, explicit Optimizer delete action with safe Cancel default, and Qt 6 native theme support for system authentication dialogs.
+- README operating guide for current storage, recorder, optimizer, pipeline, Islamic reminders, live browser blur controls, and safe component updates.
 - Live recorder loudness meter, recording toolbar/tray signal bars, background MP4/WebM saves, and a non-destructive trim/copy/cut editor with audio mute/replace/mix exports.
 - Daily bounded Optimizer cache care with an opt-out setting; preserves user files, active caches, recordings and offline models.
 - Optional installer Data drives page with explicit selection, confirmation and automatic ext4 A/B/C layouts; leaves Calamares-managed disks and unselected storage intact.
@@ -15,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Desktop-user home/settings write checks during installation and at login, with distinct permission, read-only, full-disk, quota and I/O error reporting.
 
 ### Fixed
+- Stop editing compiled KDE branding strings; repair damaged cached native packages and gate ISO builds on ELF checksums and critical disk-tool execution.
+- Preserve Modesty Filter locked state and private-window policy during updates; install missing Qt theme dependencies.
+- Choose automatic partition tables for the current firmware, show readable drive/volume review, refresh hardware facts on each installer retry, and skip root Snapper boot jobs without a configuration.
+- Animated installer startup now uses the shared disk-probing launcher; throttles window checks instead of spawning a subprocess every animation frame.
+- AI pipeline respects scheduled order, preserves queue writes atomically under a shared lock, runs provider calls outside the UI thread, and distinguishes submitted work from verified completion. Missing tools and failed repository creation no longer report success.
 - Newly formatted Linux data volumes receive the invoking/installed user's ownership instead of remaining unwritable root-owned volumes. Unknown, mounted, read-only and active system targets are rejected; disk identity is rechecked before whole-disk changes.
 - Security settings use unique temporary files and durable writes, preserve the old file on write failure, and avoid predictable temporary-file symlinks.
 - Replace unsafe automatic Btrfs log clearing/forced write remounts with diagnostic guidance; remove claims that recovery can never fail.
@@ -23,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ISO validation normalizes 7z paths instead of reporting existing boot files missing. CI runs installer/update tests and the boot-layout gate, and reports QEMU startup errors.
 
 ### Changed
+- Add restrained shared animated installer backgrounds, retaining the DevOS emblem and an animation toggle across setup pages.
 - Consolidate hardware tuning, cap pending disk writes, isolate optional AI resources and monitor application slices for memory pressure. Bound journal/crash/package cache retention without deleting useful caches for supposed speed gains.
 - Bound pre-update snapshot creation to 30 seconds, skip its Python backend on ext4, enable scheduled Snapper cleanup, and rotate security/snapshot logs. Limit runtime journal usage and retain system journal entries for at most 30 days.
 - Raise the installer disk-space gate to 32 GB and use a 64 GB sparse disk for new QEMU test targets.

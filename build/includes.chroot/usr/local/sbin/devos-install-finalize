@@ -154,6 +154,15 @@ if ! grep -q '^btrfs' /etc/initramfs-tools/modules 2>/dev/null; then
     echo "btrfs" >> /etc/initramfs-tools/modules
 fi
 
+# The image carries a Btrfs Snapper template. Remove only that root template
+# when the installed root uses ext4, so scheduled snapshot jobs do not fail.
+if [ "$(stat -f -c %T /)" != "btrfs" ]; then
+    rm -f /etc/snapper/configs/root
+    if [ -f /etc/default/snapper ]; then
+        sed -i 's/^SNAPPER_CONFIGS="root"$/SNAPPER_CONFIGS=""/' /etc/default/snapper
+    fi
+fi
+
 echo "==> Applying the DevOS system name"
 if [ -f /usr/local/sbin/devos-apply-branding ]; then
     /bin/bash /usr/local/sbin/devos-apply-branding || true

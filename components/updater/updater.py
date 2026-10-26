@@ -189,16 +189,17 @@ def rollback(root):
 
 def prepare_dependencies(files):
     # Fixed, locally reviewed prerequisites, never commands from a release manifest.
-    if "components/kids/kids_mode.py" not in files:
-        return
+    required = list(KIDS_PACKAGES) if "components/kids/kids_mode.py" in files else []
+    if "components/devos_dialogs.py" in files:
+        required.extend(("qt5-style-kvantum", "qt6-style-kvantum"))
     missing = []
-    for package in KIDS_PACKAGES:
+    for package in required:
         check = subprocess.run(["dpkg-query", "-W", "-f=${db:Status-Status}", package],
                                capture_output=True, text=True)
         if check.returncode or check.stdout.strip() != "installed":
             missing.append(package)
     if missing:
-        print("Installing the desktop libraries needed by Kids Mode…", flush=True)
+        print("Installing the desktop libraries needed by this DevOS update…", flush=True)
         subprocess.run(["apt-get", "update", "-o", "APT::Update::Error-Mode=any"], check=True)
         subprocess.run(["apt-get", "install", "-y", "--no-install-recommends", *missing], check=True)
 
@@ -212,6 +213,8 @@ def refresh_enabled_features():
             if mode not in ("women", "people"):
                 raise ValueError("Unknown saved Modesty Filter mode; open its settings to refresh it.")
             command = ["/usr/local/bin/devos-modesty", "enable", "--mode", mode]
+            if settings.get("locked", False):
+                command.append("--locked")
             if not settings.get("lock_private_modes", True):
                 command.append("--keep-incognito")
             subprocess.run(command, check=True)

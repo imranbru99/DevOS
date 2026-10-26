@@ -51,6 +51,12 @@ class AutoCleanupTests(unittest.TestCase):
         self.assertEqual(result["bytes"], stale.stat().st_blocks * 512)
         self.assertTrue(stale.exists())
 
+    def test_scheduled_preview_creates_no_state_or_lock_files(self):
+        self.file(".cache/devos/temporary/file")
+        with patch.object(auto_cleanup, "open_files", return_value=set()):
+            auto_cleanup.run_scheduled(str(self.home), dry_run=True)
+        self.assertFalse((self.home / ".local").exists())
+
     def test_symlinked_parent_directory_and_leaf_are_preserved(self):
         outside = Path(self.tmp.name) / "outside"
         outside.mkdir()

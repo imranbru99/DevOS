@@ -202,46 +202,8 @@ for root in ROOTS:
     if os.path.isdir(root):
         walk_tree(root)
 
-# About this PC rows are compiled into the settings module. Shorten only
-# those full phrases, and keep a null so the rest of the program is untouched.
-PHRASES = (
-    (b"KDE Plasma Version", b"DevOS"),
-    (b"KDE Frameworks Version", b"Desktop libraries"),
-    (b"KDE Plasma", b"DevOS"),
-    (b"Kubuntu", b"DevOS"),
-)
+# Keep packaged libraries intact; About this PC uses kcm-about-distrorc.
 
-def patch_phrases(path):
-    try:
-        with open(path, "rb") as handle:
-            data = handle.read()
-    except OSError:
-        return
-    original = data
-    for old, new in PHRASES:
-        if len(new) >= len(old) or old not in data:
-            continue
-        repl = new + b"\0" * (len(old) - len(new))
-        data = data.replace(old, repl)
-    if data != original:
-        with open(path, "wb") as handle:
-            handle.write(data)
-
-lib_roots = ("/usr/lib", "/usr/lib64")
-for lib_root in lib_roots:
-    if not os.path.isdir(lib_root):
-        continue
-    for dirpath, dirnames, filenames in os.walk(lib_root):
-        if any(part in {"firmware", "modules", "python3"} for part in dirpath.split(os.sep)):
-            dirnames[:] = []
-            continue
-        for name in filenames:
-            if not name.endswith(".so"):
-                continue
-            low = name.lower()
-            if "about" not in low and "kinfocenter" not in low and "systemsettings" not in low:
-                continue
-            patch_phrases(os.path.join(dirpath, name))
 PY
 
 mkdir -p /etc/xdg

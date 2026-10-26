@@ -12,7 +12,7 @@ import "features-catalog.js" as Cat
 
 Page {
     id: kindPage
-    background: Rectangle { color: "#0b0f1a" }
+    background: InstallerBackground {}
 
     property string kind: "normal"
 

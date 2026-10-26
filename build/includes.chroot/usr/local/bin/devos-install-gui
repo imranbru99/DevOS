@@ -44,14 +44,14 @@ xhost +si:localuser:root >/dev/null 2>&1 || true
 xhost +local: >/dev/null 2>&1 || true
 xhost + >/dev/null 2>&1 || true
 
-# Refresh hardware facts without formatting or mounting any drive.
-if [ "$(id -u)" -eq 0 ]; then
-    /usr/local/sbin/devos-storage-probe || true
-else
-    sudo -n /usr/local/sbin/devos-storage-probe || true
-fi
-
 run_calamares() {
+    # Refresh hardware facts without formatting or mounting any drive.
+    if [ "$(id -u)" -eq 0 ]; then
+        /usr/local/sbin/devos-storage-probe || true
+    else
+        sudo -n /usr/local/sbin/devos-storage-probe || true
+    fi
+
     if [ "$(id -u)" -eq 0 ]; then
         calamares "$@"
         return $?

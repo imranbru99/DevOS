@@ -9,7 +9,7 @@ import QtQuick.Layouts 1.3
 Page {
     id: welcome
     clip: true
-    background: Rectangle { color: "#070a12" }
+    background: InstallerBackground {}
 
     Image {
         id: hero

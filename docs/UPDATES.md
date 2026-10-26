@@ -10,7 +10,8 @@ Enter your administrator password when asked. The updater uses published
 GitHub releases from `imranbru99/DevOS`, checks the bundle and file checksums,
 and restores changed files if installation fails. It installs missing Kids Mode
 desktop libraries and refreshes an already-enabled Modesty Filter while preserving
-its mode. Reopen DevOS apps and browsers afterward; sign out and back in to load
+its mode, private-window setting and locked state. Updates containing the shared
+dialog component also install the Qt 5/Qt 6 Kvantum theme prerequisites. Reopen DevOS apps and browsers afterward; sign out and back in to load
 new desktop shortcuts.
 It does not install an arbitrary branch or silently change the Ubuntu base.
 

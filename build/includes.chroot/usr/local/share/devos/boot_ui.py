@@ -2,6 +2,8 @@
 """Fullscreen animated starter. Stays up until the disk installer is visible."""
 
 import os
+import math
+import time
 import subprocess
 import sys
 
@@ -9,12 +11,12 @@ os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
 
 try:
     from PyQt5.QtCore import Qt, QTimer, QRectF
-    from PyQt5.QtGui import QColor, QFont, QLinearGradient, QPainter, QPixmap
+    from PyQt5.QtGui import QColor, QFont, QLinearGradient, QRadialGradient, QPainter, QPixmap, QPen
     from PyQt5.QtWidgets import QApplication, QLabel, QPushButton, QVBoxLayout, QWidget
 except Exception:
     try:
         from PyQt6.QtCore import Qt, QTimer, QRectF
-        from PyQt6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPixmap
+        from PyQt6.QtGui import QColor, QFont, QLinearGradient, QRadialGradient, QPainter, QPixmap, QPen
         from PyQt6.QtWidgets import QApplication, QLabel, QPushButton, QVBoxLayout, QWidget
     except Exception:
         # If neither is available, exit cleanly so live session jumps straight to installer
@@ -163,7 +165,8 @@ class Starter(QWidget):
 
         self.clock = QTimer(self)
         self.clock.timeout.connect(self.tick)
-        self.clock.start(16)
+        self.clock.start(33)
+        self._next_window_check = 0.0
         QTimer.singleShot(400, self.start_desktop)
         QTimer.singleShot(900, self.launch_installer)
 
@@ -171,7 +174,8 @@ class Starter(QWidget):
         if self.kwin is not None:
             return
         kwin = "/usr/bin/kwin_x11"
-        if os.path.isfile(kwin) and os.access(kwin, os.X_OK):
+        existing = subprocess.run(["pgrep", "-x", "kwin_x11"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
+        if existing.returncode != 0 and os.path.isfile(kwin) and os.access(kwin, os.X_OK):
             self.kwin = subprocess.Popen(
                 [kwin, "--replace"],
                 stdout=subprocess.DEVNULL,
@@ -181,6 +185,7 @@ class Starter(QWidget):
         self.activateWindow()
 
     def launch_installer(self):
+        retrying = self.failed
         self.failed = False
         self.alive_for = 0
         self.installer_was_visible = False
@@ -188,7 +193,7 @@ class Starter(QWidget):
         self.log.setVisible(False)
         self.stage = 2
         self.status.setText(PHASES[2])
-        self.detail.setText("Choose the disk on the next screen. Only that disk is erased.")
+        self.detail.setText("Choose the disk on the next screen. Review the storage plan before anything is erased.")
         if self.proc is not None and self.proc.poll() is None:
             self.proc.terminate()
             self.proc = None
@@ -208,31 +213,11 @@ class Starter(QWidget):
         except OSError:
             pass
         log = open(LOG, "a", encoding="utf-8", errors="replace")
-        if os.geteuid() == 0:
-            cmd = ["calamares"]
-            if self.failed:
-                cmd.append("-d")
-        else:
-            cmd = ["sudo", "-E", "-n", "env"]
-            if display():
-                cmd.append("DISPLAY=" + display())
-            if xauthority():
-                cmd.append("XAUTHORITY=" + xauthority())
-            cmd.extend([
-                "QT_QPA_PLATFORM=xcb",
-                "QT_QPA_PLATFORMTHEME=kde",
-                "QT_STYLE_OVERRIDE=Fusion",
-            ])
-            if self.failed:
-                cmd.extend([
-                    "LIBGL_ALWAYS_SOFTWARE=1",
-                    "QT_QUICK_BACKEND=software",
-                    "QMLSCENE_DEVICE=softwarecontext",
-                    "calamares",
-                    "-d",
-                ])
-            else:
-                cmd.append("calamares")
+        # Every launch path must use the same storage probe and safe fallback.
+        cmd = ["/usr/local/bin/devos-install-gui"]
+        if retrying:
+            env["LIBGL_ALWAYS_SOFTWARE"] = "1"
+            env["QT_QUICK_BACKEND"] = "software"
 
         try:
             self.proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, env=env)
@@ -277,18 +262,21 @@ class Starter(QWidget):
         self.retry.setVisible(True)
 
     def tick(self):
-        self.phase += 0.016
+        self.phase += 0.033
         if not self.failed and self.stage < 2 and self.phase > 0.7:
             self.stage = 1
             self.status.setText(PHASES[1])
         if self.proc is not None:
             code = self.proc.poll()
             if code is None:
-                self.alive_for += 16
-                if self.installer_window_visible():
-                    self.hide()
-                elif self.alive_for > 40000 and not self.failed:
-                    self.show_failure()
+                self.alive_for += 33
+                now = time.monotonic()
+                if now >= self._next_window_check:
+                    self._next_window_check = now + 0.5
+                    if self.installer_window_visible():
+                        self.hide()
+                    elif self.alive_for > 40000 and not self.failed:
+                        self.show_failure()
             elif self.alive_for < 8000 or not self.installer_was_visible:
                 self.proc = None
                 self.show_failure()
@@ -314,6 +302,18 @@ class Starter(QWidget):
         gradient.setColorAt(0.55, QColor("#10182c"))
         gradient.setColorAt(1.0, QColor("#160f28"))
         painter.fillRect(rect, gradient)
+        painter.setRenderHint(QPainter.Antialiasing)
+        # Low-cost drifting light and orbital lines behind the branded starter.
+        cx = rect.width() * (.76 + .035 * math.sin(self.phase / 7))
+        cy = rect.height() * (.38 + .06 * math.cos(self.phase / 9))
+        glow = QRadialGradient(cx, cy, max(rect.width(), rect.height()) * .55)
+        glow.setColorAt(0, QColor(20, 115, 160, 70))
+        glow.setColorAt(1, QColor(12, 18, 32, 0))
+        painter.fillRect(rect, glow)
+        painter.setBrush(Qt.NoBrush)
+        painter.setPen(QPen(QColor(91, 188, 238, 35), 1))
+        for radius in (210, 260, 360):
+            painter.drawEllipse(QRectF(cx-radius, cy-radius, radius*2, radius*2))
         painter.end()
 
 

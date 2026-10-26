@@ -1719,13 +1719,18 @@ def run_gui(open_cleanup=False):
             if not chosen:
                 return
             size = sum(r["size"] for r in chosen)
-            names = ", ".join(r["label"] for r in chosen)
             box = QtWidgets.QMessageBox(self)
             box.setWindowTitle("Clean selected")
-            box.setText("Permanently remove %s from: %s?" % (human_size(size), names))
-            box.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.Cancel)
-            box.setDefaultButton(QtWidgets.QMessageBox.Cancel)
-            if box.exec_() != QtWidgets.QMessageBox.Yes:
+            box.setText("Free %s of storage?" % human_size(size))
+            box.setInformativeText("The selected files will be permanently deleted. Review the categories before continuing.")
+            box.setDetailedText("Selected categories:\n" + "\n".join("• " + r["label"] for r in chosen))
+            clean_button = box.addButton("Delete selected files", QtWidgets.QMessageBox.DestructiveRole)
+            clean_button.setProperty("devosDestructive", True)
+            cancel_button = box.addButton(QtWidgets.QMessageBox.Cancel)
+            box.setDefaultButton(cancel_button)
+            box.setEscapeButton(cancel_button)
+            box.exec_()
+            if box.clickedButton() is not clean_button:
                 return
             entries = [e for r in chosen for e in r["_entries"]]
             self.clean_btn.setEnabled(False)
@@ -1979,6 +1984,12 @@ def run_gui(open_cleanup=False):
                             [("Clean up", self.open_cleanup), ("Later", lambda: None)])
 
     qapp = QtWidgets.QApplication(sys.argv)
+    # Keep confirmation and input dialogs consistent across DevOS apps.
+    import sys as _dialog_sys
+    from pathlib import Path as _DialogPath
+    _dialog_sys.path.insert(0, str(_DialogPath(__file__).resolve().parent.parent))
+    from devos_dialogs import install as _install_dialog_style
+    _install_dialog_style(qapp)
     qapp.setApplicationName("devos-optimizer")
     qapp.setApplicationDisplayName("DevOS Optimizer")
     if hasattr(qapp, "setDesktopFileName"):

@@ -124,6 +124,17 @@ EOF
 # Ubuntu's signed archive before enabling third-party HTTPS repositories.
 rm -f "${CHROOT_DIR}/etc/apt/sources.list.d/waydroid.list"
 chroot "${CHROOT_DIR}" apt-get update
+# Replace the old APT branding callback before any package operation. Older
+# images modified compiled KDE strings after dpkg, undoing a clean reinstall.
+install -m 755 "${ROOT_DIR}/build/includes.chroot/usr/local/sbin/devos-debrand-desktop" "${CHROOT_DIR}/usr/local/sbin/devos-debrand-desktop"
+# A cached rootfs must not carry damaged executable libraries into a release.
+mapfile -t DAMAGED_PACKAGES < <(python3 "${SCRIPT_DIR}/verify-package-binaries.py" --root "${CHROOT_DIR}" --packages)
+if [ "${#DAMAGED_PACKAGES[@]}" -gt 0 ]; then
+    echo "Repairing cached package binaries: ${DAMAGED_PACKAGES[*]}"
+    chroot "${CHROOT_DIR}" env DEBIAN_FRONTEND=noninteractive apt-get install -y --reinstall "${DAMAGED_PACKAGES[@]}"
+fi
+python3 "${SCRIPT_DIR}/verify-package-binaries.py" --root "${CHROOT_DIR}"
+
 chroot "${CHROOT_DIR}" env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates
 mkdir -p "${CHROOT_DIR}/usr/share/keyrings"
 if curl -fsSL --retry 3 https://repo.waydro.id/waydroid.gpg \
@@ -248,6 +259,12 @@ for hook in "${ROOT_DIR}/build/hooks/"*.hook.chroot; do
         chroot "${CHROOT_DIR}" /tmp/current_hook.sh
         rm -f "${CHROOT_DIR}/tmp/current_hook.sh"
     fi
+done
+
+# Fail closed after branding and hooks: never edit packaged ELF binaries.
+python3 "${SCRIPT_DIR}/verify-package-binaries.py" --root "${CHROOT_DIR}"
+for tool in sfdisk gawk nmcli mkswap; do
+    chroot "${CHROOT_DIR}" "$tool" --version >/dev/null
 done
 
 # 7. Extract Kernel & Initramfs for Live Boot

@@ -15,7 +15,7 @@ import "aimodel-hw.js" as HW
 
 Page {
     id: aiPage
-    background: Rectangle { color: "#0b0f1a" }
+    background: InstallerBackground {}
 
     property string chat: HW.hw.recommended
     property bool vision: HW.hw.recommended_extras.indexOf("vision") >= 0

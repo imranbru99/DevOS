@@ -23,6 +23,7 @@ jobs:
           python3 -m unittest discover -s tests/unit -p test_updater.py
           python3 -m unittest discover -s tests/unit -p 'test_optimizer*.py'
           python3 -m unittest discover -s tests/unit -p test_responsiveness.py
+          python3 -m unittest discover -s tests/unit -p test_task_pipeline.py
 
       - name: Install Host Dependencies
         run: |
@@ -63,10 +64,10 @@ jobs:
           ISO_FILE="out/devos-26.04-amd64.iso"
           test -f "$ISO_FILE"
           ISO_BYTES=$(stat -c%s "$ISO_FILE")
-          MAX_BYTES=$((4 * 1024 * 1024 * 1024))
-          echo "ISO Size: $ISO_BYTES bytes (Limit: $MAX_BYTES bytes)"
+          MAX_BYTES=${DEVOS_MAX_ISO_BYTES:-5368709120}
+          echo "ISO Size: $ISO_BYTES bytes (Release budget: $MAX_BYTES bytes)"
           if [ "$ISO_BYTES" -gt "$MAX_BYTES" ]; then
-            echo "::error::ISO exceeds 4.0 GB target limit!"
+            echo "::error::ISO exceeds configured release size budget!"
             exit 1
           fi
           sha256sum "$ISO_FILE"

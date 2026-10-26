@@ -17,6 +17,8 @@ Features:
 """
 
 import argparse
+import fcntl
+import functools
 import datetime
 import json
 import os
@@ -25,6 +27,8 @@ import shutil
 import subprocess
 import sys
 import time
+import tempfile
+import uuid
 import urllib.parse
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -60,7 +64,7 @@ def discover_agents() -> Dict[str, Dict[str, Any]]:
         "name": "ChatGPT / Codex",
         "bin": codex_bin,
         "color": "#10a37f",
-        "available": True,
+        "available": bool(codex_bin),
     }
 
     # 3. Claude Code CLI
@@ -200,12 +204,14 @@ def create_github_repo(
     browser_new_url = f"https://github.com/new?{urllib.parse.urlencode(query_params)}"
 
     # Check gh auth status
+    if not shutil.which("gh"):
+        return False, "GitHub CLI is not installed; repository was not created."
     gh_check = subprocess.run(["gh", "auth", "status"], capture_output=True, text=True)
     if gh_check.returncode != 0:
         # Fallback to opening browser create form directly
         if open_browser:
             subprocess.Popen(["xdg-open", browser_new_url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return True, browser_new_url
+        return False, "GitHub authentication required; repository was not created."
 
     # Ensure git repo is initialized locally
     if not (p_path / ".git").exists():
@@ -227,7 +233,19 @@ def create_github_repo(
 
     # Add and commit if there are changes
     subprocess.run(["git", "add", "."], cwd=str(p_path), check=False)
-    subprocess.run(["git", "commit", "-m", f"Initial commit: {clean_name}"], cwd=str(p_path), check=False)
+    for command in (["git", "config", "user.name"], ["git", "config", "user.email"],
+                    ["git", "var", "GIT_AUTHOR_IDENT"], ["git", "var", "GIT_COMMITTER_IDENT"]):
+        identity = subprocess.run(command, cwd=str(p_path), capture_output=True, text=True, check=True).stdout.strip()
+        expected = "Imran Ahmed <me@imrandev.bd>"
+        if command[-1] == "user.name" and identity != "Imran Ahmed":
+            return False, "Git author name mismatch"
+        if command[-1] == "user.email" and identity != "me@imrandev.bd":
+            return False, "Git author email mismatch"
+        if command[1] == "var" and not identity.startswith(expected + " "):
+            return False, "Effective Git identity mismatch"
+    changed = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=str(p_path))
+    if changed.returncode == 1:
+        subprocess.run(["git", "commit", "-m", f"Initial commit: {clean_name}"], cwd=str(p_path), check=True)
 
     vis_flag = "--public" if public else "--private"
     cmd = ["gh", "repo", "create", f"imranbru99/{clean_name}", vis_flag]
@@ -239,7 +257,7 @@ def create_github_repo(
     res = subprocess.run(cmd, cwd=str(p_path), capture_output=True, text=True)
     full_url = f"https://github.com/imranbru99/{clean_name}"
 
-    if res.returncode == 0 or "already exists" in (res.stderr or "").lower():
+    if res.returncode == 0:
         if open_browser:
             subprocess.Popen(["xdg-open", full_url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return True, full_url
@@ -332,6 +350,26 @@ def parse_reset_time(text: str) -> Optional[datetime.datetime]:
     return None
 
 
+def queue_transaction(method):
+    @functools.wraps(method)
+    def wrapped(self, *args, **kwargs):
+        lock = self.state_file.with_suffix(self.state_file.suffix + ".lock")
+        fd = os.open(lock, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        try:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                if method.__name__ == "execute_next":
+                    return False
+                raise RuntimeError("Another pipeline command is running. Try again after it finishes.")
+            self.queue = self._load()
+            self.context = self._load_context()
+            return method(self, *args, **kwargs)
+        finally:
+            os.close(fd)
+    return wrapped
+
+
 class TaskPipeline:
     def __init__(self, state_file: Path = STATE_FILE, context_file: Path = CONTEXT_FILE):
         self.state_file = state_file
@@ -341,31 +379,44 @@ class TaskPipeline:
         self.context: Dict[str, Any] = self._load_context()
 
     def _load(self) -> List[Dict[str, Any]]:
-        if self.state_file.exists():
-            try:
-                with open(self.state_file, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except Exception:
-                return []
-        return []
+        if not self.state_file.exists():
+            return []
+        with self.state_file.open(encoding="utf-8") as stream:
+            value = json.load(stream)
+        if not isinstance(value, list) or any(not isinstance(t, dict) for t in value):
+            raise ValueError("Invalid pipeline queue; the existing file was preserved.")
+        return value
+
+    @staticmethod
+    def _atomic_json(path, value):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(prefix=".pipeline-", dir=path.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                json.dump(value, stream, indent=2)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, path)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
 
     def _save(self):
-        with open(self.state_file, "w", encoding="utf-8") as f:
-            json.dump(self.queue, f, indent=2)
+        self._atomic_json(self.state_file, self.queue)
 
     def _load_context(self) -> Dict[str, Any]:
-        if self.context_file.exists():
-            try:
-                with open(self.context_file, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except Exception:
-                return {}
-        return {}
+        if not self.context_file.exists():
+            return {}
+        with self.context_file.open(encoding="utf-8") as stream:
+            value = json.load(stream)
+        if not isinstance(value, dict):
+            raise ValueError("Invalid pipeline context; the existing file was preserved.")
+        return value
 
     def _save_context(self):
-        with open(self.context_file, "w", encoding="utf-8") as f:
-            json.dump(self.context, f, indent=2)
+        self._atomic_json(self.context_file, self.context)
 
+    @queue_transaction
     def add(
         self,
         prompt: str,
@@ -376,7 +427,7 @@ class TaskPipeline:
         repo_name: str = "",
         repo_desc: str = "",
     ) -> str:
-        task_id = f"task_{int(time.time() * 1000)}"
+        task_id = "task_" + uuid.uuid4().hex[:16]
         run_at = (datetime.datetime.now() + datetime.timedelta(seconds=delay_seconds)).isoformat()
         item = {
             "id": task_id,
@@ -401,16 +452,34 @@ class TaskPipeline:
     def list(self) -> List[Dict[str, Any]]:
         return self.queue
 
+    @queue_transaction
+    def update_task(self, task_id, changes):
+        for task in self.queue:
+            if task["id"] == task_id:
+                task.update(changes)
+                self._save()
+                return
+        raise ValueError("Task no longer exists")
+
+    @queue_transaction
     def clear(self):
         self.queue = []
         self._save()
 
+    @queue_transaction
     def execute_next(self) -> bool:
         """Finds next eligible task and executes it."""
         now = datetime.datetime.now()
         for task in self.queue:
-            if task["status"] in ("COMPLETED", "FAILED"):
+            if task["status"] == "COMPLETED":
                 continue
+            if task["status"] == "FAILED":
+                return False
+
+            if task["status"] in ("RUNNING", "SUBMITTED"):
+                return False  # no proof of completion; never redispatch after a crash
+            if now < datetime.datetime.fromisoformat(task["run_at"]):
+                return False  # ordered chain: later tasks cannot overtake this one
 
             # Check if delayed or rate-limited with scheduled wakeup
             if task["retry_at"]:
@@ -418,7 +487,7 @@ class TaskPipeline:
                 if now < retry_time:
                     remaining = int((retry_time - now).total_seconds())
                     print(f"[Rate-Limited] {task['id']} ({task['agent']}) waiting until {retry_time.strftime('%I:%M %p')} ({remaining}s remaining)")
-                    continue
+                    return False
 
             # Resolve context variables in prompt: e.g. {github_repo}, {repo_url}, {repo_name}
             resolved_prompt = task["prompt"]
@@ -429,7 +498,7 @@ class TaskPipeline:
             # If target agent is currently busy doing work, wait for current turn to complete
             if is_agent_working(task["agent"]):
                 print(f"[{task['agent'].upper()}] Agent is currently working. Waiting for turn to finish before dispatching...")
-                continue
+                return False
 
             # Run this task
             task["status"] = "RUNNING"
@@ -438,8 +507,18 @@ class TaskPipeline:
 
             task_dispatch = dict(task)
             task_dispatch["prompt"] = resolved_prompt
-            success, output = self._dispatch(task_dispatch)
+            try:
+                success, output = self._dispatch(task_dispatch)
+            except Exception as exc:
+                success, output = False, str(exc)
+            output = str(output)[-65536:]
             task["output"] = output
+
+            if output.startswith("SUBMITTED:"):
+                task["status"] = "SUBMITTED"
+                self._save()
+                notify("Task submitted", "Waiting for verified agent completion before the next task.")
+                return True
 
             # Check if rate-limited
             if not success and ("rate limit" in output.lower() or "usage to reset" in output.lower()):
@@ -479,6 +558,11 @@ class TaskPipeline:
                         push=True,
                         open_browser=True,
                     )
+                    if not ok_repo:
+                        task["status"] = "FAILED"
+                        task["output"] += "\nRepository creation failed: " + repo_info
+                        self._save()
+                        return True
                     if ok_repo:
                         task["github_url"] = repo_info
                         self.context["github_repo"] = repo_info
@@ -505,54 +589,26 @@ class TaskPipeline:
             if AGENTAPI_BIN.exists():
                 cmd = [str(AGENTAPI_BIN), "new-conversation", prompt]
                 try:
-                    res = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-                    return res.returncode == 0, res.stdout or res.stderr
+                    res = subprocess.run(cmd, capture_output=True, text=True, timeout=300, cwd=task.get("project") or None)
+                    if res.returncode == 0:
+                        return False, "SUBMITTED: " + (res.stdout or "Antigravity accepted the conversation; completion is not verified.")
+                    return False, res.stderr or res.stdout
                 except Exception as e:
                     return False, str(e)
             else:
                 return False, "Antigravity CLI (agentapi) not found"
 
         elif agent in ("chatgpt", "codex"):
-            # For desktop window automation via xdotool or Codex window
-            # Look for running Codex / ChatGPT desktop app
-            find_win = subprocess.run(["xdotool", "search", "--class", "chatgpt"], capture_output=True, text=True)
-            win_id = find_win.stdout.strip().splitlines()[0] if find_win.stdout.strip() else None
-            if not win_id:
-                find_win = subprocess.run(["xdotool", "search", "--name", "Codex"], capture_output=True, text=True)
-                win_id = find_win.stdout.strip().splitlines()[0] if find_win.stdout.strip() else None
-
-            if win_id:
-                try:
-                    # Wait up to 300s if currently working
-                    start_wait = time.time()
-                    while is_codex_working() and (time.time() - start_wait < 300):
-                        time.sleep(2)
-
-                    # Activate window, type prompt, press Return
-                    subprocess.run(["xdotool", "windowactivate", win_id], check=False)
-                    time.sleep(0.5)
-                    subprocess.run(["xdotool", "type", "--delay", "10", prompt], check=False)
-                    subprocess.run(["xdotool", "key", "Return"], check=False)
-
-                    # Wait until the turn finishes before returning success
-                    time.sleep(3)
-                    start_exec = time.time()
-                    while is_codex_working() and (time.time() - start_exec < 600):
-                        time.sleep(2)
-
-                    return True, "Dispatched and completed via Codex/ChatGPT desktop app"
-                except Exception as e:
-                    return False, f"xdotool error: {e}"
-            else:
-                # If window is not open, check if codex CLI exists
-                codex_bin = shutil.which("codex") or (Path.home() / ".npm-global/bin/codex")
-                if codex_bin and Path(codex_bin).exists():
-                    try:
-                        res = subprocess.run([str(codex_bin), "exec", prompt], capture_output=True, text=True, timeout=300)
-                        return res.returncode == 0, res.stdout or res.stderr
-                    except Exception as e:
-                        return False, f"Codex CLI error: {e}"
-                return True, f"Simulated ChatGPT command completed: {prompt[:40]}"
+            # Process exit gives an observable result. Desktop idle heuristics
+            # cannot establish whether a particular task succeeded.
+            codex_bin = discover_agents().get("chatgpt", {}).get("bin")
+            if not codex_bin:
+                return False, "Codex CLI is not installed. Install and sign in before running this task."
+            try:
+                res = subprocess.run([str(codex_bin), "exec", prompt], capture_output=True, text=True, timeout=300, cwd=task.get("project") or None)
+                return res.returncode == 0, res.stdout or res.stderr
+            except Exception as exc:
+                return False, f"Codex CLI error: {exc}"
 
         elif agent == "local":
             # Local DevOS AI engine
@@ -582,7 +638,7 @@ class TaskPipeline:
             bin_path = known_agents.get("claude", {}).get("bin") or shutil.which("claude")
             if bin_path:
                 try:
-                    res = subprocess.run([bin_path, "-p", prompt], capture_output=True, text=True, timeout=300)
+                    res = subprocess.run([bin_path, "-p", prompt], capture_output=True, text=True, timeout=300, cwd=task.get("project") or None)
                     return res.returncode == 0, res.stdout or res.stderr
                 except Exception as e:
                     return False, f"Claude CLI error: {e}"
@@ -593,7 +649,7 @@ class TaskPipeline:
             bin_path = known_agents.get("aider", {}).get("bin") or shutil.which("aider")
             if bin_path:
                 try:
-                    res = subprocess.run([bin_path, "--message", prompt, "--no-auto-commits"], capture_output=True, text=True, timeout=300)
+                    res = subprocess.run([bin_path, "--message", prompt, "--no-auto-commits"], capture_output=True, text=True, timeout=300, cwd=task.get("project") or None)
                     return res.returncode == 0, res.stdout or res.stderr
                 except Exception as e:
                     return False, f"Aider CLI error: {e}"
@@ -607,7 +663,7 @@ class TaskPipeline:
                     cmd = [sys.executable, bin_path, prompt]
                 else:
                     cmd = [bin_path, prompt]
-                res = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=300, cwd=task.get("project") or None)
                 return res.returncode == 0, res.stdout or res.stderr
             except Exception as e:
                 return False, f"Custom agent '{agent}' error: {e}"
@@ -616,7 +672,7 @@ class TaskPipeline:
         generic_bin = shutil.which(agent)
         if generic_bin:
             try:
-                res = subprocess.run([generic_bin, prompt], capture_output=True, text=True, timeout=300)
+                res = subprocess.run([generic_bin, prompt], capture_output=True, text=True, timeout=300, cwd=task.get("project") or None)
                 return res.returncode == 0, res.stdout or res.stderr
             except Exception as e:
                 return False, f"Agent '{agent}' execution error: {e}"
@@ -686,8 +742,16 @@ def main():
             if not has_more:
                 # Check if any tasks are rate limited
                 rate_limited = [t for t in pipeline.list() if t["status"] == "RATE_LIMITED"]
-                if not rate_limited:
-                    print("All tasks in pipeline completed successfully!")
+                pending = [t for t in pipeline.list() if t["status"] not in ("COMPLETED", "FAILED")]
+                if pending and any(t["status"] == "FAILED" for t in pipeline.list()):
+                    print("Pipeline paused after a failed task; later tasks have not run.")
+                    break
+                if any(t["status"] in ("RUNNING", "SUBMITTED") for t in pending):
+                    print("Pipeline paused: awaiting verified agent completion.")
+                    break
+                if not pending:
+                    failed = any(t["status"] == "FAILED" for t in pipeline.list())
+                    print("Pipeline finished with failed tasks." if failed else "All tasks completed successfully.")
                     break
             time.sleep(2)
 

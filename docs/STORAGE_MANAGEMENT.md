@@ -89,3 +89,15 @@ no physical disk was formatted during development. Visual previews use mock
 installer data. Test actual multi-disk selection, preservation of an unselected
 disk, first boot, volume write access, failure handling and recovery in an
 isolated VM and on representative hardware.
+
+The automatic OS layout follows firmware: GPT/EFI on UEFI computers and MBR on
+legacy BIOS computers. A legacy BIOS installation on a disk exceeding MBR's
+addressable range needs an appropriate manual GPT layout and BIOS boot partition.
+The separate Storage & Boot Doctor preparation action can create GPT BIOS boot
+space. Review the installer Summary before applying any layout.
+
+The Data drives review lists device paths, volume labels, requested GiB sizes and
+remaining space in readable text. Disk model/serial/capacity facts stay in a
+root-owned scan snapshot and are compared with fresh hardware facts before any
+additional drive is modified. Installer retries refresh this scan. Missing or
+changed facts stop the operation rather than silently choosing another disk.

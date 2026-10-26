@@ -1905,6 +1905,12 @@ def run_gui(focus: Optional[str] = None, discovery: Optional[AppDiscovery] = Non
     QtCore.QCoreApplication.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling, True)
     QtCore.QCoreApplication.setAttribute(QtCore.Qt.AA_UseHighDpiPixmaps, True)
     qapp = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    # Keep confirmation and input dialogs consistent across DevOS apps.
+    import sys as _dialog_sys
+    from pathlib import Path as _DialogPath
+    _dialog_sys.path.insert(0, str(_DialogPath(__file__).resolve().parent.parent))
+    from devos_dialogs import install as _install_dialog_style
+    _install_dialog_style(qapp)
     qapp.setApplicationName("devos-apps")
     qapp.setApplicationDisplayName("DevOS Apps")
     qapp.setDesktopFileName("devos-apps")

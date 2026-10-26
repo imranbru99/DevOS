@@ -1,0 +1,4 @@
+#!/bin/sh
+# A shipped Btrfs root template is not evidence that this installation uses Btrfs.
+[ -r /etc/snapper/configs/root ] || exit 1
+[ "$(stat -f -c %T /)" = btrfs ]

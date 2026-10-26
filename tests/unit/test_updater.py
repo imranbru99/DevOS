@@ -151,6 +151,14 @@ class UpdaterTests(unittest.TestCase):
                 updater.main(["--check", "--os-upgrade"])
             call.assert_not_called()
 
+    def test_filter_refresh_preserves_locked_and_private_window_settings(self):
+        state = mock.Mock()
+        state.exists.return_value = True
+        state.read_text.return_value = json.dumps({"enabled": True, "mode": "people", "locked": True, "lock_private_modes": False})
+        with mock.patch.object(updater, "Path", return_value=state), mock.patch.object(updater.subprocess, "run") as run:
+            updater.refresh_enabled_features()
+        self.assertEqual(run.call_args.args[0], ["/usr/local/bin/devos-modesty", "enable", "--mode", "people", "--locked", "--keep-incognito"])
+
     def test_check_does_not_install(self):
         info = {"tag_name": "v1", "assets": [{"name": name, "browser_download_url": "https://example.com/" + name}
                                                for name in (updater.ASSET, updater.ASSET + ".sha256")]}

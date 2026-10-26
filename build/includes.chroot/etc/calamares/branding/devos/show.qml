@@ -328,7 +328,15 @@ Presentation {
                             GradientStop { position: 0.55; color: "#00ffffff" }
                         }
                     }
+                    Image {
+                        anchors.centerIn: parent
+                        width: parent.width * 0.72; height: width
+                        source: "logo.png"
+                        fillMode: Image.PreserveAspectFit
+                        visible: stage.c.tag.indexOf("DEVOS") >= 0
+                    }
                     Text {
+                        visible: stage.c.tag.indexOf("DEVOS") < 0
                         anchors.centerIn: parent
                         text: stage.c.icon
                         color: "white"
