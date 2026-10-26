@@ -235,9 +235,16 @@ class TaskPipeline:
 
 
 def main():
+    if len(sys.argv) == 1 and (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        # Launch Visual GUI when invoked without arguments on desktop
+        import pipeline_gui
+        pipeline_gui.main()
+        return
+
     parser = argparse.ArgumentParser(description="DevOS AI Task Pipeline & Rate-Limit Scheduler")
     sub = parser.add_subparsers(dest="cmd")
 
+    sub.add_parser("gui", help="Open Visual Pipeline & Scheduler Dashboard")
     add_p = sub.add_parser("add", help="Add command to pipeline")
     add_p.add_argument("prompt", help="Command or prompt to execute")
     add_p.add_argument("--agent", choices=["chatgpt", "antigravity", "local"], default="antigravity", help="Target AI agent")
@@ -251,7 +258,12 @@ def main():
     args = parser.parse_args()
     pipeline = TaskPipeline()
 
-    if args.cmd == "add":
+    if args.cmd == "gui":
+        import pipeline_gui
+        pipeline_gui.main()
+        return
+
+    elif args.cmd == "add":
         tid = pipeline.add(args.prompt, agent=args.agent, project=args.project, delay_seconds=args.delay)
         print(f"Task queued: {tid} [{args.agent.upper()}] -> '{args.prompt}'")
 

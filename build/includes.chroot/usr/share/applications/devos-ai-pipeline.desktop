@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=DevOS AI Task Pipeline
+GenericName=AI Command Scheduler & Rate-Limit Engine
+Comment=Sequential multi-agent task runner across ChatGPT, Antigravity, and Local AI with rate-limit scheduler
+Exec=devos-ai-pipeline %F
+Icon=devos-ai-code-agent
+Terminal=false
+Categories=Development;Utility;System;
+Keywords=devos;ai;pipeline;scheduler;chatgpt;antigravity;queue;agent;rate-limit;
+StartupNotify=true
+StartupWMClass=devos-ai-pipeline

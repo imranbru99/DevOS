@@ -1,0 +1,440 @@
+#!/usr/bin/env python3
+"""DevOS AI Multi-Agent Task Pipeline & Rate-Limit Scheduler - Visual GUI.
+
+Visual dashboard for managing, queuing, and monitoring sequential AI tasks
+across ChatGPT/Codex, Google Antigravity, and DevOS Local AI with automatic
+rate-limit detection and countdown timers.
+"""
+
+import datetime
+import os
+import sys
+import time
+from pathlib import Path
+
+from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtWidgets import QLineEdit
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "components" / "ai-agent"))
+from task_pipeline import TaskPipeline, parse_reset_time
+
+STYLE = """
+QWidget {
+    background-color: #0b0f1a;
+    color: #e2e8f0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 13px;
+}
+QFrame#card {
+    background-color: #0f172a;
+    border: 1px solid #1e293b;
+    border-radius: 10px;
+}
+QFrame#banner_rate_limit {
+    background-color: #2a1b06;
+    border: 1px solid #d97706;
+    border-radius: 8px;
+}
+QLabel#title {
+    font-size: 20px;
+    font-weight: 700;
+    color: #f8fafc;
+}
+QLabel#subtitle {
+    color: #94a3b8;
+    font-size: 13px;
+}
+QLabel#badge_agent {
+    font-weight: 700;
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 5px;
+}
+QPushButton {
+    background-color: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    padding: 7px 16px;
+    font-weight: 600;
+    color: #f8fafc;
+}
+QPushButton:hover {
+    background-color: #334155;
+    border-color: #475569;
+}
+QPushButton#primary {
+    background-color: #0284c7;
+    border: 1px solid #38bdf8;
+    color: #ffffff;
+}
+QPushButton#primary:hover {
+    background-color: #0369a1;
+}
+QPushButton#accent_warning {
+    background-color: #d97706;
+    border: 1px solid #fbbf24;
+    color: #ffffff;
+}
+QPushButton#accent_warning:hover {
+    background-color: #b45309;
+}
+QPushButton#danger {
+    background-color: #991b1b;
+    border: 1px solid #f87171;
+    color: #ffffff;
+}
+QComboBox, QLineEdit, QTextEdit {
+    background-color: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    padding: 6px 10px;
+    color: #f8fafc;
+}
+QComboBox:focus, QLineEdit:focus, QTextEdit:focus {
+    border: 1px solid #38bdf8;
+}
+QScrollArea {
+    border: none;
+    background-color: transparent;
+}
+QScrollBar:vertical {
+    border: none;
+    background: #0b0f1a;
+    width: 8px;
+    margin: 0px;
+}
+QScrollBar::handle:vertical {
+    background: #334155;
+    min-height: 20px;
+    border-radius: 4px;
+}
+"""
+
+
+class TaskCard(QtWidgets.QFrame):
+    def __init__(self, task: dict, on_failover=None, parent=None):
+        super().__init__(parent)
+        self.task = task
+        self.on_failover = on_failover
+        self.setObjectName("card")
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QtWidgets.QHBoxLayout(self)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(12)
+
+        # Agent icon / badge
+        agent = self.task.get("agent", "antigravity").lower()
+        badge = QtWidgets.QLabel()
+        badge.setObjectName("badge_agent")
+        if agent == "chatgpt":
+            badge.setText("ChatGPT / Codex")
+            badge.setStyleSheet("background-color: #10a37f; color: white;")
+        elif agent == "antigravity":
+            badge.setText("Google Antigravity")
+            badge.setStyleSheet("background-color: #2563eb; color: white;")
+        else:
+            badge.setText("DevOS Local AI")
+            badge.setStyleSheet("background-color: #7c3aed; color: white;")
+        layout.addWidget(badge)
+
+        # Center info: prompt & status
+        center_box = QtWidgets.QVBoxLayout()
+        center_box.setSpacing(4)
+
+        prompt_lbl = QtWidgets.QLabel(self.task.get("prompt", ""))
+        prompt_lbl.setWordWrap(True)
+        prompt_lbl.setStyleSheet("font-size: 13px; font-weight: 500; color: #f8fafc;")
+        center_box.addWidget(prompt_lbl)
+
+        status = self.task.get("status", "QUEUED")
+        status_text = f"Status: {status}"
+        status_color = "#94a3b8"
+
+        if status == "RUNNING":
+            status_text = "⚡ RUNNING: In progress..."
+            status_color = "#38bdf8"
+        elif status == "RATE_LIMITED":
+            retry_at = self.task.get("retry_at", "")
+            if retry_at:
+                try:
+                    dt = datetime.datetime.fromisoformat(retry_at)
+                    status_text = f"⏸ RATE LIMITED: Cooldown active until {dt.strftime('%I:%M %p')}"
+                except Exception:
+                    status_text = "⏸ RATE LIMITED"
+            status_color = "#fbbf24"
+        elif status == "COMPLETED":
+            status_text = "✓ COMPLETED"
+            status_color = "#34d399"
+        elif status == "FAILED":
+            status_text = "✗ FAILED"
+            status_color = "#f87171"
+
+        status_lbl = QtWidgets.QLabel(status_text)
+        status_lbl.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {status_color};")
+        center_box.addWidget(status_lbl)
+
+        layout.addLayout(center_box, stretch=1)
+
+        # Failover action button if rate limited
+        if status == "RATE_LIMITED" and self.on_failover:
+            btn_failover = QtWidgets.QPushButton("⚡ Switch to Antigravity")
+            btn_failover.setObjectName("accent_warning")
+            btn_failover.setToolTip("Skip rate-limit cooldown and execute via Antigravity immediately")
+            btn_failover.clicked.connect(lambda: self.on_failover(self.task["id"]))
+            layout.addWidget(btn_failover)
+
+
+class PipelineWindow(QtWidgets.QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.pipeline = TaskPipeline()
+        self.setWindowTitle("DevOS AI Command Pipeline & Scheduler")
+        self.resize(880, 720)
+        self.setStyleSheet(STYLE)
+        self.init_ui()
+
+        # Timer for refreshing queue and ticking countdowns
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.refresh_queue)
+        self.timer.start(1000)
+
+        # Worker timer for executing next pipeline task if running
+        self.is_running = False
+        self.runner_timer = QTimer(self)
+        self.runner_timer.timeout.connect(self.run_step)
+
+    def init_ui(self):
+        central = QtWidgets.QWidget()
+        self.setCentralWidget(central)
+        main_layout = QtWidgets.QVBoxLayout(central)
+        main_layout.setContentsMargins(24, 20, 24, 20)
+        main_layout.setSpacing(16)
+
+        # Header
+        header_layout = QtWidgets.QHBoxLayout()
+        header_vbox = QtWidgets.QVBoxLayout()
+        title = QtWidgets.QLabel("AI Multi-Agent Command Pipeline")
+        title.setObjectName("title")
+        subtitle = QtWidgets.QLabel("Serial execution & auto-scheduling across ChatGPT, Antigravity & Local AI")
+        subtitle.setObjectName("subtitle")
+        header_vbox.addWidget(title)
+        header_vbox.addWidget(subtitle)
+        header_layout.addLayout(header_vbox, stretch=1)
+
+        # Top Control Buttons
+        self.btn_run = QtWidgets.QPushButton("▶ Run Pipeline")
+        self.btn_run.setObjectName("primary")
+        self.btn_run.clicked.connect(self.toggle_runner)
+        header_layout.addWidget(self.btn_run)
+
+        btn_clear = QtWidgets.QPushButton("Clear")
+        btn_clear.clicked.connect(self.clear_queue)
+        header_layout.addWidget(btn_clear)
+
+        main_layout.addLayout(header_layout)
+
+        # Rate Limit Alert Banner (Dynamic)
+        self.banner_frame = QtWidgets.QFrame()
+        self.banner_frame.setObjectName("banner_rate_limit")
+        banner_box = QtWidgets.QHBoxLayout(self.banner_frame)
+        banner_box.setContentsMargins(16, 12, 16, 12)
+
+        self.banner_icon = QtWidgets.QLabel("⏳")
+        self.banner_icon.setStyleSheet("font-size: 20px;")
+        banner_box.addWidget(self.banner_icon)
+
+        self.banner_text = QtWidgets.QLabel("")
+        self.banner_text.setStyleSheet("color: #fef3c7; font-weight: 500;")
+        banner_box.addWidget(self.banner_text, stretch=1)
+
+        self.btn_banner_switch = QtWidgets.QPushButton("⚡ Auto-Failover to Antigravity")
+        self.btn_banner_switch.setObjectName("accent_warning")
+        self.btn_banner_switch.clicked.connect(self.failover_all_rate_limited)
+        banner_box.addWidget(self.btn_banner_switch)
+
+        self.banner_frame.hide()
+        main_layout.addWidget(self.banner_frame)
+
+        # Add Task Input Form Card
+        form_card = QtWidgets.QFrame()
+        form_card.setObjectName("card")
+        form_layout = QtWidgets.QVBoxLayout(form_card)
+        form_layout.setContentsMargins(16, 14, 16, 14)
+        form_layout.setSpacing(10)
+
+        form_title = QtWidgets.QLabel("Queue a New Command in Chain")
+        form_title.setStyleSheet("font-weight: 600; font-size: 14px; color: #f8fafc;")
+        form_layout.addWidget(form_title)
+
+        input_row = QtWidgets.QHBoxLayout()
+        input_row.setSpacing(10)
+
+        self.agent_combo = QtWidgets.QComboBox()
+        self.agent_combo.addItem("ChatGPT / Codex", "chatgpt")
+        self.agent_combo.addItem("Google Antigravity", "antigravity")
+        self.agent_combo.addItem("DevOS Local AI", "local")
+        input_row.addWidget(self.agent_combo)
+
+        self.prompt_input = QLineEdit()
+        self.prompt_input.setPlaceholderText("Enter command or prompt (e.g. 'Build Laravel authentication API')...")
+        self.prompt_input.returnPressed.connect(self.add_task)
+        input_row.addWidget(self.prompt_input, stretch=1)
+
+        btn_add = QtWidgets.QPushButton("+ Queue Command")
+        btn_add.setObjectName("primary")
+        btn_add.clicked.connect(self.add_task)
+        input_row.addWidget(btn_add)
+
+        form_layout.addLayout(input_row)
+        main_layout.addWidget(form_card)
+
+        # Task List Area
+        list_header = QtWidgets.QLabel("Pipeline Queue (Sequential Order)")
+        list_header.setStyleSheet("font-weight: 600; color: #94a3b8; margin-top: 6px;")
+        main_layout.addWidget(list_header)
+
+        self.scroll = QtWidgets.QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll_content = QtWidgets.QWidget()
+        self.task_list_layout = QtWidgets.QVBoxLayout(self.scroll_content)
+        self.task_list_layout.setContentsMargins(0, 0, 0, 0)
+        self.task_list_layout.setSpacing(10)
+        self.task_list_layout.addStretch()
+        self.scroll.setWidget(self.scroll_content)
+        main_layout.addWidget(self.scroll, stretch=1)
+
+        # Live Execution Output Box
+        self.log_box = QtWidgets.QTextEdit()
+        self.log_box.setReadOnly(True)
+        self.log_box.setMaximumHeight(110)
+        self.log_box.setPlaceholderText("Pipeline activity and agent dispatch log will stream here...")
+        self.log_box.setStyleSheet("background-color: #060912; border: 1px solid #1e293b; color: #94a3b8; font-family: monospace; font-size: 11px;")
+        main_layout.addWidget(self.log_box)
+
+        self.refresh_queue()
+
+    def add_task(self):
+        prompt = self.prompt_input.text().strip()
+        if not prompt:
+            return
+        agent = self.agent_combo.currentData()
+        self.pipeline.add(prompt, agent=agent)
+        self.prompt_input.clear()
+        self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Queued [{agent.upper()}]: {prompt}")
+        self.refresh_queue()
+
+    def refresh_queue(self):
+        tasks = self.pipeline.list()
+
+        # Check rate-limit banner status
+        rate_limited_tasks = [t for t in tasks if t["status"] == "RATE_LIMITED"]
+        if rate_limited_tasks:
+            t = rate_limited_tasks[0]
+            retry_str = t.get("retry_at", "")
+            if retry_str:
+                try:
+                    dt = datetime.datetime.fromisoformat(retry_str)
+                    now = datetime.datetime.now()
+                    rem = int((dt - now).total_seconds())
+                    if rem > 0:
+                        mins, secs = divmod(rem, 60)
+                        self.banner_text.setText(
+                            f"<b>Usage Limit Active on {t['agent'].upper()}:</b> Auto-resuming at <b>{dt.strftime('%I:%M %p')}</b> "
+                            f"(in {mins}m {secs:02d}s). DevOS timer is active."
+                        )
+                        self.banner_frame.show()
+                    else:
+                        self.banner_frame.hide()
+                except Exception:
+                    self.banner_frame.hide()
+            else:
+                self.banner_frame.hide()
+        else:
+            self.banner_frame.hide()
+
+        # Rebuild list items
+        # Clear existing items except bottom stretch
+        while self.task_list_layout.count() > 1:
+            item = self.task_list_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        if not tasks:
+            empty_lbl = QtWidgets.QLabel("Pipeline queue is empty. Type a command above to start a sequential workflow.")
+            empty_lbl.setStyleSheet("color: #64748b; font-style: italic; padding: 20px;")
+            empty_lbl.setAlignment(Qt.AlignCenter)
+            self.task_list_layout.insertWidget(0, empty_lbl)
+        else:
+            for idx, task in enumerate(tasks):
+                card = TaskCard(task, on_failover=self.failover_single_task)
+                self.task_list_layout.insertWidget(idx, card)
+
+    def toggle_runner(self):
+        if not self.is_running:
+            self.is_running = True
+            self.btn_run.setText("⏸ Pause Pipeline")
+            self.btn_run.setStyleSheet("background-color: #eab308; color: black;")
+            self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Starting pipeline runner...")
+            self.runner_timer.start(2500)
+            self.run_step()
+        else:
+            self.is_running = False
+            self.btn_run.setText("▶ Run Pipeline")
+            self.btn_run.setObjectName("primary")
+            self.btn_run.setStyleSheet("")
+            self.runner_timer.stop()
+            self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Pipeline paused by user.")
+
+    def run_step(self):
+        if not self.is_running:
+            return
+        has_more = self.pipeline.execute_next()
+        self.refresh_queue()
+        if not has_more:
+            # If nothing was eligible, check if all done
+            rate_limited = [t for t in self.pipeline.list() if t["status"] == "RATE_LIMITED"]
+            if not rate_limited:
+                self.toggle_runner()
+                self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] All pipeline commands completed!")
+
+    def failover_single_task(self, task_id: str):
+        for t in self.pipeline.queue:
+            if t["id"] == task_id:
+                t["agent"] = "antigravity"
+                t["status"] = "QUEUED"
+                t["retry_at"] = None
+                self.pipeline._save()
+                self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Task {task_id} switched to Antigravity!")
+                self.refresh_queue()
+                break
+
+    def failover_all_rate_limited(self):
+        for t in self.pipeline.queue:
+            if t["status"] == "RATE_LIMITED":
+                t["agent"] = "antigravity"
+                t["status"] = "QUEUED"
+                t["retry_at"] = None
+        self.pipeline._save()
+        self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] All rate-limited tasks switched to Antigravity!")
+        self.refresh_queue()
+
+    def clear_queue(self):
+        self.pipeline.clear()
+        self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Pipeline cleared.")
+        self.refresh_queue()
+
+
+def main():
+    app = QtWidgets.QApplication(sys.argv)
+    app.setApplicationName("DevOS AI Pipeline")
+    win = PipelineWindow()
+    win.show()
+    sys.exit(app.exec_())
+
+
+if __name__ == "__main__":
+    main()
