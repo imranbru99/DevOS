@@ -1,14 +1,14 @@
 [Desktop Entry]
 Type=Application
-Name=Antigravity KDE
-GenericName=AI Agent IDE (KDE Edition)
-Comment=Secondary independent Google Antigravity AI Agent for DevOS KDE
+Name=Antigravity Studio
+GenericName=AI Development Studio (KDE Edition)
+Comment=Next-generation autonomous AI development studio with deep KDE Plasma integration
 Exec=/usr/local/bin/antigravity-kde %F
 Icon=antigravity-kde
 Terminal=false
 Categories=Development;IDE;TextEditor;
 MimeType=text/plain;inode/directory;
-Keywords=antigravity;kde;agent;ai;ide;coding;pair-programmer;
+Keywords=antigravity;studio;kde;agent;ai;ide;coding;pair-programmer;
 StartupNotify=true
 StartupWMClass=antigravity-kde
 Actions=NewWindow;

@@ -57,7 +57,7 @@ def discover_agents() -> Dict[str, Dict[str, Any]]:
     ag_kde_bin = shutil.which("antigravity-kde") or (Path.home() / ".local/bin/antigravity-kde")
     ag_kde_ok = bool(ag_kde_bin and Path(ag_kde_bin).exists())
     agents["antigravity-kde"] = {
-        "name": "Antigravity KDE",
+        "name": "Antigravity Studio (KDE)",
         "bin": str(ag_kde_bin) if ag_kde_ok else None,
         "color": "#0ea5e9",
         "available": ag_kde_ok,
