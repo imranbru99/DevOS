@@ -615,8 +615,8 @@ def main():
     app.setDesktopFileName("devos-ai-pipeline")
     from app_identity import apply as apply_identity
     apply_identity(app, "devos-ai-pipeline")
-    QCoreApplication.setApplicationName("devos-ai-pipeline")
-    QCoreApplication.setApplicationDisplayName("DevOS AI Command Pipeline")
+    app.setApplicationName("devos-ai-pipeline")
+    app.setApplicationDisplayName("DevOS AI Command Pipeline")
     icon = get_app_icon()
     if not icon.isNull():
         app.setWindowIcon(icon)

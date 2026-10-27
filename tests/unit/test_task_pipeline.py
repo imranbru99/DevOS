@@ -154,6 +154,15 @@ class TestTaskPipeline(unittest.TestCase):
             self.assertEqual(dispatch.call_count, 1)
         self.assertEqual(self.pipeline.list()[1]["status"], "QUEUED")
 
+    def test_pipeline_gui_initialization(self):
+        from PyQt5 import QtWidgets
+        import pipeline_gui
+        app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(["--platform", "offscreen"])
+        win = pipeline_gui.PipelineWindow()
+        self.assertIsNotNone(win)
+        self.assertIn("DevOS AI Command Pipeline", win.windowTitle())
+        win.close()
+
 
 if __name__ == "__main__":
     unittest.main()
