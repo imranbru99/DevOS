@@ -3,7 +3,7 @@ Type=Application
 Name=Antigravity KDE
 GenericName=AI Agent IDE (KDE Edition)
 Comment=Secondary independent Google Antigravity AI Agent for DevOS KDE
-Exec=antigravity-kde %F
+Exec=/usr/local/bin/antigravity-kde %F
 Icon=antigravity-kde
 Terminal=false
 Categories=Development;IDE;TextEditor;
@@ -15,5 +15,5 @@ Actions=NewWindow;
 
 [Desktop Action NewWindow]
 Name=New Window
-Exec=antigravity-kde --new-window %F
+Exec=/usr/local/bin/antigravity-kde --new-window %F
 Icon=antigravity-kde

@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Antigravity KDE - Independent second AI agent instance for DevOS KDE
 IDE_BIN=""
-if [ -x "$HOME/.local/lib/antigravity-ide/bin/antigravity-ide" ]; then
+if [ -x "$HOME/.local/lib/antigravity-ide/antigravity-ide" ]; then
+    IDE_BIN="$HOME/.local/lib/antigravity-ide/antigravity-ide"
+elif [ -x "$HOME/.local/lib/antigravity-ide/bin/antigravity-ide" ]; then
     IDE_BIN="$HOME/.local/lib/antigravity-ide/bin/antigravity-ide"
 elif [ -x "/usr/local/share/devos/antigravity-ide/bin/antigravity-ide" ]; then
     IDE_BIN="/usr/local/share/devos/antigravity-ide/bin/antigravity-ide"
@@ -16,6 +18,7 @@ fi
 
 export DONT_PROMPT_WSL_INSTALL=1
 exec "$IDE_BIN" \
+    --no-sandbox \
     --user-data-dir="${HOME}/.config/Antigravity-KDE" \
     --extensions-dir="${HOME}/.antigravity-kde/extensions" \
     --class=antigravity-kde \
