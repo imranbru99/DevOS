@@ -1,0 +1,19 @@
+[Desktop Entry]
+Type=Application
+Name=Antigravity Studio
+GenericName=AI Development Studio
+Comment=Next-generation autonomous AI development studio
+Exec=/usr/local/bin/antigravity-kde %F
+Icon=antigravity-ide
+Terminal=false
+Categories=Development;IDE;TextEditor;
+MimeType=text/plain;inode/directory;
+Keywords=antigravity;studio;kde;agent;ai;ide;coding;pair-programmer;
+StartupNotify=true
+StartupWMClass=antigravity-ide
+Actions=NewWindow;
+
+[Desktop Action NewWindow]
+Name=New Window
+Exec=/usr/local/bin/antigravity-kde --new-window %F
+Icon=antigravity-ide

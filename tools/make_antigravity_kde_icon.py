@@ -265,25 +265,31 @@ def main():
         u_dir = USER_ICONS / size_str / "apps"
         u_dir.mkdir(parents=True, exist_ok=True)
         resized.save(u_dir / "antigravity-kde.png", "PNG")
+        resized.save(u_dir / "antigravity-ide.png", "PNG")
 
         # Save to build chroot icons
         c_dir = CHROOT_ICONS / size_str / "apps"
         c_dir.mkdir(parents=True, exist_ok=True)
         resized.save(c_dir / "antigravity-kde.png", "PNG")
+        resized.save(c_dir / "antigravity-ide.png", "PNG")
         
-        print(f"  [+] Generated {size_str}/apps/antigravity-kde.png")
+        print(f"  [+] Generated {size_str}/apps/antigravity-ide.png and antigravity-kde.png")
 
     # Save Scalable SVG
     svg_content = generate_svg()
     (USER_ICONS / "scalable/apps").mkdir(parents=True, exist_ok=True)
     with open(USER_ICONS / "scalable/apps/antigravity-kde.svg", "w", encoding="utf-8") as f:
         f.write(svg_content)
+    with open(USER_ICONS / "scalable/apps/antigravity-ide.svg", "w", encoding="utf-8") as f:
+        f.write(svg_content)
         
     (CHROOT_ICONS / "scalable/apps").mkdir(parents=True, exist_ok=True)
     with open(CHROOT_ICONS / "scalable/apps/antigravity-kde.svg", "w", encoding="utf-8") as f:
         f.write(svg_content)
+    with open(CHROOT_ICONS / "scalable/apps/antigravity-ide.svg", "w", encoding="utf-8") as f:
+        f.write(svg_content)
         
-    print("  [+] Generated scalable/apps/antigravity-kde.svg")
+    print("  [+] Generated scalable/apps/antigravity-ide.svg and antigravity-kde.svg")
     print("==> All icons successfully rendered and installed!")
 
 
