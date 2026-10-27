@@ -20,9 +20,11 @@ fi
 
 export DONT_PROMPT_WSL_INSTALL=1
 export GEMINI_APP_DATA_DIR="antigravity-kde"
+# Bypass host GNOME Keyring in language server to ensure full auth/session segregation
+export SSH_CLIENT="127.0.0.1 0 0"
 
 # Ensure isolated directories exist
-mkdir -p "$HOME/.gemini-kde-home" "$HOME/.antigravity-kde/extensions"
+mkdir -p "$HOME/.antigravity-kde/extensions"
 
 # Remove any stale timeout marker from previous tests
 rm -f "$HOME/.gemini/cache/antigravity-keyring-unavailable"
