@@ -53,6 +53,16 @@ def discover_agents() -> Dict[str, Dict[str, Any]]:
         "available": ag_ok,
     }
 
+    # 1b. Google Antigravity IDE (KDE GUI)
+    ag_ide_bin = shutil.which("antigravity") or Path("/opt/antigravity/antigravity")
+    ag_ide_ok = bool(ag_ide_bin and Path(ag_ide_bin).exists())
+    agents["antigravity-ide"] = {
+        "name": "Google Antigravity IDE",
+        "bin": str(ag_ide_bin) if ag_ide_ok else None,
+        "color": "#4f46e5",
+        "available": ag_ide_ok,
+    }
+
     # 2. ChatGPT / Codex CLI
     codex_candidates = [
         shutil.which("codex"),
@@ -311,6 +321,9 @@ def is_agent_working(agent: str) -> bool:
     ag = agent.lower()
     if ag == "antigravity":
         return is_antigravity_working()
+    elif ag == "antigravity-ide":
+        res = subprocess.run(["pgrep", "-f", "/opt/antigravity/antigravity"], capture_output=True)
+        return res.returncode == 0
     elif ag in ("chatgpt", "codex"):
         return is_codex_working()
     elif ag == "local":
@@ -597,6 +610,17 @@ class TaskPipeline:
                     return False, str(e)
             else:
                 return False, "Antigravity CLI (agentapi) not found"
+
+        elif agent == "antigravity-ide":
+            ide_bin = discover_agents().get("antigravity-ide", {}).get("bin")
+            if not ide_bin:
+                return False, "Google Antigravity IDE not found"
+            try:
+                target_dir = task.get("project") or str(Path.cwd())
+                subprocess.Popen([str(ide_bin), target_dir], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return True, f"Opened Antigravity IDE in workspace: {target_dir}"
+            except Exception as e:
+                return False, str(e)
 
         elif agent in ("chatgpt", "codex"):
             # Process exit gives an observable result. Desktop idle heuristics
