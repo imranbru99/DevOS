@@ -17,8 +17,14 @@ if [ -z "$IDE_BIN" ]; then
 fi
 
 export DONT_PROMPT_WSL_INSTALL=1
+export GEMINI_APP_DATA_DIR="antigravity-kde"
+export XDG_CONFIG_HOME="${HOME}/.config/Antigravity-KDE-env"
+
+mkdir -p "$XDG_CONFIG_HOME"
+
 exec "$IDE_BIN" \
     --no-sandbox \
+    --password-store=basic \
     --user-data-dir="${HOME}/.config/Antigravity-KDE" \
     --extensions-dir="${HOME}/.antigravity-kde/extensions" \
     --class=antigravity-kde \
