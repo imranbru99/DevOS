@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Antigravity KDE - Independent second AI agent instance for DevOS KDE
+# Antigravity Studio (KDE Edition) - 100% Isolated Independent AI Agent Instance
+set -e
+
 IDE_BIN=""
 if [ -x "$HOME/.local/lib/antigravity-ide/antigravity-ide" ]; then
     IDE_BIN="$HOME/.local/lib/antigravity-ide/antigravity-ide"
@@ -19,8 +21,16 @@ fi
 export DONT_PROMPT_WSL_INSTALL=1
 export GEMINI_APP_DATA_DIR="antigravity-kde"
 export XDG_CONFIG_HOME="${HOME}/.config/Antigravity-KDE-env"
+export XDG_DATA_HOME="${HOME}/.local/share/Antigravity-KDE-data"
 
-mkdir -p "$XDG_CONFIG_HOME"
+mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME"
+
+# Launch inside an isolated DBus session bus so it cannot access the host
+# gnome-keyring / org.freedesktop.secrets credentials from the primary Antigravity instance.
+if command -v dbus-run-session >/dev/null 2>&1 && [ -z "$ANTIGRAVITY_KDE_ISOLATED_BUS" ]; then
+    export ANTIGRAVITY_KDE_ISOLATED_BUS=1
+    exec dbus-run-session -- "$0" "$@"
+fi
 
 exec "$IDE_BIN" \
     --no-sandbox \
