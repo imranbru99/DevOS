@@ -3,7 +3,7 @@ Type=Application
 Name=Google Antigravity IDE
 GenericName=AI-First Code Editor & Agent
 Comment=Next-generation AI-first integrated development environment by Google
-Exec=/usr/local/bin/antigravity %F
+Exec=antigravity %F
 Icon=antigravity
 Terminal=false
 Categories=Development;IDE;TextEditor;
@@ -15,5 +15,5 @@ Actions=NewWindow;
 
 [Desktop Action NewWindow]
 Name=New Window
-Exec=/usr/local/bin/antigravity --new-window %F
+Exec=antigravity --new-window %F
 Icon=antigravity
