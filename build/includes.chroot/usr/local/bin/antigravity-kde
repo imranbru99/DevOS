@@ -20,23 +20,15 @@ fi
 
 export DONT_PROMPT_WSL_INSTALL=1
 export GEMINI_APP_DATA_DIR="antigravity-kde"
-export XDG_CONFIG_HOME="${HOME}/.config/Antigravity-KDE-env"
-export XDG_DATA_HOME="${HOME}/.local/share/Antigravity-KDE-data"
 
-mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME"
-
-# Launch inside an isolated DBus session bus so it cannot access the host
-# gnome-keyring / org.freedesktop.secrets credentials from the primary Antigravity instance.
-if command -v dbus-run-session >/dev/null 2>&1 && [ -z "$ANTIGRAVITY_KDE_ISOLATED_BUS" ]; then
-    export ANTIGRAVITY_KDE_ISOLATED_BUS=1
-    exec dbus-run-session -- "$0" "$@"
-fi
+# Remove any stale timeout marker from previous tests
+rm -f "$HOME/.gemini/cache/antigravity-keyring-unavailable"
 
 exec "$IDE_BIN" \
     --no-sandbox \
     --password-store=basic \
     --user-data-dir="${HOME}/.config/Antigravity-KDE" \
     --extensions-dir="${HOME}/.antigravity-kde/extensions" \
-    --class=antigravity-kde \
-    --name=antigravity-kde \
+    --class=antigravity-ide \
+    --name=antigravity-ide \
     "$@"
