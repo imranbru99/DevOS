@@ -1,19 +1,8 @@
 [Desktop Entry]
-Type=Application
-Name=Google Antigravity IDE
-GenericName=AI-First Code Editor & Agent
-Comment=Next-generation AI-first integrated development environment by Google
-Exec=antigravity %F
+Name=Antigravity
+Exec=/opt/antigravity/antigravity %U
 Icon=antigravity
 Terminal=false
-Categories=Development;IDE;TextEditor;
-MimeType=text/plain;inode/directory;
-Keywords=google;antigravity;ide;agent;ai;code;editor;pair-programmer;
-StartupNotify=true
+Type=Application
+Categories=Development;IDE;
 StartupWMClass=antigravity
-Actions=NewWindow;
-
-[Desktop Action NewWindow]
-Name=New Window
-Exec=antigravity --new-window %F
-Icon=antigravity

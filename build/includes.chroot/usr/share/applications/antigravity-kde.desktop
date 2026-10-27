@@ -1,0 +1,19 @@
+[Desktop Entry]
+Type=Application
+Name=Antigravity KDE
+GenericName=AI Agent IDE (KDE Edition)
+Comment=Secondary independent Google Antigravity AI Agent for DevOS KDE
+Exec=antigravity-kde %F
+Icon=antigravity-kde
+Terminal=false
+Categories=Development;IDE;TextEditor;
+MimeType=text/plain;inode/directory;
+Keywords=antigravity;kde;agent;ai;ide;coding;pair-programmer;
+StartupNotify=true
+StartupWMClass=antigravity-kde
+Actions=NewWindow;
+
+[Desktop Action NewWindow]
+Name=New Window
+Exec=antigravity-kde --new-window %F
+Icon=antigravity-kde
