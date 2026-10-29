@@ -16,6 +16,7 @@ https://imrandev.bd
 """
 
 import ctypes
+import math
 import os
 import subprocess
 import sys
@@ -86,14 +87,15 @@ def get_pointer_coordinates():
 
 
 class WaylandPrimaryWatcher(QtCore.QThread):
-    """Watches Wayland primary selection for changes in real-time, waiting until mouse drag finishes."""
+    """Event-driven mouse drag selection watcher with zero-interference click handling."""
 
-    selection_changed = QtCore.pyqtSignal(str)
-    selection_cleared = QtCore.pyqtSignal()
+    selection_changed = QtCore.pyqtSignal(str, int, int)
+    dismiss_requested = QtCore.pyqtSignal()
 
-    def __init__(self, pointer: X11Pointer, parent=None):
+    def __init__(self, pointer: X11Pointer, pill: QtWidgets.QWidget, parent=None):
         super().__init__(parent)
         self.pointer = pointer
+        self.pill = pill
         self._running = True
         self._last_text = ""
 
@@ -103,65 +105,66 @@ class WaylandPrimaryWatcher(QtCore.QThread):
         self.wait(500)
 
     def run(self):
-        # Seed _last_text with pre-existing primary selection on startup
-        # so we never trigger on stale clipboard text or on initial load
-        try:
-            init_res = subprocess.run(
-                ["wl-paste", "--primary"],
-                capture_output=True,
-                text=True,
-                timeout=0.4
-            )
-            if init_res.returncode == 0:
-                self._last_text = init_res.stdout.strip()
-        except Exception:
-            pass
+        was_down = False
+        press_x = 0
+        press_y = 0
+        max_dist = 0
+        last_up_time = 0
 
         while self._running and not self.isInterruptionRequested():
             try:
-                res = subprocess.run(
-                    ["wl-paste", "--primary"],
-                    capture_output=True,
-                    text=True,
-                    timeout=0.3
-                )
-                if res.returncode == 0:
-                    text = res.stdout.strip()
-                    # Only trigger when newly selected text differs from last known selection
-                    if text and text != self._last_text and len(text) >= 2:
-                        # Check if left mouse button is currently held down (user actively dragging/marking text)
-                        while self._running and not self.isInterruptionRequested():
-                            _, _, left_down, right_down = self.pointer.get_state()
-                            if right_down:
-                                # Right click happening, do not show selection pill
-                                break
-                            if not left_down:
-                                # Left button released: user finished marking!
-                                break
-                            time.sleep(0.05)
+                x, y, left_down, right_down = self.pointer.get_state()
+                if x is None:
+                    time.sleep(0.05)
+                    continue
 
-                        # Settling pause for application to finalize selection
-                        time.sleep(0.08)
+                # 1. Dismiss pill immediately if user clicks outside of it
+                if (left_down or right_down) and self.pill.isVisible():
+                    geom = self.pill.geometry()
+                    if not (geom.left() <= x <= geom.right() and geom.top() <= y <= geom.bottom()):
+                        self.dismiss_requested.emit()
 
-                        # Re-read to capture the full, complete selection
-                        final_res = subprocess.run(
-                            ["wl-paste", "--primary"],
-                            capture_output=True,
-                            text=True,
-                            timeout=0.3
-                        )
-                        if final_res.returncode == 0:
-                            final_text = final_res.stdout.strip()
-                            if final_text and len(final_text) >= 2:
-                                self._last_text = final_text
-                                self.selection_changed.emit(final_text)
-                else:
-                    if self._last_text:
-                        self._last_text = ""
-                        self.selection_cleared.emit()
+                # 2. Track mouse drag vs single click
+                is_selection_event = False
+                if left_down and not was_down:
+                    was_down = True
+                    press_x = x
+                    press_y = y
+                    max_dist = 0
+                elif left_down and was_down:
+                    dist = math.hypot(x - press_x, y - press_y)
+                    if dist > max_dist:
+                        max_dist = dist
+                elif not left_down and was_down:
+                    was_down = False
+                    now = time.time()
+                    if max_dist >= 14:
+                        # Genuine text drag selection
+                        is_selection_event = True
+                    elif now - last_up_time < 0.35 and max_dist < 8:
+                        # Genuine double-click selection
+                        is_selection_event = True
+                    last_up_time = now
+
+                # 3. ONLY query clipboard when a genuine selection interaction occurred!
+                # Clicks on Chrome switcher, bookmarks, buttons NEVER trigger this!
+                if is_selection_event:
+                    time.sleep(0.06)  # Small settling pause for app to commit selection
+                    res = subprocess.run(
+                        ["wl-paste", "--primary"],
+                        capture_output=True,
+                        text=True,
+                        timeout=0.3
+                    )
+                    if res.returncode == 0:
+                        text = res.stdout.strip()
+                        if text and len(text) >= 2:
+                            self._last_text = text
+                            self.selection_changed.emit(text, x, y)
+
             except Exception:
                 pass
-            time.sleep(0.12)
+            time.sleep(0.03)  # Fast 30ms responsive loop with zero subprocess overhead
 
 
 class SelectionPill(QtWidgets.QWidget):
@@ -171,9 +174,9 @@ class SelectionPill(QtWidgets.QWidget):
         super().__init__(parent)
         self.selected_text = ""
 
+        # Remove WindowStaysOnTopHint so the pill never overrides transient menus/switchers
         self.setWindowFlags(
             QtCore.Qt.FramelessWindowHint |
-            QtCore.Qt.WindowStaysOnTopHint |
             QtCore.Qt.Tool |
             QtCore.Qt.WindowDoesNotAcceptFocus
         )
@@ -291,7 +294,7 @@ class SelectionPill(QtWidgets.QWidget):
         div.setFrameShape(QtWidgets.QFrame.VLine)
         return div
 
-    def popup_for_text(self, text):
+    def popup_for_text(self, text, x=None, y=None):
         """Position and display the pill near cursor or at top center."""
         self.selected_text = text
         self.btn_copy.setText("📋 Copy")
@@ -304,10 +307,12 @@ class SelectionPill(QtWidgets.QWidget):
         h = self.sizeHint().height()
 
         screen = QtWidgets.QApplication.primaryScreen().availableGeometry()
-        coords = get_pointer_coordinates()
+        if x is None or y is None or x <= 0 or y <= 0:
+            coords = get_pointer_coordinates()
+            if coords:
+                x, y = coords
 
-        if coords and coords[0] > 0 and coords[1] > 0:
-            x, y = coords
+        if x is not None and y is not None and x > 0 and y > 0:
             # Put the Copy button (left edge of pill) right next to cursor x so user doesn't have to move mouse
             pos_x = min(screen.right() - w - 10, max(screen.left() + 10, x - 25))
             pos_y = y - h - 10
@@ -406,9 +411,9 @@ class QuickSelectionDaemon(QtCore.QObject):
         self.last_handled_text = ""
 
         # 1. Wayland Primary Watcher Thread
-        self.wayland_watcher = WaylandPrimaryWatcher(_global_pointer, self)
+        self.wayland_watcher = WaylandPrimaryWatcher(_global_pointer, self.pill, self)
         self.wayland_watcher.selection_changed.connect(self._handle_new_text)
-        self.wayland_watcher.selection_cleared.connect(self._on_selection_cleared)
+        self.wayland_watcher.dismiss_requested.connect(self.pill.hide_pill)
         self.wayland_watcher.start()
 
         # 2. KDE Klipper D-Bus connection as fallback
@@ -422,12 +427,6 @@ class QuickSelectionDaemon(QtCore.QObject):
             pass
 
     @QtCore.pyqtSlot()
-    def _on_selection_cleared(self):
-        # When text is unselected/deselected by user, dismiss the pill
-        self.last_handled_text = ""
-        self.pill.hide_pill()
-
-    @QtCore.pyqtSlot()
     def _on_klipper_updated(self):
         try:
             msg = QtDBus.QDBusMessage.createMethodCall(
@@ -436,18 +435,17 @@ class QuickSelectionDaemon(QtCore.QObject):
             reply = self.bus.call(msg)
             if reply.type() == QtDBus.QDBusMessage.ReplyMessage and reply.arguments():
                 text = str(reply.arguments()[0]).strip()
-                self._handle_new_text(text)
+                if text and text != self.last_handled_text and len(text) >= 2:
+                    self.last_handled_text = text
+                    self.pill.popup_for_text(text)
         except Exception:
             pass
 
-    def _handle_new_text(self, text):
+    def _handle_new_text(self, text, x, y):
         if not text or len(text) < 2:
             return
-        if text == self.last_handled_text:
-            return
-
         self.last_handled_text = text
-        self.pill.popup_for_text(text)
+        self.pill.popup_for_text(text, x, y)
 
 
 def main():
