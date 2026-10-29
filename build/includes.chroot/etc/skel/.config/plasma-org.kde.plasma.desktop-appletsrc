@@ -1,3 +1,10 @@
+[ActionPlugins][0]
+RightButton;NoModifier=org.kde.contextmenu
+wheel:Vertical;NoModifier=org.kde.switchdesktop
+
+[ActionPlugins][1]
+RightButton;NoModifier=org.kde.contextmenu
+
 [Containments][1]
 activityId=
 formfactor=0

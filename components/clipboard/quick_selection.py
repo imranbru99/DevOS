@@ -24,24 +24,12 @@ from PyQt5 import QtCore, QtGui, QtWidgets, QtDBus
 
 
 def get_pointer_coordinates():
-    """Returns (x, y) coordinates of mouse cursor using xdotool, or None."""
+    """Returns (x, y) coordinates of mouse cursor using native Qt cursor."""
     try:
-        out = subprocess.check_output(
-            ["xdotool", "getmouselocation"],
-            stderr=subprocess.DEVNULL,
-            text=True,
-            timeout=0.3
-        )
-        parts = {}
-        for token in out.strip().split():
-            if ":" in token:
-                k, v = token.split(":", 1)
-                parts[k] = int(v)
-        if "x" in parts and "y" in parts:
-            return parts["x"], parts["y"]
+        pos = QtGui.QCursor.pos()
+        return pos.x(), pos.y()
     except Exception:
-        pass
-    return None
+        return None
 
 
 class WaylandPrimaryWatcher(QtCore.QThread):
@@ -89,7 +77,7 @@ class SelectionPill(QtWidgets.QWidget):
             QtCore.Qt.FramelessWindowHint |
             QtCore.Qt.WindowStaysOnTopHint |
             QtCore.Qt.Tool |
-            QtCore.Qt.X11BypassWindowManagerHint
+            QtCore.Qt.WindowDoesNotAcceptFocus
         )
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground, True)
         self.setAttribute(QtCore.Qt.WA_ShowWithoutActivating, True)
@@ -233,7 +221,6 @@ class SelectionPill(QtWidgets.QWidget):
 
         self.move(pos_x, pos_y)
         self.show()
-        self.raise_()
 
         # Auto hide after 6 seconds of inactivity
         self.auto_hide_timer.start(6000)
