@@ -131,7 +131,7 @@ def main(argv=None):
             self.lead=QtWidgets.QSpinBox();self.lead.setRange(1,119);self.lead.setSuffix(' min');self.lead.setValue(lead//60)
             form.addRow('Expected inactivity limit',self.limit);form.addRow('Warn before the limit',self.lead);layout.addLayout(form)
             self.limit.valueChanged.connect(self.configure);self.lead.valueChanged.connect(self.configure)
-            self.notice=label('Opening the app does not reset this reminder. Use your Cloud PC, then confirm above. Microsoft controls the real session timeout.', 'muted');layout.addWidget(self.notice)
+            self.notice=label('Opening the app does not reset this reminder. Connects to Microsoft 365 Cloud PC or Azure Virtual Desktop. To run Windows .exe files locally, use WinLayer.', 'muted');layout.addWidget(self.notice)
             self.timer=QtCore.QTimer(self);self.timer.setInterval(1000);self.timer.timeout.connect(self.refresh)
             self.tray=QtWidgets.QSystemTrayIcon(app.windowIcon(),self)
             menu=QtWidgets.QMenu()

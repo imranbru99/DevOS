@@ -18,6 +18,9 @@ apps="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 # --no-first-run: a fresh profile must not stop on Chrome's welcome screens.
 # DEVOS_PWA_CHROME_FLAGS: extra flags (container tests need --no-sandbox).
 read -ra extra <<< "--no-first-run ${DEVOS_PWA_CHROME_FLAGS:-}"
+if [ "${XDG_SESSION_TYPE:-}" = "wayland" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
+    extra+=("--disable-features=WaylandFractionalScaleV1")
+fi
 
 chrome=""
 for b in google-chrome-stable google-chrome; do
@@ -29,6 +32,10 @@ installed_id() {
     local f n
     for f in "$apps"/chrome-*-Default.desktop; do
         [ -f "$f" ] || continue
+        # Ignore desktop files created for temporary / custom user-data-dir
+        if grep -q -- '--user-data-dir' "$f"; then
+            continue
+        fi
         n="$(sed -n 's/^Name=//p' "$f" | head -n 1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
         n="$(printf '%s' "$n" | tr '[:upper:]' '[:lower:]')"
         IFS='|' read -ra wanted <<< "$names"

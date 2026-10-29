@@ -161,8 +161,21 @@ def open_android(path, name):
 
 def main():
     if len(sys.argv) < 2:
-        dialog("--sorry", "Choose an .exe, .msi or .apk file.")
-        return 1
+        if shutil.which("kdialog"):
+            proc = subprocess.run(
+                ["kdialog", "--title", "WinLayer • Open Windows or Android Application",
+                 "--getopenfilename", os.path.expanduser("~"),
+                 "Supported Applications (*.exe *.msi *.bat *.cmd *.apk *.xapk);;Windows Executables (*.exe *.msi *.bat *.cmd);;All files (*)"],
+                capture_output=True, text=True
+            )
+            selected = proc.stdout.strip()
+            if selected:
+                sys.argv.append(selected)
+            else:
+                return 0
+        else:
+            dialog("--sorry", "Choose an .exe, .msi or .apk file.")
+            return 1
     path = os.path.abspath(sys.argv[1])
     name = os.path.splitext(os.path.basename(path))[0]
     ext = os.path.splitext(path)[1].lower()

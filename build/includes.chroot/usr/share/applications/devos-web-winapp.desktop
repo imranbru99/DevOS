@@ -1,10 +1,12 @@
 [Desktop Entry]
 Type=Application
 Name=Windows App
-Comment=Cloud PC with DevOS session reminders
+GenericName=Microsoft Cloud PC
+Comment=Microsoft Cloud PC (Windows 365) with DevOS session reminders
 Exec=/usr/local/bin/devos-windows-app
 Icon=devos-web-winapp
 StartupWMClass=devos-web-winapp
 Terminal=false
 NoDisplay=true
 Categories=Network;Office;
+Keywords=windows;cloud;pc;rdp;azure;virtual desktop;
