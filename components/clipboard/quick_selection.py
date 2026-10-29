@@ -15,6 +15,7 @@ Author: Imran Ahmed <me@imrandev.bd>
 https://imrandev.bd
 """
 
+import ctypes
 import os
 import subprocess
 import sys
@@ -23,22 +24,54 @@ import urllib.parse
 from PyQt5 import QtCore, QtGui, QtWidgets, QtDBus
 
 
+class X11Pointer:
+    """Ultra-fast, zero-overhead mouse pointer and button state tracker via XQueryPointer."""
+
+    def __init__(self):
+        try:
+            self.x11 = ctypes.cdll.LoadLibrary("libX11.so.6")
+            self.display = self.x11.XOpenDisplay(None)
+            if self.display:
+                self.root = self.x11.XDefaultRootWindow(self.display)
+                self.root_ret = ctypes.c_ulong()
+                self.child_ret = ctypes.c_ulong()
+                self.root_x = ctypes.c_int()
+                self.root_y = ctypes.c_int()
+                self.win_x = ctypes.c_int()
+                self.win_y = ctypes.c_int()
+                self.mask = ctypes.c_uint()
+        except Exception:
+            self.display = None
+
+    def get_state(self):
+        if not self.display:
+            return None, None, False, False
+        try:
+            self.x11.XQueryPointer(
+                self.display, self.root,
+                ctypes.byref(self.root_ret), ctypes.byref(self.child_ret),
+                ctypes.byref(self.root_x), ctypes.byref(self.root_y),
+                ctypes.byref(self.win_x), ctypes.byref(self.win_y),
+                ctypes.byref(self.mask)
+            )
+            x = self.root_x.value
+            y = self.root_y.value
+            left_down = bool(self.mask.value & 256)   # Button 1
+            right_down = bool(self.mask.value & 1024) # Button 3
+            return x, y, left_down, right_down
+        except Exception:
+            return None, None, False, False
+
+
+_global_pointer = X11Pointer()
+
+
 def get_pointer_coordinates():
     """Returns (x, y) coordinates of mouse cursor near the selection."""
     try:
-        out = subprocess.check_output(
-            ["xdotool", "getmouselocation"],
-            stderr=subprocess.DEVNULL,
-            text=True,
-            timeout=0.25
-        )
-        parts = {}
-        for token in out.strip().split():
-            if ":" in token:
-                k, v = token.split(":", 1)
-                parts[k] = int(v)
-        if "x" in parts and "y" in parts and (parts["x"] > 0 or parts["y"] > 0):
-            return parts["x"], parts["y"]
+        x, y, _, _ = _global_pointer.get_state()
+        if x is not None and (x > 0 or y > 0):
+            return x, y
     except Exception:
         pass
 
@@ -53,13 +86,14 @@ def get_pointer_coordinates():
 
 
 class WaylandPrimaryWatcher(QtCore.QThread):
-    """Watches Wayland primary selection for changes in real-time."""
+    """Watches Wayland primary selection for changes in real-time, waiting until mouse drag finishes."""
 
     selection_changed = QtCore.pyqtSignal(str)
     selection_cleared = QtCore.pyqtSignal()
 
-    def __init__(self, parent=None):
+    def __init__(self, pointer: X11Pointer, parent=None):
         super().__init__(parent)
+        self.pointer = pointer
         self._running = True
         self._last_text = ""
 
@@ -89,21 +123,45 @@ class WaylandPrimaryWatcher(QtCore.QThread):
                     ["wl-paste", "--primary"],
                     capture_output=True,
                     text=True,
-                    timeout=0.4
+                    timeout=0.3
                 )
                 if res.returncode == 0:
                     text = res.stdout.strip()
                     # Only trigger when newly selected text differs from last known selection
                     if text and text != self._last_text and len(text) >= 2:
-                        self._last_text = text
-                        self.selection_changed.emit(text)
+                        # Check if left mouse button is currently held down (user actively dragging/marking text)
+                        while self._running and not self.isInterruptionRequested():
+                            _, _, left_down, right_down = self.pointer.get_state()
+                            if right_down:
+                                # Right click happening, do not show selection pill
+                                break
+                            if not left_down:
+                                # Left button released: user finished marking!
+                                break
+                            time.sleep(0.05)
+
+                        # Settling pause for application to finalize selection
+                        time.sleep(0.08)
+
+                        # Re-read to capture the full, complete selection
+                        final_res = subprocess.run(
+                            ["wl-paste", "--primary"],
+                            capture_output=True,
+                            text=True,
+                            timeout=0.3
+                        )
+                        if final_res.returncode == 0:
+                            final_text = final_res.stdout.strip()
+                            if final_text and len(final_text) >= 2:
+                                self._last_text = final_text
+                                self.selection_changed.emit(final_text)
                 else:
                     if self._last_text:
                         self._last_text = ""
                         self.selection_cleared.emit()
             except Exception:
                 pass
-            time.sleep(0.15)
+            time.sleep(0.12)
 
 
 class SelectionPill(QtWidgets.QWidget):
@@ -348,7 +406,7 @@ class QuickSelectionDaemon(QtCore.QObject):
         self.last_handled_text = ""
 
         # 1. Wayland Primary Watcher Thread
-        self.wayland_watcher = WaylandPrimaryWatcher(self)
+        self.wayland_watcher = WaylandPrimaryWatcher(_global_pointer, self)
         self.wayland_watcher.selection_changed.connect(self._handle_new_text)
         self.wayland_watcher.selection_cleared.connect(self._on_selection_cleared)
         self.wayland_watcher.start()
