@@ -26,13 +26,6 @@ from PyQt5 import QtCore, QtGui, QtWidgets, QtDBus
 def get_pointer_coordinates():
     """Returns (x, y) coordinates of mouse cursor near the selection."""
     try:
-        pos = QtGui.QCursor.pos()
-        if pos.x() > 0 and pos.y() > 0:
-            return pos.x(), pos.y()
-    except Exception:
-        pass
-
-    try:
         out = subprocess.check_output(
             ["xdotool", "getmouselocation"],
             stderr=subprocess.DEVNULL,
@@ -49,6 +42,13 @@ def get_pointer_coordinates():
     except Exception:
         pass
 
+    try:
+        pos = QtGui.QCursor.pos()
+        if pos.x() > 0 and pos.y() > 0:
+            return pos.x(), pos.y()
+    except Exception:
+        pass
+
     return None
 
 
@@ -56,10 +56,15 @@ class WaylandPrimaryWatcher(QtCore.QThread):
     """Watches Wayland primary selection for changes in real-time."""
 
     selection_changed = QtCore.pyqtSignal(str)
+    selection_cleared = QtCore.pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._running = True
+        self._last_text = ""
+
+    def reset_last_text(self):
+        """Allows re-triggering for the same text upon next selection."""
         self._last_text = ""
 
     def stop(self):
@@ -74,20 +79,26 @@ class WaylandPrimaryWatcher(QtCore.QThread):
                     ["wl-paste", "--primary"],
                     capture_output=True,
                     text=True,
-                    timeout=0.5
+                    timeout=0.4
                 )
                 if res.returncode == 0:
                     text = res.stdout.strip()
                     if text and text != self._last_text and len(text) >= 2:
                         self._last_text = text
                         self.selection_changed.emit(text)
+                else:
+                    if self._last_text:
+                        self._last_text = ""
+                        self.selection_cleared.emit()
             except Exception:
                 pass
-            time.sleep(0.15)
+            time.sleep(0.12)
 
 
 class SelectionPill(QtWidgets.QWidget):
     """Modern floating quick-action pill."""
+
+    pill_hidden = QtCore.pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -230,10 +241,11 @@ class SelectionPill(QtWidgets.QWidget):
 
         if coords and coords[0] > 0 and coords[1] > 0:
             x, y = coords
-            pos_x = max(screen.left() + 8, min(screen.right() - w - 8, x - w // 2))
+            # Put the Copy button (left edge of pill) right next to cursor x so user doesn't have to move mouse
+            pos_x = min(screen.right() - w - 10, max(screen.left() + 10, x - 25))
             pos_y = y - h - 10
             if pos_y < screen.top() + 8:
-                pos_y = y + 20
+                pos_y = y + 18
         else:
             # Fallback to Top-Center HUD
             pos_x = screen.left() + (screen.width() - w) // 2
@@ -242,8 +254,8 @@ class SelectionPill(QtWidgets.QWidget):
         self.move(pos_x, pos_y)
         self.show()
 
-        # Auto hide after 5 seconds of inactivity
-        self.auto_hide_timer.start(5000)
+        # Auto hide after 6 seconds of inactivity
+        self.auto_hide_timer.start(6000)
 
     def enterEvent(self, event):
         self.auto_hide_timer.stop()
@@ -256,6 +268,7 @@ class SelectionPill(QtWidgets.QWidget):
     def hide_pill(self):
         self.auto_hide_timer.stop()
         self.hide()
+        self.pill_hidden.emit()
 
     def on_copy(self):
         if self.selected_text:
@@ -326,9 +339,13 @@ class QuickSelectionDaemon(QtCore.QObject):
         self.pill = pill
         self.last_handled_text = ""
 
+        # Connect pill hidden signal to reset state so re-selecting same text works
+        self.pill.pill_hidden.connect(self._on_pill_hidden)
+
         # 1. Wayland Primary Watcher Thread
         self.wayland_watcher = WaylandPrimaryWatcher(self)
         self.wayland_watcher.selection_changed.connect(self._handle_new_text)
+        self.wayland_watcher.selection_cleared.connect(self._on_selection_cleared)
         self.wayland_watcher.start()
 
         # 2. KDE Klipper D-Bus connection as fallback
@@ -340,6 +357,18 @@ class QuickSelectionDaemon(QtCore.QObject):
             )
         except Exception:
             pass
+
+    @QtCore.pyqtSlot()
+    def _on_pill_hidden(self):
+        # Reset state so re-selecting the same text pops up immediately
+        self.last_handled_text = ""
+        self.wayland_watcher.reset_last_text()
+
+    @QtCore.pyqtSlot()
+    def _on_selection_cleared(self):
+        # When text is unselected/deselected by user, dismiss the pill
+        self.last_handled_text = ""
+        self.pill.hide_pill()
 
     @QtCore.pyqtSlot()
     def _on_klipper_updated(self):
