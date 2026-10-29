@@ -120,3 +120,7 @@ ForegroundNormal=232,238,248
 ForegroundPositive=80,210,150
 ForegroundVisited=176,140,255
 
+[KFileDialog Settings]
+Automatically select filename extension=false
+
+

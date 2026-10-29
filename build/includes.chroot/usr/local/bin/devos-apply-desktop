@@ -89,6 +89,7 @@ if [ ! -f "${stamp}" ]; then
         "${kw_bin}" --file kdeglobals --group Icons --key Theme Papirus-Dark
         "${kw_bin}" --file kdeglobals --group KDE --key widgetStyle kvantum
         "${kw_bin}" --file kdeglobals --group KDE --key LookAndFeelPackage org.devos.desktop
+        "${kw_bin}" --file kdeglobals --group "KFileDialog Settings" --key "Automatically select filename extension" false
         "${kw_bin}" --file plasmarc --group Theme --key name breeze-dark
     fi
     # Do not run lookandfeeltool here: it rebuilds the whole layout and can

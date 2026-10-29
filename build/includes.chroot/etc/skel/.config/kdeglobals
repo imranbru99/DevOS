@@ -13,3 +13,7 @@ Theme=Papirus-Dark
 [KDE]
 LookAndFeelPackage=org.devos.desktop
 widgetStyle=kvantum
+
+[KFileDialog Settings]
+Automatically select filename extension=false
+

@@ -9,6 +9,10 @@ Theme=Papirus-Dark
 LookAndFeelPackage=org.devos.desktop
 widgetStyle=kvantum
 
+[kdeglobals][KFileDialog Settings]
+Automatically select filename extension=false
+
+
 [plasmarc][Theme]
 name=breeze-dark
 
