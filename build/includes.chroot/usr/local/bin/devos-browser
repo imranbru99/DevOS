@@ -69,7 +69,11 @@ if [ -z "$chrome" ]; then
 fi
 
 lang=$(search_language)
-args=(--accept-lang="$lang")
+# Under Wayland on KDE Plasma, Chromium native Wayland backend has an upstream bug
+# where xdg_popup menus (bookmark folders, profile switcher, extension bubbles)
+# instantly dismiss upon click. Forcing --ozone-platform=x11 routes through XWayland,
+# making all bookmark dropdowns, profile switchers, and menus 100% stable.
+args=(--accept-lang="$lang" --ozone-platform=x11)
 # A virtual display (the test VM, and some other virtual PCs) makes Chrome's
 # graphics process quit immediately, so the window never appears. Draw in
 # software there. A normal graphics card is left alone, and the sandbox stays on.

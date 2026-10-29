@@ -13,7 +13,7 @@ if [ ! -x "$real" ]; then
 fi
 
 feature="PwaNavigationCapturing:aux_context_keep_same_container/true"
-args=()
+args=(--ozone-platform=x11)
 extra=""
 for a in "$@"; do
     case "$a" in
