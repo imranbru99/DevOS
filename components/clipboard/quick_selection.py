@@ -3,10 +3,10 @@
 DevOS Quick Selection Bar (Smart Floating Selection Actions).
 
 When text is selected / marked in any application (terminals, PuTTY, Chrome, editors),
-a sleek floating action pill automatically appears above the mouse pointer offering:
+a sleek floating action pill automatically appears offering:
   - 📋 Copy (syncs to clipboard & Klipper, shows checkmark)
   - ✂️ Cut (copies & deletes selected text)
-  - 📸 Screenshot (launches area capture)
+  - 📸 Capture (launches area screenshot)
   - 🤖 Ask AI (routes text to DevOS AI Assistant)
   - 🔍 Search (web search in browser)
   - ✕ Cancel (dismisses)
@@ -15,63 +15,32 @@ Author: Imran Ahmed <me@imrandev.bd>
 https://imrandev.bd
 """
 
-import ctypes
-from ctypes import byref, c_int, c_uint, c_ulong
 import os
 import subprocess
 import sys
 import urllib.parse
-from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt5 import QtCore, QtGui, QtWidgets, QtDBus
 
 
-class X11PointerWatcher:
-    """Monitors mouse pointer coordinates and left button state using X11."""
-
-    def __init__(self):
-        self.available = False
-        try:
-            self.x11 = ctypes.cdll.LoadLibrary("libX11.so.6")
-            self.disp = self.x11.XOpenDisplay(None)
-            if self.disp:
-                self.root = self.x11.XDefaultRootWindow(self.disp)
-                self.available = True
-        except Exception:
-            self.available = False
-
-    def query(self):
-        """Returns (x, y, is_left_button_pressed) or None if unavailable."""
-        if not self.available:
-            return None
-        root_ret = c_ulong()
-        child_ret = c_ulong()
-        root_x = c_int()
-        root_y = c_int()
-        win_x = c_int()
-        win_y = c_int()
-        mask = c_uint()
-        try:
-            res = self.x11.XQueryPointer(
-                self.disp, self.root,
-                byref(root_ret), byref(child_ret),
-                byref(root_x), byref(root_y),
-                byref(win_x), byref(win_y),
-                byref(mask)
-            )
-            if res:
-                # Button1Mask = (1 << 8)
-                btn1 = bool(mask.value & (1 << 8))
-                return root_x.value, root_y.value, btn1
-        except Exception:
-            pass
-        return None
-
-    def close(self):
-        if self.available and self.disp:
-            try:
-                self.x11.XCloseDisplay(self.disp)
-            except Exception:
-                pass
-            self.available = False
+def get_pointer_coordinates():
+    """Returns (x, y) coordinates of mouse cursor using xdotool, or None."""
+    try:
+        out = subprocess.check_output(
+            ["xdotool", "getmouselocation"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=0.3
+        )
+        parts = {}
+        for token in out.strip().split():
+            if ":" in token:
+                k, v = token.split(":", 1)
+                parts[k] = int(v)
+        if "x" in parts and "y" in parts:
+            return parts["x"], parts["y"]
+    except Exception:
+        pass
+    return None
 
 
 class SelectionPill(QtWidgets.QWidget):
@@ -104,8 +73,8 @@ class SelectionPill(QtWidgets.QWidget):
         self.frame.setObjectName("pillFrame")
         self.frame.setStyleSheet("""
             #pillFrame {
-                background-color: rgba(16, 24, 40, 0.94);
-                border: 1px solid rgba(56, 189, 248, 0.45);
+                background-color: rgba(16, 24, 40, 0.95);
+                border: 1px solid rgba(56, 189, 248, 0.5);
                 border-radius: 20px;
             }
             QPushButton {
@@ -114,7 +83,7 @@ class SelectionPill(QtWidgets.QWidget):
                 font-family: 'Inter', -apple-system, sans-serif;
                 font-size: 10pt;
                 font-weight: 600;
-                padding: 6px 11px;
+                padding: 6px 12px;
                 border: none;
                 border-radius: 12px;
             }
@@ -127,14 +96,14 @@ class SelectionPill(QtWidgets.QWidget):
             }
             #closeBtn {
                 color: #94a3b8;
-                padding: 6px 9px;
+                padding: 6px 10px;
             }
             #closeBtn:hover {
                 background-color: rgba(239, 68, 68, 0.22);
                 color: #ef4444;
             }
             .divider {
-                background-color: rgba(255, 255, 255, 0.14);
+                background-color: rgba(255, 255, 255, 0.15);
                 width: 1px;
                 max-width: 1px;
                 margin: 4px 1px;
@@ -143,14 +112,14 @@ class SelectionPill(QtWidgets.QWidget):
 
         # Drop shadow
         shadow = QtWidgets.QGraphicsDropShadowEffect(self.frame)
-        shadow.setBlurRadius(16)
-        shadow.setColor(QtGui.QColor(0, 0, 0, 160))
+        shadow.setBlurRadius(18)
+        shadow.setColor(QtGui.QColor(0, 0, 0, 180))
         shadow.setOffset(0, 4)
         self.frame.setGraphicsEffect(shadow)
 
         layout = QtWidgets.QHBoxLayout(self.frame)
         layout.setContentsMargins(8, 4, 8, 4)
-        layout.setSpacing(3)
+        layout.setSpacing(4)
 
         # 1. Copy
         self.btn_copy = QtWidgets.QPushButton("📋 Copy")
@@ -201,8 +170,8 @@ class SelectionPill(QtWidgets.QWidget):
         div.setFrameShape(QtWidgets.QFrame.VLine)
         return div
 
-    def popup_at(self, x, y, text):
-        """Position and display the pill near pointer coordinates."""
+    def popup_for_text(self, text):
+        """Position and display the pill near cursor or at top center."""
         self.selected_text = text
         self.btn_copy.setText("📋 Copy")
         self.btn_copy.setStyleSheet("")
@@ -214,14 +183,18 @@ class SelectionPill(QtWidgets.QWidget):
         h = self.sizeHint().height()
 
         screen = QtWidgets.QApplication.primaryScreen().availableGeometry()
+        coords = get_pointer_coordinates()
 
-        # Center horizontally on cursor, clamped to screen bounds
-        pos_x = max(screen.left() + 10, min(screen.right() - w - 10, x - w // 2))
-
-        # Position above cursor by default, or below if near top
-        pos_y = y - h - 12
-        if pos_y < screen.top() + 10:
-            pos_y = y + 24
+        if coords and coords[0] > 0 and coords[1] > 0:
+            x, y = coords
+            pos_x = max(screen.left() + 10, min(screen.right() - w - 10, x - w // 2))
+            pos_y = y - h - 14
+            if pos_y < screen.top() + 10:
+                pos_y = y + 26
+        else:
+            # Fallback to Top-Center HUD
+            pos_x = screen.left() + (screen.width() - w) // 2
+            pos_y = screen.top() + 30
 
         self.move(pos_x, pos_y)
         self.show()
@@ -239,7 +212,6 @@ class SelectionPill(QtWidgets.QWidget):
             clip = QtWidgets.QApplication.clipboard()
             clip.setText(self.selected_text, QtGui.QClipboard.Clipboard)
 
-            # Also push to Klipper via DBus
             try:
                 subprocess.run(
                     ["qdbus6", "org.kde.klipper", "/klipper", "setClipboardContents", self.selected_text],
@@ -254,7 +226,6 @@ class SelectionPill(QtWidgets.QWidget):
 
     def on_cut(self):
         self.on_copy()
-        # Simulate backspace deletion in active app
         try:
             subprocess.Popen(["xdotool", "key", "BackSpace"])
         except Exception:
@@ -263,7 +234,6 @@ class SelectionPill(QtWidgets.QWidget):
     def on_screenshot(self):
         self.hide_pill()
         try:
-            # DevOS region capture
             subprocess.Popen(["spectacle", "-r"])
         except Exception:
             pass
@@ -271,7 +241,6 @@ class SelectionPill(QtWidgets.QWidget):
     def on_ai(self):
         self.on_copy()
         self.hide_pill()
-        # Launch DevOS AI Assistant / Chat
         try:
             subprocess.Popen(["devos-chat"])
         except Exception:
@@ -289,64 +258,71 @@ class SelectionPill(QtWidgets.QWidget):
 
 
 class QuickSelectionDaemon(QtCore.QObject):
-    """Background selection and mouse release monitor."""
+    """Monitors selection changes across both Wayland (Klipper D-Bus) and Qt/X11."""
 
     def __init__(self, pill: SelectionPill):
         super().__init__()
         self.pill = pill
         self.clip = QtWidgets.QApplication.clipboard()
-        self.watcher = X11PointerWatcher()
-
-        self.was_mouse_down = False
         self.last_handled_text = ""
-        self.mouse_press_pos = (0, 0)
 
-        # Polling timer every 50ms for snappy response
-        self.timer = QtCore.QTimer(self)
-        self.timer.timeout.connect(self._check_pointer)
-        self.timer.start(50)
+        # 1. Connect Qt clipboard signals
+        self.clip.selectionChanged.connect(self._on_qt_selection_changed)
+        self.clip.dataChanged.connect(self._on_qt_data_changed)
 
-    def _check_pointer(self):
-        info = self.watcher.query()
-        if not info:
+        # 2. Connect KDE Klipper D-Bus signal
+        self.bus = QtDBus.QDBusConnection.sessionBus()
+        self.bus.connect(
+            "org.kde.klipper", "/klipper", "org.kde.klipper.klipper",
+            "clipboardHistoryUpdated", self._on_klipper_updated
+        )
+
+        # 3. Check for outside clicks periodically to dismiss the pill
+        self.dismiss_timer = QtCore.QTimer(self)
+        self.dismiss_timer.timeout.connect(self._check_dismiss)
+        self.dismiss_timer.start(100)
+
+    @QtCore.pyqtSlot()
+    def _on_klipper_updated(self):
+        msg = QtDBus.QDBusMessage.createMethodCall(
+            "org.kde.klipper", "/klipper", "org.kde.klipper.klipper", "getClipboardContents"
+        )
+        reply = self.bus.call(msg)
+        if reply.type() == QtDBus.QDBusMessage.ReplyMessage and reply.arguments():
+            text = str(reply.arguments()[0]).strip()
+            self._handle_new_text(text)
+
+    def _on_qt_selection_changed(self):
+        text = self.clip.text(QtGui.QClipboard.Selection).strip()
+        self._handle_new_text(text)
+
+    def _on_qt_data_changed(self):
+        text = self.clip.text(QtGui.QClipboard.Clipboard).strip()
+        self._handle_new_text(text)
+
+    def _handle_new_text(self, text):
+        if not text or len(text) < 2:
+            return
+        if text == self.last_handled_text:
             return
 
-        x, y, is_down = info
+        self.last_handled_text = text
+        self.pill.popup_for_text(text)
 
-        # 1. Detect Mouse Press
-        if is_down and not self.was_mouse_down:
-            self.was_mouse_down = True
-            self.mouse_press_pos = (x, y)
-
-            # If user clicked outside the pill, dismiss it
-            if self.pill.isVisible():
-                if not self.pill.geometry().contains(x, y):
-                    self.pill.hide_pill()
-
-        # 2. Detect Mouse Release (User finished dragging / marking text)
-        elif not is_down and self.was_mouse_down:
-            self.was_mouse_down = False
-
-            # Check if mouse moved enough to be a selection drag (> 6 pixels)
-            dx = abs(x - self.mouse_press_pos[0])
-            dy = abs(y - self.mouse_press_pos[1])
-            is_drag = (dx > 6 or dy > 6)
-
-            # Delay slightly (60ms) to allow the application to publish the selection
-            QtCore.QTimer.singleShot(60, lambda: self._evaluate_selection(x, y, is_drag))
-
-    def _evaluate_selection(self, x, y, is_drag):
-        text = self.clip.text(QtGui.QClipboard.Selection).strip()
-
-        # Only trigger if text is at least 2 chars, non-empty, and changed or dragged
-        if text and len(text) >= 2:
-            if is_drag or (text != self.last_handled_text):
-                self.last_handled_text = text
-                self.pill.popup_at(x, y, text)
+    def _check_dismiss(self):
+        if not self.pill.isVisible():
+            return
+        coords = get_pointer_coordinates()
+        if coords:
+            x, y = coords
+            geom = self.pill.geometry()
+            dist_x = max(0, geom.left() - x, x - geom.right())
+            dist_y = max(0, geom.top() - y, y - geom.bottom())
+            if dist_x > 300 or dist_y > 250:
+                self.pill.hide_pill()
 
 
 def main():
-    # Single instance guard
     app = QtWidgets.QApplication(sys.argv)
     app.setApplicationName("devos-quick-selection")
     app.setQuitOnLastWindowClosed(False)
