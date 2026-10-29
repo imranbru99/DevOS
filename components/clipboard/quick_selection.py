@@ -63,16 +63,26 @@ class WaylandPrimaryWatcher(QtCore.QThread):
         self._running = True
         self._last_text = ""
 
-    def reset_last_text(self):
-        """Allows re-triggering for the same text upon next selection."""
-        self._last_text = ""
-
     def stop(self):
         self._running = False
         self.quit()
         self.wait(500)
 
     def run(self):
+        # Seed _last_text with pre-existing primary selection on startup
+        # so we never trigger on stale clipboard text or on initial load
+        try:
+            init_res = subprocess.run(
+                ["wl-paste", "--primary"],
+                capture_output=True,
+                text=True,
+                timeout=0.4
+            )
+            if init_res.returncode == 0:
+                self._last_text = init_res.stdout.strip()
+        except Exception:
+            pass
+
         while self._running and not self.isInterruptionRequested():
             try:
                 res = subprocess.run(
@@ -83,6 +93,7 @@ class WaylandPrimaryWatcher(QtCore.QThread):
                 )
                 if res.returncode == 0:
                     text = res.stdout.strip()
+                    # Only trigger when newly selected text differs from last known selection
                     if text and text != self._last_text and len(text) >= 2:
                         self._last_text = text
                         self.selection_changed.emit(text)
@@ -92,13 +103,11 @@ class WaylandPrimaryWatcher(QtCore.QThread):
                         self.selection_cleared.emit()
             except Exception:
                 pass
-            time.sleep(0.12)
+            time.sleep(0.15)
 
 
 class SelectionPill(QtWidgets.QWidget):
     """Modern floating quick-action pill."""
-
-    pill_hidden = QtCore.pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -268,7 +277,6 @@ class SelectionPill(QtWidgets.QWidget):
     def hide_pill(self):
         self.auto_hide_timer.stop()
         self.hide()
-        self.pill_hidden.emit()
 
     def on_copy(self):
         if self.selected_text:
@@ -339,9 +347,6 @@ class QuickSelectionDaemon(QtCore.QObject):
         self.pill = pill
         self.last_handled_text = ""
 
-        # Connect pill hidden signal to reset state so re-selecting same text works
-        self.pill.pill_hidden.connect(self._on_pill_hidden)
-
         # 1. Wayland Primary Watcher Thread
         self.wayland_watcher = WaylandPrimaryWatcher(self)
         self.wayland_watcher.selection_changed.connect(self._handle_new_text)
@@ -357,12 +362,6 @@ class QuickSelectionDaemon(QtCore.QObject):
             )
         except Exception:
             pass
-
-    @QtCore.pyqtSlot()
-    def _on_pill_hidden(self):
-        # Reset state so re-selecting the same text pops up immediately
-        self.last_handled_text = ""
-        self.wayland_watcher.reset_last_text()
 
     @QtCore.pyqtSlot()
     def _on_selection_cleared(self):
