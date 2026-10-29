@@ -17,10 +17,9 @@ squashEnabled=true
 
 [Compositing]
 Enabled=true
-LatencyPolicy=Low
 
 [Windows]
-BorderlessMaximizedWindows=false
+BorderlessMaximizedWindows=true
 TitlebarDoubleClickCommand=Maximize
 FocusPolicy=ClickToFocus
 

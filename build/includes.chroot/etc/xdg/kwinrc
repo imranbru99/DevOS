@@ -30,13 +30,12 @@ squashEnabled=true
 
 [Compositing]
 Enabled=true
-LatencyPolicy=Low
 
 [Windows]
 AutoRaise=false
 AutoRaiseInterval=750
 BorderSnapZone=10
-BorderlessMaximizedWindows=false
+BorderlessMaximizedWindows=true
 CenterByShortcut=false
 ClickRaise=true
 DelayFocus=false
