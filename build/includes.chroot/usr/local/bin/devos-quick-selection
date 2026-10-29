@@ -1,0 +1,3 @@
+#!/bin/bash
+# DevOS Quick Selection Bar: Smart floating selection action pill
+exec /usr/bin/python3 /usr/local/share/devos/components/clipboard/quick_selection.py "$@"

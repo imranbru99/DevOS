@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=DevOS Quick Selection
+Comment=Smart floating quick action bar on text selection
+Exec=/usr/local/bin/devos-quick-selection
+Icon=edit-copy
+Categories=Utility;
+X-KDE-autostart-phase=2
+StartupNotify=false
+Terminal=false
