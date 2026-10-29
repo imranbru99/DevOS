@@ -174,10 +174,12 @@ class SelectionPill(QtWidgets.QWidget):
         super().__init__(parent)
         self.selected_text = ""
 
-        # Remove WindowStaysOnTopHint so the pill never overrides transient menus/switchers
+        # ToolTip + WindowStaysOnTopHint ensures the pill appears directly on screen
+        # above the selected text without ever appearing as an app icon in KDE taskbar
         self.setWindowFlags(
             QtCore.Qt.FramelessWindowHint |
-            QtCore.Qt.Tool |
+            QtCore.Qt.WindowStaysOnTopHint |
+            QtCore.Qt.ToolTip |
             QtCore.Qt.WindowDoesNotAcceptFocus
         )
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground, True)
@@ -325,9 +327,28 @@ class SelectionPill(QtWidgets.QWidget):
 
         self.move(pos_x, pos_y)
         self.show()
+        self.raise_()
+        self._ensure_skip_taskbar()
 
         # Auto hide after 6 seconds of inactivity
         self.auto_hide_timer.start(6000)
+
+    def _ensure_skip_taskbar(self):
+        """Explicitly add _NET_WM_STATE_SKIP_TASKBAR and _NET_WM_STATE_SKIP_PAGER via X11."""
+        try:
+            win_id = int(self.winId())
+            if _global_pointer.display and _global_pointer.x11:
+                disp = _global_pointer.display
+                x11 = _global_pointer.x11
+                atom_skip_taskbar = x11.XInternAtom(disp, b"_NET_WM_STATE_SKIP_TASKBAR", False)
+                atom_skip_pager = x11.XInternAtom(disp, b"_NET_WM_STATE_SKIP_PAGER", False)
+                atom_state = x11.XInternAtom(disp, b"_NET_WM_STATE", False)
+                atoms = (ctypes.c_ulong * 2)(atom_skip_taskbar, atom_skip_pager)
+                # Mode 2 is PropModeAppend
+                x11.XChangeProperty(disp, win_id, atom_state, 4, 32, 2, ctypes.cast(atoms, ctypes.c_char_p), 2)
+                x11.XFlush(disp)
+        except Exception:
+            pass
 
     def enterEvent(self, event):
         self.auto_hide_timer.stop()
