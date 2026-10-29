@@ -24,12 +24,32 @@ from PyQt5 import QtCore, QtGui, QtWidgets, QtDBus
 
 
 def get_pointer_coordinates():
-    """Returns (x, y) coordinates of mouse cursor using native Qt cursor."""
+    """Returns (x, y) coordinates of mouse cursor near the selection."""
     try:
         pos = QtGui.QCursor.pos()
-        return pos.x(), pos.y()
+        if pos.x() > 0 and pos.y() > 0:
+            return pos.x(), pos.y()
     except Exception:
-        return None
+        pass
+
+    try:
+        out = subprocess.check_output(
+            ["xdotool", "getmouselocation"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=0.25
+        )
+        parts = {}
+        for token in out.strip().split():
+            if ":" in token:
+                k, v = token.split(":", 1)
+                parts[k] = int(v)
+        if "x" in parts and "y" in parts and (parts["x"] > 0 or parts["y"] > 0):
+            return parts["x"], parts["y"]
+    except Exception:
+        pass
+
+    return None
 
 
 class WaylandPrimaryWatcher(QtCore.QThread):
@@ -210,10 +230,10 @@ class SelectionPill(QtWidgets.QWidget):
 
         if coords and coords[0] > 0 and coords[1] > 0:
             x, y = coords
-            pos_x = max(screen.left() + 10, min(screen.right() - w - 10, x - w // 2))
-            pos_y = y - h - 14
-            if pos_y < screen.top() + 10:
-                pos_y = y + 26
+            pos_x = max(screen.left() + 8, min(screen.right() - w - 8, x - w // 2))
+            pos_y = y - h - 10
+            if pos_y < screen.top() + 8:
+                pos_y = y + 20
         else:
             # Fallback to Top-Center HUD
             pos_x = screen.left() + (screen.width() - w) // 2
@@ -222,8 +242,16 @@ class SelectionPill(QtWidgets.QWidget):
         self.move(pos_x, pos_y)
         self.show()
 
-        # Auto hide after 6 seconds of inactivity
-        self.auto_hide_timer.start(6000)
+        # Auto hide after 5 seconds of inactivity
+        self.auto_hide_timer.start(5000)
+
+    def enterEvent(self, event):
+        self.auto_hide_timer.stop()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self.auto_hide_timer.start(3500)
+        super().leaveEvent(event)
 
     def hide_pill(self):
         self.auto_hide_timer.stop()
@@ -313,11 +341,6 @@ class QuickSelectionDaemon(QtCore.QObject):
         except Exception:
             pass
 
-        # 3. Dismiss on far mouse movements
-        self.dismiss_timer = QtCore.QTimer(self)
-        self.dismiss_timer.timeout.connect(self._check_dismiss)
-        self.dismiss_timer.start(150)
-
     @QtCore.pyqtSlot()
     def _on_klipper_updated(self):
         try:
@@ -339,18 +362,6 @@ class QuickSelectionDaemon(QtCore.QObject):
 
         self.last_handled_text = text
         self.pill.popup_for_text(text)
-
-    def _check_dismiss(self):
-        if not self.pill.isVisible():
-            return
-        coords = get_pointer_coordinates()
-        if coords:
-            x, y = coords
-            geom = self.pill.geometry()
-            dist_x = max(0, geom.left() - x, x - geom.right())
-            dist_y = max(0, geom.top() - y, y - geom.bottom())
-            if dist_x > 350 or dist_y > 250:
-                self.pill.hide_pill()
 
 
 def main():
