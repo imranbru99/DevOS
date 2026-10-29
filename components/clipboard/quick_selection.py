@@ -18,6 +18,7 @@ https://imrandev.bd
 import os
 import subprocess
 import sys
+import time
 import urllib.parse
 from PyQt5 import QtCore, QtGui, QtWidgets, QtDBus
 
@@ -41,6 +42,40 @@ def get_pointer_coordinates():
     except Exception:
         pass
     return None
+
+
+class WaylandPrimaryWatcher(QtCore.QThread):
+    """Watches Wayland primary selection for changes in real-time."""
+
+    selection_changed = QtCore.pyqtSignal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._running = True
+        self._last_text = ""
+
+    def stop(self):
+        self._running = False
+        self.quit()
+        self.wait(500)
+
+    def run(self):
+        while self._running and not self.isInterruptionRequested():
+            try:
+                res = subprocess.run(
+                    ["wl-paste", "--primary"],
+                    capture_output=True,
+                    text=True,
+                    timeout=0.5
+                )
+                if res.returncode == 0:
+                    text = res.stdout.strip()
+                    if text and text != self._last_text and len(text) >= 2:
+                        self._last_text = text
+                        self.selection_changed.emit(text)
+            except Exception:
+                pass
+            time.sleep(0.15)
 
 
 class SelectionPill(QtWidgets.QWidget):
@@ -209,9 +244,20 @@ class SelectionPill(QtWidgets.QWidget):
 
     def on_copy(self):
         if self.selected_text:
+            # 1. Push via wl-copy
+            try:
+                subprocess.run(
+                    ["wl-copy", self.selected_text],
+                    check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
+            except Exception:
+                pass
+
+            # 2. Push via Qt
             clip = QtWidgets.QApplication.clipboard()
             clip.setText(self.selected_text, QtGui.QClipboard.Clipboard)
 
+            # 3. Push to Klipper
             try:
                 subprocess.run(
                     ["qdbus6", "org.kde.klipper", "/klipper", "setClipboardContents", self.selected_text],
@@ -258,47 +304,45 @@ class SelectionPill(QtWidgets.QWidget):
 
 
 class QuickSelectionDaemon(QtCore.QObject):
-    """Monitors selection changes across both Wayland (Klipper D-Bus) and Qt/X11."""
+    """Monitors selection changes across both Wayland (wl-paste + Klipper) and Qt."""
 
     def __init__(self, pill: SelectionPill):
         super().__init__()
         self.pill = pill
-        self.clip = QtWidgets.QApplication.clipboard()
         self.last_handled_text = ""
 
-        # 1. Connect Qt clipboard signals
-        self.clip.selectionChanged.connect(self._on_qt_selection_changed)
-        self.clip.dataChanged.connect(self._on_qt_data_changed)
+        # 1. Wayland Primary Watcher Thread
+        self.wayland_watcher = WaylandPrimaryWatcher(self)
+        self.wayland_watcher.selection_changed.connect(self._handle_new_text)
+        self.wayland_watcher.start()
 
-        # 2. Connect KDE Klipper D-Bus signal
-        self.bus = QtDBus.QDBusConnection.sessionBus()
-        self.bus.connect(
-            "org.kde.klipper", "/klipper", "org.kde.klipper.klipper",
-            "clipboardHistoryUpdated", self._on_klipper_updated
-        )
+        # 2. KDE Klipper D-Bus connection as fallback
+        try:
+            self.bus = QtDBus.QDBusConnection.sessionBus()
+            self.bus.connect(
+                "org.kde.klipper", "/klipper", "org.kde.klipper.klipper",
+                "clipboardHistoryUpdated", self._on_klipper_updated
+            )
+        except Exception:
+            pass
 
-        # 3. Check for outside clicks periodically to dismiss the pill
+        # 3. Dismiss on far mouse movements
         self.dismiss_timer = QtCore.QTimer(self)
         self.dismiss_timer.timeout.connect(self._check_dismiss)
-        self.dismiss_timer.start(100)
+        self.dismiss_timer.start(150)
 
     @QtCore.pyqtSlot()
     def _on_klipper_updated(self):
-        msg = QtDBus.QDBusMessage.createMethodCall(
-            "org.kde.klipper", "/klipper", "org.kde.klipper.klipper", "getClipboardContents"
-        )
-        reply = self.bus.call(msg)
-        if reply.type() == QtDBus.QDBusMessage.ReplyMessage and reply.arguments():
-            text = str(reply.arguments()[0]).strip()
-            self._handle_new_text(text)
-
-    def _on_qt_selection_changed(self):
-        text = self.clip.text(QtGui.QClipboard.Selection).strip()
-        self._handle_new_text(text)
-
-    def _on_qt_data_changed(self):
-        text = self.clip.text(QtGui.QClipboard.Clipboard).strip()
-        self._handle_new_text(text)
+        try:
+            msg = QtDBus.QDBusMessage.createMethodCall(
+                "org.kde.klipper", "/klipper", "org.kde.klipper.klipper", "getClipboardContents"
+            )
+            reply = self.bus.call(msg)
+            if reply.type() == QtDBus.QDBusMessage.ReplyMessage and reply.arguments():
+                text = str(reply.arguments()[0]).strip()
+                self._handle_new_text(text)
+        except Exception:
+            pass
 
     def _handle_new_text(self, text):
         if not text or len(text) < 2:
@@ -318,7 +362,7 @@ class QuickSelectionDaemon(QtCore.QObject):
             geom = self.pill.geometry()
             dist_x = max(0, geom.left() - x, x - geom.right())
             dist_y = max(0, geom.top() - y, y - geom.bottom())
-            if dist_x > 300 or dist_y > 250:
+            if dist_x > 350 or dist_y > 250:
                 self.pill.hide_pill()
 
 

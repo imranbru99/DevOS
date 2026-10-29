@@ -8,6 +8,7 @@ Type=simple
 ExecStart=/usr/bin/python3 /usr/local/share/devos/components/clipboard/quick_selection.py
 Restart=always
 RestartSec=2
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
 Environment=DISPLAY=:1
 Environment=WAYLAND_DISPLAY=wayland-0
 Environment=QT_QPA_PLATFORM=xcb
