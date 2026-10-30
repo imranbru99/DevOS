@@ -31,6 +31,10 @@ class X11Pointer:
     def __init__(self):
         try:
             self.x11 = ctypes.cdll.LoadLibrary("libX11.so.6")
+            # Install silent error handler so any X11 error is non-fatal
+            ERROR_HANDLER = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p)
+            self._error_cb = ERROR_HANDLER(lambda d, e: 0)
+            self.x11.XSetErrorHandler(self._error_cb)
             self.display = self.x11.XOpenDisplay(None)
             if self.display:
                 self.root = self.x11.XDefaultRootWindow(self.display)
@@ -332,10 +336,12 @@ class SelectionPill(QtWidgets.QWidget):
         self.auto_hide_timer.start(5000)
 
     def _ensure_skip_taskbar(self):
-        """Explicitly add _NET_WM_STATE_SKIP_TASKBAR and _NET_WM_STATE_SKIP_PAGER via X11."""
+        """Explicitly add _NET_WM_STATE_SKIP_TASKBAR and _NET_WM_STATE_SKIP_PAGER via X11 if on X11."""
         try:
+            if "xcb" not in QtWidgets.QApplication.platformName():
+                return
             win_id = int(self.winId())
-            if _global_pointer.display and _global_pointer.x11:
+            if _global_pointer.display and _global_pointer.x11 and win_id > 0:
                 disp = _global_pointer.display
                 x11 = _global_pointer.x11
                 atom_skip_taskbar = x11.XInternAtom(disp, b"_NET_WM_STATE_SKIP_TASKBAR", False)
