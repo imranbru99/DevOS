@@ -718,7 +718,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
         header_layout.addLayout(header_vbox, stretch=1)
 
         # Top Control Buttons
-        self.btn_run = QtWidgets.QPushButton("► Run Pipeline")
+        self.btn_run = QtWidgets.QPushButton("Run Pipeline")
         self.btn_run.setObjectName("primary")
         self.btn_run.clicked.connect(self.toggle_runner)
         header_layout.addWidget(self.btn_run)
@@ -813,12 +813,12 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.detected_current_title = cur_title
         self.detected_current_path = cur_path
 
-        current_text = f"🎯 Current Project: {cur_slug}" if cur_slug else "🎯 Target Current Project"
+        current_text = f"Target Current Project ({cur_slug})" if cur_slug else "Target Current Project"
         self.radio_current_project = QRadioButton(current_text)
         self.radio_current_project.toggled.connect(self.on_mode_toggled)
         mode_box.addWidget(self.radio_current_project)
 
-        self.radio_existing_project = QRadioButton("📂 Select Existing Workspace Folder")
+        self.radio_existing_project = QRadioButton("Select Existing Workspace Folder")
         self.radio_existing_project.toggled.connect(self.on_mode_toggled)
         mode_box.addWidget(self.radio_existing_project)
 
@@ -993,7 +993,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
             self.existing_combo.addItem("No existing projects found in workspace", "")
         else:
             for p in projects:
-                self.existing_combo.addItem(f"📁 {p['title']} (folder: {p['slug']})", p['slug'])
+                self.existing_combo.addItem(f"{p['title']} ({p['slug']})", p['slug'])
         self.existing_combo.blockSignals(False)
 
     def on_existing_combo_changed(self, index):
@@ -1001,7 +1001,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
             return
         slug = str(self.existing_combo.currentData() or "")
         text = self.existing_combo.currentText()
-        clean_title = text.split("(", 1)[0].replace("📁", "").strip()
+        clean_title = text.split("(", 1)[0].strip()
         if slug:
             self.project_title_input.setText(clean_title or slug.replace("-", " ").title())
             self.project_slug_input.setText(slug)
@@ -1183,14 +1183,14 @@ class PipelineWindow(QtWidgets.QMainWindow):
     def toggle_runner(self):
         if not self.is_running:
             self.is_running = True
-            self.btn_run.setText("⏸ Pause Pipeline")
+            self.btn_run.setText("Pause Pipeline")
             self.btn_run.setStyleSheet("background-color: #eab308; color: black; font-weight: 700;")
             self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Starting pipeline runner...")
             self.runner_timer.start(2500)
             self.run_step()
         else:
             self.is_running = False
-            self.btn_run.setText("► Run Pipeline")
+            self.btn_run.setText("Run Pipeline")
             self.btn_run.setObjectName("primary")
             self.btn_run.setStyleSheet("")
             self.runner_timer.stop()
