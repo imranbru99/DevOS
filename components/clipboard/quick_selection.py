@@ -362,9 +362,49 @@ class SelectionPill(QtWidgets.QWidget):
         self.auto_hide_timer.stop()
         self.hide()
 
-    def on_copy(self):
+    def deselect_text(self):
+        """Immediately clears the active selection and collapses highlight in the source window."""
+        # 1. Clear Wayland primary selection
+        try:
+            subprocess.run(
+                ["wl-copy", "--clear", "--primary"],
+                check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+        except Exception:
+            pass
+
+        # 2. Clear Qt selection
+        try:
+            QtWidgets.QApplication.clipboard().clear(QtGui.QClipboard.Selection)
+        except Exception:
+            pass
+
+        # 3. Clear X11 primary selection via XSetSelectionOwner
+        try:
+            if _global_pointer.display and _global_pointer.x11:
+                disp = _global_pointer.display
+                x11 = _global_pointer.x11
+                atom_primary = x11.XInternAtom(disp, b"PRIMARY", False)
+                x11.XSetSelectionOwner(disp, atom_primary, 0, 0)
+                x11.XFlush(disp)
+        except Exception:
+            pass
+
+        # 4. Collapse active visual selection in target application
+        try:
+            subprocess.Popen(
+                ["xdotool", "key", "--clearmodifiers", "Right"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+        except Exception:
+            pass
+
+    def on_copy(self, deselect=True):
+        # Remove the button / floating pill immediately
+        self.hide_pill()
+
         if self.selected_text:
-            # 1. Push via wl-copy
+            # 1. Push via wl-copy to regular clipboard
             try:
                 subprocess.run(
                     ["wl-copy", self.selected_text],
@@ -374,8 +414,11 @@ class SelectionPill(QtWidgets.QWidget):
                 pass
 
             # 2. Push via Qt
-            clip = QtWidgets.QApplication.clipboard()
-            clip.setText(self.selected_text, QtGui.QClipboard.Clipboard)
+            try:
+                clip = QtWidgets.QApplication.clipboard()
+                clip.setText(self.selected_text, QtGui.QClipboard.Clipboard)
+            except Exception:
+                pass
 
             # 3. Push to Klipper
             try:
@@ -386,12 +429,12 @@ class SelectionPill(QtWidgets.QWidget):
             except Exception:
                 pass
 
-        self.btn_copy.setText("✓ Copied!")
-        self.btn_copy.setStyleSheet("color: #22c55e;")
-        QtCore.QTimer.singleShot(350, self.hide_pill)
+            # 4. Immediately deselect the text in the active window
+            if deselect:
+                self.deselect_text()
 
     def on_cut(self):
-        self.on_copy()
+        self.on_copy(deselect=False)
         try:
             subprocess.Popen(["xdotool", "key", "BackSpace"])
         except Exception:
@@ -405,8 +448,7 @@ class SelectionPill(QtWidgets.QWidget):
             pass
 
     def on_ai(self):
-        self.on_copy()
-        self.hide_pill()
+        self.on_copy(deselect=True)
         try:
             subprocess.Popen(["devos-chat"])
         except Exception:
