@@ -103,13 +103,13 @@ def get_primary_text():
 
 
 def clear_primary_text():
-    """Clear Wayland/X11 primary selection so old selections do not persist."""
+    """Clear Wayland/X11 primary selection."""
     try:
         subprocess.run(
             ["wl-copy", "--clear", "--primary"],
             check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL if hasattr(subprocess, "DEVNULL") else None,
+            stderr=subprocess.DEVNULL if hasattr(subprocess, "DEVNULL") else None,
             timeout=0.2,
         )
     except Exception:
@@ -127,8 +127,7 @@ class WaylandPrimaryWatcher(QtCore.QThread):
         self.pointer = pointer
         self.pill = pill
         self._running = True
-        self._last_text = ""
-        self._text_before_press = ""
+        self._last_emitted_text = ""
 
     def stop(self):
         self._running = False
@@ -155,11 +154,9 @@ class WaylandPrimaryWatcher(QtCore.QThread):
                     geom = self.pill.geometry()
                     if not (geom.left() <= x <= geom.right() and geom.top() <= y <= geom.bottom()):
                         self.dismiss_requested.emit()
-                        clear_primary_text()
-                        self._last_text = ""
-                        self._text_before_press = ""
+                        self._last_emitted_text = ""
 
-                # 2. Track mouse drag vs click
+                # 2. Track mouse drag vs click without touching clipboard or popups
                 if left_down and not was_down:
                     was_down = True
                     press_x = x
@@ -170,8 +167,6 @@ class WaylandPrimaryWatcher(QtCore.QThread):
                         consecutive_clicks += 1
                     else:
                         consecutive_clicks = 1
-                        # Capture text in buffer before click starts
-                        self._text_before_press = get_primary_text()
 
                 elif left_down and was_down:
                     dist = math.hypot(x - press_x, y - press_y)
@@ -188,28 +183,22 @@ class WaylandPrimaryWatcher(QtCore.QThread):
                         consecutive_clicks = 0
                         time.sleep(0.06)  # Settling pause for application to commit selection
                         text = get_primary_text()
-                        if text and len(text) >= 1:
-                            self._last_text = text
+                        if text and len(text) >= 1 and text != self._last_emitted_text:
+                            self._last_emitted_text = text
                             self.selection_changed.emit(text, x, y)
 
                     # CASE B: Double-click or Triple-click on a word/line
                     elif consecutive_clicks >= 2 and max_dist < 8:
                         time.sleep(0.07)  # Settling pause for application to highlight word
                         text = get_primary_text()
-                        # CRITICAL: Only trigger if text was ACTUALLY selected!
-                        # Double-clicking on empty space, desktop icons, or folders puts NOTHING into primary.
-                        # If text is empty or unchanged from before the click, nothing was selected.
-                        if text and len(text) >= 1:
-                            if text != self._text_before_press:
-                                self._last_text = text
-                                self.selection_changed.emit(text, x, y)
+                        if text and len(text) >= 1 and text != self._last_emitted_text:
+                            self._last_emitted_text = text
+                            self.selection_changed.emit(text, x, y)
 
-                # Periodic cleanup of stale buffer on idle after a single click without drag
                 elif not left_down and not was_down:
                     if consecutive_clicks == 1 and (time.time() - last_up_time) > 0.45:
                         consecutive_clicks = 0
-                        clear_primary_text()
-                        self._text_before_press = ""
+                        self._last_emitted_text = ""
 
             except Exception:
                 pass
