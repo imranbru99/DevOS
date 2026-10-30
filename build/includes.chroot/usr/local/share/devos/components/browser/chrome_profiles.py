@@ -8,6 +8,8 @@ Also runs a dynamic watcher that unifies open windows with taskbar launchers
 so pinned Chrome icons are never duplicated.
 """
 
+import ctypes
+import glob
 import hashlib
 import json
 import os
@@ -320,30 +322,38 @@ Categories=Network;WebBrowser;
 WINDOW_PROFILE_CACHE = {}
 
 
-def set_window_icon(wid, icon_path):
+def set_window_icon(wid, icon_path_48, icon_path_128=None):
     """Set _NET_WM_ICON on an X11 window using libX11.so.6."""
-    if not icon_path or not os.path.isfile(icon_path):
+    paths = [p for p in [icon_path_48, icon_path_128] if p and os.path.isfile(p)]
+    if not paths:
         return
     try:
-        import ctypes
-        from PIL import Image
-
         x11 = ctypes.CDLL("libX11.so.6")
         x11.XOpenDisplay.restype = ctypes.c_void_p
-        display = x11.XOpenDisplay(None)
+
+        disp_name = os.environ.get("DISPLAY")
+        if not disp_name:
+            for sock in sorted(glob.glob("/tmp/.X11-unix/X*")):
+                disp_num = sock.split("/tmp/.X11-unix/X")[-1]
+                disp_name = f":{disp_num}"
+                break
+        display = x11.XOpenDisplay(disp_name.encode() if disp_name else None)
         if not display:
             return
         net_wm_icon = x11.XInternAtom(display, b"_NET_WM_ICON", False)
         cardinal = x11.XInternAtom(display, b"CARDINAL", False)
 
-        img = Image.open(icon_path).convert("RGBA")
-        w, h = img.size
-        pixels = [w, h]
-        for y in range(h):
-            for x in range(w):
-                r, g, b, a = img.getpixel((x, y))
-                argb = (a << 24) | (r << 16) | (g << 8) | b
-                pixels.append(argb)
+        pixels = []
+        for p in paths:
+            img = Image.open(p).convert("RGBA")
+            w, h = img.size
+            pixels.append(w)
+            pixels.append(h)
+            for y in range(h):
+                for x in range(w):
+                    r, g, b, a = img.getpixel((x, y))
+                    argb = (a << 24) | (r << 16) | (g << 8) | b
+                    pixels.append(argb)
 
         c_data = (ctypes.c_ulong * len(pixels))(*pixels)
         x11.XChangeProperty(
@@ -505,6 +515,42 @@ def detect_window_profile(w, profiles, home_dir=None):
                     WINDOW_PROFILE_CACHE[wid] = p_name
                 return p_name
 
+    # Check most recently active profile in Local State or Sessions
+    local_state = os.path.join(chrome_dir, "Local State")
+    if os.path.isfile(local_state):
+        try:
+            with open(local_state, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            prof_key = d.get("profile", {}).get("last_used")
+            if not prof_key:
+                active_list = d.get("profile", {}).get("last_active_profiles")
+                if active_list and isinstance(active_list, list) and active_list[0]:
+                    prof_key = active_list[0]
+            if prof_key and prof_key in profiles:
+                p_name = profiles[prof_key]
+                if wid:
+                    WINDOW_PROFILE_CACHE[wid] = p_name
+                return p_name
+        except Exception:
+            pass
+
+    # Check session directory mtimes
+    times = []
+    for p in os.listdir(chrome_dir):
+        sess_dir = os.path.join(chrome_dir, p, "Sessions")
+        if os.path.isdir(sess_dir):
+            files = glob.glob(os.path.join(sess_dir, "Session_*"))
+            if files:
+                mtime = max(os.path.getmtime(f) for f in files)
+                times.append((mtime, p))
+    if times:
+        times.sort(reverse=True)
+        recent_p = times[0][1]
+        p_name = profiles.get(recent_p, "Work")
+        if wid:
+            WINDOW_PROFILE_CACHE[wid] = p_name
+        return p_name
+
     # Default profile name
     default_name = profiles.get("Default", "Work")
     if wid:
@@ -575,7 +621,7 @@ def apply_window_profiles(home_dir=None):
             generate_badged_icon(prof_name, prof_icon_48, prof_icon_128)
 
         # Apply _NET_WM_ICON directly to window
-        set_window_icon(w["id"], prof_icon_128)
+        set_window_icon(w["id"], prof_icon_48, prof_icon_128)
 
         if idx == 0:
             # Primary Chrome window: unifies with the pinned google-chrome.desktop launcher
