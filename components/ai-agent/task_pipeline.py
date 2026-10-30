@@ -39,6 +39,45 @@ AGENTAPI_BIN = Path(os.path.expanduser("~/.gemini/antigravity/bin/agentapi"))
 CUSTOM_AGENTS_DIR = Path.expanduser(Path("~/.config/devos/agents"))
 
 
+def to_slug(text: str) -> str:
+    """Converts a title, name, or prompt into a clean, filesystem-safe slug."""
+    if not text:
+        return "project"
+    slug = text.strip().lower()
+    slug = slug.replace("'", "").replace('"', "")
+    slug = re.sub(r"[^\w\s-]", "-", slug)
+    slug = re.sub(r"[-\s_]+", "-", slug)
+    return slug.strip("-") or "project"
+
+
+def get_grouped_projects(tasks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Groups queued tasks into structured project objects preserving sequence."""
+    projects_map: Dict[str, Dict[str, Any]] = {}
+    projects_order: List[str] = []
+
+    for task in tasks:
+        slug = task.get("project_slug") or to_slug(task.get("project_title") or "default-project")
+        if slug not in projects_map:
+            p_title = task.get("project_title") or slug.replace("-", " ").title()
+            p_dir = task.get("project") or ""
+            projects_map[slug] = {
+                "slug": slug,
+                "title": p_title,
+                "dir": p_dir,
+                "tasks": [],
+                "github_url": None,
+            }
+            projects_order.append(slug)
+
+        projects_map[slug]["tasks"].append(task)
+        if task.get("github_url") and not projects_map[slug]["github_url"]:
+            projects_map[slug]["github_url"] = task["github_url"]
+        if not projects_map[slug]["dir"] and task.get("project"):
+            projects_map[slug]["dir"] = task["project"]
+
+    return [projects_map[s] for s in projects_order]
+
+
 def discover_agents() -> Dict[str, Dict[str, Any]]:
     """Auto-detects available AI agents on the system and in custom directories."""
     agents = {}
@@ -429,6 +468,33 @@ class TaskPipeline:
     def _save_context(self):
         self._atomic_json(self.context_file, self.context)
 
+    def get_base_dir(self) -> str:
+        stored = self.context.get("base_dir")
+        if stored:
+            p = Path(stored).expanduser().resolve()
+            if p.exists() and p.is_dir():
+                return str(p)
+        candidates = [
+            Path("/home/imran/project"),
+            Path.home() / "project",
+            Path.home() / "Projects",
+            Path.cwd(),
+        ]
+        for c in candidates:
+            if c.exists() and c.is_dir():
+                return str(c.resolve())
+        default_dir = Path.home() / "project"
+        default_dir.mkdir(parents=True, exist_ok=True)
+        return str(default_dir.resolve())
+
+    @queue_transaction
+    def set_base_dir(self, directory: str) -> str:
+        p = Path(directory).expanduser().resolve()
+        p.mkdir(parents=True, exist_ok=True)
+        self.context["base_dir"] = str(p)
+        self._save_context()
+        return str(p)
+
     @queue_transaction
     def add(
         self,
@@ -439,13 +505,39 @@ class TaskPipeline:
         create_repo: bool = False,
         repo_name: str = "",
         repo_desc: str = "",
+        project_title: str = "",
+        project_slug: str = "",
     ) -> str:
         task_id = "task_" + uuid.uuid4().hex[:16]
         run_at = (datetime.datetime.now() + datetime.timedelta(seconds=delay_seconds)).isoformat()
+
+        # Derive slug and title
+        p_title = (project_title or "").strip()
+        p_slug = (project_slug or "").strip()
+
+        if not p_slug:
+            if p_title:
+                p_slug = to_slug(p_title)
+            elif repo_name:
+                p_slug = to_slug(repo_name)
+            elif project:
+                p_slug = to_slug(Path(project).name)
+            else:
+                p_slug = to_slug(prompt[:40])
+
+        if not p_title:
+            p_title = p_slug.replace("-", " ").title()
+
+        if not project:
+            base_dir = self.get_base_dir()
+            project = str(Path(base_dir) / p_slug)
+
         item = {
             "id": task_id,
+            "project_title": p_title,
+            "project_slug": p_slug,
             "prompt": prompt,
-            "agent": agent.lower(),  # "chatgpt", "antigravity", "local"
+            "agent": agent.lower(),  # "chatgpt", "antigravity", "local", etc.
             "project": project,
             "status": "QUEUED",      # QUEUED, RUNNING, RATE_LIMITED, COMPLETED, FAILED
             "run_at": run_at,
@@ -453,17 +545,55 @@ class TaskPipeline:
             "created_at": datetime.datetime.now().isoformat(),
             "output": None,
             "create_repo": create_repo,
-            "repo_name": repo_name,
+            "repo_name": repo_name or (p_slug if create_repo else ""),
             "repo_desc": repo_desc,
             "github_url": None,
         }
         self.queue.append(item)
         self._save()
-        notify("Task Queued", f"[{agent.upper()}] {prompt[:60]}...")
+        notify("Task Queued", f"[{p_slug}] [{agent.upper()}] {prompt[:60]}...")
         return task_id
+
+    def add_commands(
+        self,
+        prompts: List[str],
+        agent: str = "antigravity",
+        project_title: str = "",
+        project_slug: str = "",
+        create_repo: bool = False,
+        repo_name: str = "",
+        repo_desc: str = "",
+        delay_seconds: int = 0,
+    ) -> List[str]:
+        task_ids = []
+        clean_prompts = [p.strip() for p in prompts if p.strip()]
+        for idx, p in enumerate(clean_prompts):
+            is_repo = create_repo if idx == 0 else False
+            tid = self.add(
+                prompt=p,
+                agent=agent,
+                project_title=project_title,
+                project_slug=project_slug,
+                create_repo=is_repo,
+                repo_name=repo_name,
+                repo_desc=repo_desc,
+                delay_seconds=delay_seconds,
+            )
+            task_ids.append(tid)
+        return task_ids
 
     def list(self) -> List[Dict[str, Any]]:
         return self.queue
+
+    @queue_transaction
+    def delete_task(self, task_id: str):
+        self.queue = [t for t in self.queue if t["id"] != task_id]
+        self._save()
+
+    @queue_transaction
+    def delete_project(self, project_slug: str):
+        self.queue = [t for t in self.queue if t.get("project_slug") != project_slug]
+        self._save()
 
     @queue_transaction
     def update_task(self, task_id, changes):
@@ -502,9 +632,33 @@ class TaskPipeline:
                     print(f"[Rate-Limited] {task['id']} ({task['agent']}) waiting until {retry_time.strftime('%I:%M %p')} ({remaining}s remaining)")
                     return False
 
-            # Resolve context variables in prompt: e.g. {github_repo}, {repo_url}, {repo_name}
+            # Ensure project slug and local folder are created
+            p_slug = task.get("project_slug") or to_slug(task.get("project_title") or "project")
+            task["project_slug"] = p_slug
+
+            project_path = task.get("project")
+            if not project_path:
+                base = self.get_base_dir()
+                project_path = str(Path(base) / p_slug)
+                task["project"] = project_path
+
+            # Auto-create the project folder if it does not exist
+            try:
+                proj_dir = Path(project_path).resolve()
+                proj_dir.mkdir(parents=True, exist_ok=True)
+                task["project"] = str(proj_dir)
+            except Exception as e:
+                task["status"] = "FAILED"
+                task["output"] = f"Failed to auto-create project directory '{project_path}': {e}"
+                self._save()
+                return True
+
+            # Resolve context variables in prompt: e.g. {github_repo}, {repo_url}, {repo_name}, {project_dir}, {project_slug}
             resolved_prompt = task["prompt"]
-            for k, v in self.context.items():
+            context_vars = dict(self.context)
+            context_vars["project_dir"] = str(proj_dir)
+            context_vars["project_slug"] = p_slug
+            for k, v in context_vars.items():
                 resolved_prompt = resolved_prompt.replace(f"{{{k}}}", str(v))
             task["resolved_prompt"] = resolved_prompt
 
@@ -516,7 +670,7 @@ class TaskPipeline:
             # Run this task
             task["status"] = "RUNNING"
             self._save()
-            notify("Executing Task", f"[{task['agent'].upper()}] Starting command: {resolved_prompt[:60]}...")
+            notify("Executing Task", f"[{p_slug}] [{task['agent'].upper()}] {resolved_prompt[:60]}...")
 
             task_dispatch = dict(task)
             task_dispatch["prompt"] = resolved_prompt
@@ -557,11 +711,11 @@ class TaskPipeline:
                 task["status"] = "COMPLETED"
                 # Check if GitHub repository creation is requested or proposed
                 if task.get("create_repo") or task.get("repo_name") or "@create-repo" in task["prompt"]:
-                    r_name = task.get("repo_name") or ""
+                    r_name = task.get("repo_name") or task.get("project_slug") or ""
                     r_desc = task.get("repo_desc") or ""
                     if not r_name:
                         ext_name, ext_desc = extract_repo_metadata(output)
-                        r_name = ext_name or f"devos-project-{int(time.time())}"
+                        r_name = ext_name or task.get("project_slug") or f"devos-project-{int(time.time())}"
                         r_desc = r_desc or (ext_desc or "")
                     
                     ok_repo, repo_info = create_github_repo(
@@ -717,8 +871,11 @@ def main():
     sub.add_parser("gui", help="Open Visual Pipeline & Scheduler Dashboard")
     add_p = sub.add_parser("add", help="Add command to pipeline")
     add_p.add_argument("prompt", help="Command or prompt to execute")
-    add_p.add_argument("--agent", choices=["chatgpt", "antigravity", "local"], default="antigravity", help="Target AI agent")
+    add_p.add_argument("--agent", default="antigravity", help="Target AI agent")
     add_p.add_argument("--project", default="", help="Project path or context")
+    add_p.add_argument("--title", default="", help="Project title (auto-converts to slug)")
+    add_p.add_argument("--slug", default="", help="Project folder slug")
+    add_p.add_argument("--base-dir", default="", help="Base directory for project creation")
     add_p.add_argument("--delay", type=int, default=0, help="Delay in seconds before running")
     add_p.add_argument("--create-repo", action="store_true", help="Auto-create GitHub repo and push")
     add_p.add_argument("--repo-name", default="", help="GitHub repository name")
@@ -727,6 +884,8 @@ def main():
     sub.add_parser("list", help="List all queued and running commands")
     sub.add_parser("run", help="Run the pipeline loop until all tasks complete")
     sub.add_parser("clear", help="Clear the pipeline queue")
+    base_p = sub.add_parser("set-base-dir", help="Configure base directory for project folders")
+    base_p.add_argument("directory", help="Absolute path to base directory")
 
     args = parser.parse_args()
     pipeline = TaskPipeline()
@@ -736,7 +895,13 @@ def main():
         pipeline_gui.main()
         return
 
+    elif args.cmd == "set-base-dir":
+        configured = pipeline.set_base_dir(args.directory)
+        print(f"Projects base directory set to: {configured}")
+
     elif args.cmd == "add":
+        if args.base_dir:
+            pipeline.set_base_dir(args.base_dir)
         tid = pipeline.add(
             args.prompt,
             agent=args.agent,
@@ -745,6 +910,8 @@ def main():
             create_repo=args.create_repo,
             repo_name=args.repo_name,
             repo_desc=args.repo_desc,
+            project_title=args.title,
+            project_slug=args.slug,
         )
         print(f"Task queued: {tid} [{args.agent.upper()}] -> '{args.prompt}'")
 
@@ -753,11 +920,11 @@ def main():
         if not tasks:
             print("AI Task Pipeline is currently empty.")
             return
-        print(f"{'ID':<18} {'AGENT':<12} {'STATUS':<15} {'SCHEDULED / RETRY':<20} PROMPT")
-        print("-" * 80)
+        print(f"{'PROJECT':<25} {'ID':<18} {'AGENT':<12} {'STATUS':<15} PROMPT")
+        print("-" * 90)
         for t in tasks:
-            sched = t["retry_at"] or t["run_at"]
-            print(f"{t['id']:<18} {t['agent'].upper():<12} {t['status']:<15} {sched[:19]:<20} {t['prompt'][:30]}")
+            slug = t.get("project_slug", "default")
+            print(f"{slug:<25} {t['id']:<18} {t['agent'].upper():<12} {t['status']:<15} {t['prompt'][:35]}")
 
     elif args.cmd == "run":
         print("DevOS AI Task Pipeline Runner starting...")
