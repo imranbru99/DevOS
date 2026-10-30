@@ -371,76 +371,42 @@ class SelectionPill(QtWidgets.QWidget):
         self.auto_hide_timer.stop()
         self.hide()
 
-    def deselect_text(self):
-        """Immediately clears the active selection and collapses highlight in the source window."""
-        # 1. Clear Wayland primary selection
-        try:
-            subprocess.run(
-                ["wl-copy", "--clear", "--primary"],
-                check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
-        except Exception:
-            pass
-
-        # 2. Clear Qt selection
-        try:
-            QtWidgets.QApplication.clipboard().clear(QtGui.QClipboard.Selection)
-        except Exception:
-            pass
-
-        # 3. Clear X11 primary selection via XSetSelectionOwner
-        try:
-            if _global_pointer.display and _global_pointer.x11:
-                disp = _global_pointer.display
-                x11 = _global_pointer.x11
-                atom_primary = x11.XInternAtom(disp, b"PRIMARY", False)
-                x11.XSetSelectionOwner(disp, atom_primary, 0, 0)
-                x11.XFlush(disp)
-        except Exception:
-            pass
-
-        # 4. Collapse active visual selection in target application
-        try:
-            subprocess.Popen(
-                ["xdotool", "key", "--clearmodifiers", "Right"],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
-        except Exception:
-            pass
-
-    def on_copy(self, deselect=True):
-        # Remove the button / floating pill immediately
+    def on_copy(self, *args, **kwargs):
+        """Immediately commit text to clipboard across Wayland, X11, and Qt for instant pasting."""
         self.hide_pill()
 
-        if self.selected_text:
-            # 1. Push via wl-copy to regular clipboard
-            try:
-                subprocess.run(
-                    ["wl-copy", self.selected_text],
-                    check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-                )
-            except Exception:
-                pass
+        text = self.selected_text
+        if not text:
+            return
 
-            # 2. Push via Qt
-            try:
-                clip = QtWidgets.QApplication.clipboard()
-                clip.setText(self.selected_text, QtGui.QClipboard.Clipboard)
-            except Exception:
-                pass
+        # 1. Instant Wayland clipboard commit
+        try:
+            subprocess.Popen(
+                ["wl-copy", text],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            pass
 
-            # 3. Push to Klipper
-            try:
-                subprocess.run(
-                    ["qdbus6", "org.kde.klipper", "/klipper", "setClipboardContents", self.selected_text],
-                    check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-                )
-            except Exception:
-                pass
+        # 2. Instant X11 clipboard commit via xclip
+        try:
+            p = subprocess.Popen(
+                ["xclip", "-selection", "clipboard"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            p.communicate(text.encode("utf-8"), timeout=0.1)
+        except Exception:
+            pass
 
-            # 4. Immediately deselect the text in the active window
-            if deselect:
-                self.deselect_text()
+        # 3. Instant Qt in-memory clipboard commit
+        try:
+            clip = QtWidgets.QApplication.clipboard()
+            clip.setText(text, QtGui.QClipboard.Clipboard)
+        except Exception:
+            pass
 
     def on_cut(self):
         self.on_copy(deselect=False)
