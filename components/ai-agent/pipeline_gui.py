@@ -700,6 +700,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
         self.setWindowTitle("DevOS AI Command Pipeline & Scheduler")
         self.setObjectName("devos-ai-pipeline")
+        self.setWindowFlags(self.windowFlags() | Qt.WindowMinMaxButtonsHint | Qt.WindowCloseButtonHint)
         icon = get_app_icon()
         if not icon.isNull():
             self.setWindowIcon(icon)
