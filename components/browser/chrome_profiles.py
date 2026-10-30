@@ -159,6 +159,12 @@ def update_google_chrome_desktop(home_dir, all_profiles):
     if not os.path.isfile(desktop_file):
         return
 
+    devos_bin = (
+        os.path.join(home_dir, ".local/bin/devos-browser")
+        if os.path.isfile(os.path.join(home_dir, ".local/bin/devos-browser"))
+        else "devos-browser"
+    )
+
     action_keys = ["new-window", "new-private-window", "new-guest-window"]
     action_blocks = []
 
@@ -168,10 +174,10 @@ def update_google_chrome_desktop(home_dir, all_profiles):
         action_keys.append(action_id)
 
         if key == "guest":
-            exec_line = "devos-browser --guest --class=chrome-guest"
+            exec_line = f"{devos_bin} --guest --class=chrome-guest"
             icon_line = "chrome-guest"
         else:
-            exec_line = f'devos-browser --profile-directory="{key}" --class=chrome-{slug}'
+            exec_line = f'{devos_bin} --profile-directory="{key}" --class=chrome-{slug}'
             icon_line = f"chrome-{slug}"
 
         action_blocks.append(f"""
@@ -189,7 +195,7 @@ Version=1.0
 Name=Google Chrome
 GenericName=Web Browser
 Comment=Access the Internet
-Exec=devos-browser %U
+Exec={devos_bin} %U
 StartupNotify=true
 StartupWMClass=google-chrome
 Terminal=false
@@ -201,15 +207,15 @@ Actions={actions_str}
 
 [Desktop Action new-window]
 Name=New Window
-Exec=devos-browser
+Exec={devos_bin}
 
 [Desktop Action new-private-window]
 Name=New Incognito Window
-Exec=devos-browser --incognito
+Exec={devos_bin} --incognito
 
 [Desktop Action new-guest-window]
 Name=New Guest Window
-Exec=devos-browser --guest
+Exec={devos_bin} --guest
 """
     full_content = base_content + "".join(action_blocks)
     with open(user_desktop, "w", encoding="utf-8") as f:
@@ -236,6 +242,12 @@ def sync_all_profiles(home_dir=None):
 
     created_desktops = []
 
+    devos_bin = (
+        os.path.join(home_dir, ".local/bin/devos-browser")
+        if os.path.isfile(os.path.join(home_dir, ".local/bin/devos-browser"))
+        else "devos-browser"
+    )
+
     for key, name in all_profiles:
         slug = slugify(key if key == "guest" else (name or key))
         icon_name = f"chrome-{slug}"
@@ -248,9 +260,9 @@ def sync_all_profiles(home_dir=None):
         wm_class = icon_name
 
         if key == "guest":
-            exec_cmd = "devos-browser --guest --class=chrome-guest"
+            exec_cmd = f"{devos_bin} --guest --class=chrome-guest"
         else:
-            exec_cmd = f'devos-browser --profile-directory="{key}" --class={wm_class}'
+            exec_cmd = f'{devos_bin} --profile-directory="{key}" --class={wm_class}'
 
         content = f"""[Desktop Entry]
 Version=1.0
@@ -305,10 +317,55 @@ Categories=Network;WebBrowser;
 
 # --- X11 Window Management & Profile Watcher ---
 
+WINDOW_PROFILE_CACHE = {}
+
+
+def set_window_icon(wid, icon_path):
+    """Set _NET_WM_ICON on an X11 window using libX11.so.6."""
+    if not icon_path or not os.path.isfile(icon_path):
+        return
+    try:
+        import ctypes
+        from PIL import Image
+
+        x11 = ctypes.CDLL("libX11.so.6")
+        x11.XOpenDisplay.restype = ctypes.c_void_p
+        display = x11.XOpenDisplay(None)
+        if not display:
+            return
+        net_wm_icon = x11.XInternAtom(display, b"_NET_WM_ICON", False)
+        cardinal = x11.XInternAtom(display, b"CARDINAL", False)
+
+        img = Image.open(icon_path).convert("RGBA")
+        w, h = img.size
+        pixels = [w, h]
+        for y in range(h):
+            for x in range(w):
+                r, g, b, a = img.getpixel((x, y))
+                argb = (a << 24) | (r << 16) | (g << 8) | b
+                pixels.append(argb)
+
+        c_data = (ctypes.c_ulong * len(pixels))(*pixels)
+        x11.XChangeProperty(
+            display,
+            wid,
+            net_wm_icon,
+            cardinal,
+            32,
+            0,  # PropModeReplace
+            ctypes.cast(c_data, ctypes.POINTER(ctypes.c_ubyte)),
+            len(pixels),
+        )
+        x11.XFlush(display)
+        x11.XCloseDisplay(display)
+    except Exception:
+        pass
+
+
 def get_x11_windows():
     """
     Query open X11 windows and return list of dicts:
-    [{'id': int, 'title': str, 'wm_class': str, 'desktop_file': str}, ...]
+    [{'id': int, 'title': str, 'wm_class': str}, ...]
     """
     try:
         import subprocess
@@ -338,7 +395,7 @@ def set_window_desktop_file(wid, desktop_slug):
     try:
         import subprocess
         subprocess.run(
-            ["xprop", "-id", hex(wid), "-f", "_KDE_NET_WM_DESKTOP_FILE", "8u", "-set", "_KDE_NET_WM_DESKTOP_FILE", desktop_slug],
+            ["xprop", "-id", hex(wid), "-f", "_KDE_NET_WM_DESKTOP_FILE", "8s", "-set", "_KDE_NET_WM_DESKTOP_FILE", desktop_slug],
             check=False,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -347,12 +404,13 @@ def set_window_desktop_file(wid, desktop_slug):
         pass
 
 
-def set_window_wm_class(wid, class_name):
+def set_window_wm_class(wid, class_name, class_inst=None):
     """Set WM_CLASS on an X11 window."""
     try:
         import subprocess
+        inst = class_inst if class_inst else class_name
         subprocess.run(
-            ["xprop", "-id", hex(wid), "-f", "WM_CLASS", "8s", "-set", "WM_CLASS", class_name, class_name],
+            ["xprop", "-id", hex(wid), "-f", "WM_CLASS", "8s", "-set", "WM_CLASS", inst, class_name],
             check=False,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -361,30 +419,97 @@ def set_window_wm_class(wid, class_name):
         pass
 
 
-def detect_window_profile(title, profiles):
+def get_profile_tab_domains(chrome_config_dir):
+    """Extract significant domains open in each profile from Sessions/Tabs_*."""
+    domains_map = {}
+    if not os.path.isdir(chrome_config_dir):
+        return domains_map
+    for p in os.listdir(chrome_config_dir):
+        sess_dir = os.path.join(chrome_config_dir, p, "Sessions")
+        if not os.path.isdir(sess_dir):
+            continue
+        files = sorted(glob.glob(os.path.join(sess_dir, "Tabs_*")), key=os.path.getmtime)
+        if not files:
+            continue
+        try:
+            with open(files[-1], "rb") as f:
+                data = f.read()
+            urls = re.findall(rb"https?://([a-zA-Z0-9\.\-_]+)", data)
+            domains = set()
+            for u in urls:
+                parts = u.decode("utf-8", errors="ignore").lower().split(".")
+                if len(parts) >= 2:
+                    domains.add(parts[-2])
+            domains_map[p] = domains
+        except Exception:
+            pass
+    return domains_map
+
+
+def detect_window_profile(w, profiles, home_dir=None):
     """
-    Determine profile name from window title:
-    e.g. "[Blog] Google Chrome" -> "Blog"
-         "Guest - Google Chrome" -> "Guest"
-         "Flexible Front End Jobs... - Google Chrome" -> Default ("Work")
+    Determine profile name from window attributes and session activity:
+    e.g. WM_CLASS "chrome-mirza" -> "Mirza"
+         Title "Facebook - Google Chrome" -> "Tony" (from Profile 2 tabs)
+         Title "WhatsApp - Google Chrome" -> "Mirza" (from Profile 1 tabs)
     """
+    wid = w.get("id") if isinstance(w, dict) else None
+    title = w.get("title", "") if isinstance(w, dict) else str(w)
+    wm_class = w.get("wm_class", "") if isinstance(w, dict) else ""
+
+    if wid and wid in WINDOW_PROFILE_CACHE:
+        return WINDOW_PROFILE_CACHE[wid]
+
+    # Check wm_class if launched with --class=chrome-<slug>
+    for p_key, p_name in profiles.items():
+        slug = slugify(p_name)
+        if f"chrome-{slug}" in wm_class.lower():
+            if wid:
+                WINDOW_PROFILE_CACHE[wid] = p_name
+            return p_name
+
     # Check for [ProfileName]
     m = re.search(r"\[([^\]]+)\]", title)
     if m:
-        return m.group(1).strip()
+        prof = m.group(1).strip()
+        if wid:
+            WINDOW_PROFILE_CACHE[wid] = prof
+        return prof
 
     # Check for (Guest) or Guest
     if re.search(r"\bGuest\b", title, re.IGNORECASE):
+        if wid:
+            WINDOW_PROFILE_CACHE[wid] = "Guest"
         return "Guest"
 
-    # Check profile names in title
+    # Check profile names explicitly mentioned in title
     for p_key, p_name in profiles.items():
         if p_name and p_name.lower() != "work":
             if f"({p_name})" in title or f" - {p_name}" in title:
+                if wid:
+                    WINDOW_PROFILE_CACHE[wid] = p_name
+                return p_name
+
+    # Match domain / tab keywords against profile active sessions
+    if not home_dir:
+        home_dir = os.path.expanduser("~")
+    chrome_dir = os.path.join(home_dir, ".config/google-chrome")
+    tab_domains = get_profile_tab_domains(chrome_dir)
+    title_lower = title.lower()
+
+    for prof_key, domains in tab_domains.items():
+        p_name = profiles.get(prof_key, prof_key)
+        for d in domains:
+            if len(d) >= 4 and d in title_lower:
+                if wid:
+                    WINDOW_PROFILE_CACHE[wid] = p_name
                 return p_name
 
     # Default profile name
-    return profiles.get("Default", "Work")
+    default_name = profiles.get("Default", "Work")
+    if wid:
+        WINDOW_PROFILE_CACHE[wid] = default_name
+    return default_name
 
 
 def apply_window_profiles(home_dir=None):
@@ -399,12 +524,25 @@ def apply_window_profiles(home_dir=None):
     profiles = get_chrome_profiles(os.path.join(home_dir, ".config/google-chrome"))
     windows = get_x11_windows()
 
-    # Filter for Chrome windows
+    # Filter for real Chrome browser windows (exclude PWAs like Windows App, Maps, etc.)
     chrome_wins = []
+    active_wids = set()
     for w in windows:
         wc = w["wm_class"].lower()
-        if "google-chrome" in wc or "chrome-" in wc:
+        title = w["title"]
+        active_wids.add(w["id"])
+
+        # Must be Chrome and have "Google Chrome" in title or be an explicitly launched chrome-* window
+        if ("google-chrome" in wc or "chrome-" in wc) and ("google chrome" in title.lower() or wc.startswith("chrome-")):
+            # Skip Microsoft Windows App PWA or similar
+            if "windows app" in title.lower():
+                continue
             chrome_wins.append(w)
+
+    # Clean up stale window profile cache entries
+    stale = [wid for wid in WINDOW_PROFILE_CACHE if wid not in active_wids]
+    for wid in stale:
+        del WINDOW_PROFILE_CACHE[wid]
 
     if not chrome_wins:
         # No Chrome windows open: ensure google-chrome icon is clean stock icon
@@ -426,7 +564,7 @@ def apply_window_profiles(home_dir=None):
     # Group windows by detected profile
     processed = 0
     for idx, w in enumerate(chrome_wins):
-        prof_name = detect_window_profile(w["title"], profiles)
+        prof_name = detect_window_profile(w, profiles, home_dir)
         slug = slugify(prof_name)
 
         # Ensure badged icon for this profile exists
@@ -435,9 +573,14 @@ def apply_window_profiles(home_dir=None):
         if not os.path.isfile(prof_icon_48):
             generate_badged_icon(prof_name, prof_icon_48, prof_icon_128)
 
+        # Apply _NET_WM_ICON directly to window
+        set_window_icon(w["id"], prof_icon_128)
+
         if idx == 0:
             # Primary Chrome window: unifies with the pinned google-chrome.desktop launcher
-            set_window_desktop_file(w["id"], "google-chrome")
+            set_window_desktop_file(w["id"], "google-chrome.desktop")
+            set_window_wm_class(w["id"], "google-chrome", "Google-chrome")
+
             # Update user's google-chrome.png to show Window 0's profile badge
             user_icon_48 = os.path.join(icons_dir_48, "google-chrome.png")
             user_icon_128 = os.path.join(icons_dir_128, "google-chrome.png")
@@ -448,9 +591,9 @@ def apply_window_profiles(home_dir=None):
                 pass
         else:
             # Secondary Chrome windows: separate ungrouped task items with badged icons
-            desktop_slug = f"chrome-{slug}"
+            desktop_slug = f"chrome-{slug}.desktop"
             set_window_desktop_file(w["id"], desktop_slug)
-            set_window_wm_class(w["id"], desktop_slug)
+            set_window_wm_class(w["id"], f"chrome-{slug}", f"chrome-{slug}")
 
         processed += 1
 

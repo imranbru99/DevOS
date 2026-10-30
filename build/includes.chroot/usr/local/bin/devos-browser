@@ -87,7 +87,7 @@ done
 
 # Inject policy override so Chrome Guest Mode and Add Person are always enabled
 override_so="/usr/local/lib/devos/libdevos_browser_override.so"
-user_override_so="${XDG_DATA_HOME:-$HOME/.local}/lib/devos/libdevos_browser_override.so"
+user_override_so="$HOME/.local/lib/devos/libdevos_browser_override.so"
 if [ -f "$override_so" ]; then
     export LD_PRELOAD="${override_so}${LD_PRELOAD:+:$LD_PRELOAD}"
 elif [ -f "$user_override_so" ]; then
@@ -96,7 +96,7 @@ fi
 
 # Sync profile badged icons & desktop launchers
 sync_script="/usr/local/share/devos/components/browser/chrome_profiles.py"
-user_sync_script="${XDG_DATA_HOME:-$HOME/.local}/share/devos/components/browser/chrome_profiles.py"
+user_sync_script="$HOME/.local/share/devos/components/browser/chrome_profiles.py"
 if [ -f "$sync_script" ]; then
     python3 "$sync_script" sync >/dev/null 2>&1 &
 elif [ -f "$user_sync_script" ]; then
