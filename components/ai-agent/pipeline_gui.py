@@ -680,8 +680,20 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.pipeline = TaskPipeline()
         self.worker = None
 
-        # Auto-detect current active project
-        cur_slug, cur_title, cur_path = detect_current_project(self.pipeline.get_base_dir())
+        # Determine initial preferred agent (e.g. Antigravity KDE in KDE desktop)
+        known_agents = discover_agents()
+        is_kde = ("KDE" in os.environ.get("XDG_CURRENT_DESKTOP", "")) or (os.environ.get("DESKTOP_SESSION") == "plasma")
+        if is_kde and known_agents.get("antigravity-kde", {}).get("running"):
+            init_agent = "antigravity-kde"
+        elif known_agents.get("antigravity", {}).get("running"):
+            init_agent = "antigravity"
+        elif known_agents.get("antigravity-kde", {}).get("running"):
+            init_agent = "antigravity-kde"
+        else:
+            init_agent = None
+
+        # Auto-detect current active project based on active agent
+        cur_slug, cur_title, cur_path = detect_current_project(self.pipeline.get_base_dir(), agent=init_agent)
         self.current_slug = cur_slug or "dev-os"
         self.current_title = cur_title or "Dev Os"
         self.current_path = cur_path or str(Path(self.pipeline.get_base_dir()) / self.current_slug)
@@ -808,12 +820,38 @@ class PipelineWindow(QtWidgets.QMainWindow):
         agent_row.addWidget(lbl_step1)
 
         self.agent_combo = QtWidgets.QComboBox()
-        self.agent_combo.setMinimumWidth(240)
+        self.agent_combo.setMinimumWidth(280)
         known = discover_agents()
+        is_kde_session = ("KDE" in os.environ.get("XDG_CURRENT_DESKTOP", "")) or (
+            os.environ.get("DESKTOP_SESSION") == "plasma"
+        )
+        default_index = 0
+
+        idx = 0
         for k, v in known.items():
-            avail_bullet = "● " if v.get("available") else "○ "
-            self.agent_combo.addItem(f"{avail_bullet}{v['name']}", k)
+            if v.get("running"):
+                label = f"● {v['name']} [Running]"
+            elif v.get("available"):
+                label = f"○ {v['name']} [Ready]" if k == "local" else f"○ {v['name']} [Installed]"
+            else:
+                label = f"○ {v['name']} [Not Installed]"
+            self.agent_combo.addItem(label, k)
+
+            if is_kde_session and k == "antigravity-kde" and v.get("running"):
+                default_index = idx
+            elif not is_kde_session and k == "antigravity" and v.get("running") and default_index == 0:
+                default_index = idx
+            elif v.get("running") and default_index == 0:
+                default_index = idx
+            idx += 1
+
+        self.agent_combo.setCurrentIndex(default_index)
         agent_row.addWidget(self.agent_combo)
+
+        # Live status badge next to dropdown
+        self.agent_status_lbl = QtWidgets.QLabel()
+        self.agent_status_lbl.setObjectName("badge_cyan")
+        agent_row.addWidget(self.agent_status_lbl)
 
         agent_row.addStretch()
 
@@ -846,6 +884,14 @@ class PipelineWindow(QtWidgets.QMainWindow):
         cur_header.addWidget(self.cur_proj_path_lbl)
 
         cur_header.addStretch()
+
+        btn_rescan_cur = QtWidgets.QPushButton("Re-Detect Workspace")
+        btn_rescan_cur.setObjectName("small_btn")
+        btn_rescan_cur.setToolTip("Re-scan running agent process and workspace storage for open project")
+        btn_rescan_cur.setStyleSheet("background-color: #0f172a; color: #38bdf8; font-size: 11px; padding: 3px 8px; border: 1px solid #1e293b; border-radius: 4px;")
+        btn_rescan_cur.clicked.connect(lambda: self.refresh_current_project(manual=True))
+        cur_header.addWidget(btn_rescan_cur)
+
         cur_layout.addLayout(cur_header)
 
         # Command input for current project
@@ -969,7 +1015,8 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.log_box.setStyleSheet("background-color: #050811; border: 1px solid #1a2436; color: #94a3b8; font-family: monospace; font-size: 11px;")
         main_layout.addWidget(self.log_box)
 
-        self.refresh_current_project()
+        self.agent_combo.currentIndexChanged.connect(self.on_agent_changed)
+        self.on_agent_changed(self.agent_combo.currentIndex())
         self.refresh_queue()
 
     # Compatibility aliases
@@ -988,17 +1035,62 @@ class PipelineWindow(QtWidgets.QMainWindow):
     def add_task(self):
         self.add_next_project_tasks()
 
-    def refresh_current_project(self):
-        cur_slug, cur_title, cur_path = detect_current_project(self.pipeline.get_base_dir())
+    def on_agent_changed(self, index: int = -1):
+        if index < 0 and hasattr(self, "agent_combo"):
+            index = self.agent_combo.currentIndex()
+        if not hasattr(self, "agent_combo") or index < 0:
+            return
+
+        agent_key = self.agent_combo.itemData(index)
+        known = discover_agents()
+        agent_info = known.get(agent_key, {})
+        is_running = agent_info.get("running", False)
+        pid = agent_info.get("pid")
+
+        if hasattr(self, "agent_status_lbl"):
+            if is_running:
+                self.agent_status_lbl.setText(f"Live: Running (PID {pid})")
+                self.agent_status_lbl.setStyleSheet(
+                    "background-color: #022c22; color: #34d399; border: 1px solid #059669; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 700;"
+                )
+            elif agent_info.get("available"):
+                ready_txt = "Ready" if agent_key == "local" else "Installed"
+                self.agent_status_lbl.setText(f"Status: {ready_txt}")
+                self.agent_status_lbl.setStyleSheet(
+                    "background-color: #1e293b; color: #94a3b8; border: 1px solid #334155; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 600;"
+                )
+            else:
+                self.agent_status_lbl.setText("Status: Not Installed")
+                self.agent_status_lbl.setStyleSheet(
+                    "background-color: #2a1215; color: #f87171; border: 1px solid #7f1d1d; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 600;"
+                )
+
+        self.refresh_current_project(agent=agent_key)
+
+    def refresh_current_project(self, agent: Optional[str] = None, manual: bool = False):
+        if agent is None and hasattr(self, "agent_combo"):
+            agent = self.agent_combo.currentData()
+
+        cur_slug, cur_title, cur_path = detect_current_project(self.pipeline.get_base_dir(), agent=agent)
         if cur_slug:
+            prev_slug = getattr(self, "current_slug", None)
             self.current_slug = cur_slug
-            self.current_title = cur_title
-            self.current_path = cur_path
-            self.cur_proj_title_lbl.setText(f"{self.current_title} ({self.current_slug})")
-            self.cur_proj_path_lbl.setText(f"Path: {self.current_path}")
-            self.current_prompt_input.setPlaceholderText(
-                f"Enter command(s) for Current Project '{self.current_slug}'... (Optional: leave empty to proceed to next project)"
-            )
+            self.current_title = cur_title or cur_slug.replace("-", " ").title()
+            self.current_path = cur_path or str(Path(self.pipeline.get_base_dir()) / self.current_slug)
+
+            if hasattr(self, "cur_proj_title_lbl"):
+                self.cur_proj_title_lbl.setText(f"{self.current_title} ({self.current_slug})")
+                self.cur_proj_path_lbl.setText(f"Path: {self.current_path}")
+                self.current_prompt_input.setPlaceholderText(
+                    f"Enter command(s) for Current Project '{self.current_slug}'... (Optional: leave empty to proceed to next project)"
+                )
+
+            if hasattr(self, "log_box") and (manual or (prev_slug and prev_slug != cur_slug)):
+                known = discover_agents()
+                ag_name = known.get(agent, {}).get("name", (agent or "Agent").title())
+                self.log_box.append(
+                    f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Detected active project for {ag_name}: '{self.current_title}' [{self.current_slug}] ({self.current_path})"
+                )
 
     def on_next_title_changed(self, text):
         self.next_slug_input.setText(to_slug(text))

@@ -293,5 +293,26 @@ class TestTaskPipeline(unittest.TestCase):
         self.assertTrue(Path(path).exists())
 
 
+    def test_discover_agents_running_flags(self):
+        agents = discover_agents()
+        self.assertIn("antigravity-kde", agents)
+        self.assertIn("antigravity", agents)
+        for key, info in agents.items():
+            self.assertIn("available", info)
+            self.assertIn("running", info)
+            self.assertIn("pid", info)
+
+    def test_detect_current_project_agent_parameter(self):
+        ws = Path(self.test_dir) / "test_ws"
+        ws.mkdir(parents=True, exist_ok=True)
+        sub = ws / "my-custom-kde-project"
+        sub.mkdir()
+        
+        slug, title, path = detect_current_project(base_dir=str(ws), agent="antigravity-kde")
+        self.assertEqual(slug, "my-custom-kde-project")
+        self.assertEqual(title, "My Custom Kde Project")
+        self.assertEqual(path, str(sub))
+
+
 if __name__ == "__main__":
     unittest.main()

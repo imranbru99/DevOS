@@ -50,14 +50,65 @@ def to_slug(text: str) -> str:
     return slug.strip("-") or "project"
 
 
-def detect_current_project(base_dir: Optional[str] = None) -> tuple[Optional[str], Optional[str], Optional[str]]:
+def is_agent_process_running(agent: str) -> tuple[bool, Optional[int]]:
+    """Checks whether the agent's application process is actively running in the OS.
+    Returns: (is_running, pid)
+    """
+    ag = (agent or "").lower()
+    proc_dir = Path("/proc")
+    if not proc_dir.exists():
+        return False, None
+
+    for proc in proc_dir.iterdir():
+        if not proc.name.isdigit():
+            continue
+        try:
+            pid = int(proc.name)
+            cmdline_bytes = (proc / "cmdline").read_bytes()
+            cmdline = cmdline_bytes.decode("utf-8", errors="ignore").replace("\0", " ")
+            if not cmdline.strip():
+                continue
+
+            if ag in ("antigravity-kde", "antigravity_kde"):
+                if "antigravity-kde" in cmdline or "Antigravity-KDE" in cmdline or "app_data_dir=antigravity-kde" in cmdline:
+                    return True, pid
+            elif ag in ("antigravity", "google-antigravity"):
+                if ("/opt/antigravity" in cmdline or "app_data_dir=antigravity" in cmdline) and "antigravity-kde" not in cmdline:
+                    return True, pid
+            elif ag in ("chatgpt", "codex"):
+                if "codex-linux-sandbox" in cmdline or "codex-code-mode-host" in cmdline or "codex exec" in cmdline:
+                    return True, pid
+            elif ag == "claude":
+                comm = (proc / "comm").read_text(errors="ignore").strip()
+                if comm == "claude":
+                    return True, pid
+            elif ag == "aider":
+                comm = (proc / "comm").read_text(errors="ignore").strip()
+                if comm == "aider":
+                    return True, pid
+            elif ag == "local":
+                comm = (proc / "comm").read_text(errors="ignore").strip()
+                if "ollama" in comm or "devos-ai-code" in cmdline:
+                    return True, pid
+        except Exception:
+            continue
+
+    return False, None
+
+
+def detect_current_project(
+    base_dir: Optional[str] = None, agent: Optional[str] = None
+) -> tuple[Optional[str], Optional[str], Optional[str]]:
     """Auto-detects the currently active working project name, slug, and folder path.
 
     Detection strategy:
-    1. Active Antigravity / IDE workspace & open files
-    2. Active terminal shell processes working directory (/proc/*/cwd)
-    3. Current process working directory
-    4. Most recently modified project folder in base_dir
+    1. Active target agent's running processes (--add-dir / open workspaces)
+    2. Target agent's workspace storage (Antigravity-KDE / Antigravity workspaceStorage)
+    3. Active agent conversation brain transcripts
+    4. Active Antigravity / IDE app_storage.json
+    5. Active terminal shell processes working directory (/proc/*/cwd)
+    6. Current process working directory
+    7. Most recently modified project folder in base_dir
     Returns: (slug, title, folder_path)
     """
     b_dir = Path(base_dir).resolve() if base_dir else Path.home() / "project"
@@ -66,23 +117,126 @@ def detect_current_project(base_dir: Optional[str] = None) -> tuple[Optional[str
 
     candidates: List[Path] = []
 
-    # 1. Inspect Antigravity IDE storage for open project files
-    app_storage = Path.home() / ".config/Antigravity/app_storage.json"
-    if app_storage.exists():
+    def _add_cand(p):
         try:
-            with open(app_storage, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            text = json.dumps(data)
-            matches = re.findall(r"file://(" + re.escape(str(b_dir)) + r"/[^/\"\'#]+)", text)
-            for m in reversed(matches):
-                p = Path(m).resolve()
-                if p.exists() and p.is_dir() and p not in candidates:
-                    candidates.append(p)
+            cand = Path(p).resolve()
+            if not cand.exists() or not cand.is_dir():
+                return
+            if cand.is_relative_to(b_dir):
+                if cand != b_dir:
+                    top_sub = b_dir / cand.relative_to(b_dir).parts[0]
+                    if top_sub.is_dir() and top_sub not in candidates:
+                        candidates.append(top_sub)
+                elif cand == b_dir and (b_dir / ".git").exists() and cand not in candidates:
+                    candidates.append(cand)
+            elif not candidates and (b_dir == (Path.home() / "project") or b_dir == Path.cwd()):
+                # Allow candidate if base_dir is default fallback root
+                if cand not in candidates:
+                    candidates.append(cand)
         except Exception:
             pass
 
-    # 2. Inspect active shell processes in /proc
+    is_kde_session = ("KDE" in os.environ.get("XDG_CURRENT_DESKTOP", "")) or (
+        os.environ.get("DESKTOP_SESSION") == "plasma"
+    )
+
+    # 1. Inspect running process command lines for --add-dir (gives live active workspace)
     proc_dir = Path("/proc")
+    if proc_dir.exists():
+        for proc in proc_dir.iterdir():
+            if not proc.name.isdigit():
+                continue
+            try:
+                cmdline_bytes = (proc / "cmdline").read_bytes()
+                cmdline = cmdline_bytes.decode("utf-8", errors="ignore").replace("\0", " ")
+                if not cmdline.strip():
+                    continue
+
+                match_kde = (
+                    "antigravity-kde" in cmdline
+                    or "Antigravity-KDE" in cmdline
+                    or "app_data_dir=antigravity-kde" in cmdline
+                )
+                match_std = (
+                    ("/opt/antigravity" in cmdline or "app_data_dir=antigravity" in cmdline)
+                    and not match_kde
+                )
+
+                is_target = False
+                if agent in ("antigravity-kde", "antigravity_kde"):
+                    is_target = match_kde
+                elif agent in ("antigravity", "google-antigravity"):
+                    is_target = match_std
+                else:
+                    is_target = (match_kde if is_kde_session else match_std) or match_kde or match_std
+
+                if is_target:
+                    for m in re.finditer(r"--add-dir[=\s]+([^\s\0]+)", cmdline):
+                        _add_cand(m.group(1))
+            except Exception:
+                continue
+
+    # 2. Inspect workspaceStorage for Antigravity-KDE and/or Antigravity
+    config_dirs = []
+    if agent in ("antigravity-kde", "antigravity_kde"):
+        config_dirs.append(Path.home() / ".config/Antigravity-KDE")
+    elif agent in ("antigravity", "google-antigravity"):
+        config_dirs.append(Path.home() / ".config/Antigravity")
+    else:
+        if is_kde_session:
+            config_dirs.extend([Path.home() / ".config/Antigravity-KDE", Path.home() / ".config/Antigravity"])
+        else:
+            config_dirs.extend([Path.home() / ".config/Antigravity", Path.home() / ".config/Antigravity-KDE"])
+
+    for cdir in config_dirs:
+        ws_files = list(cdir.glob("User/workspaceStorage/*/workspace.json"))
+        ws_files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+        for wf in ws_files:
+            try:
+                data = json.loads(wf.read_text())
+                uri = data.get("folder", "")
+                if uri.startswith("file://"):
+                    _add_cand(uri[7:])
+            except Exception:
+                pass
+
+        app_storage = cdir / "app_storage.json"
+        if app_storage.exists():
+            try:
+                data = json.loads(app_storage.read_text())
+                text = json.dumps(data)
+                matches = re.findall(r"file://(" + re.escape(str(b_dir)) + r"/[^/\"\'#]+)", text)
+                for m in reversed(matches):
+                    _add_cand(m)
+            except Exception:
+                pass
+
+    # 3. Check Brain transcripts for recent Active Workspaces
+    brain_dirs = []
+    if agent in ("antigravity-kde", "antigravity_kde"):
+        brain_dirs.append(Path.home() / ".gemini/antigravity-kde/brain")
+    elif agent in ("antigravity", "google-antigravity"):
+        brain_dirs.append(Path.home() / ".gemini/antigravity/brain")
+    else:
+        if is_kde_session:
+            brain_dirs.extend([Path.home() / ".gemini/antigravity-kde/brain", Path.home() / ".gemini/antigravity/brain"])
+        else:
+            brain_dirs.extend([Path.home() / ".gemini/antigravity/brain", Path.home() / ".gemini/antigravity-kde/brain"])
+
+    for bdir in brain_dirs:
+        transcripts = list(bdir.glob("*/.system_generated/logs/transcript.jsonl"))
+        transcripts.sort(key=lambda t: t.stat().st_mtime, reverse=True)
+        for t in transcripts[:5]:
+            try:
+                with open(t, "r", encoding="utf-8", errors="ignore") as f:
+                    chunk = f.read(8192)
+                    m = re.findall(r"Active Workspaces:\s*\n-\s*([^\n\r]+)", chunk)
+                    for path_str in m:
+                        _add_cand(path_str.strip())
+            except Exception:
+                pass
+
+    # 4. Inspect active shell processes in /proc
     if proc_dir.exists():
         for proc in proc_dir.iterdir():
             if proc.name.isdigit():
@@ -90,29 +244,26 @@ def detect_current_project(base_dir: Optional[str] = None) -> tuple[Optional[str
                     cwd = Path(os.readlink(f"/proc/{proc.name}/cwd")).resolve()
                     if cwd.is_relative_to(b_dir) and cwd != b_dir:
                         proj = b_dir / cwd.relative_to(b_dir).parts[0]
-                        if proj.exists() and proj not in candidates:
-                            candidates.append(proj)
+                        _add_cand(proj)
                 except Exception:
                     pass
 
-    # 3. Check current process working directory (if inside base_dir)
+    # 5. Check current process working directory (if inside base_dir)
     cwd = Path.cwd().resolve()
     if cwd.is_relative_to(b_dir) and cwd != b_dir:
         proj = b_dir / cwd.relative_to(b_dir).parts[0]
-        if proj.exists() and proj not in candidates:
-            candidates.append(proj)
+        _add_cand(proj)
 
-    # 4. Check most recently modified folder in base_dir
+    # 6. Check most recently modified folder in base_dir
     if b_dir.exists():
         subdirs = [d for d in b_dir.iterdir() if d.is_dir() and not d.name.startswith(".")]
         subdirs.sort(key=lambda d: os.path.getmtime(d), reverse=True)
         for s in subdirs:
-            if s not in candidates:
-                candidates.append(s)
+            _add_cand(s)
 
-    # 5. Fallback to cwd if no project was found in base_dir
+    # 7. Fallback to cwd if no project was found in base_dir
     if not candidates and (cwd / ".git").exists():
-        candidates.append(cwd)
+        _add_cand(cwd)
 
     if candidates:
         top = candidates[0]
@@ -169,27 +320,44 @@ def get_grouped_projects(tasks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def discover_agents() -> Dict[str, Dict[str, Any]]:
-    """Auto-detects available AI agents on the system and in custom directories."""
+    """Auto-detects available AI agents, their binary paths, and live running process states."""
     agents = {}
+
+    kde_running, kde_pid = is_agent_process_running("antigravity-kde")
+    std_running, std_pid = is_agent_process_running("antigravity")
+    codex_running, codex_pid = is_agent_process_running("chatgpt")
+    claude_running, claude_pid = is_agent_process_running("claude")
+    aider_running, aider_pid = is_agent_process_running("aider")
+    local_running, local_pid = is_agent_process_running("local")
 
     # 1. Google Antigravity
     ag_bin = shutil.which("antigravity") or AGENTAPI_BIN
-    ag_ok = bool(ag_bin and Path(ag_bin).exists())
+    ag_ok = bool((ag_bin and Path(ag_bin).exists()) or std_running)
     agents["antigravity"] = {
         "name": "Google Antigravity",
-        "bin": str(ag_bin) if ag_ok else None,
+        "bin": str(ag_bin) if ag_bin and Path(ag_bin).exists() else None,
         "color": "#2563eb",
         "available": ag_ok,
+        "running": std_running,
+        "pid": std_pid,
     }
 
     # 1b. Antigravity KDE (Second Independent Agent)
-    ag_kde_bin = shutil.which("antigravity-kde") or (Path.home() / ".local/bin/antigravity-kde")
-    ag_kde_ok = bool(ag_kde_bin and Path(ag_kde_bin).exists())
+    kde_candidates = [
+        shutil.which("antigravity-kde"),
+        Path.home() / ".local/bin/antigravity-kde",
+        Path.home() / ".local/lib/antigravity-ide/antigravity-ide",
+        Path.home() / ".local/lib/antigravity-ide/bin/antigravity-ide",
+    ]
+    ag_kde_bin = next((str(p) for p in kde_candidates if p and Path(p).exists()), None)
+    ag_kde_ok = bool(ag_kde_bin or kde_running)
     agents["antigravity-kde"] = {
         "name": "Antigravity Studio (KDE)",
-        "bin": str(ag_kde_bin) if ag_kde_ok else None,
+        "bin": ag_kde_bin,
         "color": "#0ea5e9",
         "available": ag_kde_ok,
+        "running": kde_running,
+        "pid": kde_pid,
     }
 
     # 2. ChatGPT / Codex CLI
@@ -203,7 +371,9 @@ def discover_agents() -> Dict[str, Dict[str, Any]]:
         "name": "ChatGPT / Codex",
         "bin": codex_bin,
         "color": "#10a37f",
-        "available": bool(codex_bin),
+        "available": bool(codex_bin or codex_running),
+        "running": codex_running,
+        "pid": codex_pid,
     }
 
     # 3. Claude Code CLI
@@ -212,7 +382,9 @@ def discover_agents() -> Dict[str, Dict[str, Any]]:
         "name": "Claude Code",
         "bin": claude_bin,
         "color": "#d97706",
-        "available": bool(claude_bin),
+        "available": bool(claude_bin or claude_running),
+        "running": claude_running,
+        "pid": claude_pid,
     }
 
     # 4. Aider Multi-Model Pair Programmer
@@ -221,7 +393,9 @@ def discover_agents() -> Dict[str, Dict[str, Any]]:
         "name": "Aider Pair Programmer",
         "bin": aider_bin,
         "color": "#059669",
-        "available": bool(aider_bin),
+        "available": bool(aider_bin or aider_running),
+        "running": aider_running,
+        "pid": aider_pid,
     }
 
     # 5. DevOS Local AI / Ollama
@@ -231,6 +405,8 @@ def discover_agents() -> Dict[str, Dict[str, Any]]:
         "bin": ollama_bin,
         "color": "#7c3aed",
         "available": True,
+        "running": local_running,
+        "pid": local_pid,
     }
 
     # 6. Custom Agents directory: ~/.config/devos/agents/
@@ -242,6 +418,8 @@ def discover_agents() -> Dict[str, Dict[str, Any]]:
                 "bin": str(script),
                 "color": "#ec4899",
                 "available": True,
+                "running": False,
+                "pid": None,
             }
 
     return agents
@@ -407,9 +585,9 @@ def create_github_repo(
         return False, res.stderr or "Failed to create repo via gh"
 
 
-def is_antigravity_working() -> bool:
-    """Checks if any Antigravity conversation is currently executing a turn or tool."""
-    brain_dir = Path.home() / ".gemini/antigravity/brain"
+def is_antigravity_working(kde: bool = False) -> bool:
+    """Checks if any Antigravity conversation (GNOME or KDE instance) is currently executing a turn or tool."""
+    brain_dir = (Path.home() / ".gemini/antigravity-kde/brain") if kde else (Path.home() / ".gemini/antigravity/brain")
     if not brain_dir.exists():
         return False
     transcripts = list(brain_dir.glob("*/.system_generated/logs/transcript.jsonl"))
@@ -447,12 +625,11 @@ def is_codex_working() -> bool:
 
 def is_agent_working(agent: str) -> bool:
     """Universal status check: returns True if the specified agent is actively busy."""
-    ag = agent.lower()
+    ag = (agent or "").lower()
     if ag == "antigravity":
-        return is_antigravity_working()
+        return is_antigravity_working(kde=False)
     elif ag in ("antigravity-ide", "antigravity-kde"):
-        res = subprocess.run(["pgrep", "-f", "antigravity-kde|Antigravity-KDE"], capture_output=True)
-        return res.returncode == 0
+        return is_antigravity_working(kde=True)
     elif ag in ("chatgpt", "codex"):
         return is_codex_working()
     elif ag == "local":
