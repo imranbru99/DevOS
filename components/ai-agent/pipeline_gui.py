@@ -3,7 +3,7 @@
 
 Visual dashboard for managing, queuing, and monitoring sequential AI tasks
 organized by project slug across ChatGPT/Codex, Google Antigravity, and DevOS Local AI
-with automatic rate-limit detection, base folder selection, and automatic local project creation.
+with automatic rate-limit detection, current project auto-detection, and local project creation.
 """
 
 import datetime
@@ -17,7 +17,7 @@ from pathlib import Path
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtCore import Qt, QTimer, QCoreApplication
-from PyQt5.QtGui import QIcon
+from PyQt5.QtGui import QIcon, QFont, QColor
 from PyQt5.QtWidgets import QLineEdit, QTextEdit, QComboBox, QProgressBar
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -29,6 +29,8 @@ from task_pipeline import (
     is_agent_working,
     to_slug,
     get_grouped_projects,
+    detect_current_project,
+    list_existing_projects,
 )
 
 
@@ -55,7 +57,7 @@ def get_app_icon():
 
 STYLE = """
 QWidget {
-    background-color: #0b0f1a;
+    background-color: #080d1a;
     color: #e2e8f0;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     font-size: 13px;
@@ -65,21 +67,26 @@ QFrame#card {
     border: 1px solid #1e293b;
     border-radius: 10px;
 }
-QFrame#project_card {
-    background-color: #0d1527;
+QFrame#banner_strip {
+    background-color: #0c1427;
     border: 1px solid #1e293b;
+    border-radius: 8px;
+}
+QFrame#project_card {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #0f182c, stop:1 #0b1120);
+    border: 1px solid #1e2a42;
     border-radius: 10px;
 }
 QFrame#project_card:hover {
-    border-color: #334155;
+    border-color: #334768;
 }
 QFrame#step_row {
-    background-color: #070c18;
-    border: 1px solid #1a2234;
+    background-color: #060b16;
+    border: 1px solid #182338;
     border-radius: 6px;
 }
 QFrame#step_row:hover {
-    border-color: #243049;
+    border-color: #2a3c5a;
 }
 QFrame#banner_rate_limit {
     background-color: #2a1b06;
@@ -90,16 +97,26 @@ QLabel#title {
     font-size: 20px;
     font-weight: 700;
     color: #f8fafc;
+    letter-spacing: -0.3px;
 }
 QLabel#subtitle {
     color: #94a3b8;
     font-size: 13px;
 }
+QLabel#tag_label {
+    background-color: #1e293b;
+    color: #38bdf8;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 4px;
+    border: 1px solid #334155;
+}
 QLabel#badge_agent {
     font-weight: 700;
     font-size: 11px;
     padding: 3px 8px;
-    border-radius: 5px;
+    border-radius: 4px;
 }
 QLabel#badge_slug {
     background-color: #032b43;
@@ -116,7 +133,7 @@ QLabel#badge_step {
     color: #94a3b8;
     font-size: 11px;
     font-weight: 700;
-    padding: 2px 7px;
+    padding: 3px 7px;
     border-radius: 4px;
     border: 1px solid #334155;
 }
@@ -129,21 +146,32 @@ QPushButton {
     background-color: #1e293b;
     border: 1px solid #334155;
     border-radius: 6px;
-    padding: 7px 16px;
+    padding: 7px 15px;
     font-weight: 600;
     color: #f8fafc;
 }
 QPushButton:hover {
-    background-color: #334155;
+    background-color: #29384d;
     border-color: #475569;
 }
 QPushButton#primary {
-    background-color: #0284c7;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0284c7, stop:1 #0369a1);
     border: 1px solid #38bdf8;
     color: #ffffff;
+    font-weight: 700;
 }
 QPushButton#primary:hover {
-    background-color: #0369a1;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0369a1, stop:1 #075985);
+}
+QPushButton#accent_action {
+    background-color: #082f49;
+    border: 1px solid #0ea5e9;
+    color: #38bdf8;
+    font-weight: 600;
+}
+QPushButton#accent_action:hover {
+    background-color: #0c4a6e;
+    color: #ffffff;
 }
 QPushButton#accent_warning {
     background-color: #d97706;
@@ -165,37 +193,39 @@ QPushButton#small_btn {
     border-radius: 5px;
 }
 QPushButton#danger_small {
-    background-color: #450a0a;
-    border: 1px solid #991b1b;
+    background-color: #3f1010;
+    border: 1px solid #7f1d1d;
     color: #fca5a5;
     padding: 3px 8px;
     font-size: 11px;
     font-weight: 700;
-    border-radius: 5px;
+    border-radius: 4px;
 }
 QPushButton#danger_small:hover {
     background-color: #7f1d1d;
     color: #ffffff;
+    border-color: #ef4444;
 }
 QComboBox, QLineEdit, QTextEdit {
-    background-color: #0f172a;
-    border: 1px solid #334155;
+    background-color: #060a14;
+    border: 1px solid #222f44;
     border-radius: 6px;
-    padding: 6px 10px;
+    padding: 7px 10px;
     color: #f8fafc;
 }
 QComboBox:focus, QLineEdit:focus, QTextEdit:focus {
-    border: 1px solid #38bdf8;
+    border: 1px solid #0284c7;
+    background-color: #080e1c;
 }
 QProgressBar {
-    background-color: #1e293b;
+    background-color: #162032;
     border: none;
     border-radius: 3px;
-    height: 6px;
+    height: 5px;
     text-align: center;
 }
 QProgressBar::chunk {
-    background-color: #38bdf8;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0284c7, stop:1 #38bdf8);
     border-radius: 3px;
 }
 QScrollArea {
@@ -204,14 +234,33 @@ QScrollArea {
 }
 QScrollBar:vertical {
     border: none;
-    background: #0b0f1a;
+    background: #080d1a;
     width: 8px;
     margin: 0px;
 }
 QScrollBar::handle:vertical {
-    background: #334155;
-    min-height: 20px;
+    background: #1e293b;
+    min-height: 24px;
     border-radius: 4px;
+}
+QScrollBar::handle:vertical:hover {
+    background: #334155;
+}
+QCheckBox {
+    color: #38bdf8;
+    font-weight: 500;
+    spacing: 6px;
+}
+QCheckBox::indicator {
+    width: 15px;
+    height: 15px;
+    border-radius: 3px;
+    border: 1px solid #334155;
+    background-color: #060a14;
+}
+QCheckBox::indicator:checked {
+    background-color: #0284c7;
+    border-color: #38bdf8;
 }
 """
 
@@ -254,7 +303,7 @@ class StepRow(QtWidgets.QFrame):
 
     def init_ui(self):
         layout = QtWidgets.QHBoxLayout(self)
-        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setContentsMargins(12, 9, 12, 9)
         layout.setSpacing(10)
 
         # Step badge (Step 1, Step 2, etc.)
@@ -288,25 +337,25 @@ class StepRow(QtWidgets.QFrame):
         status_color = "#94a3b8"
 
         if status == "RUNNING":
-            status_text = "⚡ RUNNING: In progress..."
+            status_text = "RUNNING: Execution in progress..."
             status_color = "#38bdf8"
         elif status == "RATE_LIMITED":
             retry_at = self.task.get("retry_at", "")
             if retry_at:
                 try:
                     dt = datetime.datetime.fromisoformat(retry_at)
-                    status_text = f"⏸ RATE LIMITED: Cooldown active until {dt.strftime('%I:%M %p')}"
+                    status_text = f"RATE LIMITED: Cooldown active until {dt.strftime('%I:%M %p')}"
                 except Exception:
-                    status_text = "⏸ RATE LIMITED"
+                    status_text = "RATE LIMITED"
             status_color = "#fbbf24"
         elif status == "SUBMITTED":
             status_text = "Submitted • verify completion in the agent"
             status_color = "#fbbf24"
         elif status == "COMPLETED":
-            status_text = "✓ COMPLETED"
+            status_text = "COMPLETED"
             status_color = "#34d399"
         elif status == "FAILED":
-            status_text = "✗ FAILED"
+            status_text = "FAILED"
             status_color = "#f87171"
 
         status_lbl = QtWidgets.QLabel(status_text)
@@ -318,7 +367,7 @@ class StepRow(QtWidgets.QFrame):
         # GitHub Repo Link button if repo was created
         github_url = self.task.get("github_url")
         if github_url:
-            btn_repo = QtWidgets.QPushButton("🐙 Open GitHub")
+            btn_repo = QtWidgets.QPushButton("Open GitHub")
             btn_repo.setObjectName("small_btn")
             btn_repo.setToolTip(github_url)
             btn_repo.setStyleSheet("background-color: #238636; color: white; font-weight: 600; padding: 4px 10px; border-radius: 5px;")
@@ -326,14 +375,14 @@ class StepRow(QtWidgets.QFrame):
             layout.addWidget(btn_repo)
 
         if status == "SUBMITTED" and self.on_confirm:
-            btn_confirm = QtWidgets.QPushButton("✓ Confirm completed")
+            btn_confirm = QtWidgets.QPushButton("Confirm Completed")
             btn_confirm.setObjectName("small_btn")
             btn_confirm.clicked.connect(lambda: self.on_confirm(self.task["id"]))
             layout.addWidget(btn_confirm)
 
         # Failover action button if rate limited
         if status == "RATE_LIMITED" and self.on_failover:
-            btn_failover = QtWidgets.QPushButton("⚡ Switch to Antigravity")
+            btn_failover = QtWidgets.QPushButton("Switch to Antigravity")
             btn_failover.setObjectName("accent_warning")
             btn_failover.setStyleSheet("padding: 4px 8px; font-size: 11px;")
             btn_failover.setToolTip("Skip rate-limit cooldown and execute via Antigravity immediately")
@@ -362,7 +411,7 @@ class ProjectPipelineCard(QtWidgets.QFrame):
 
     def init_ui(self):
         main_layout = QtWidgets.QVBoxLayout(self)
-        main_layout.setContentsMargins(14, 12, 14, 12)
+        main_layout.setContentsMargins(16, 14, 16, 14)
         main_layout.setSpacing(10)
 
         # Header Bar
@@ -375,9 +424,9 @@ class ProjectPipelineCard(QtWidgets.QFrame):
         title_hbox = QtWidgets.QHBoxLayout()
         title_hbox.setSpacing(8)
 
-        icon_lbl = QtWidgets.QLabel("📁")
-        icon_lbl.setStyleSheet("font-size: 16px;")
-        title_hbox.addWidget(icon_lbl)
+        tag_badge = QtWidgets.QLabel("PROJECT")
+        tag_badge.setObjectName("tag_label")
+        title_hbox.addWidget(tag_badge)
 
         title_lbl = QtWidgets.QLabel(self.project_data.get("title", "Project"))
         title_lbl.setStyleSheet("font-size: 15px; font-weight: 700; color: #f8fafc;")
@@ -393,7 +442,7 @@ class ProjectPipelineCard(QtWidgets.QFrame):
 
         # Local Path info
         proj_dir = self.project_data.get("dir", "")
-        path_lbl = QtWidgets.QLabel(f"Local Path: {proj_dir}")
+        path_lbl = QtWidgets.QLabel(f"Path: {proj_dir}")
         path_lbl.setObjectName("path_info")
         path_lbl.setToolTip(proj_dir)
         title_vbox.addWidget(path_lbl)
@@ -411,27 +460,27 @@ class ProjectPipelineCard(QtWidgets.QFrame):
 
         if running_tasks:
             curr_idx = tasks.index(running_tasks[0]) + 1
-            status_text = f"⚡ RUNNING ({curr_idx}/{total_tasks})"
+            status_text = f"RUNNING ({curr_idx}/{total_tasks})"
             status_color = "#38bdf8"
             bg_color = "#032b43"
         elif rate_limited_tasks:
-            status_text = "⏸ RATE LIMITED"
+            status_text = "RATE LIMITED"
             status_color = "#fbbf24"
             bg_color = "#2a1b06"
         elif failed_tasks:
-            status_text = "✗ FAILED"
+            status_text = "FAILED"
             status_color = "#f87171"
             bg_color = "#450a0a"
         elif submitted_tasks:
-            status_text = "⏳ SUBMITTED"
+            status_text = "SUBMITTED"
             status_color = "#fbbf24"
             bg_color = "#2a1b06"
         elif completed_tasks == total_tasks and total_tasks > 0:
-            status_text = f"✓ ALL {total_tasks} COMPLETED"
+            status_text = f"ALL {total_tasks} COMPLETED"
             status_color = "#34d399"
             bg_color = "#064e3b"
         else:
-            status_text = f"⏳ QUEUED ({total_tasks} steps)"
+            status_text = f"QUEUED ({total_tasks} steps)"
             status_color = "#94a3b8"
             bg_color = "#1e293b"
 
@@ -444,7 +493,7 @@ class ProjectPipelineCard(QtWidgets.QFrame):
 
         # Open Folder button
         if proj_dir:
-            btn_folder = QtWidgets.QPushButton("📂 Open Folder")
+            btn_folder = QtWidgets.QPushButton("Open Folder")
             btn_folder.setObjectName("small_btn")
             btn_folder.setToolTip(f"Open {proj_dir} in file manager")
             btn_folder.clicked.connect(lambda: self.open_local_folder(proj_dir))
@@ -453,7 +502,7 @@ class ProjectPipelineCard(QtWidgets.QFrame):
         # Open GitHub button if project has github url
         gh_url = self.project_data.get("github_url")
         if gh_url:
-            btn_gh = QtWidgets.QPushButton("🐙 GitHub")
+            btn_gh = QtWidgets.QPushButton("GitHub")
             btn_gh.setObjectName("small_btn")
             btn_gh.setStyleSheet("background-color: #238636; color: white; font-weight: 600; padding: 4px 10px; border-radius: 5px;")
             btn_gh.clicked.connect(lambda: subprocess.Popen(["xdg-open", gh_url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
@@ -540,25 +589,25 @@ class TaskCard(QtWidgets.QFrame):
         status_color = "#94a3b8"
 
         if status == "RUNNING":
-            status_text = "⚡ RUNNING: In progress..."
+            status_text = "RUNNING: In progress..."
             status_color = "#38bdf8"
         elif status == "RATE_LIMITED":
             retry_at = self.task.get("retry_at", "")
             if retry_at:
                 try:
                     dt = datetime.datetime.fromisoformat(retry_at)
-                    status_text = f"⏸ RATE LIMITED: Cooldown active until {dt.strftime('%I:%M %p')}"
+                    status_text = f"RATE LIMITED: Cooldown active until {dt.strftime('%I:%M %p')}"
                 except Exception:
-                    status_text = "⏸ RATE LIMITED"
+                    status_text = "RATE LIMITED"
             status_color = "#fbbf24"
         elif status == "SUBMITTED":
             status_text = "Submitted • verify completion in the agent"
             status_color = "#fbbf24"
         elif status == "COMPLETED":
-            status_text = "✓ COMPLETED"
+            status_text = "COMPLETED"
             status_color = "#34d399"
         elif status == "FAILED":
-            status_text = "✗ FAILED"
+            status_text = "FAILED"
             status_color = "#f87171"
 
         status_lbl = QtWidgets.QLabel(status_text)
@@ -569,19 +618,19 @@ class TaskCard(QtWidgets.QFrame):
 
         github_url = self.task.get("github_url")
         if github_url:
-            btn_repo = QtWidgets.QPushButton("🐙 Open GitHub")
+            btn_repo = QtWidgets.QPushButton("Open GitHub")
             btn_repo.setToolTip(github_url)
             btn_repo.setStyleSheet("background-color: #238636; color: white; font-weight: 600; padding: 6px 12px; border-radius: 6px;")
             btn_repo.clicked.connect(lambda: subprocess.Popen(["xdg-open", github_url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
             layout.addWidget(btn_repo)
 
         if status == "SUBMITTED" and self.on_confirm:
-            button = QtWidgets.QPushButton("Confirm completed")
+            button = QtWidgets.QPushButton("Confirm Completed")
             button.clicked.connect(lambda: self.on_confirm(self.task["id"]))
             layout.addWidget(button)
 
         if status == "RATE_LIMITED" and self.on_failover:
-            btn_failover = QtWidgets.QPushButton("⚡ Switch to Antigravity")
+            btn_failover = QtWidgets.QPushButton("Switch to Antigravity")
             btn_failover.setObjectName("accent_warning")
             btn_failover.setToolTip("Skip rate-limit cooldown and execute via Antigravity immediately")
             btn_failover.clicked.connect(lambda: self.on_failover(self.task["id"]))
@@ -598,7 +647,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
         icon = get_app_icon()
         if not icon.isNull():
             self.setWindowIcon(icon)
-        self.resize(920, 780)
+        self.resize(960, 800)
         self.setStyleSheet(STYLE)
         self.init_ui()
 
@@ -630,6 +679,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
         header_layout.addWidget(icon_lbl)
 
         header_vbox = QtWidgets.QVBoxLayout()
+        header_vbox.setSpacing(3)
         title = QtWidgets.QLabel("DevOS AI Command Pipeline")
         title.setObjectName("title")
         subtitle = QtWidgets.QLabel("Serial multi-agent execution & auto-scheduling across ChatGPT, Antigravity & Local AI")
@@ -639,7 +689,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
         header_layout.addLayout(header_vbox, stretch=1)
 
         # Top Control Buttons
-        self.btn_run = QtWidgets.QPushButton("▶ Run Pipeline")
+        self.btn_run = QtWidgets.QPushButton("► Run Pipeline")
         self.btn_run.setObjectName("primary")
         self.btn_run.clicked.connect(self.toggle_runner)
         header_layout.addWidget(self.btn_run)
@@ -656,15 +706,15 @@ class PipelineWindow(QtWidgets.QMainWindow):
         banner_box = QtWidgets.QHBoxLayout(self.banner_frame)
         banner_box.setContentsMargins(16, 12, 16, 12)
 
-        self.banner_icon = QtWidgets.QLabel("⏳")
-        self.banner_icon.setStyleSheet("font-size: 20px;")
-        banner_box.addWidget(self.banner_icon)
+        self.banner_tag = QtWidgets.QLabel("RATE LIMIT")
+        self.banner_tag.setObjectName("tag_label")
+        banner_box.addWidget(self.banner_tag)
 
         self.banner_text = QtWidgets.QLabel("")
         self.banner_text.setStyleSheet("color: #fef3c7; font-weight: 500;")
         banner_box.addWidget(self.banner_text, stretch=1)
 
-        self.btn_banner_switch = QtWidgets.QPushButton("⚡ Auto-Failover to Antigravity")
+        self.btn_banner_switch = QtWidgets.QPushButton("Auto-Failover to Antigravity")
         self.btn_banner_switch.setObjectName("accent_warning")
         self.btn_banner_switch.clicked.connect(self.failover_all_rate_limited)
         banner_box.addWidget(self.btn_banner_switch)
@@ -674,18 +724,14 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
         # Base Project Directory Selection Bar
         base_dir_card = QtWidgets.QFrame()
-        base_dir_card.setObjectName("card")
+        base_dir_card.setObjectName("banner_strip")
         base_dir_layout = QtWidgets.QHBoxLayout(base_dir_card)
-        base_dir_layout.setContentsMargins(14, 10, 14, 10)
+        base_dir_layout.setContentsMargins(14, 8, 14, 8)
         base_dir_layout.setSpacing(10)
 
-        base_icon = QtWidgets.QLabel("📁")
-        base_icon.setStyleSheet("font-size: 16px;")
-        base_dir_layout.addWidget(base_icon)
-
-        base_label = QtWidgets.QLabel("Projects Base Directory:")
-        base_label.setStyleSheet("font-weight: 600; color: #94a3b8;")
-        base_dir_layout.addWidget(base_label)
+        base_badge = QtWidgets.QLabel("BASE WORKSPACE")
+        base_badge.setObjectName("tag_label")
+        base_dir_layout.addWidget(base_badge)
 
         self.base_dir_input = QLineEdit()
         self.base_dir_input.setText(self.pipeline.get_base_dir())
@@ -693,7 +739,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.base_dir_input.editingFinished.connect(self.on_base_dir_changed)
         base_dir_layout.addWidget(self.base_dir_input, stretch=1)
 
-        btn_browse_dir = QtWidgets.QPushButton("📂 Browse...")
+        btn_browse_dir = QtWidgets.QPushButton("Browse Folder...")
         btn_browse_dir.setObjectName("small_btn")
         btn_browse_dir.setToolTip("Select root folder where all project slug folders will be created")
         btn_browse_dir.clicked.connect(self.browse_base_dir)
@@ -705,43 +751,54 @@ class PipelineWindow(QtWidgets.QMainWindow):
         form_card = QtWidgets.QFrame()
         form_card.setObjectName("card")
         form_layout = QtWidgets.QVBoxLayout(form_card)
-        form_layout.setContentsMargins(16, 14, 16, 14)
-        form_layout.setSpacing(10)
+        form_layout.setContentsMargins(18, 16, 18, 16)
+        form_layout.setSpacing(12)
 
-        # Form Title & Preset
+        # Form Title & SEO Button
         form_title_row = QtWidgets.QHBoxLayout()
-        form_title = QtWidgets.QLabel("Queue Projects & Commands in Pipeline")
-        form_title.setStyleSheet("font-weight: 600; font-size: 14px; color: #f8fafc;")
+        form_title = QtWidgets.QLabel("Queue Commands into Pipeline")
+        form_title.setStyleSheet("font-weight: 700; font-size: 14px; color: #f8fafc;")
         form_title_row.addWidget(form_title)
         form_title_row.addStretch()
 
-        btn_seo = QtWidgets.QPushButton("⚡ SEO Repo Ranking Preset")
+        btn_seo = QtWidgets.QPushButton("SEO Repo Ranking Preset")
         btn_seo.setToolTip("Auto-fill prompt for best ranking repo name & 400-char SEO description")
-        btn_seo.setStyleSheet("background-color: #1e293b; color: #38bdf8; font-size: 11px; padding: 4px 8px; border: 1px solid #334155; border-radius: 6px;")
+        btn_seo.setStyleSheet("background-color: #1e293b; color: #38bdf8; font-size: 11px; padding: 4px 10px; border: 1px solid #334155; border-radius: 6px;")
         btn_seo.clicked.connect(self.fill_seo_prompt)
         form_title_row.addWidget(btn_seo)
 
         form_layout.addLayout(form_title_row)
 
-        # Project Info Row (Project Selector, Title, Slug)
+        # Project Selection & Detection Row
         project_row = QtWidgets.QHBoxLayout()
         project_row.setSpacing(10)
 
         self.project_combo = QtWidgets.QComboBox()
-        self.project_combo.addItem("+ New Project...", "")
+        self.project_combo.setMinimumWidth(260)
         self.project_combo.currentIndexChanged.connect(self.on_project_combo_changed)
         project_row.addWidget(self.project_combo)
 
+        btn_detect = QtWidgets.QPushButton("🎯 Current Project")
+        btn_detect.setObjectName("accent_action")
+        btn_detect.setToolTip("Auto-detect the project folder currently active in your IDE / workspace")
+        btn_detect.clicked.connect(self.auto_detect_project)
+        project_row.addWidget(btn_detect)
+
         self.project_title_input = QLineEdit()
-        self.project_title_input.setPlaceholderText("Project Title (e.g. 'Build Laravel Authentication API', 'Payment Service')...")
+        self.project_title_input.setPlaceholderText("Project Title (e.g. 'Build Laravel Auth API')...")
         self.project_title_input.textChanged.connect(self.on_project_title_changed)
         project_row.addWidget(self.project_title_input, stretch=2)
 
         self.project_slug_input = QLineEdit()
-        self.project_slug_input.setPlaceholderText("slug (auto-generated: 'laravel-auth')")
+        self.project_slug_input.setPlaceholderText("slug (auto-generated)")
         project_row.addWidget(self.project_slug_input, stretch=1)
 
         form_layout.addLayout(project_row)
+
+        # Target Path Preview Label
+        self.target_preview_lbl = QtWidgets.QLabel("")
+        self.target_preview_lbl.setStyleSheet("color: #38bdf8; font-size: 11px; font-family: monospace; padding-left: 2px;")
+        form_layout.addWidget(self.target_preview_lbl)
 
         # Commands & Agent Row
         cmd_row = QtWidgets.QHBoxLayout()
@@ -755,7 +812,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
         cmd_row.addWidget(self.agent_combo)
 
         self.prompt_input = QTextEdit()
-        self.prompt_input.setPlaceholderText("Enter command or prompt. (Enter multiple commands on separate lines to queue sequential steps)...")
+        self.prompt_input.setPlaceholderText("Enter command or prompt... (Enter multiple lines for sequential steps in this project)")
         self.prompt_input.setMaximumHeight(70)
         cmd_row.addWidget(self.prompt_input, stretch=1)
 
@@ -770,8 +827,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
         gh_row = QtWidgets.QHBoxLayout()
         gh_row.setSpacing(10)
 
-        self.gh_check = QtWidgets.QCheckBox("🐙 Auto-Create GitHub Repo & Push Code (README included)")
-        self.gh_check.setStyleSheet("color: #38bdf8; font-weight: 500;")
+        self.gh_check = QtWidgets.QCheckBox("Auto-Create GitHub Repo & Push Code (README included)")
         gh_row.addWidget(self.gh_check)
 
         self.gh_name_input = QLineEdit()
@@ -786,9 +842,9 @@ class PipelineWindow(QtWidgets.QMainWindow):
         form_layout.addLayout(gh_row)
         main_layout.addWidget(form_card)
 
-        # Task List Area
+        # Task List Area Header
         list_header = QtWidgets.QLabel("Pipeline Queue (Sequential Multi-Project Order)")
-        list_header.setStyleSheet("font-weight: 600; color: #94a3b8; margin-top: 4px;")
+        list_header.setStyleSheet("font-weight: 700; color: #94a3b8; margin-top: 4px;")
         main_layout.addWidget(list_header)
 
         self.scroll = QtWidgets.QScrollArea()
@@ -806,16 +862,94 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.log_box.setReadOnly(True)
         self.log_box.setMaximumHeight(105)
         self.log_box.setPlaceholderText("Pipeline activity and agent dispatch log will stream here...")
-        self.log_box.setStyleSheet("background-color: #060912; border: 1px solid #1e293b; color: #94a3b8; font-family: monospace; font-size: 11px;")
+        self.log_box.setStyleSheet("background-color: #050811; border: 1px solid #1a2436; color: #94a3b8; font-family: monospace; font-size: 11px;")
         main_layout.addWidget(self.log_box)
 
+        # Populate project dropdown and auto-detect initial project
+        self.populate_project_dropdown()
+        self.auto_detect_project(silent=True)
         self.refresh_queue()
+
+    def update_target_preview(self):
+        slug = self.project_slug_input.text().strip()
+        base = self.pipeline.get_base_dir()
+        if slug:
+            target_path = Path(base) / slug
+            exists_tag = " [EXISTS]" if target_path.exists() else " [AUTO-CREATE ON EXECUTION]"
+            self.target_preview_lbl.setText(f"Target Working Directory: {target_path}{exists_tag}")
+        else:
+            self.target_preview_lbl.setText("")
+
+    def populate_project_dropdown(self):
+        current_data = self.project_combo.currentData()
+        self.project_combo.blockSignals(True)
+        self.project_combo.clear()
+
+        self.project_combo.addItem("+ New Project (Custom Slug)", "")
+
+        # Auto-detect current active project
+        slug, title, folder = detect_current_project(self.pipeline.get_base_dir())
+        if slug and folder:
+            self.project_combo.addItem(f"🎯 Current Project: {title} ({slug})", f"auto:{slug}")
+
+        # List existing local projects in base directory
+        local_projects = list_existing_projects(self.pipeline.get_base_dir())
+        if local_projects:
+            for p in local_projects:
+                if p["slug"] != slug:
+                    self.project_combo.addItem(f"Existing: {p['title']} ({p['slug']})", f"local:{p['slug']}")
+
+        # List active projects currently queued in pipeline
+        tasks = self.pipeline.list()
+        grouped = get_grouped_projects(tasks)
+        for proj in grouped:
+            # Avoid duplicate entries
+            already = False
+            for idx in range(self.project_combo.count()):
+                d = self.project_combo.itemData(idx)
+                if d and d.endswith(f":{proj['slug']}"):
+                    already = True
+                    break
+            if not already:
+                self.project_combo.addItem(f"Queued: {proj['title']} ({proj['slug']})", f"queued:{proj['slug']}")
+
+        if current_data:
+            idx = self.project_combo.findData(current_data)
+            if idx >= 0:
+                self.project_combo.setCurrentIndex(idx)
+        self.project_combo.blockSignals(False)
+
+    def auto_detect_project(self, silent=False):
+        slug, title, folder = detect_current_project(self.pipeline.get_base_dir())
+        if slug:
+            self.project_title_input.setText(title)
+            self.project_slug_input.setText(slug)
+            self.update_target_preview()
+
+            # Select matching item in combo if available
+            idx = self.project_combo.findData(f"auto:{slug}")
+            if idx >= 0:
+                self.project_combo.blockSignals(True)
+                self.project_combo.setCurrentIndex(idx)
+                self.project_combo.blockSignals(False)
+
+            if not silent:
+                self.log_box.append(
+                    f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Detected active project: '{title}' [slug: {slug}] -> {folder}"
+                )
+        else:
+            if not silent:
+                self.log_box.append(
+                    f"[{datetime.datetime.now().strftime('%H:%M:%S')}] No active project detected; using base directory."
+                )
 
     def on_base_dir_changed(self):
         txt = self.base_dir_input.text().strip()
         if txt and Path(txt).is_dir():
             configured = self.pipeline.set_base_dir(txt)
             self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Projects base directory set to: {configured}")
+            self.populate_project_dropdown()
+            self.update_target_preview()
             self.refresh_queue()
 
     def browse_base_dir(self):
@@ -825,25 +959,31 @@ class PipelineWindow(QtWidgets.QMainWindow):
             configured = self.pipeline.set_base_dir(selected)
             self.base_dir_input.setText(configured)
             self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Projects base directory set to: {configured}")
+            self.populate_project_dropdown()
+            self.update_target_preview()
             self.refresh_queue()
 
     def on_project_title_changed(self, text):
-        if self.project_combo.currentIndex() <= 0:
+        data = self.project_combo.currentData() or ""
+        if not data or data == "":
             self.project_slug_input.setText(to_slug(text))
+        self.update_target_preview()
 
     def on_project_combo_changed(self, index):
         if index <= 0:
             self.project_title_input.clear()
             self.project_slug_input.clear()
         else:
-            slug = self.project_combo.itemData(index)
-            # Find matching project from pipeline
-            tasks = self.pipeline.list()
-            matched = [t for t in tasks if t.get("project_slug") == slug]
-            if matched:
-                title = matched[0].get("project_title") or slug.replace("-", " ").title()
-                self.project_title_input.setText(title)
-                self.project_slug_input.setText(slug)
+            data = str(self.project_combo.itemData(index) or "")
+            slug = data.split(":", 1)[1] if ":" in data else data
+            text = self.project_combo.itemText(index)
+            # Clean display title
+            clean_title = text.split(":", 1)[-1].strip()
+            clean_title = re.sub(r"\s*\([^)]*\)$", "", clean_title).strip()
+
+            self.project_slug_input.setText(slug)
+            self.project_title_input.setText(clean_title or slug.replace("-", " ").title())
+        self.update_target_preview()
 
     def fill_seo_prompt(self):
         title = self.project_title_input.text().strip() or "this project"
@@ -908,10 +1048,11 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.gh_check.setChecked(False)
 
         count = len(lines)
-        tag = f" [🐙 GH Repo: {repo_name}]" if create_repo else ""
+        tag = f" [GH Repo: {repo_name}]" if create_repo else ""
         self.log_box.append(
-            f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Queued {count} step(s) under project '{title}' [📁 {slug}]{tag}"
+            f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Queued {count} step(s) into project '{title}' [slug: {slug}] -> {proj_dir}{tag}"
         )
+        self.populate_project_dropdown()
         self.refresh_queue()
 
     def refresh_queue(self):
@@ -950,19 +1091,6 @@ class PipelineWindow(QtWidgets.QMainWindow):
         # Group tasks by project
         grouped = get_grouped_projects(tasks)
 
-        # Update project combo choices without resetting if user is typing
-        current_data = self.project_combo.currentData()
-        self.project_combo.blockSignals(True)
-        self.project_combo.clear()
-        self.project_combo.addItem("+ New Project...", "")
-        for proj in grouped:
-            self.project_combo.addItem(f"📁 {proj['title']} ({proj['slug']})", proj['slug'])
-        if current_data:
-            idx = self.project_combo.findData(current_data)
-            if idx >= 0:
-                self.project_combo.setCurrentIndex(idx)
-        self.project_combo.blockSignals(False)
-
         # Rebuild list items
         while self.task_list_layout.count() > 1:
             item = self.task_list_layout.takeAt(0)
@@ -970,8 +1098,8 @@ class PipelineWindow(QtWidgets.QMainWindow):
                 item.widget().deleteLater()
 
         if not grouped:
-            empty_lbl = QtWidgets.QLabel("Pipeline queue is empty. Enter project title and command(s) above to start a sequential workflow.")
-            empty_lbl.setStyleSheet("color: #64748b; font-style: italic; padding: 24px;")
+            empty_lbl = QtWidgets.QLabel("Pipeline queue is empty. Select your current project or enter a title and commands above to start.")
+            empty_lbl.setStyleSheet("color: #64748b; font-style: italic; padding: 28px;")
             empty_lbl.setAlignment(Qt.AlignCenter)
             self.task_list_layout.insertWidget(0, empty_lbl)
         else:
@@ -989,13 +1117,13 @@ class PipelineWindow(QtWidgets.QMainWindow):
         if not self.is_running:
             self.is_running = True
             self.btn_run.setText("⏸ Pause Pipeline")
-            self.btn_run.setStyleSheet("background-color: #eab308; color: black;")
+            self.btn_run.setStyleSheet("background-color: #eab308; color: black; font-weight: 700;")
             self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Starting pipeline runner...")
             self.runner_timer.start(2500)
             self.run_step()
         else:
             self.is_running = False
-            self.btn_run.setText("▶ Run Pipeline")
+            self.btn_run.setText("► Run Pipeline")
             self.btn_run.setObjectName("primary")
             self.btn_run.setStyleSheet("")
             self.runner_timer.stop()
@@ -1059,6 +1187,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
             return
         self.pipeline.delete_project(project_slug)
         self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Removed project '{project_slug}' from pipeline.")
+        self.populate_project_dropdown()
         self.refresh_queue()
 
     def closeEvent(self, event):
@@ -1098,6 +1227,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
             return
         self.pipeline.clear()
         self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Pipeline cleared.")
+        self.populate_project_dropdown()
         self.refresh_queue()
 
 

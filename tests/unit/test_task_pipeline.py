@@ -20,6 +20,8 @@ from task_pipeline import (
     discover_agents,
     to_slug,
     get_grouped_projects,
+    detect_current_project,
+    list_existing_projects,
 )
 
 
@@ -270,6 +272,25 @@ class TestTaskPipeline(unittest.TestCase):
         self.pipeline.delete_project("p1")
         self.assertEqual(len(self.pipeline.list()), 1)
         self.assertEqual(self.pipeline.list()[0]["project_slug"], "p2")
+
+    def test_detect_current_project_and_listing(self):
+        ws = Path(self.test_dir) / "test_workspace"
+        ws.mkdir(parents=True, exist_ok=True)
+        p1 = ws / "alpha-app"
+        p2 = ws / "beta-service"
+        p1.mkdir()
+        p2.mkdir()
+
+        projects = list_existing_projects(str(ws))
+        slugs = [p["slug"] for p in projects]
+        self.assertIn("alpha-app", slugs)
+        self.assertIn("beta-service", slugs)
+
+        # Test detection fallback to most recent folder in workspace
+        slug, title, path = detect_current_project(str(ws))
+        self.assertIn(slug, ["alpha-app", "beta-service"])
+        self.assertIsNotNone(title)
+        self.assertTrue(Path(path).exists())
 
 
 if __name__ == "__main__":

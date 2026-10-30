@@ -50,6 +50,96 @@ def to_slug(text: str) -> str:
     return slug.strip("-") or "project"
 
 
+def detect_current_project(base_dir: Optional[str] = None) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """Auto-detects the currently active working project name, slug, and folder path.
+
+    Detection strategy:
+    1. Active Antigravity / IDE workspace & open files
+    2. Active terminal shell processes working directory (/proc/*/cwd)
+    3. Current process working directory
+    4. Most recently modified project folder in base_dir
+    Returns: (slug, title, folder_path)
+    """
+    b_dir = Path(base_dir).resolve() if base_dir else Path.home() / "project"
+    if not b_dir.exists() or not b_dir.is_dir():
+        b_dir = Path.cwd().resolve()
+
+    candidates: List[Path] = []
+
+    # 1. Inspect Antigravity IDE storage for open project files
+    app_storage = Path.home() / ".config/Antigravity/app_storage.json"
+    if app_storage.exists():
+        try:
+            with open(app_storage, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            text = json.dumps(data)
+            matches = re.findall(r"file://(" + re.escape(str(b_dir)) + r"/[^/\"\'#]+)", text)
+            for m in reversed(matches):
+                p = Path(m).resolve()
+                if p.exists() and p.is_dir() and p not in candidates:
+                    candidates.append(p)
+        except Exception:
+            pass
+
+    # 2. Inspect active shell processes in /proc
+    proc_dir = Path("/proc")
+    if proc_dir.exists():
+        for proc in proc_dir.iterdir():
+            if proc.name.isdigit():
+                try:
+                    cwd = Path(os.readlink(f"/proc/{proc.name}/cwd")).resolve()
+                    if cwd.is_relative_to(b_dir) and cwd != b_dir:
+                        proj = b_dir / cwd.relative_to(b_dir).parts[0]
+                        if proj.exists() and proj not in candidates:
+                            candidates.append(proj)
+                except Exception:
+                    pass
+
+    # 3. Check current process working directory (if inside base_dir)
+    cwd = Path.cwd().resolve()
+    if cwd.is_relative_to(b_dir) and cwd != b_dir:
+        proj = b_dir / cwd.relative_to(b_dir).parts[0]
+        if proj.exists() and proj not in candidates:
+            candidates.append(proj)
+
+    # 4. Check most recently modified folder in base_dir
+    if b_dir.exists():
+        subdirs = [d for d in b_dir.iterdir() if d.is_dir() and not d.name.startswith(".")]
+        subdirs.sort(key=lambda d: os.path.getmtime(d), reverse=True)
+        for s in subdirs:
+            if s not in candidates:
+                candidates.append(s)
+
+    # 5. Fallback to cwd if no project was found in base_dir
+    if not candidates and (cwd / ".git").exists():
+        candidates.append(cwd)
+
+    if candidates:
+        top = candidates[0]
+        slug = to_slug(top.name)
+        title = top.name.replace("-", " ").title()
+        return slug, title, str(top)
+
+    return None, None, None
+
+
+def list_existing_projects(base_dir: Optional[str] = None) -> List[Dict[str, str]]:
+    """Returns all project directories inside base_dir ordered by recent modification."""
+    b_dir = Path(base_dir).resolve() if base_dir else Path.home() / "project"
+    if not b_dir.exists() or not b_dir.is_dir():
+        return []
+    projects = []
+    subdirs = [d for d in b_dir.iterdir() if d.is_dir() and not d.name.startswith(".")]
+    subdirs.sort(key=lambda d: os.path.getmtime(d), reverse=True)
+    for d in subdirs:
+        projects.append({
+            "slug": to_slug(d.name),
+            "title": d.name.replace("-", " ").title(),
+            "path": str(d.resolve()),
+        })
+    return projects
+
+
 def get_grouped_projects(tasks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Groups queued tasks into structured project objects preserving sequence."""
     projects_map: Dict[str, Dict[str, Any]] = {}
