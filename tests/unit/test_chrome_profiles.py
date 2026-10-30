@@ -87,6 +87,55 @@ class TestChromeProfiles(unittest.TestCase):
             self.assertTrue(pol.get("BrowserGuestModeEnabled"))
             self.assertTrue(pol.get("BrowserAddPersonEnabled"))
 
+    def test_detect_window_profile_markers(self):
+        profiles = {"Default": "Work", "Profile 1": "Mirza", "Profile 4": "Blog"}
+        w_guest = {"id": 1, "title": "Welcome - Google Chrome (Guest)", "wm_class": "Google-chrome"}
+        self.assertEqual(chrome_profiles.detect_window_profile(w_guest, profiles), "Guest")
+
+        w_tag = {"id": 2, "title": "[Mirza] Project Dashboard - Google Chrome", "wm_class": "Google-chrome"}
+        self.assertEqual(chrome_profiles.detect_window_profile(w_tag, profiles), "Mirza")
+
+        w_title_paren = {"id": 3, "title": "Settings (Blog) - Google Chrome", "wm_class": "Google-chrome"}
+        self.assertEqual(chrome_profiles.detect_window_profile(w_title_paren, profiles), "Blog")
+
+    def test_detect_window_profile_session_match(self):
+        profiles = {"Default": "Work", "Profile 1": "Mirza", "Profile 4": "Blog"}
+        prof_session_data = {
+            "Default": {"titles": {"google search", "gmail"}, "domains": {"google"}, "mtime": 100},
+            "Profile 1": {"titles": {"whatsapp business", "youtube studio"}, "domains": {"whatsapp", "youtube"}, "mtime": 200},
+            "Profile 4": {"titles": {"cloudflare dashboard", "domain overview"}, "domains": {"cloudflare"}, "mtime": 300},
+        }
+
+        w_wa = {"id": 101, "title": "WhatsApp Business - Google Chrome", "wm_class": "Google-chrome"}
+        self.assertEqual(chrome_profiles.detect_window_profile(w_wa, profiles, prof_session_data=prof_session_data), "Mirza")
+
+        w_cf = {"id": 102, "title": "Cloudflare Dashboard - Google Chrome", "wm_class": "Google-chrome"}
+        self.assertEqual(chrome_profiles.detect_window_profile(w_cf, profiles, prof_session_data=prof_session_data), "Blog")
+
+    def test_get_ranked_active_profiles(self):
+        with tempfile.TemporaryDirectory() as tmp_home:
+            conf_dir = os.path.join(tmp_home, ".config", "google-chrome")
+            os.makedirs(conf_dir, exist_ok=True)
+            with open(os.path.join(conf_dir, "Local State"), "w", encoding="utf-8") as f:
+                json.dump(
+                    {
+                        "profile": {
+                            "last_active_profiles": ["Profile 4", "Profile 1"],
+                            "info_cache": {
+                                "Default": {"name": "Work"},
+                                "Profile 1": {"name": "Mirza"},
+                                "Profile 4": {"name": "Blog"},
+                            },
+                        }
+                    },
+                    f,
+                )
+            profiles = {"Default": "Work", "Profile 1": "Mirza", "Profile 4": "Blog"}
+            ranked = chrome_profiles.get_ranked_active_profiles(conf_dir, profiles)
+            self.assertEqual(ranked[0], "Profile 4")
+            self.assertEqual(ranked[1], "Profile 1")
+            self.assertIn("Default", ranked)
+
 
 if __name__ == "__main__":
     unittest.main()
