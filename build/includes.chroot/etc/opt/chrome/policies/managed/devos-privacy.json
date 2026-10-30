@@ -1,5 +1,7 @@
 {
   "MetricsReportingEnabled": false,
   "PromotionalTabsEnabled": false,
-  "DefaultBrowserSettingEnabled": false
+  "DefaultBrowserSettingEnabled": false,
+  "BrowserGuestModeEnabled": true,
+  "BrowserAddPersonEnabled": true
 }

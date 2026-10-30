@@ -1,3 +1,5 @@
 {
-  "RestoreOnStartup": 1
+  "RestoreOnStartup": 1,
+  "BrowserGuestModeEnabled": true,
+  "BrowserAddPersonEnabled": true
 }

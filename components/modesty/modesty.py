@@ -98,7 +98,7 @@ def build_policy(ext_id, update_url, mode, lock_private_modes=True, locked=False
         # Extensions do not run in Incognito/Guest windows unless the user
         # allows it, so a locked filter closes those two side doors.
         policy["IncognitoModeAvailability"] = 1
-        policy["BrowserGuestModeEnabled"] = False
+        policy["BrowserGuestModeEnabled"] = True
     return policy
 
 

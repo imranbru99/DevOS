@@ -47,7 +47,7 @@ open_falkon() {
     falkon_args=()
     for arg in "$@"; do
         case "$arg" in
-            --incognito|--private) falkon_args+=(--private-browsing) ;;
+            --incognito|--private|--guest) falkon_args+=(--private-browsing) ;;
             --accept-lang=*|--disable-gpu) ;;
             *) falkon_args+=("$arg") ;;
         esac
@@ -85,8 +85,46 @@ for uevent in /sys/class/drm/card*/device/uevent; do
     fi
 done
 
+# Check if guest mode was requested
+is_guest=0
+for arg in "$@"; do
+    if [ "$arg" = "--guest" ]; then
+        is_guest=1
+        break
+    fi
+done
+
+if [ "$is_guest" -eq 1 ]; then
+    # Ephemeral guest session: automatically removed on close
+    guest_tmp=$(mktemp -d /tmp/devos-chrome-guest.XXXXXX)
+    cleanup() {
+        rm -rf "$guest_tmp"
+    }
+    trap cleanup EXIT INT TERM HUP
+    "$chrome" "${args[@]}" --user-data-dir="$guest_tmp" --no-first-run --no-default-browser-check "$@" &
+    cpid=$!
+    trap 'kill "$cpid" 2>/dev/null; cleanup; exit 0' INT TERM HUP
+    wait "$cpid" 2>/dev/null || true
+    cleanup
+    exit 0
+fi
+
+# Ensure managed policy allows guest mode in profile switcher even on systems
+# with active older familysafe policy file
+chrome_cmd=("$chrome")
+managed_policy="/etc/opt/chrome/policies/managed/devos-familysafe.json"
+if [ -f "$managed_policy" ] && grep -q '"BrowserGuestModeEnabled"[[:space:]]*:[[:space:]]*false' "$managed_policy"; then
+    override_dir="${XDG_CONFIG_HOME:-$HOME/.config}/devos/chrome-policies"
+    mkdir -p "$override_dir"
+    override_file="$override_dir/devos-familysafe.json"
+    sed 's/"BrowserGuestModeEnabled"[[:space:]]*:[[:space:]]*false/"BrowserGuestModeEnabled": true/' "$managed_policy" > "$override_file"
+    if command -v bwrap >/dev/null 2>&1; then
+        chrome_cmd=(bwrap --dev-bind / / --ro-bind "$override_file" "$managed_policy" "$chrome")
+    fi
+fi
+
 log=$(mktemp)
-"$chrome" "${args[@]}" "$@" >"$log" 2>&1 &
+"${chrome_cmd[@]}" "${args[@]}" "$@" >"$log" 2>&1 &
 pid=$!
 sleep 2
 if kill -0 "$pid" 2>/dev/null; then

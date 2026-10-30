@@ -333,8 +333,8 @@ def chromium_policy(level: str, browser: str = "chrome") -> dict:
         "ForceGoogleSafeSearch": True,
         "ForceYouTubeRestrict": LEVELS[level]["youtube"],
         "IncognitoModeAvailability": 1,  # 1 = incognito not available
-        "BrowserGuestModeEnabled": False,
-        "BrowserAddPersonEnabled": False,  # a fresh profile would have no history either
+        "BrowserGuestModeEnabled": True,
+        "BrowserAddPersonEnabled": True,  # a fresh profile would have no history either
     }
     if browser == "edge":
         policy.update({
