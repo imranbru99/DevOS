@@ -2,8 +2,12 @@
 """DevOS AI Multi-Agent Task Pipeline & Rate-Limit Scheduler - Visual GUI.
 
 Visual dashboard for managing, queuing, and monitoring sequential AI tasks
-organized by project slug across ChatGPT/Codex, Google Antigravity, and DevOS Local AI
-with automatic rate-limit detection, current project auto-detection, and local project creation.
+across ChatGPT/Codex, Google Antigravity, and DevOS Local AI.
+Features:
+- Step 1: Agent selector
+- Step 2: Current working project command queuing (optional)
+- Step 3: Add another / next project with title-to-slug auto-conversion
+- Step 4: Sequential multi-project execution with local folder auto-creation
 """
 
 import datetime
@@ -18,7 +22,7 @@ from pathlib import Path
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtCore import Qt, QTimer, QCoreApplication
 from PyQt5.QtGui import QIcon, QFont, QColor
-from PyQt5.QtWidgets import QLineEdit, QTextEdit, QComboBox, QProgressBar, QRadioButton
+from PyQt5.QtWidgets import QLineEdit, QTextEdit, QComboBox, QProgressBar
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "components" / "ai-agent"))
@@ -72,6 +76,16 @@ QFrame#banner_strip {
     border: 1px solid #1e293b;
     border-radius: 8px;
 }
+QFrame#section_current {
+    background-color: #081224;
+    border: 1px solid #0f274a;
+    border-radius: 8px;
+}
+QFrame#section_next {
+    background-color: #0c1022;
+    border: 1px solid #1f2544;
+    border-radius: 8px;
+}
 QFrame#project_card {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #0f182c, stop:1 #0b1120);
     border: 1px solid #1e2a42;
@@ -111,6 +125,24 @@ QLabel#tag_label {
     padding: 3px 8px;
     border-radius: 4px;
     border: 1px solid #334155;
+}
+QLabel#badge_cyan {
+    background-color: #032b43;
+    color: #38bdf8;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 4px;
+    border: 1px solid #0284c7;
+}
+QLabel#badge_indigo {
+    background-color: #1e1b4b;
+    color: #a5b4fc;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 4px;
+    border: 1px solid #4338ca;
 }
 QLabel#field_label {
     font-weight: 600;
@@ -250,26 +282,6 @@ QScrollBar::handle:vertical {
 }
 QScrollBar::handle:vertical:hover {
     background: #334155;
-}
-QRadioButton {
-    color: #cbd5e1;
-    font-weight: 600;
-    font-size: 13px;
-    spacing: 7px;
-}
-QRadioButton::indicator {
-    width: 15px;
-    height: 15px;
-    border-radius: 8px;
-    border: 1px solid #334155;
-    background-color: #060a14;
-}
-QRadioButton::indicator:hover {
-    border-color: #38bdf8;
-}
-QRadioButton::indicator:checked {
-    background-color: #0284c7;
-    border: 2px solid #38bdf8;
 }
 QCheckBox {
     color: #38bdf8;
@@ -416,7 +428,7 @@ class StepRow(QtWidgets.QFrame):
 
         # Delete step button (if QUEUED or FAILED)
         if status in ("QUEUED", "FAILED") and self.on_delete:
-            btn_del = QtWidgets.QPushButton("✕")
+            btn_del = QtWidgets.QPushButton("X")
             btn_del.setObjectName("danger_small")
             btn_del.setToolTip("Remove this step from pipeline")
             btn_del.clicked.connect(lambda: self.on_delete(self.task["id"]))
@@ -535,7 +547,7 @@ class ProjectPipelineCard(QtWidgets.QFrame):
 
         # Delete project button (only if not currently running)
         if not running_tasks and self.on_delete_project:
-            btn_del_proj = QtWidgets.QPushButton("✕")
+            btn_del_proj = QtWidgets.QPushButton("X")
             btn_del_proj.setObjectName("danger_small")
             btn_del_proj.setToolTip(f"Remove project '{slug}' and its commands from queue")
             btn_del_proj.clicked.connect(lambda: self.on_delete_project(slug))
@@ -667,16 +679,19 @@ class PipelineWindow(QtWidgets.QMainWindow):
         super().__init__()
         self.pipeline = TaskPipeline()
         self.worker = None
-        self.detected_current_slug = None
-        self.detected_current_title = None
-        self.detected_current_path = None
+
+        # Auto-detect current active project
+        cur_slug, cur_title, cur_path = detect_current_project(self.pipeline.get_base_dir())
+        self.current_slug = cur_slug or "dev-os"
+        self.current_title = cur_title or "Dev Os"
+        self.current_path = cur_path or str(Path(self.pipeline.get_base_dir()) / self.current_slug)
 
         self.setWindowTitle("DevOS AI Command Pipeline & Scheduler")
         self.setObjectName("devos-ai-pipeline")
         icon = get_app_icon()
         if not icon.isNull():
             self.setWindowIcon(icon)
-        self.resize(980, 820)
+        self.resize(1000, 840)
         self.setStyleSheet(STYLE)
         self.init_ui()
 
@@ -694,8 +709,8 @@ class PipelineWindow(QtWidgets.QMainWindow):
         central = QtWidgets.QWidget()
         self.setCentralWidget(central)
         main_layout = QtWidgets.QVBoxLayout(central)
-        main_layout.setContentsMargins(24, 20, 24, 20)
-        main_layout.setSpacing(14)
+        main_layout.setContentsMargins(24, 18, 24, 18)
+        main_layout.setSpacing(12)
 
         # Header
         header_layout = QtWidgets.QHBoxLayout()
@@ -708,7 +723,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
         header_layout.addWidget(icon_lbl)
 
         header_vbox = QtWidgets.QVBoxLayout()
-        header_vbox.setSpacing(3)
+        header_vbox.setSpacing(2)
         title = QtWidgets.QLabel("DevOS AI Command Pipeline")
         title.setObjectName("title")
         subtitle = QtWidgets.QLabel("Serial multi-agent execution & auto-scheduling across ChatGPT, Antigravity & Local AI")
@@ -755,7 +770,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
         base_dir_card = QtWidgets.QFrame()
         base_dir_card.setObjectName("banner_strip")
         base_dir_layout = QtWidgets.QHBoxLayout(base_dir_card)
-        base_dir_layout.setContentsMargins(14, 8, 14, 8)
+        base_dir_layout.setContentsMargins(14, 7, 14, 7)
         base_dir_layout.setSpacing(10)
 
         base_badge = QtWidgets.QLabel("BASE WORKSPACE")
@@ -764,134 +779,151 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
         self.base_dir_input = QLineEdit()
         self.base_dir_input.setText(self.pipeline.get_base_dir())
-        self.base_dir_input.setPlaceholderText("Select base directory where project folders will be created...")
+        self.base_dir_input.setPlaceholderText("Base directory where project folders will be created...")
         self.base_dir_input.editingFinished.connect(self.on_base_dir_changed)
         base_dir_layout.addWidget(self.base_dir_input, stretch=1)
 
         btn_browse_dir = QtWidgets.QPushButton("Browse Folder...")
         btn_browse_dir.setObjectName("small_btn")
-        btn_browse_dir.setToolTip("Select root folder where all project slug folders will be created")
         btn_browse_dir.clicked.connect(self.browse_base_dir)
         base_dir_layout.addWidget(btn_browse_dir)
 
         main_layout.addWidget(base_dir_card)
 
-        # Add Task Input Form Card
+        # =====================================================================
+        # MAIN PIPELINE INPUT CONSOLE
+        # =====================================================================
         form_card = QtWidgets.QFrame()
         form_card.setObjectName("card")
         form_layout = QtWidgets.QVBoxLayout(form_card)
-        form_layout.setContentsMargins(18, 16, 18, 16)
+        form_layout.setContentsMargins(18, 14, 18, 14)
         form_layout.setSpacing(12)
 
-        # Form Title & SEO Button
-        form_title_row = QtWidgets.QHBoxLayout()
-        form_title = QtWidgets.QLabel("Queue Projects & Commands into Pipeline")
-        form_title.setStyleSheet("font-weight: 700; font-size: 14px; color: #f8fafc;")
-        form_title_row.addWidget(form_title)
-        form_title_row.addStretch()
+        # 1. Choose Option Agent (1ST STEP)
+        agent_row = QtWidgets.QHBoxLayout()
+        agent_row.setSpacing(12)
+
+        lbl_step1 = QtWidgets.QLabel("1. Target AI Agent:")
+        lbl_step1.setObjectName("field_label")
+        agent_row.addWidget(lbl_step1)
+
+        self.agent_combo = QtWidgets.QComboBox()
+        self.agent_combo.setMinimumWidth(240)
+        known = discover_agents()
+        for k, v in known.items():
+            avail_bullet = "● " if v.get("available") else "○ "
+            self.agent_combo.addItem(f"{avail_bullet}{v['name']}", k)
+        agent_row.addWidget(self.agent_combo)
+
+        agent_row.addStretch()
 
         btn_seo = QtWidgets.QPushButton("SEO Repo Ranking Preset")
         btn_seo.setToolTip("Auto-fill prompt for best ranking repo name & 400-char SEO description")
         btn_seo.setStyleSheet("background-color: #1e293b; color: #38bdf8; font-size: 11px; padding: 4px 10px; border: 1px solid #334155; border-radius: 6px;")
         btn_seo.clicked.connect(self.fill_seo_prompt)
-        form_title_row.addWidget(btn_seo)
+        agent_row.addWidget(btn_seo)
 
-        form_layout.addLayout(form_title_row)
+        form_layout.addLayout(agent_row)
 
-        # Mode Selection: Start New/Next Project vs Target Current Active vs Select Existing
-        mode_box = QtWidgets.QHBoxLayout()
-        mode_box.setSpacing(16)
+        # 2. CURRENT WORKING PROJECT SECTION (2ND STEP)
+        cur_section = QtWidgets.QFrame()
+        cur_section.setObjectName("section_current")
+        cur_layout = QtWidgets.QVBoxLayout(cur_section)
+        cur_layout.setContentsMargins(14, 11, 14, 11)
+        cur_layout.setSpacing(8)
 
-        self.radio_new_project = QRadioButton("+ Start New / Next Project (Creates Local Folder)")
-        self.radio_new_project.setChecked(True)
-        self.radio_new_project.toggled.connect(self.on_mode_toggled)
-        mode_box.addWidget(self.radio_new_project)
+        cur_header = QtWidgets.QHBoxLayout()
+        cur_badge = QtWidgets.QLabel("2. CURRENT ACTIVE PROJECT")
+        cur_badge.setObjectName("badge_cyan")
+        cur_header.addWidget(cur_badge)
 
-        # Detect active project for radio label
-        cur_slug, cur_title, cur_path = detect_current_project(self.pipeline.get_base_dir())
-        self.detected_current_slug = cur_slug
-        self.detected_current_title = cur_title
-        self.detected_current_path = cur_path
+        self.cur_proj_title_lbl = QtWidgets.QLabel(f"{self.current_title} ({self.current_slug})")
+        self.cur_proj_title_lbl.setStyleSheet("font-weight: 700; color: #f8fafc; font-size: 13px;")
+        cur_header.addWidget(self.cur_proj_title_lbl)
 
-        current_text = f"Target Current Project ({cur_slug})" if cur_slug else "Target Current Project"
-        self.radio_current_project = QRadioButton(current_text)
-        self.radio_current_project.toggled.connect(self.on_mode_toggled)
-        mode_box.addWidget(self.radio_current_project)
+        self.cur_proj_path_lbl = QtWidgets.QLabel(f"Path: {self.current_path}")
+        self.cur_proj_path_lbl.setObjectName("path_info")
+        cur_header.addWidget(self.cur_proj_path_lbl)
 
-        self.radio_existing_project = QRadioButton("Select Existing Workspace Folder")
-        self.radio_existing_project.toggled.connect(self.on_mode_toggled)
-        mode_box.addWidget(self.radio_existing_project)
+        cur_header.addStretch()
+        cur_layout.addLayout(cur_header)
 
-        mode_box.addStretch()
-        form_layout.addLayout(mode_box)
+        # Command input for current project
+        cur_cmd_row = QtWidgets.QHBoxLayout()
+        cur_cmd_row.setSpacing(10)
 
-        # Dropdown for Existing Projects (shown when radio_existing_project is active)
-        self.existing_combo = QtWidgets.QComboBox()
-        self.existing_combo.currentIndexChanged.connect(self.on_existing_combo_changed)
-        self.existing_combo.hide()
-        form_layout.addWidget(self.existing_combo)
+        self.current_prompt_input = QTextEdit()
+        self.current_prompt_input.setPlaceholderText(
+            f"Enter command(s) for Current Project '{self.current_slug}'... (Optional: leave empty to proceed directly to next project)"
+        )
+        self.current_prompt_input.setMaximumHeight(54)
+        cur_cmd_row.addWidget(self.current_prompt_input, stretch=1)
 
-        # Title & Slug / Folder Name Input Row
-        self.title_slug_frame = QtWidgets.QWidget()
-        ts_layout = QtWidgets.QHBoxLayout(self.title_slug_frame)
-        ts_layout.setContentsMargins(0, 0, 0, 0)
-        ts_layout.setSpacing(12)
+        btn_add_current = QtWidgets.QPushButton("+ Queue to Current Project")
+        btn_add_current.setObjectName("accent_action")
+        btn_add_current.clicked.connect(self.add_current_project_tasks)
+        cur_cmd_row.addWidget(btn_add_current)
 
-        # Title vbox
-        title_vbox = QtWidgets.QVBoxLayout()
-        title_vbox.setSpacing(4)
-        self.title_label = QtWidgets.QLabel("Project Title / Name:")
-        self.title_label.setObjectName("field_label")
-        title_vbox.addWidget(self.title_label)
-        self.project_title_input = QLineEdit()
-        self.project_title_input.setPlaceholderText("Enter Project Title (e.g. 'Build Laravel Auth API', 'Payment Service')...")
-        self.project_title_input.textChanged.connect(self.on_project_title_changed)
-        title_vbox.addWidget(self.project_title_input)
-        ts_layout.addLayout(title_vbox, stretch=2)
+        cur_layout.addLayout(cur_cmd_row)
+        form_layout.addWidget(cur_section)
 
-        # Slug / Folder Name vbox
-        slug_vbox = QtWidgets.QVBoxLayout()
-        slug_vbox.setSpacing(4)
-        self.slug_label = QtWidgets.QLabel("Project Folder Name (Slug):")
-        self.slug_label.setObjectName("field_label")
-        slug_vbox.addWidget(self.slug_label)
-        self.project_slug_input = QLineEdit()
-        self.project_slug_input.setPlaceholderText("Folder name (auto-generated from title)")
-        self.project_slug_input.textChanged.connect(self.update_target_preview)
-        slug_vbox.addWidget(self.project_slug_input)
-        ts_layout.addLayout(slug_vbox, stretch=1)
+        # 3. ADD ANOTHER PROJECT / NEXT PROJECT (3RD STEP)
+        next_section = QtWidgets.QFrame()
+        next_section.setObjectName("section_next")
+        next_layout = QtWidgets.QVBoxLayout(next_section)
+        next_layout.setContentsMargins(14, 11, 14, 11)
+        next_layout.setSpacing(8)
 
-        form_layout.addWidget(self.title_slug_frame)
+        next_header = QtWidgets.QHBoxLayout()
+        next_badge = QtWidgets.QLabel("3. ADD ANOTHER / NEXT PROJECT")
+        next_badge.setObjectName("badge_indigo")
+        next_header.addWidget(next_badge)
 
-        # Target Path Preview Label
-        self.target_preview_lbl = QtWidgets.QLabel("")
-        self.target_preview_lbl.setStyleSheet("color: #38bdf8; font-size: 11px; font-family: monospace; padding-left: 2px;")
-        form_layout.addWidget(self.target_preview_lbl)
+        next_desc = QtWidgets.QLabel("Auto-creates local project folder based on slug, then executes commands smoothly")
+        next_desc.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        next_header.addWidget(next_desc)
 
-        # Commands & Agent Row
-        cmd_row = QtWidgets.QHBoxLayout()
-        cmd_row.setSpacing(10)
+        next_header.addStretch()
+        next_layout.addLayout(next_header)
 
-        self.agent_combo = QtWidgets.QComboBox()
-        known = discover_agents()
-        for k, v in known.items():
-            avail_bullet = "● " if v.get("available") else "○ "
-            self.agent_combo.addItem(f"{avail_bullet}{v['name']}", k)
-        cmd_row.addWidget(self.agent_combo)
+        # Project Title & Slug inputs
+        meta_row = QtWidgets.QHBoxLayout()
+        meta_row.setSpacing(10)
 
-        self.prompt_input = QTextEdit()
-        self.prompt_input.setPlaceholderText("Enter command or prompt... (Enter multiple lines for sequential steps in this project)")
-        self.prompt_input.setMaximumHeight(70)
-        cmd_row.addWidget(self.prompt_input, stretch=1)
+        self.next_title_input = QLineEdit()
+        self.next_title_input.setPlaceholderText("Next Project Title (e.g. 'Build Laravel Auth API', 'Payment Service')...")
+        self.next_title_input.textChanged.connect(self.on_next_title_changed)
+        meta_row.addWidget(self.next_title_input, stretch=2)
 
-        self.btn_add = QtWidgets.QPushButton("+ Add Project to Pipeline")
-        self.btn_add.setObjectName("primary")
-        self.btn_add.clicked.connect(self.add_task)
-        cmd_row.addWidget(self.btn_add)
+        self.next_slug_input = QLineEdit()
+        self.next_slug_input.setPlaceholderText("Folder Slug (auto-generated)")
+        self.next_slug_input.textChanged.connect(self.update_next_target_preview)
+        meta_row.addWidget(self.next_slug_input, stretch=1)
 
-        form_layout.addLayout(cmd_row)
+        next_layout.addLayout(meta_row)
 
-        # GitHub Automation Row
+        # Folder location preview
+        self.next_target_preview_lbl = QtWidgets.QLabel("")
+        self.next_target_preview_lbl.setStyleSheet("color: #a5b4fc; font-size: 11px; font-family: monospace;")
+        next_layout.addWidget(self.next_target_preview_lbl)
+
+        # Commands input for next project
+        next_cmd_row = QtWidgets.QHBoxLayout()
+        next_cmd_row.setSpacing(10)
+
+        self.next_prompt_input = QTextEdit()
+        self.next_prompt_input.setPlaceholderText("Enter command(s) for this project (enter multiple lines for sequential steps)...")
+        self.next_prompt_input.setMaximumHeight(58)
+        next_cmd_row.addWidget(self.next_prompt_input, stretch=1)
+
+        self.btn_add_next = QtWidgets.QPushButton("+ Add Next Project to Pipeline")
+        self.btn_add_next.setObjectName("primary")
+        self.btn_add_next.clicked.connect(self.add_next_project_tasks)
+        next_cmd_row.addWidget(self.btn_add_next)
+
+        next_layout.addLayout(next_cmd_row)
+
+        # GitHub Automation Row for next project
         gh_row = QtWidgets.QHBoxLayout()
         gh_row.setSpacing(10)
 
@@ -900,17 +932,21 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
         self.gh_name_input = QLineEdit()
         self.gh_name_input.setPlaceholderText("Repo Name (defaults to slug)")
-        self.gh_name_input.setMaximumWidth(220)
+        self.gh_name_input.setMaximumWidth(200)
         gh_row.addWidget(self.gh_name_input)
 
         self.gh_desc_input = QLineEdit()
         self.gh_desc_input.setPlaceholderText("Description (e.g. 'Production auth module')")
         gh_row.addWidget(self.gh_desc_input, stretch=1)
 
-        form_layout.addLayout(gh_row)
+        next_layout.addLayout(gh_row)
+        form_layout.addWidget(next_section)
+
         main_layout.addWidget(form_card)
 
-        # Task List Area Header
+        # =====================================================================
+        # PIPELINE QUEUE LIST (Sequential Execution Order)
+        # =====================================================================
         list_header = QtWidgets.QLabel("Pipeline Queue (Sequential Multi-Project Order)")
         list_header.setStyleSheet("font-weight: 700; color: #94a3b8; margin-top: 4px;")
         main_layout.addWidget(list_header)
@@ -928,108 +964,63 @@ class PipelineWindow(QtWidgets.QMainWindow):
         # Live Execution Output Box
         self.log_box = QtWidgets.QTextEdit()
         self.log_box.setReadOnly(True)
-        self.log_box.setMaximumHeight(105)
+        self.log_box.setMaximumHeight(95)
         self.log_box.setPlaceholderText("Pipeline activity and agent dispatch log will stream here...")
         self.log_box.setStyleSheet("background-color: #050811; border: 1px solid #1a2436; color: #94a3b8; font-family: monospace; font-size: 11px;")
         main_layout.addWidget(self.log_box)
 
-        # Populate existing projects combo
-        self.populate_existing_projects_combo()
-        self.update_target_preview()
+        self.refresh_current_project()
         self.refresh_queue()
 
-    # Property alias for compatibility
+    # Compatibility aliases
     @property
-    def project_combo(self):
-        return self.existing_combo
+    def prompt_input(self):
+        return self.next_prompt_input
 
-    def on_mode_toggled(self):
-        if self.radio_new_project.isChecked():
-            self.existing_combo.hide()
-            self.title_slug_frame.show()
-            self.project_title_input.setReadOnly(False)
-            self.project_slug_input.setReadOnly(False)
-            self.title_label.setText("Project Title / Name:")
-            self.slug_label.setText("Project Folder Name (Slug):")
-            self.project_title_input.clear()
-            self.project_slug_input.clear()
-            has_queue = len(self.pipeline.list()) > 0
-            self.project_title_input.setPlaceholderText(
-                "Enter Next Project Title (e.g. 'Payment Service API')..." if has_queue else "Enter Project Title (e.g. 'Build Laravel Auth API')..."
+    @property
+    def project_title_input(self):
+        return self.next_title_input
+
+    @property
+    def project_slug_input(self):
+        return self.next_slug_input
+
+    def add_task(self):
+        self.add_next_project_tasks()
+
+    def refresh_current_project(self):
+        cur_slug, cur_title, cur_path = detect_current_project(self.pipeline.get_base_dir())
+        if cur_slug:
+            self.current_slug = cur_slug
+            self.current_title = cur_title
+            self.current_path = cur_path
+            self.cur_proj_title_lbl.setText(f"{self.current_title} ({self.current_slug})")
+            self.cur_proj_path_lbl.setText(f"Path: {self.current_path}")
+            self.current_prompt_input.setPlaceholderText(
+                f"Enter command(s) for Current Project '{self.current_slug}'... (Optional: leave empty to proceed to next project)"
             )
-            self.btn_add.setText("+ Add Next Project to Pipeline" if has_queue else "+ Add Project to Pipeline")
-            self.update_target_preview()
 
-        elif self.radio_current_project.isChecked():
-            self.existing_combo.hide()
-            self.title_slug_frame.show()
-            # Detect active project
-            slug, title, path = detect_current_project(self.pipeline.get_base_dir())
-            if slug:
-                self.detected_current_slug = slug
-                self.detected_current_title = title
-                self.detected_current_path = path
-                self.project_title_input.setText(title)
-                self.project_slug_input.setText(slug)
-                self.title_label.setText("Active Project:")
-                self.slug_label.setText("Project Folder:")
-                self.btn_add.setText(f"+ Add Commands to {slug}")
-                self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Targeting current working project: '{title}' [{slug}] -> {path}")
-            else:
-                self.log_box.append("No active project detected; using base directory.")
-            self.update_target_preview()
+    def on_next_title_changed(self, text):
+        self.next_slug_input.setText(to_slug(text))
+        self.update_next_target_preview()
 
-        elif self.radio_existing_project.isChecked():
-            self.populate_existing_projects_combo()
-            self.existing_combo.show()
-            self.title_slug_frame.show()
-            self.on_existing_combo_changed(self.existing_combo.currentIndex())
-
-    def populate_existing_projects_combo(self):
-        self.existing_combo.blockSignals(True)
-        self.existing_combo.clear()
-        projects = list_existing_projects(self.pipeline.get_base_dir())
-        if not projects:
-            self.existing_combo.addItem("No existing projects found in workspace", "")
-        else:
-            for p in projects:
-                self.existing_combo.addItem(f"{p['title']} ({p['slug']})", p['slug'])
-        self.existing_combo.blockSignals(False)
-
-    def on_existing_combo_changed(self, index):
-        if not self.radio_existing_project.isChecked():
-            return
-        slug = str(self.existing_combo.currentData() or "")
-        text = self.existing_combo.currentText()
-        clean_title = text.split("(", 1)[0].strip()
-        if slug:
-            self.project_title_input.setText(clean_title or slug.replace("-", " ").title())
-            self.project_slug_input.setText(slug)
-            self.btn_add.setText(f"+ Add Commands to {slug}")
-        self.update_target_preview()
-
-    def update_target_preview(self):
-        slug = self.project_slug_input.text().strip()
+    def update_next_target_preview(self):
+        slug = self.next_slug_input.text().strip()
         base = self.pipeline.get_base_dir()
         if slug:
             target_path = Path(base) / slug
-            exists_tag = " [EXISTS - Local Workspace Folder]" if target_path.exists() else " [WILL AUTO-CREATE LOCAL FOLDER ON EXECUTION]"
-            self.target_preview_lbl.setText(f"Target Working Directory: {target_path}{exists_tag}")
+            exists_tag = " [EXISTS]" if target_path.exists() else " [WILL AUTO-CREATE LOCAL FOLDER ON EXECUTION]"
+            self.next_target_preview_lbl.setText(f"Target Folder: {target_path}{exists_tag}")
         else:
-            self.target_preview_lbl.setText("")
-
-    def on_project_title_changed(self, text):
-        if self.radio_new_project.isChecked():
-            self.project_slug_input.setText(to_slug(text))
-        self.update_target_preview()
+            self.next_target_preview_lbl.setText("")
 
     def on_base_dir_changed(self):
         txt = self.base_dir_input.text().strip()
         if txt and Path(txt).is_dir():
             configured = self.pipeline.set_base_dir(txt)
             self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Projects base directory set to: {configured}")
-            self.populate_existing_projects_combo()
-            self.update_target_preview()
+            self.refresh_current_project()
+            self.update_next_target_preview()
             self.refresh_queue()
 
     def browse_base_dir(self):
@@ -1039,27 +1030,60 @@ class PipelineWindow(QtWidgets.QMainWindow):
             configured = self.pipeline.set_base_dir(selected)
             self.base_dir_input.setText(configured)
             self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Projects base directory set to: {configured}")
-            self.populate_existing_projects_combo()
-            self.update_target_preview()
+            self.refresh_current_project()
+            self.update_next_target_preview()
             self.refresh_queue()
 
     def fill_seo_prompt(self):
-        title = self.project_title_input.text().strip() or "this project"
+        title = self.next_title_input.text().strip() or self.current_title or "this project"
         prompt = (
             f"Based on {title}, give me the best github repo name with 400 character description "
             "for reaching organically to rank or any related search our repo will be searchable rank in google or github"
         )
-        self.prompt_input.setText(prompt)
+        self.next_prompt_input.setText(prompt)
         self.gh_check.setChecked(True)
         self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Loaded SEO Ranking Prompt Preset into input.")
 
     @queue_error_to_log
-    def add_task(self):
+    def add_current_project_tasks(self):
         if self.busy():
             self.log_box.append("Wait for the current task to finish before changing the queue.")
             return
 
-        raw_text = self.prompt_input.toPlainText().strip()
+        raw_text = self.current_prompt_input.toPlainText().strip()
+        if not raw_text:
+            self.log_box.append("Type a command above for the current project, or use Section 3 to add a new project.")
+            return
+
+        lines = [line.strip() for line in raw_text.split("\n") if line.strip()]
+        if not lines:
+            return
+
+        agent = self.agent_combo.currentData()
+        for prompt in lines:
+            self.pipeline.add(
+                prompt=prompt,
+                agent=agent,
+                project=self.current_path,
+                project_title=self.current_title,
+                project_slug=self.current_slug,
+                create_repo=False,
+            )
+
+        self.current_prompt_input.clear()
+        count = len(lines)
+        self.log_box.append(
+            f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Queued {count} step(s) into CURRENT project '{self.current_title}' [{self.current_slug}]"
+        )
+        self.refresh_queue()
+
+    @queue_error_to_log
+    def add_next_project_tasks(self):
+        if self.busy():
+            self.log_box.append("Wait for the current task to finish before changing the queue.")
+            return
+
+        raw_text = self.next_prompt_input.toPlainText().strip()
         if not raw_text:
             return
 
@@ -1067,8 +1091,8 @@ class PipelineWindow(QtWidgets.QMainWindow):
         if not lines:
             return
 
-        title = self.project_title_input.text().strip()
-        slug = self.project_slug_input.text().strip()
+        title = self.next_title_input.text().strip()
+        slug = self.next_slug_input.text().strip()
 
         if not slug:
             if title:
@@ -1100,7 +1124,10 @@ class PipelineWindow(QtWidgets.QMainWindow):
                 repo_desc=repo_desc,
             )
 
-        self.prompt_input.clear()
+        self.next_prompt_input.clear()
+        self.next_title_input.clear()
+        self.next_slug_input.clear()
+        self.next_target_preview_lbl.setText("")
         self.gh_name_input.clear()
         self.gh_desc_input.clear()
         self.gh_check.setChecked(False)
@@ -1108,18 +1135,10 @@ class PipelineWindow(QtWidgets.QMainWindow):
         count = len(lines)
         tag = f" [GH Repo: {repo_name}]" if create_repo else ""
         self.log_box.append(
-            f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Queued {count} step(s) into project '{title}' [slug: {slug}] -> {proj_dir}{tag}"
+            f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Queued project '{title}' [folder: {slug}] with {count} step(s){tag}"
         )
-
-        # Prepare form for the NEXT project if in New Project mode!
-        if self.radio_new_project.isChecked():
-            self.project_title_input.clear()
-            self.project_slug_input.clear()
-            self.project_title_input.setPlaceholderText("Next Project Title (e.g. 'Payment Service API')...")
-            self.btn_add.setText("+ Add Next Project to Pipeline")
-            self.project_title_input.setFocus()
-            self.log_box.append("Ready for Next Project: Enter next project title above to chain it!")
-
+        self.next_title_input.setPlaceholderText("Next Project Title (e.g. 'Payment Service API')...")
+        self.next_title_input.setFocus()
         self.refresh_queue()
 
     def refresh_queue(self):
@@ -1165,7 +1184,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
                 item.widget().deleteLater()
 
         if not grouped:
-            empty_lbl = QtWidgets.QLabel("Pipeline queue is empty. Enter project title and commands above to start.")
+            empty_lbl = QtWidgets.QLabel("Pipeline queue is empty. Enter commands for current project or add another project above to start.")
             empty_lbl.setStyleSheet("color: #64748b; font-style: italic; padding: 28px;")
             empty_lbl.setAlignment(Qt.AlignCenter)
             self.task_list_layout.insertWidget(0, empty_lbl)
@@ -1254,7 +1273,6 @@ class PipelineWindow(QtWidgets.QMainWindow):
             return
         self.pipeline.delete_project(project_slug)
         self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Removed project '{project_slug}' from pipeline.")
-        self.populate_existing_projects_combo()
         self.refresh_queue()
 
     def closeEvent(self, event):
@@ -1293,8 +1311,6 @@ class PipelineWindow(QtWidgets.QMainWindow):
             self.log_box.append("Wait for the current task to finish before changing the queue.")
             return
         self.pipeline.clear()
-        self.btn_add.setText("+ Add Project to Pipeline")
-        self.project_title_input.setPlaceholderText("Enter Project Title (e.g. 'Build Laravel Auth API')...")
         self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Pipeline cleared.")
         self.refresh_queue()
 
