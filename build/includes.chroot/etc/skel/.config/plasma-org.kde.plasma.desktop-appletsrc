@@ -81,7 +81,8 @@ plugin=org.kde.plasma.icontasks
 
 [Containments][3][Applets][6][Configuration][General]
 launchers=applications:devos-search.desktop,applications:devos-taskman.desktop,applications:devos-windows.desktop,applications:google-chrome.desktop,applications:devos-thispc.desktop,applications:devos-chat.desktop,applications:devos-code.desktop,applications:systemsettings.desktop,applications:devos-install.desktop
-groupingStrategy=0
+groupingStrategy=1
+groupInline=true
 hideActivatedLaunchers=true
 launchInPlace=true
 separateLaunchers=false
@@ -94,7 +95,7 @@ showOnlyCurrentActivity=false
 showOnlyCurrentScreen=false
 showToolTips=true
 highlightWindows=true
-sortingStrategy=0
+sortingStrategy=1
 maxStripes=1
 fill=false
 

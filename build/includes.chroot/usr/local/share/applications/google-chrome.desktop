@@ -5,6 +5,7 @@ GenericName=Web Browser
 Comment=Open the web in the language of this network
 Exec=devos-browser %U
 StartupNotify=true
+StartupWMClass=google-chrome
 Terminal=false
 Icon=google-chrome
 Type=Application

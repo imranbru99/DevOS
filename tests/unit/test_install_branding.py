@@ -181,7 +181,8 @@ class TestInstalledSystemBoot(unittest.TestCase):
         self.assertIn("ubuntu-desktop-bootstrap", read("build/hooks/02-disable-services.hook.chroot"))
         # Icons-only taskbar: running apps must not eat the panel width.
         self.assertIn("org.kde.plasma.icontasks", panel)
-        self.assertIn("groupingStrategy=0", panel)
+        self.assertIn("groupingStrategy=1", panel)
+        self.assertIn("sortingStrategy=1", panel)
         self.assertIn("onlyGroupWhenFull=false", panel)
         self.assertIn("devos-windows.desktop", panel)
         self.assertIn("devos-thispc.desktop", panel)
