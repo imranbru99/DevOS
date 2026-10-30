@@ -47,6 +47,46 @@ installed_id() {
             fi
         done
     done
+
+    # Also check if installed under another profile and auto-generate Default desktop file
+    for f in "$apps"/chrome-*-Profile_*.desktop "$apps"/chrome-*.desktop; do
+        [ -f "$f" ] || continue
+        n="$(sed -n 's/^Name=//p' "$f" | head -n 1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+        n="$(printf '%s' "$n" | tr '[:upper:]' '[:lower:]')"
+        IFS='|' read -ra wanted <<< "$names"
+        for w in "${wanted[@]}"; do
+            w="$(printf '%s' "$w" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr '[:upper:]' '[:lower:]')"
+            if [ -n "$w" ] && [ "$n" = "$w" ]; then
+                id="$(basename "$f" | sed -E 's/^chrome-([a-p]{32})(-.*)?\.desktop$/\1/')"
+                # Auto-generate Default desktop entry if missing
+                if [ ! -f "$apps/chrome-${id}-Default.desktop" ]; then
+                    cat << DESK > "$apps/chrome-${id}-Default.desktop"
+[Desktop Entry]
+Version=1.0
+Terminal=false
+Type=Application
+Name=${names%%|*}
+Comment=${names%%|*}
+Exec=/opt/google/chrome/google-chrome.devos-real --profile-directory=Default --app-id=${id}
+Icon=chrome-${id}-Default
+StartupWMClass=crx_${id}
+Categories=Network;Office;
+DESK
+                    # Copy vendor icons to Default
+                    for size in 32x32 48x48 128x128 256x256; do
+                        src="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/$size/apps/chrome-${id}-Profile_1.png"
+                        dst="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/$size/apps/chrome-${id}-Default.png"
+                        if [ -f "$src" ] && [ ! -f "$dst" ]; then
+                            mkdir -p "$(dirname "$dst")"
+                            cp -f "$src" "$dst" 2>/dev/null || true
+                        fi
+                    done
+                fi
+                printf '%s\n' "$id"
+                return 0
+            fi
+        done
+    done
     return 1
 }
 

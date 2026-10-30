@@ -532,11 +532,12 @@ def apply_window_profiles(home_dir=None):
         title = w["title"]
         active_wids.add(w["id"])
 
+        # Strictly ignore any Chrome PWA / Chrome App (starts with crx_) or Windows App
+        if "crx_" in wc or "windows app" in title.lower() or "setting up" in title.lower():
+            continue
+
         # Must be Chrome and have "Google Chrome" in title or be an explicitly launched chrome-* window
         if ("google-chrome" in wc or "chrome-" in wc) and ("google chrome" in title.lower() or wc.startswith("chrome-")):
-            # Skip Microsoft Windows App PWA or similar
-            if "windows app" in title.lower():
-                continue
             chrome_wins.append(w)
 
     # Clean up stale window profile cache entries
