@@ -133,8 +133,130 @@ def make_vector_sound_icon(name: str, size: int = 24, color: str = "#ffffff") ->
 # AUDIO BACKEND (PipeWire & PulseAudio via pactl / wpctl)
 # ============================================================================
 
+STATE_DIR = os.path.expanduser("~/.config/devos")
+DEFAULT_STATE_FILE = os.path.join(STATE_DIR, "sound_state.json")
+
+
 class AudioManager:
-    """Communicates directly with PipeWire / PulseAudio."""
+    """Communicates directly with PipeWire / PulseAudio with persistent volume tracking."""
+
+    _last_checked_sink: str = ""
+    _last_user_action_time: float = 0.0
+
+    @classmethod
+    def get_state_file_path(cls) -> str:
+        return os.environ.get("DEVOS_AUDIO_STATE_FILE", DEFAULT_STATE_FILE)
+
+    @classmethod
+    def load_tracked_state(cls) -> Dict[str, Any]:
+        """Loads persistent audio state from disk."""
+        path = cls.get_state_file_path()
+        default_state = {
+            "master_volume": 40,
+            "master_muted": False,
+            "default_sink": "",
+            "device_volumes": {},
+            "device_mutes": {},
+            "last_user_set_time": 0.0,
+        }
+        if not os.path.exists(path):
+            return default_state
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    default_state.update(data)
+        except Exception:
+            pass
+        return default_state
+
+    @classmethod
+    def save_tracked_state(cls, updates: Dict[str, Any]) -> None:
+        """Atomically saves persistent audio state to disk."""
+        current = cls.load_tracked_state()
+        current.update(updates)
+        path = cls.get_state_file_path()
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            tmp_path = path + f".tmp.{os.getpid()}"
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(current, f, indent=2)
+            os.replace(tmp_path, path)
+        except Exception:
+            pass
+
+    @classmethod
+    def restore_tracked_state(cls) -> Dict[str, Any]:
+        """Restores the last known user volume preferences to current audio sink."""
+        tracked = cls.load_tracked_state()
+        state = cls.get_audio_state()
+        cur_sink = state.get("default_sink", "")
+
+        dev_vols = tracked.get("device_volumes", {})
+        dev_mutes = tracked.get("device_mutes", {})
+
+        target_vol = dev_vols.get(cur_sink, tracked.get("master_volume", 40))
+        target_mute = dev_mutes.get(cur_sink, tracked.get("master_muted", False))
+
+        cls.set_master_volume(target_vol, is_user_action=False)
+        cls.set_master_mute(target_mute, is_user_action=False)
+        cls._last_checked_sink = cur_sink
+        return cls.get_audio_state()
+
+    @classmethod
+    def enforce_volume_protection(cls, current_state: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Anti-jump watchdog & route synchronization:
+        1. Protects against rogue apps / WirePlumber auto-spiking volume to 100%.
+        2. Detects sink switch (headphones, HDMI, speakers) and applies tracked per-device volume.
+        3. Persists legitimate volume adjustments (e.g. keyboard media keys or UI controls).
+        """
+        tracked = cls.load_tracked_state()
+        cur_sink = current_state.get("default_sink", "")
+        cur_vol = current_state.get("master_volume", 50)
+        cur_muted = current_state.get("master_muted", False)
+
+        tracked_vol = tracked.get("master_volume", 40)
+        dev_vols = tracked.get("device_volumes", {})
+        sink_tracked_vol = dev_vols.get(cur_sink, tracked_vol)
+        last_user_time = max(tracked.get("last_user_set_time", 0.0), cls._last_user_action_time)
+        now = time.time()
+
+        # Case 1: Active output sink changed (headphones plugged/unplugged, HDMI connected)
+        if cur_sink and cur_sink != cls._last_checked_sink:
+            cls._last_checked_sink = cur_sink
+            target_vol = dev_vols.get(cur_sink, tracked_vol)
+            cls.set_master_volume(target_vol, is_user_action=False)
+            current_state["master_volume"] = target_vol
+            return current_state
+
+        # Case 2: Rogue 100% Volume Jump detected!
+        # If master jumped to 100%, but user preference is < 95%, and user didn't explicitly request 100% in the last 3.5s
+        if cur_vol == 100 and sink_tracked_vol < 95 and (now - last_user_time) > 3.5:
+            # Auto-clamp back to user preference
+            cls.set_master_volume(sink_tracked_vol, is_user_action=False)
+            current_state["master_volume"] = sink_tracked_vol
+            return current_state
+
+        # Case 3: Legitimate external volume change (keyboard Fn keys, pactl, etc.)
+        # Ignore 0-1% idle glitches, and ignore 100% unless user explicitly set it
+        if 1 < cur_vol < 100 and cur_vol != sink_tracked_vol and (now - last_user_time) > 1.0:
+            dev_vols[cur_sink] = cur_vol
+            cls.save_tracked_state({
+                "master_volume": cur_vol,
+                "device_volumes": dev_vols,
+            })
+
+        # Track external mute changes
+        if cur_muted != tracked.get("master_muted", False) and (now - last_user_time) > 1.0:
+            dev_mutes = tracked.get("device_mutes", {})
+            dev_mutes[cur_sink] = cur_muted
+            cls.save_tracked_state({
+                "master_muted": cur_muted,
+                "device_mutes": dev_mutes,
+            })
+
+        return current_state
 
     @staticmethod
     def get_audio_state() -> Dict[str, Any]:
@@ -242,35 +364,83 @@ class AudioManager:
 
         return state
 
-    @staticmethod
-    def set_master_volume(percent: int):
-        percent = max(0, min(100, percent))
+    @classmethod
+    def set_master_volume(cls, percent: int, is_user_action: bool = True):
+        percent = max(0, min(100, int(percent)))
         try:
             subprocess.run(["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{percent}%"], check=False)
         except Exception:
             pass
 
-    @staticmethod
-    def set_master_mute(mute: bool):
+        if is_user_action:
+            cls._last_user_action_time = time.time()
+            tracked = cls.load_tracked_state()
+            dev_vols = tracked.get("device_volumes", {})
+            state = cls.get_audio_state()
+            sink_name = state.get("default_sink", "")
+            if sink_name:
+                dev_vols[sink_name] = percent
+            updates = {
+                "master_volume": percent,
+                "device_volumes": dev_vols,
+                "last_user_set_time": cls._last_user_action_time,
+            }
+            # Auto-unmute if user increases volume from 0 while muted
+            if percent > 0 and state.get("master_muted"):
+                updates["master_muted"] = False
+                try:
+                    subprocess.run(["pactl", "set-sink-mute", "@DEFAULT_SINK@", "0"], check=False)
+                except Exception:
+                    pass
+            cls.save_tracked_state(updates)
+
+    @classmethod
+    def set_master_mute(cls, mute: bool, is_user_action: bool = True):
         val = "1" if mute else "0"
         try:
             subprocess.run(["pactl", "set-sink-mute", "@DEFAULT_SINK@", val], check=False)
         except Exception:
             pass
 
-    @staticmethod
-    def toggle_master_mute():
-        try:
-            subprocess.run(["pactl", "set-sink-mute", "@DEFAULT_SINK@", "toggle"], check=False)
-        except Exception:
-            pass
+        if not mute:
+            state = cls.get_audio_state()
+            if state.get("master_volume", 0) == 0:
+                tracked = cls.load_tracked_state()
+                restore_vol = tracked.get("master_volume", 40)
+                if restore_vol > 0:
+                    cls.set_master_volume(restore_vol, is_user_action=False)
 
-    @staticmethod
-    def set_default_sink(sink_name: str):
+        if is_user_action:
+            cls._last_user_action_time = time.time()
+            tracked = cls.load_tracked_state()
+            dev_mutes = tracked.get("device_mutes", {})
+            state = cls.get_audio_state()
+            sink_name = state.get("default_sink", "")
+            if sink_name:
+                dev_mutes[sink_name] = mute
+            cls.save_tracked_state({
+                "master_muted": mute,
+                "device_mutes": dev_mutes,
+                "last_user_set_time": cls._last_user_action_time,
+            })
+
+    @classmethod
+    def toggle_master_mute(cls):
+        state = cls.get_audio_state()
+        new_mute = not state.get("master_muted", False)
+        cls.set_master_mute(new_mute, is_user_action=True)
+
+    @classmethod
+    def set_default_sink(cls, sink_name: str):
         try:
             subprocess.run(["pactl", "set-default-sink", sink_name], check=False)
         except Exception:
             pass
+        cls._last_checked_sink = sink_name
+        tracked = cls.load_tracked_state()
+        dev_vols = tracked.get("device_volumes", {})
+        target_vol = dev_vols.get(sink_name, tracked.get("master_volume", 40))
+        cls.set_master_volume(target_vol, is_user_action=False)
 
     @staticmethod
     def set_default_source(source_name: str):
@@ -925,6 +1095,7 @@ class WindowsVolumeFlyout(QWidget):
         self._updating = True
         try:
             state = AudioManager.get_audio_state()
+            state = AudioManager.enforce_volume_protection(state)
             mv = state.get("master_volume", 50)
             muted = state.get("master_muted", False)
             self.slider.setValue(mv)
@@ -982,6 +1153,12 @@ class DevOSSoundTray(QObject):
         self.tray = QSystemTrayIcon(self)
         self.flyout = WindowsVolumeFlyout()
         self.settings_window = None
+
+        # Restore last known volume on tray daemon startup
+        try:
+            AudioManager.restore_tracked_state()
+        except Exception:
+            pass
 
         self._setup_tray()
 
@@ -1055,6 +1232,7 @@ class DevOSSoundTray(QObject):
 
     def update_tray_icon(self):
         state = AudioManager.get_audio_state()
+        state = AudioManager.enforce_volume_protection(state)
         mv = state.get("master_volume", 50)
         muted = state.get("master_muted", False)
 
@@ -1096,11 +1274,17 @@ def main():
     parser.add_argument("--toggle-mute", action="store_true", help="Toggle master audio mute")
     parser.add_argument("--status", action="store_true", help="Print audio status JSON and exit")
     parser.add_argument("--test", action="store_true", help="Play test sound chime and exit")
+    parser.add_argument("--restore", "--restore-volume", dest="restore", action="store_true", help="Restore last tracked volume level")
 
     args = parser.parse_args()
 
     if args.status:
         print(json.dumps(AudioManager.get_audio_state(), indent=2))
+        return
+
+    if args.restore:
+        state = AudioManager.restore_tracked_state()
+        print(f"Restored master volume to {state.get('master_volume')}% (Muted: {state.get('master_muted')})")
         return
 
     if args.test:
@@ -1139,6 +1323,10 @@ def main():
         tray_ctl = DevOSSoundTray(app)
         sys.exit(app.exec_())
     else:
+        try:
+            AudioManager.restore_tracked_state()
+        except Exception:
+            pass
         win = WindowsSoundSettingsWindow()
         win.show()
         sys.exit(app.exec_())
