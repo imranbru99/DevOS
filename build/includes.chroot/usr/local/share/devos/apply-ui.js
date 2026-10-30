@@ -30,8 +30,8 @@ if (panelList.length === 0) {
     var tasks = panel.addWidget("org.kde.plasma.icontasks");
     tasks.currentConfigGroup = ["General"];
     tasks.writeConfig("launchers", "applications:devos-search.desktop,applications:devos-taskman.desktop,applications:devos-windows.desktop,applications:google-chrome.desktop,applications:devos-thispc.desktop,applications:devos-chat.desktop,applications:devos-code.desktop,applications:systemsettings.desktop");
-    tasks.writeConfig("groupingStrategy", 1);
-    tasks.writeConfig("groupInline", true);
+    tasks.writeConfig("groupingStrategy", 0);
+    tasks.writeConfig("groupInline", false);
     tasks.writeConfig("iconSpacing", 1);
     tasks.writeConfig("groupPopups", true);
     tasks.writeConfig("onlyGroupWhenFull", false);

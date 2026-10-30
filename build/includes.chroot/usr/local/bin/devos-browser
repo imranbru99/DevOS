@@ -85,13 +85,40 @@ for uevent in /sys/class/drm/card*/device/uevent; do
     fi
 done
 
-# Check if guest mode was requested
+# Inject policy override so Chrome Guest Mode and Add Person are always enabled
+override_so="/usr/local/lib/devos/libdevos_browser_override.so"
+user_override_so="${XDG_DATA_HOME:-$HOME/.local}/lib/devos/libdevos_browser_override.so"
+if [ -f "$override_so" ]; then
+    export LD_PRELOAD="${override_so}${LD_PRELOAD:+:$LD_PRELOAD}"
+elif [ -f "$user_override_so" ]; then
+    export LD_PRELOAD="${user_override_so}${LD_PRELOAD:+:$LD_PRELOAD}"
+fi
+
+# Sync profile badged icons & desktop launchers
+sync_script="/usr/local/share/devos/components/browser/chrome_profiles.py"
+user_sync_script="${XDG_DATA_HOME:-$HOME/.local}/share/devos/components/browser/chrome_profiles.py"
+if [ -f "$sync_script" ]; then
+    python3 "$sync_script" sync >/dev/null 2>&1 &
+elif [ -f "$user_sync_script" ]; then
+    python3 "$user_sync_script" sync >/dev/null 2>&1 &
+fi
+
+# Check if guest mode or specific profile was requested
 is_guest=0
+prof_dir=""
+has_class=0
 for arg in "$@"; do
-    if [ "$arg" = "--guest" ]; then
-        is_guest=1
-        break
-    fi
+    case "$arg" in
+        --guest)
+            is_guest=1
+            ;;
+        --profile-directory=*)
+            prof_dir="${arg#--profile-directory=}"
+            ;;
+        --class=*)
+            has_class=1
+            ;;
+    esac
 done
 
 if [ "$is_guest" -eq 1 ]; then
@@ -101,7 +128,7 @@ if [ "$is_guest" -eq 1 ]; then
         rm -rf "$guest_tmp"
     }
     trap cleanup EXIT INT TERM HUP
-    "$chrome" "${args[@]}" --user-data-dir="$guest_tmp" --no-first-run --no-default-browser-check "$@" &
+    "$chrome" "${args[@]}" --class="chrome-guest" --user-data-dir="$guest_tmp" --no-first-run --no-default-browser-check "$@" &
     cpid=$!
     trap 'kill "$cpid" 2>/dev/null; cleanup; exit 0' INT TERM HUP
     wait "$cpid" 2>/dev/null || true
@@ -109,19 +136,16 @@ if [ "$is_guest" -eq 1 ]; then
     exit 0
 fi
 
-# Ensure managed policy allows guest mode in profile switcher even on systems
-# with active older familysafe policy file
-chrome_cmd=("$chrome")
-managed_policy="/etc/opt/chrome/policies/managed/devos-familysafe.json"
-if [ -f "$managed_policy" ] && grep -q '"BrowserGuestModeEnabled"[[:space:]]*:[[:space:]]*false' "$managed_policy"; then
-    override_dir="${XDG_CONFIG_HOME:-$HOME/.config}/devos/chrome-policies"
-    mkdir -p "$override_dir"
-    override_file="$override_dir/devos-familysafe.json"
-    sed 's/"BrowserGuestModeEnabled"[[:space:]]*:[[:space:]]*false/"BrowserGuestModeEnabled": true/' "$managed_policy" > "$override_file"
-    if command -v bwrap >/dev/null 2>&1; then
-        chrome_cmd=(bwrap --dev-bind / / --ro-bind "$override_file" "$managed_policy" "$chrome")
+# Assign profile class if not already explicitly specified
+if [ "$has_class" -eq 0 ]; then
+    if [ -n "$prof_dir" ]; then
+        # Map profile directory to safe slug
+        slug=$(echo "$prof_dir" | tr '[:upper:]' '[:lower:]' | tr -c '[:alnum:]' '-')
+        args+=(--class="chrome-${slug}")
     fi
 fi
+
+chrome_cmd=("$chrome")
 
 log=$(mktemp)
 "${chrome_cmd[@]}" "${args[@]}" "$@" >"$log" 2>&1 &

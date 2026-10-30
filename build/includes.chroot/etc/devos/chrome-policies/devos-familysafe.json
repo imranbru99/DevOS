@@ -1,0 +1,8 @@
+{
+  "DnsOverHttpsMode": "off",
+  "ForceGoogleSafeSearch": true,
+  "ForceYouTubeRestrict": 1,
+  "IncognitoModeAvailability": 1,
+  "BrowserGuestModeEnabled": true,
+  "BrowserAddPersonEnabled": true
+}
