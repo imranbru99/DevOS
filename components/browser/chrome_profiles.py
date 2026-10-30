@@ -250,6 +250,45 @@ def sync_all_profiles(home_dir=None):
         else "devos-browser"
     )
 
+    # Build complete desktop actions for switching to any profile or guest mode
+    action_keys = ["new-window", "new-private-window", "new-guest-window"]
+    action_blocks = []
+
+    for key, name in all_profiles:
+        slug = slugify(key if key == "guest" else (name or key))
+        action_id = f"profile-{slug}"
+        action_keys.append(action_id)
+
+        if key == "guest":
+            exec_line = f"{devos_bin} --guest --class=chrome-guest"
+            icon_line = "chrome-guest"
+        else:
+            exec_line = f'{devos_bin} --profile-directory="{key}" --class=chrome-{slug}'
+            icon_line = f"chrome-{slug}"
+
+        action_blocks.append(f"""
+[Desktop Action {action_id}]
+Name={name}
+Exec={exec_line}
+Icon={icon_line}
+""")
+
+    actions_str = ";".join(action_keys) + ";"
+    common_actions = f"""Actions={actions_str}
+
+[Desktop Action new-window]
+Name=New Window
+Exec={devos_bin}
+
+[Desktop Action new-private-window]
+Name=New Incognito Window
+Exec={devos_bin} --incognito
+
+[Desktop Action new-guest-window]
+Name=New Guest Window
+Exec={devos_bin} --guest
+""" + "".join(action_blocks)
+
     for key, name in all_profiles:
         slug = slugify(key if key == "guest" else (name or key))
         icon_name = f"chrome-{slug}"
@@ -278,13 +317,29 @@ Terminal=false
 Icon={icon_name}
 Type=Application
 Categories=Network;WebBrowser;
-"""
+{common_actions}"""
         with open(desktop_file, "w", encoding="utf-8") as f:
             f.write(content)
         created_desktops.append(desktop_file)
 
     # Update google-chrome.desktop with all profile actions
-    update_google_chrome_desktop(home_dir, all_profiles)
+    user_desktop = os.path.join(home_dir, ".local/share/applications/google-chrome.desktop")
+    base_content = f"""[Desktop Entry]
+Version=1.0
+Name=Google Chrome
+GenericName=Web Browser
+Comment=Access the Internet
+Exec={devos_bin} %U
+StartupNotify=true
+StartupWMClass=google-chrome
+Terminal=false
+Icon=google-chrome
+Type=Application
+Categories=Network;WebBrowser;
+MimeType=application/pdf;application/rdf+xml;application/rss+xml;application/xhtml+xml;application/xhtml_xml;application/xml;image/gif;image/jpeg;image/png;image/webp;text/html;text/xml;x-scheme-handler/http;x-scheme-handler/https;
+{common_actions}"""
+    with open(user_desktop, "w", encoding="utf-8") as f:
+        f.write(base_content)
 
     # Ensure com.google.Chrome.desktop symlinks to google-chrome.desktop so pinned launcher unifies in-place
     com_chrome = os.path.join(apps_dir, "com.google.Chrome.desktop")
@@ -431,50 +486,10 @@ def set_window_wm_class(wid, class_name, class_inst=None):
 
 def set_plasma_chrome_pinned_launcher(visible=True):
     """
-    Dynamically add or remove the pinned Google Chrome launcher in Plasma's
-    icontasks applet so that when browser windows are open, the pinned launcher
-    is hidden (preventing blank unbadged icons), and restored when all windows close.
+    Plasma icontasks natively handles hideActivatedLaunchers=true and launchInPlace=true.
+    We do not manipulate launchers dynamically over DBus to protect the user's pinned apps.
     """
-    try:
-        import subprocess
-
-        want_visible = "true" if visible else "false"
-        script = f"""
-var ps = panels();
-for (var i = 0; i < ps.length; i++) {{
-    var ws = ps[i].widgets();
-    for (var j = 0; j < ws.length; j++) {{
-        if (ws[j].type === "org.kde.plasma.icontasks") {{
-            var w = ws[j];
-            w.currentConfigGroup = ["General"];
-            var cur = w.readConfig("launchers") || "";
-            var items = cur.split(",").filter(function(x) {{ return x.length > 0; }});
-            var chromeItem = "applications:google-chrome.desktop";
-            var hasChrome = items.indexOf(chromeItem) !== -1;
-            var wantVisible = {want_visible};
-            if (wantVisible && !hasChrome) {{
-                items.push(chromeItem);
-                w.writeConfig("launchers", items.join(","));
-            }} else if (!wantVisible && hasChrome) {{
-                items = items.filter(function(x) {{
-                    return x !== chromeItem && x !== "applications:com.google.Chrome.desktop";
-                }});
-                w.writeConfig("launchers", items.join(","));
-            }}
-        }}
-    }}
-}}
-"""
-        cmd = ["qdbus6", "org.kde.plasmashell", "/PlasmaShell", "org.kde.PlasmaShell.evaluateScript", script]
-        subprocess.run(
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=2.0,
-            check=False,
-        )
-    except Exception:
-        pass
+    pass
 
 
 def get_profile_session_data(chrome_config_dir):
@@ -764,8 +779,6 @@ def apply_window_profiles(home_dir=None):
         del WINDOW_PROFILE_CACHE[wid]
 
     if not chrome_wins:
-        # No Chrome windows open: restore pinned Google Chrome launcher and clean stock icon
-        set_plasma_chrome_pinned_launcher(visible=True)
         stock_icon = get_stock_chrome_icon()
         if stock_icon:
             user_icon_48 = os.path.join(home_dir, ".local/share/icons/hicolor/48x48/apps/google-chrome.png")
@@ -778,9 +791,6 @@ def apply_window_profiles(home_dir=None):
                 pass
         return 0
 
-    # Chrome windows ARE open: hide pinned Chrome launcher so NO blank icon remains on taskbar
-    set_plasma_chrome_pinned_launcher(visible=False)
-
     chrome_dir = os.path.join(home_dir, ".config/google-chrome")
     prof_session_data = get_profile_session_data(chrome_dir)
 
@@ -790,7 +800,7 @@ def apply_window_profiles(home_dir=None):
     assigned_profiles = set()
     processed = 0
 
-    for w in chrome_wins:
+    for idx, w in enumerate(chrome_wins):
         prof_name = detect_window_profile(w, profiles, home_dir, assigned_profiles, prof_session_data)
         assigned_profiles.add(prof_name)
         slug = slugify(prof_name)
@@ -804,10 +814,24 @@ def apply_window_profiles(home_dir=None):
         # Apply _NET_WM_ICON directly to window
         set_window_icon(w["id"], prof_icon_48, prof_icon_128)
 
-        # Each window gets its distinct profile desktop entry and WM_CLASS
-        desktop_slug = f"chrome-{slug}.desktop"
-        set_window_desktop_file(w["id"], desktop_slug)
-        set_window_wm_class(w["id"], f"chrome-{slug}", f"chrome-{slug}")
+        if idx == 0:
+            # Primary window unifies in-place with the pinned google-chrome.desktop launcher
+            set_window_desktop_file(w["id"], "google-chrome.desktop")
+            set_window_wm_class(w["id"], "google-chrome", "Google-chrome")
+
+            # Update user's google-chrome.png to show Window 0's profile badge
+            user_icon_48 = os.path.join(icons_dir_48, "google-chrome.png")
+            user_icon_128 = os.path.join(icons_dir_128, "google-chrome.png")
+            try:
+                shutil.copyfile(prof_icon_48, user_icon_48)
+                shutil.copyfile(prof_icon_128, user_icon_128)
+            except Exception:
+                pass
+        else:
+            # Subsequent windows: separate ungrouped task items with distinct badged icons and names
+            desktop_slug = f"chrome-{slug}.desktop"
+            set_window_desktop_file(w["id"], desktop_slug)
+            set_window_wm_class(w["id"], f"chrome-{slug}", f"chrome-{slug}")
 
         processed += 1
 

@@ -250,6 +250,45 @@ def sync_all_profiles(home_dir=None):
         else "devos-browser"
     )
 
+    # Build complete desktop actions for switching to any profile or guest mode
+    action_keys = ["new-window", "new-private-window", "new-guest-window"]
+    action_blocks = []
+
+    for key, name in all_profiles:
+        slug = slugify(key if key == "guest" else (name or key))
+        action_id = f"profile-{slug}"
+        action_keys.append(action_id)
+
+        if key == "guest":
+            exec_line = f"{devos_bin} --guest --class=chrome-guest"
+            icon_line = "chrome-guest"
+        else:
+            exec_line = f'{devos_bin} --profile-directory="{key}" --class=chrome-{slug}'
+            icon_line = f"chrome-{slug}"
+
+        action_blocks.append(f"""
+[Desktop Action {action_id}]
+Name={name}
+Exec={exec_line}
+Icon={icon_line}
+""")
+
+    actions_str = ";".join(action_keys) + ";"
+    common_actions = f"""Actions={actions_str}
+
+[Desktop Action new-window]
+Name=New Window
+Exec={devos_bin}
+
+[Desktop Action new-private-window]
+Name=New Incognito Window
+Exec={devos_bin} --incognito
+
+[Desktop Action new-guest-window]
+Name=New Guest Window
+Exec={devos_bin} --guest
+""" + "".join(action_blocks)
+
     for key, name in all_profiles:
         slug = slugify(key if key == "guest" else (name or key))
         icon_name = f"chrome-{slug}"
@@ -278,13 +317,29 @@ Terminal=false
 Icon={icon_name}
 Type=Application
 Categories=Network;WebBrowser;
-"""
+{common_actions}"""
         with open(desktop_file, "w", encoding="utf-8") as f:
             f.write(content)
         created_desktops.append(desktop_file)
 
     # Update google-chrome.desktop with all profile actions
-    update_google_chrome_desktop(home_dir, all_profiles)
+    user_desktop = os.path.join(home_dir, ".local/share/applications/google-chrome.desktop")
+    base_content = f"""[Desktop Entry]
+Version=1.0
+Name=Google Chrome
+GenericName=Web Browser
+Comment=Access the Internet
+Exec={devos_bin} %U
+StartupNotify=true
+StartupWMClass=google-chrome
+Terminal=false
+Icon=google-chrome
+Type=Application
+Categories=Network;WebBrowser;
+MimeType=application/pdf;application/rdf+xml;application/rss+xml;application/xhtml+xml;application/xhtml_xml;application/xml;image/gif;image/jpeg;image/png;image/webp;text/html;text/xml;x-scheme-handler/http;x-scheme-handler/https;
+{common_actions}"""
+    with open(user_desktop, "w", encoding="utf-8") as f:
+        f.write(base_content)
 
     # Ensure com.google.Chrome.desktop symlinks to google-chrome.desktop so pinned launcher unifies in-place
     com_chrome = os.path.join(apps_dir, "com.google.Chrome.desktop")
@@ -429,54 +484,149 @@ def set_window_wm_class(wid, class_name, class_inst=None):
         pass
 
 
-def get_profile_tab_domains(chrome_config_dir):
-    """Extract significant domains open in each profile from Sessions/Tabs_*."""
-    domains_map = {}
+def set_plasma_chrome_pinned_launcher(visible=True):
+    """
+    Plasma icontasks natively handles hideActivatedLaunchers=true and launchInPlace=true.
+    We do not manipulate launchers dynamically over DBus to protect the user's pinned apps.
+    """
+    pass
+
+
+def get_profile_session_data(chrome_config_dir):
+    """
+    Extract tab titles and domains open in each profile from Sessions/Session_* and Sessions/Tabs_*.
+    Also reads bookmarks for deterministic window title matching.
+    """
+    prof_data = {}
     if not os.path.isdir(chrome_config_dir):
-        return domains_map
+        return prof_data
+
     for p in os.listdir(chrome_config_dir):
         sess_dir = os.path.join(chrome_config_dir, p, "Sessions")
-        if not os.path.isdir(sess_dir):
-            continue
-        files = sorted(glob.glob(os.path.join(sess_dir, "Tabs_*")), key=os.path.getmtime)
-        if not files:
-            continue
+        titles = set()
+        domains = set()
+        latest_mtime = 0
+
+        # Read bookmarks
+        for b_name in ["Bookmarks", "AccountBookmarks"]:
+            b_path = os.path.join(chrome_config_dir, p, b_name)
+            if os.path.isfile(b_path):
+                try:
+                    with open(b_path, "r", encoding="utf-8", errors="ignore") as bf:
+                        b_json = json.load(bf)
+                    # recursively get names
+                    def _extract_bm(node):
+                        if isinstance(node, dict):
+                            if node.get("type") == "url":
+                                name = node.get("name")
+                                if name and len(name) >= 3:
+                                    titles.add(name.strip().lower())
+                            for v in node.values():
+                                _extract_bm(v)
+                        elif isinstance(node, list):
+                            for item in node:
+                                _extract_bm(item)
+                    _extract_bm(b_json)
+                except Exception:
+                    pass
+
+        # Read sessions
+        if os.path.isdir(sess_dir):
+            for fn in glob.glob(os.path.join(sess_dir, "*")):
+                bn = os.path.basename(fn)
+                if bn.startswith("Apps_"):
+                    continue
+                try:
+                    mt = os.path.getmtime(fn)
+                    if mt > latest_mtime:
+                        latest_mtime = mt
+                    with open(fn, "rb") as f:
+                        data = f.read()
+
+                    # Extract UTF-16LE titles
+                    for m in re.finditer(b"(?:[\x20-\x7e]\x00){4,}", data):
+                        s = m.group(0).decode("utf-16le", errors="ignore").strip()
+                        if len(s) >= 3 and not s.startswith("http") and not s.startswith("<!--") and not s.startswith("{"):
+                            titles.add(s.lower())
+
+                    # Extract URLs and domains
+                    urls = re.findall(rb"https?://([a-zA-Z0-9\.\-_]+)", data)
+                    for u in urls:
+                        parts = u.decode("utf-8", errors="ignore").lower().split(".")
+                        if len(parts) >= 2:
+                            domains.add(parts[-2])
+                except Exception:
+                    pass
+
+        prof_data[p] = {
+            "titles": titles,
+            "domains": domains,
+            "mtime": latest_mtime,
+        }
+    return prof_data
+
+
+def get_profile_tab_domains(chrome_config_dir):
+    """Extract significant domains open in each profile (legacy helper)."""
+    data = get_profile_session_data(chrome_config_dir)
+    return {k: v["domains"] for k, v in data.items()}
+
+
+def get_ranked_active_profiles(chrome_dir, profiles):
+    """
+    Return profile keys ordered by recent active browser usage,
+    ignoring background PWAs that touch Default.
+    """
+    ranked = []
+    seen = set()
+
+    local_state = os.path.join(chrome_dir, "Local State")
+    if os.path.isfile(local_state):
         try:
-            with open(files[-1], "rb") as f:
-                data = f.read()
-            urls = re.findall(rb"https?://([a-zA-Z0-9\.\-_]+)", data)
-            domains = set()
-            for u in urls:
-                parts = u.decode("utf-8", errors="ignore").lower().split(".")
-                if len(parts) >= 2:
-                    domains.add(parts[-2])
-            domains_map[p] = domains
+            with open(local_state, "r", encoding="utf-8") as f:
+                ls = json.load(f)
+            last_active = ls.get("profile", {}).get("last_active_profiles") or []
+            for p in last_active:
+                if p in profiles and p not in seen:
+                    ranked.append(p)
+                    seen.add(p)
         except Exception:
             pass
-    return domains_map
+
+    # Sort remaining profiles by session modification times
+    sess_times = []
+    for p in profiles:
+        if p in seen:
+            continue
+        sdir = os.path.join(chrome_dir, p, "Sessions")
+        mtime = 0
+        if os.path.isdir(sdir):
+            for fn in glob.glob(os.path.join(sdir, "*")):
+                if not os.path.basename(fn).startswith("Apps_"):
+                    mt = os.path.getmtime(fn)
+                    if mt > mtime:
+                        mtime = mt
+        sess_times.append((mtime, p))
+
+    sess_times.sort(reverse=True)
+    for _, p in sess_times:
+        ranked.append(p)
+        seen.add(p)
+
+    return ranked
 
 
-def detect_window_profile(w, profiles, home_dir=None):
+def detect_window_profile(w, profiles, home_dir=None, assigned_profiles=None, prof_session_data=None):
     """
     Determine profile name from window attributes and session activity:
-    e.g. WM_CLASS "chrome-mirza" -> "Mirza"
-         Title "Facebook - Google Chrome" -> "Tony" (from Profile 2 tabs)
-         Title "WhatsApp - Google Chrome" -> "Mirza" (from Profile 1 tabs)
+    - Title containing profile markers like [ProfileName] or (Guest)
+    - Tab title and bookmark match from profile Sessions/Session_* and Bookmarks
+    - Explicit launch WM_CLASS (e.g. chrome-blog)
+    - Active profile session ranking for generic titles (New Tab)
     """
     wid = w.get("id") if isinstance(w, dict) else None
     title = w.get("title", "") if isinstance(w, dict) else str(w)
     wm_class = w.get("wm_class", "") if isinstance(w, dict) else ""
-
-    if wid and wid in WINDOW_PROFILE_CACHE:
-        return WINDOW_PROFILE_CACHE[wid]
-
-    # Check wm_class if launched with --class=chrome-<slug>
-    for p_key, p_name in profiles.items():
-        slug = slugify(p_name)
-        if f"chrome-{slug}" in wm_class.lower():
-            if wid:
-                WINDOW_PROFILE_CACHE[wid] = p_name
-            return p_name
 
     # Check for [ProfileName]
     m = re.search(r"\[([^\]]+)\]", title)
@@ -492,7 +642,7 @@ def detect_window_profile(w, profiles, home_dir=None):
             WINDOW_PROFILE_CACHE[wid] = "Guest"
         return "Guest"
 
-    # Check profile names explicitly mentioned in title
+    # Check profile names explicitly mentioned in title (e.g. "Work - Google Chrome")
     for p_key, p_name in profiles.items():
         if p_name and p_name.lower() != "work":
             if f"({p_name})" in title or f" - {p_name}" in title:
@@ -500,58 +650,94 @@ def detect_window_profile(w, profiles, home_dir=None):
                     WINDOW_PROFILE_CACHE[wid] = p_name
                 return p_name
 
-    # Match domain / tab keywords against profile active sessions
     if not home_dir:
         home_dir = os.path.expanduser("~")
     chrome_dir = os.path.join(home_dir, ".config/google-chrome")
-    tab_domains = get_profile_tab_domains(chrome_dir)
-    title_lower = title.lower()
 
-    for prof_key, domains in tab_domains.items():
-        p_name = profiles.get(prof_key, prof_key)
-        for d in domains:
-            if len(d) >= 4 and d in title_lower:
+    if prof_session_data is None:
+        prof_session_data = get_profile_session_data(chrome_dir)
+
+    # Clean title for comparison
+    title_clean = title.replace(" - Google Chrome", "").strip().lower()
+    keywords = [kw for kw in re.findall(r"[a-zA-Z0-9]+", title_clean) if len(kw) >= 4]
+
+    # Rank profiles by match score for this title
+    # Sort profiles by session mtime descending
+    sorted_profs = sorted(
+        prof_session_data.items(),
+        key=lambda item: item[1].get("mtime", 0),
+        reverse=True,
+    )
+
+    best_prof = None
+    best_score = 0
+
+    for p_key, sdata in sorted_profs:
+        if p_key not in profiles:
+            continue
+        p_name = profiles[p_key]
+        score = 0
+
+        # Exact title match
+        for t in sdata.get("titles", []):
+            if t == title_clean:
+                score += 150
+            elif len(t) >= 5 and (t in title_clean or title_clean in t):
+                score += 100
+
+        # Keyword match
+        for d in sdata.get("domains", []):
+            if len(d) >= 4 and d in title_clean:
+                score += 40
+
+        # Recency bonus
+        if score > 0:
+            mtime = sdata.get("mtime", 0)
+            recency = max(0, 30 - int((time.time() - mtime) / 3600))
+            score += recency
+
+            # Penalty if already assigned to another open window
+            if assigned_profiles and p_name in assigned_profiles:
+                score -= 30
+
+            if score > best_score:
+                best_score = score
+                best_prof = p_name
+
+    if best_prof and best_score >= 40:
+        if wid:
+            WINDOW_PROFILE_CACHE[wid] = best_prof
+        return best_prof
+
+    # If already cached and valid, keep cached assignment
+    if wid and wid in WINDOW_PROFILE_CACHE:
+        return WINDOW_PROFILE_CACHE[wid]
+
+    # Check wm_class if launched explicitly with --class=chrome-<slug>
+    for p_key, p_name in profiles.items():
+        slug = slugify(p_name)
+        if f"chrome-{slug}" in wm_class.lower():
+            if wid:
+                WINDOW_PROFILE_CACHE[wid] = p_name
+            return p_name
+
+    # Unassigned fallback using ranked active profiles
+    ranked_keys = get_ranked_active_profiles(chrome_dir, profiles)
+    if assigned_profiles:
+        # Pick first active profile not yet assigned to an open window
+        for k in ranked_keys:
+            name = profiles.get(k, k)
+            if name not in assigned_profiles:
                 if wid:
-                    WINDOW_PROFILE_CACHE[wid] = p_name
-                return p_name
+                    WINDOW_PROFILE_CACHE[wid] = name
+                return name
 
-    # Check most recently active profile in Local State or Sessions
-    local_state = os.path.join(chrome_dir, "Local State")
-    if os.path.isfile(local_state):
-        try:
-            with open(local_state, "r", encoding="utf-8") as f:
-                d = json.load(f)
-            prof_key = d.get("profile", {}).get("last_used")
-            if not prof_key:
-                active_list = d.get("profile", {}).get("last_active_profiles")
-                if active_list and isinstance(active_list, list) and active_list[0]:
-                    prof_key = active_list[0]
-            if prof_key and prof_key in profiles:
-                p_name = profiles[prof_key]
-                if wid:
-                    WINDOW_PROFILE_CACHE[wid] = p_name
-                return p_name
-        except Exception:
-            pass
-
-    # Check session directory mtimes
-    times = []
-    for p in os.listdir(chrome_dir):
-        sess_dir = os.path.join(chrome_dir, p, "Sessions")
-        if os.path.isdir(sess_dir):
-            files = glob.glob(os.path.join(sess_dir, "Session_*"))
-            if files:
-                mtime = max(os.path.getmtime(f) for f in files)
-                times.append((mtime, p))
-    if times:
-        times.sort(reverse=True)
-        recent_p = times[0][1]
-        p_name = profiles.get(recent_p, "Work")
+    if ranked_keys:
+        p_name = profiles.get(ranked_keys[0], "Work")
         if wid:
             WINDOW_PROFILE_CACHE[wid] = p_name
         return p_name
 
-    # Default profile name
     default_name = profiles.get("Default", "Work")
     if wid:
         WINDOW_PROFILE_CACHE[wid] = default_name
@@ -560,9 +746,10 @@ def detect_window_profile(w, profiles, home_dir=None):
 
 def apply_window_profiles(home_dir=None):
     """
-    Inspect all open Chrome windows and assign profile desktop files and icons.
-    Window 0 unifies with google-chrome.desktop to keep the pinned launcher satisfied.
-    Windows 1, 2, ... are assigned chrome-<slug>.desktop to display as distinct items.
+    Inspect all open Chrome windows and assign profile desktop files and badged icons.
+    Each profile window gets its own badged icon and desktop entry on the taskbar.
+    When browser windows are open, the pinned launcher is hidden so no blank/unbadged
+    icons remain. When all windows close, the pinned launcher is restored.
     """
     if not home_dir:
         home_dir = os.path.expanduser("~")
@@ -592,7 +779,6 @@ def apply_window_profiles(home_dir=None):
         del WINDOW_PROFILE_CACHE[wid]
 
     if not chrome_wins:
-        # No Chrome windows open: ensure google-chrome icon is clean stock icon
         stock_icon = get_stock_chrome_icon()
         if stock_icon:
             user_icon_48 = os.path.join(home_dir, ".local/share/icons/hicolor/48x48/apps/google-chrome.png")
@@ -605,13 +791,18 @@ def apply_window_profiles(home_dir=None):
                 pass
         return 0
 
+    chrome_dir = os.path.join(home_dir, ".config/google-chrome")
+    prof_session_data = get_profile_session_data(chrome_dir)
+
     icons_dir_48 = os.path.join(home_dir, ".local/share/icons/hicolor/48x48/apps")
     icons_dir_128 = os.path.join(home_dir, ".local/share/icons/hicolor/128x128/apps")
 
-    # Group windows by detected profile
+    assigned_profiles = set()
     processed = 0
+
     for idx, w in enumerate(chrome_wins):
-        prof_name = detect_window_profile(w, profiles, home_dir)
+        prof_name = detect_window_profile(w, profiles, home_dir, assigned_profiles, prof_session_data)
+        assigned_profiles.add(prof_name)
         slug = slugify(prof_name)
 
         # Ensure badged icon for this profile exists
@@ -624,7 +815,7 @@ def apply_window_profiles(home_dir=None):
         set_window_icon(w["id"], prof_icon_48, prof_icon_128)
 
         if idx == 0:
-            # Primary Chrome window: unifies with the pinned google-chrome.desktop launcher
+            # Primary window unifies in-place with the pinned google-chrome.desktop launcher
             set_window_desktop_file(w["id"], "google-chrome.desktop")
             set_window_wm_class(w["id"], "google-chrome", "Google-chrome")
 
@@ -637,7 +828,7 @@ def apply_window_profiles(home_dir=None):
             except Exception:
                 pass
         else:
-            # Secondary Chrome windows: separate ungrouped task items with badged icons
+            # Subsequent windows: separate ungrouped task items with distinct badged icons and names
             desktop_slug = f"chrome-{slug}.desktop"
             set_window_desktop_file(w["id"], desktop_slug)
             set_window_wm_class(w["id"], f"chrome-{slug}", f"chrome-{slug}")
@@ -659,7 +850,13 @@ def watch_chrome_windows(home_dir=None, poll_interval=1.0):
     while True:
         try:
             wins = get_x11_windows()
-            chrome_wins = [w for w in wins if "google-chrome" in w["wm_class"].lower() or "chrome-" in w["wm_class"].lower()]
+            chrome_wins = [
+                w for w in wins
+                if ("google-chrome" in w["wm_class"].lower() or "chrome-" in w["wm_class"].lower())
+                and "crx_" not in w["wm_class"].lower()
+                and "windows app" not in w["title"].lower()
+                and "setting up" not in w["title"].lower()
+            ]
             cur_state = [(w["id"], w["title"]) for w in chrome_wins]
 
             if cur_state != last_win_state:
