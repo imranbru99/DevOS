@@ -440,7 +440,7 @@ class StepRow(QtWidgets.QFrame):
         self.setObjectName("step_row")
         self.init_ui()
 
-    def view_full_prompt(self):
+    def view_full_prompt(self, *args, **kwargs):
         dlg = FullPromptViewerDialog(self.step_idx, self.task, parent=self)
         dlg.exec_()
 
@@ -781,21 +781,21 @@ class ProjectPipelineCard(QtWidgets.QFrame):
             self.steps_container.setVisible(False)
             self.btn_toggle.setText("▼")
 
-    def goto_prev_step(self):
+    def goto_prev_step(self, *args, **kwargs):
         if not self.step_rows:
             return
         if self.current_step_idx > 0:
             self.current_step_idx -= 1
             self.update_step_visibility()
 
-    def goto_next_step(self):
+    def goto_next_step(self, *args, **kwargs):
         if not self.step_rows:
             return
         if self.current_step_idx < len(self.step_rows) - 1:
             self.current_step_idx += 1
             self.update_step_visibility()
 
-    def toggle_all_steps_view(self):
+    def toggle_all_steps_view(self, *args, **kwargs):
         self.show_all_mode = not self.show_all_mode
         if hasattr(self, "btn_all_steps"):
             self.btn_all_steps.setText("Focused View" if self.show_all_mode else "Show All Steps")
@@ -816,6 +816,7 @@ class ProjectPipelineCard(QtWidgets.QFrame):
         if hasattr(self, "btn_next_step"):
             self.btn_next_step.setEnabled(self.current_step_idx < total - 1)
 
+        target_row = self.step_rows[self.current_step_idx]
         if self.show_all_mode:
             for idx, r in enumerate(self.step_rows):
                 r.setVisible(True)
@@ -828,7 +829,15 @@ class ProjectPipelineCard(QtWidgets.QFrame):
                 r.setVisible(idx == self.current_step_idx)
                 r.setStyleSheet("")
 
-    def toggle_steps(self):
+        # Automatically ensure active step is scrolled into view
+        p = self.parent()
+        while p:
+            if isinstance(p, QtWidgets.QScrollArea):
+                p.ensureWidgetVisible(target_row)
+                break
+            p = p.parent()
+
+    def toggle_steps(self, *args, **kwargs):
         visible = not self.steps_container.isVisible()
         self.steps_container.setVisible(visible)
         self.btn_toggle.setText("▲" if visible else "▼")
@@ -2226,7 +2235,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
             except Exception as e:
                 QtWidgets.QMessageBox.critical(self, "File Load Error", f"Could not load file:\n{e}")
 
-    def navigate_next_prompt_next(self):
+    def navigate_next_prompt_next(self, *args, **kwargs):
         """Navigate cursor forward to the next '---' command step."""
         text = self.next_prompt_input.toPlainText()
         cursor = self.next_prompt_input.textCursor()
@@ -2238,7 +2247,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
             self.next_prompt_input.setTextCursor(cursor)
             self.next_prompt_input.ensureCursorVisible()
 
-    def navigate_next_prompt_prev(self):
+    def navigate_next_prompt_prev(self, *args, **kwargs):
         """Navigate cursor backward to the upper (previous) '---' command step."""
         text = self.next_prompt_input.toPlainText()
         cursor = self.next_prompt_input.textCursor()
@@ -2254,7 +2263,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
             self.next_prompt_input.setTextCursor(cursor)
             self.next_prompt_input.ensureCursorVisible()
 
-    def navigate_cur_prompt_next(self):
+    def navigate_cur_prompt_next(self, *args, **kwargs):
         """Navigate cursor forward to the next '---' command step in current project input."""
         text = self.current_prompt_input.toPlainText()
         cursor = self.current_prompt_input.textCursor()
@@ -2266,7 +2275,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
             self.current_prompt_input.setTextCursor(cursor)
             self.current_prompt_input.ensureCursorVisible()
 
-    def navigate_cur_prompt_prev(self):
+    def navigate_cur_prompt_prev(self, *args, **kwargs):
         """Navigate cursor backward to the upper (previous) '---' command step in current project input."""
         text = self.current_prompt_input.toPlainText()
         cursor = self.current_prompt_input.textCursor()
