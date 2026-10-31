@@ -507,43 +507,8 @@ class ProjectPipelineCard(QtWidgets.QFrame):
 
     def init_ui(self):
         main_layout = QtWidgets.QVBoxLayout(self)
-        main_layout.setContentsMargins(16, 14, 16, 14)
-        main_layout.setSpacing(10)
-
-        # Header Bar
-        header = QtWidgets.QHBoxLayout()
-        header.setSpacing(10)
-
-        title_vbox = QtWidgets.QVBoxLayout()
-        title_vbox.setSpacing(3)
-
-        title_hbox = QtWidgets.QHBoxLayout()
-        title_hbox.setSpacing(8)
-
-        tag_badge = QtWidgets.QLabel("PROJECT")
-        tag_badge.setObjectName("tag_label")
-        title_hbox.addWidget(tag_badge)
-
-        title_lbl = QtWidgets.QLabel(self.project_data.get("title", "Project"))
-        title_lbl.setStyleSheet("font-size: 15px; font-weight: 700; color: #f8fafc;")
-        title_hbox.addWidget(title_lbl)
-
-        slug = self.project_data.get("slug", "project")
-        slug_badge = QtWidgets.QLabel(f"slug: {slug}")
-        slug_badge.setObjectName("badge_slug")
-        title_hbox.addWidget(slug_badge)
-
-        title_hbox.addStretch()
-        title_vbox.addLayout(title_hbox)
-
-        # Local Path info
-        proj_dir = self.project_data.get("dir", "")
-        path_lbl = QtWidgets.QLabel(f"Path: {proj_dir}")
-        path_lbl.setObjectName("path_info")
-        path_lbl.setToolTip(proj_dir)
-        title_vbox.addWidget(path_lbl)
-
-        header.addLayout(title_vbox, stretch=1)
+        main_layout.setContentsMargins(14, 12, 14, 12)
+        main_layout.setSpacing(6)
 
         # Project Status calculation
         tasks = self.project_data.get("tasks", [])
@@ -580,47 +545,82 @@ class ProjectPipelineCard(QtWidgets.QFrame):
             status_color = "#94a3b8"
             bg_color = "#1e293b"
 
+        # ROW 1: Project Title on Left, Action Buttons on Right (ALWAYS PINNED AND VISIBLE)
+        row1 = QtWidgets.QHBoxLayout()
+        row1.setSpacing(8)
+
+        tag_badge = QtWidgets.QLabel("PROJECT")
+        tag_badge.setObjectName("tag_label")
+        row1.addWidget(tag_badge)
+
+        title_lbl = QtWidgets.QLabel(self.project_data.get("title", "Project"))
+        title_lbl.setStyleSheet("font-size: 14px; font-weight: 700; color: #f8fafc;")
+        title_lbl.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
+        row1.addWidget(title_lbl, stretch=1)
+
+        # Right-aligned actions container
+        actions_box = QtWidgets.QHBoxLayout()
+        actions_box.setSpacing(6)
+
         status_pill = QtWidgets.QLabel(status_text)
         status_pill.setStyleSheet(
             f"background-color: {bg_color}; color: {status_color}; font-size: 11px; font-weight: 700; "
-            f"padding: 4px 10px; border-radius: 5px; border: 1px solid {status_color}44;"
+            f"padding: 3px 8px; border-radius: 5px; border: 1px solid {status_color}44;"
         )
-        header.addWidget(status_pill)
+        actions_box.addWidget(status_pill)
 
-        # Open Folder button
+        proj_dir = self.project_data.get("dir", "")
         if proj_dir:
-            btn_folder = QtWidgets.QPushButton("Open Folder")
+            btn_folder = QtWidgets.QPushButton("Folder")
             btn_folder.setObjectName("small_btn")
             btn_folder.setToolTip(f"Open {proj_dir} in file manager")
             btn_folder.clicked.connect(lambda: self.open_local_folder(proj_dir))
-            header.addWidget(btn_folder)
+            actions_box.addWidget(btn_folder)
 
-        # Open GitHub button if project has github url
         gh_url = self.project_data.get("github_url")
         if gh_url:
             btn_gh = QtWidgets.QPushButton("GitHub")
             btn_gh.setObjectName("small_btn")
-            btn_gh.setStyleSheet("background-color: #238636; color: white; font-weight: 600; padding: 4px 10px; border-radius: 5px;")
+            btn_gh.setStyleSheet("background-color: #238636; color: white; font-weight: 600; padding: 3px 8px; border-radius: 5px;")
             btn_gh.clicked.connect(lambda: subprocess.Popen(["xdg-open", gh_url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
-            header.addWidget(btn_gh)
+            actions_box.addWidget(btn_gh)
 
-        # Delete project button (only if not currently running)
+        slug = self.project_data.get("slug", "project")
         if not running_tasks and self.on_delete_project:
-            btn_del_proj = QtWidgets.QPushButton("X")
-            btn_del_proj.setObjectName("danger_small")
-            btn_del_proj.setToolTip(f"Remove project '{slug}' and its commands from queue")
-            btn_del_proj.clicked.connect(lambda: self.on_delete_project(slug))
-            header.addWidget(btn_del_proj)
+            btn_del_proj = QtWidgets.QPushButton("✕ Delete")
+            btn_del_proj.setStyleSheet(
+                "background-color: #581c1c; color: #fca5a5; font-weight: 700; font-size: 11px; "
+                "padding: 3px 8px; border-radius: 4px; border: 1px solid #b91c1c;"
+            )
+            btn_del_proj.setToolTip(f"Delete project '{slug}' and all its tasks from queue")
+            btn_del_proj.clicked.connect(lambda _, s=slug: self.on_delete_project(s))
+            actions_box.addWidget(btn_del_proj)
 
-        # Toggle Expand/Collapse button
         self.btn_toggle = QtWidgets.QPushButton("▲")
         self.btn_toggle.setObjectName("small_btn")
-        self.btn_toggle.setFixedWidth(28)
+        self.btn_toggle.setFixedWidth(26)
         self.btn_toggle.setToolTip("Expand or collapse project steps")
         self.btn_toggle.clicked.connect(self.toggle_steps)
-        header.addWidget(self.btn_toggle)
+        actions_box.addWidget(self.btn_toggle)
 
-        main_layout.addLayout(header)
+        row1.addLayout(actions_box)
+        main_layout.addLayout(row1)
+
+        # ROW 2: Slug badge and Path (separate row so it never clips buttons)
+        row2 = QtWidgets.QHBoxLayout()
+        row2.setSpacing(8)
+
+        slug_badge = QtWidgets.QLabel(f"slug: {slug}")
+        slug_badge.setObjectName("badge_slug")
+        row2.addWidget(slug_badge)
+
+        path_lbl = QtWidgets.QLabel(f"📁 {proj_dir}")
+        path_lbl.setObjectName("path_info")
+        path_lbl.setToolTip(proj_dir)
+        path_lbl.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
+        row2.addWidget(path_lbl, stretch=1)
+
+        main_layout.addLayout(row2)
 
         # Progress bar (if more than 1 task)
         if total_tasks > 1:
@@ -1383,6 +1383,17 @@ class PipelineWindow(QtWidgets.QMainWindow):
         )
         queue_header_row.addWidget(self.queue_badge_lbl)
         queue_header_row.addStretch()
+
+        btn_clear_all_projects = QtWidgets.QPushButton("🗑 Clear All Projects")
+        btn_clear_all_projects.setObjectName("danger_small")
+        btn_clear_all_projects.setStyleSheet(
+            "background-color: #450a0a; color: #fca5a5; font-size: 11px; font-weight: 700; "
+            "padding: 3px 10px; border: 1px solid #7f1d1d; border-radius: 5px;"
+        )
+        btn_clear_all_projects.setToolTip("Delete all projects and commands from the queue")
+        btn_clear_all_projects.clicked.connect(lambda: self.clear_queue())
+        queue_header_row.addWidget(btn_clear_all_projects)
+
         right_layout.addLayout(queue_header_row)
 
         # Scroll Area for Project Pipeline Cards
@@ -1864,6 +1875,14 @@ class PipelineWindow(QtWidgets.QMainWindow):
             return
         self.pipeline.delete_project(project_slug)
         self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Removed project '{project_slug}' from pipeline.")
+        if hasattr(self, "toast_banner"):
+            self.toast_banner.setText(f"🗑 Removed project '{project_slug}' from queue.")
+            self.toast_banner.setStyleSheet(
+                "background-color: #450a0a; color: #fca5a5; font-weight: 700; font-size: 13px; "
+                "padding: 8px 14px; border-radius: 8px; border: 1px solid #dc2626;"
+            )
+            self.toast_banner.show()
+            QtCore.QTimer.singleShot(3500, self.toast_banner.hide)
         self.refresh_queue()
 
     def closeEvent(self, event):
@@ -1979,12 +1998,21 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.refresh_queue()
 
     @queue_error_to_log
-    def clear_queue(self):
+    def clear_queue(self, *args, **kwargs):
         if self.busy():
             self.log_box.append("Wait for the current task to finish before changing the queue.")
             return
+        count = len(self.pipeline.list())
         self.pipeline.clear()
-        self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Pipeline cleared.")
+        self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Pipeline cleared ({count} tasks removed).")
+        if hasattr(self, "toast_banner"):
+            self.toast_banner.setText(f"🗑 Cleared all projects from pipeline ({count} tasks removed).")
+            self.toast_banner.setStyleSheet(
+                "background-color: #450a0a; color: #fca5a5; font-weight: 700; font-size: 13px; "
+                "padding: 8px 14px; border-radius: 8px; border: 1px solid #dc2626;"
+            )
+            self.toast_banner.show()
+            QtCore.QTimer.singleShot(3500, self.toast_banner.hide)
         self.refresh_queue()
 
 
