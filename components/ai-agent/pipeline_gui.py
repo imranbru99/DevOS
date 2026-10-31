@@ -14,6 +14,7 @@ import datetime
 import functools
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -1213,6 +1214,20 @@ class PipelineWindow(QtWidgets.QMainWindow):
         btn_rescan_cur.clicked.connect(lambda: self.refresh_current_project(manual=True))
         cur_header.addWidget(btn_rescan_cur)
 
+        btn_reset_cur = QtWidgets.QPushButton("Reset")
+        btn_reset_cur.setObjectName("small_btn")
+        btn_reset_cur.setToolTip("Reset active working project back to dev-os")
+        btn_reset_cur.setStyleSheet("background-color: #1e293b; color: #94a3b8; font-size: 10px; padding: 2px 6px; border: 1px solid #334155; border-radius: 4px;")
+        btn_reset_cur.clicked.connect(self.reset_current_project)
+        cur_header.addWidget(btn_reset_cur)
+
+        btn_del_folder = QtWidgets.QPushButton("🗑 Delete Folder")
+        btn_del_folder.setObjectName("danger_small")
+        btn_del_folder.setToolTip("Permanently delete this project folder from disk")
+        btn_del_folder.setStyleSheet("background-color: #450a0a; color: #fca5a5; font-size: 10px; padding: 2px 6px; border: 1px solid #7f1d1d; border-radius: 4px;")
+        btn_del_folder.clicked.connect(self.delete_current_project_folder)
+        cur_header.addWidget(btn_del_folder)
+
         cur_layout.addLayout(cur_header)
 
         self.cur_proj_path_lbl = QtWidgets.QLabel(f"Path: {self.current_path}")
@@ -1485,25 +1500,94 @@ class PipelineWindow(QtWidgets.QMainWindow):
             agent = self.agent_combo.currentData()
 
         cur_slug, cur_title, cur_path = detect_current_project(self.pipeline.get_base_dir(), agent=agent)
-        if cur_slug:
-            prev_slug = getattr(self, "current_slug", None)
-            self.current_slug = cur_slug
-            self.current_title = cur_title or cur_slug.replace("-", " ").title()
-            self.current_path = cur_path or str(Path(self.pipeline.get_base_dir()) / self.current_slug)
+        if not cur_slug:
+            cur_slug = "dev-os"
+            cur_title = "Dev Os"
+            cur_path = str(Path(self.pipeline.get_base_dir()) / cur_slug)
 
-            if hasattr(self, "cur_proj_title_lbl"):
-                self.cur_proj_title_lbl.setText(f"{self.current_title} ({self.current_slug})")
-                self.cur_proj_path_lbl.setText(f"Path: {self.current_path}")
-                self.current_prompt_input.setPlaceholderText(
-                    f"Enter command(s) for Current Project '{self.current_slug}'... (Optional: leave empty to proceed to next project)"
-                )
+        prev_slug = getattr(self, "current_slug", None)
+        self.current_slug = cur_slug
+        self.current_title = cur_title or cur_slug.replace("-", " ").title()
+        self.current_path = cur_path or str(Path(self.pipeline.get_base_dir()) / self.current_slug)
 
-            if hasattr(self, "log_box") and (manual or (prev_slug and prev_slug != cur_slug)):
-                known = discover_agents()
-                ag_name = known.get(agent, {}).get("name", (agent or "Agent").title())
-                self.log_box.append(
-                    f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Detected active project for {ag_name}: '{self.current_title}' [{self.current_slug}] ({self.current_path})"
-                )
+        if hasattr(self, "cur_proj_title_lbl"):
+            self.cur_proj_title_lbl.setText(f"{self.current_title} ({self.current_slug})")
+            self.cur_proj_path_lbl.setText(f"Path: {self.current_path}")
+            self.current_prompt_input.setPlaceholderText(
+                f"Enter command(s) for Current Project '{self.current_slug}'... (Optional: leave empty to proceed to next project)"
+            )
+
+        if hasattr(self, "log_box") and (manual or (prev_slug and prev_slug != cur_slug)):
+            known = discover_agents()
+            ag_name = known.get(agent, {}).get("name", (agent or "Agent").title())
+            self.log_box.append(
+                f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Detected active project for {ag_name}: '{self.current_title}' [{self.current_slug}] ({self.current_path})"
+            )
+
+    def reset_current_project(self, *args, **kwargs):
+        """Reset Section 2 active project back to default dev-os workspace."""
+        base_dir = self.pipeline.get_base_dir()
+        self.current_slug = "dev-os"
+        self.current_title = "Dev Os"
+        self.current_path = str(Path(base_dir) / self.current_slug)
+
+        if hasattr(self, "cur_proj_title_lbl"):
+            self.cur_proj_title_lbl.setText(f"{self.current_title} ({self.current_slug})")
+            self.cur_proj_path_lbl.setText(f"Path: {self.current_path}")
+            self.current_prompt_input.setPlaceholderText(
+                f"Enter command(s) for Current Project '{self.current_slug}'... (Optional: leave empty to proceed to next project)"
+            )
+            self.current_prompt_input.clear()
+
+        if hasattr(self, "show_toast"):
+            self.show_toast("Active project reset to 'dev-os'.")
+        if hasattr(self, "log_box"):
+            self.log_box.append(
+                f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Active project manually reset to dev-os ({self.current_path})"
+            )
+
+    def delete_current_project_folder(self, *args, **kwargs):
+        """Delete current project folder from disk after user confirmation."""
+        slug = getattr(self, "current_slug", "dev-os")
+        path_str = getattr(self, "current_path", "")
+        if not path_str or slug in ("dev-os", ""):
+            QtWidgets.QMessageBox.information(
+                self,
+                "Cannot Delete Default Project",
+                f"Project '{slug}' is the root workspace default and cannot be deleted from here.",
+            )
+            return
+
+        folder = Path(path_str)
+        if not folder.exists():
+            QtWidgets.QMessageBox.information(
+                self,
+                "Folder Does Not Exist",
+                f"The folder '{folder}' does not exist on disk.\nResetting active project back to dev-os.",
+            )
+            self.reset_current_project()
+            return
+
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "Confirm Delete Folder",
+            f"Are you sure you want to permanently delete project '{slug}' from disk?\n\nPath:\n{folder}\n\nThis cannot be undone!",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No,
+        )
+        if reply == QtWidgets.QMessageBox.Yes:
+            try:
+                shutil.rmtree(folder)
+                if hasattr(self, "show_toast"):
+                    self.show_toast(f"Deleted folder '{slug}'.", is_error=False)
+                if hasattr(self, "log_box"):
+                    self.log_box.append(
+                        f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Deleted project folder: {folder}"
+                    )
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "Deletion Failed", f"Could not delete '{folder}':\n{e}")
+                return
+            self.reset_current_project()
 
     def on_next_title_changed(self, text):
         self.next_slug_input.setText(to_slug(text))
