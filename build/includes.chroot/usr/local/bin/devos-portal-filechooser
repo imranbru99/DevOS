@@ -10,6 +10,7 @@ import json
 import mimetypes
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -39,20 +40,29 @@ def parse_portal_folder(folder_val):
     return str(folder_val)
 
 
+def clean_glob_pattern(pat):
+    """Normalize regex character classes in globs like *.[pP][dD][fF] to clean *.pdf."""
+    if not pat:
+        return pat
+    cleaned = re.sub(r"\[([a-zA-Z0-9])(?:[^\]])*\]", lambda m: m.group(1).lower(), pat)
+    cleaned = cleaned.replace("?", "")
+    return cleaned
+
+
 def format_portal_filters_for_cli(filters_data):
     if not filters_data:
         return "All Files (*.*)"
     chunks = []
     for item in filters_data:
         try:
-            name = str(item[0])
+            name = clean_glob_pattern(str(item[0]))
             specs = item[1]
             globs = []
             for spec in specs:
                 spec_type = int(spec[0])
                 spec_val = str(spec[1])
                 if spec_type == 0:  # glob pattern
-                    globs.append(spec_val)
+                    globs.append(clean_glob_pattern(spec_val))
                 elif spec_type == 1:  # mime type
                     exts = mimetypes.guess_all_extensions(spec_val)
                     if exts:
@@ -129,7 +139,7 @@ class DevOSFileChooserPortal(dbus.service.Object):
         dialog_title = str(title) if title else ("Save As" if save_mode else "Open File")
         multiple = bool(options.get("multiple", False))
         directory = bool(options.get("directory", False))
-        current_name = str(options.get("current_name", ""))
+        current_name = clean_glob_pattern(str(options.get("current_name", "")))
         current_folder = parse_portal_folder(options.get("current_folder"))
         current_file = parse_portal_folder(options.get("current_file"))
         if current_file:

@@ -695,6 +695,15 @@ def format_bytes(num):
     return f"{val:.0f} bytes"
 
 
+def clean_glob_pattern(pat):
+    """Normalize regex character classes in globs like *.[pP][dD][fF] to clean *.pdf."""
+    if not pat:
+        return pat
+    cleaned = re.sub(r"\[([a-zA-Z0-9])(?:[^\]])*\]", lambda m: m.group(1).lower(), pat)
+    cleaned = cleaned.replace("?", "")
+    return cleaned
+
+
 def parse_filter_string(filter_str):
     """Parse filter string such as 'Images (*.png *.jpg);;All Files (*.*)' into [(label, [patterns])]."""
     res = []
@@ -704,10 +713,12 @@ def parse_filter_string(filter_str):
     for p in parts:
         m = re.search(r"\(([^)]+)\)", p)
         if m:
-            pats = [x.strip() for x in re.split(r"[\s,;]+", m.group(1)) if x.strip()]
-            res.append((p, pats))
+            raw_pats = [x.strip() for x in re.split(r"[\s,;]+", m.group(1)) if x.strip()]
+            cleaned_pats = [clean_glob_pattern(x) for x in raw_pats]
+            cleaned_label = clean_glob_pattern(p)
+            res.append((cleaned_label, cleaned_pats))
         else:
-            res.append((p, ["*.*"]))
+            res.append((clean_glob_pattern(p), ["*.*"]))
     return res or [("All Files (*.*)", ["*.*"])]
 
 
@@ -4045,7 +4056,7 @@ class WindowsFileExplorer(QMainWindow):
             lbl_name.setObjectName("pickerLabel")
             self.picker_name_edit = QLineEdit()
             self.picker_name_edit.setObjectName("pickerEdit")
-            initial_name = self._picker_options.get("name", "")
+            initial_name = clean_glob_pattern(self._picker_options.get("name", ""))
             if initial_name:
                 self.picker_name_edit.setText(initial_name)
             elif is_dir and self._current_path:
@@ -5574,11 +5585,13 @@ class WindowsFileExplorer(QMainWindow):
             resolved.append(p)
 
         if is_save:
-            chosen = resolved[0]
+            chosen = clean_glob_pattern(resolved[0])
             if self._current_filter_patterns and not os.path.splitext(chosen)[1]:
-                first_pat = self._current_filter_patterns[0]
+                first_pat = clean_glob_pattern(self._current_filter_patterns[0])
                 if first_pat.startswith("*."):
-                    chosen += first_pat[1:]
+                    ext = first_pat[1:]
+                    if ext and ext != ".*":
+                        chosen += ext
             self._on_picker_accept_paths([chosen])
         else:
             existing = [p for p in resolved if os.path.exists(p)]
@@ -5587,11 +5600,14 @@ class WindowsFileExplorer(QMainWindow):
             elif len(resolved) == 1 and not os.path.exists(resolved[0]):
                 if self._current_filter_patterns:
                     for pat in self._current_filter_patterns:
-                        if pat.startswith("*."):
-                            cand = resolved[0] + pat[1:]
-                            if os.path.exists(cand):
-                                self._on_picker_accept_paths([cand])
-                                return
+                        clean_pat = clean_glob_pattern(pat)
+                        if clean_pat.startswith("*."):
+                            ext = clean_pat[1:]
+                            if ext and ext != ".*":
+                                cand = resolved[0] + ext
+                                if os.path.exists(cand):
+                                    self._on_picker_accept_paths([cand])
+                                    return
 
     def _on_picker_accept_paths(self, paths):
         self.selected_files = [os.path.abspath(p) for p in paths]
