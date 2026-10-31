@@ -19,6 +19,7 @@ from task_pipeline import (
     extract_repo_metadata,
     discover_agents,
     to_slug,
+    split_prompts,
     get_grouped_projects,
     detect_current_project,
     list_existing_projects,
@@ -352,6 +353,56 @@ class TestTaskPipeline(unittest.TestCase):
         self.assertIn("3. ADD NEXT PROJECT", win.next_badge_lbl.text())
         
         win.close()
+
+    def test_split_prompts_preserves_large_multi_paragraph_prompt(self):
+        # 5000-word prompt simulation with multiple lines, paragraphs, and markdown
+        paragraphs = [
+            "# MASTER PROJECT PROMPT: Cloud Accounting Platform",
+            "You are a world-class team of software architects and senior developers.",
+            "Features:\n- Invoices & recurring billing\n- Double-entry general ledger\n- Multi-currency & VAT tax",
+            "Database Schema:\n```sql\nCREATE TABLE invoices (id INT PRIMARY KEY);\n```",
+            "Deliver complete, production-ready code.",
+        ]
+        large_spec = "\n\n".join(paragraphs)
+        result = split_prompts(large_spec)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0], large_spec)
+
+    def test_split_prompts_with_step_separators(self):
+        # Multi-step prompt separated by '---'
+        text = (
+            "Step 1: Build the complete accounting core.\nWith multi-line details.\n"
+            "\n---\n"
+            "Step 2: Add comprehensive unit tests with Pest/PHPUnit.\n"
+            "\n---\n"
+            "Step 3: Build multi-stage Docker container.\n"
+        )
+        steps = split_prompts(text)
+        self.assertEqual(len(steps), 3)
+        self.assertTrue(steps[0].startswith("Step 1"))
+        self.assertIn("With multi-line details.", steps[0])
+        self.assertTrue(steps[1].startswith("Step 2"))
+        self.assertTrue(steps[2].startswith("Step 3"))
+
+    def test_split_prompts_empty(self):
+        self.assertEqual(split_prompts(""), [])
+        self.assertEqual(split_prompts("   \n\n  "), [])
+
+    def test_prompt_editor_dialog(self):
+        from PyQt5 import QtWidgets
+        import pipeline_gui
+        app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(["--platform", "offscreen"])
+        dlg = pipeline_gui.PromptEditorDialog(
+            initial_text="Step 1: Core SaaS Spec\n---\nStep 2: Testing Suite",
+            project_name="Test SaaS"
+        )
+        self.assertIn("Test SaaS", dlg.windowTitle())
+        self.assertIn("2 Sequential Steps Detected", dlg.metrics_lbl.text())
+        dlg.insert_step_separator()
+        self.assertIn("---", dlg.get_text())
+        dlg.append_steps_25()
+        self.assertIn("OWASP", dlg.get_text())
+        dlg.close()
 
 
 if __name__ == "__main__":

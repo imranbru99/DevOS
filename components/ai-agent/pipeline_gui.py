@@ -33,6 +33,8 @@ from task_pipeline import (
     discover_agents,
     is_agent_working,
     to_slug,
+    split_prompts,
+    notify,
     get_grouped_projects,
     detect_current_project,
     list_existing_projects,
@@ -937,6 +939,7 @@ class BatchProjectDialog(QtWidgets.QDialog):
                 project_slug=slug,
                 create_repo=create_repo,
                 repo_name=slug if create_repo else "",
+                notify_desktop=False,
             )
 
             # Steps 2-5
@@ -950,9 +953,145 @@ class BatchProjectDialog(QtWidgets.QDialog):
                     project_title=title,
                     project_slug=slug,
                     create_repo=False,
+                    notify_desktop=False,
                 )
 
+        total_steps = len(lines) * (1 + len(shared_steps))
+        notify("Batch Generated", f"Queued {len(lines)} projects ({total_steps} sequential steps)")
         self.accept()
+
+
+class PromptEditorDialog(QtWidgets.QDialog):
+    """Large, dedicated multi-paragraph prompt and specification editor.
+    Perfect for 5,000+ word architecture prompts, with live step detection,
+    word counting, file loading, and template insertion.
+    """
+    def __init__(self, initial_text: str = "", project_name: str = "", parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"📝 Master Specification & Sequential Steps Editor — {project_name or 'Project'}")
+        self.resize(860, 600)
+        self.setStyleSheet(STYLE)
+        self.init_ui(initial_text)
+
+    def init_ui(self, initial_text):
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(10)
+
+        # Header with actions
+        hdr = QtWidgets.QHBoxLayout()
+        title_lbl = QtWidgets.QLabel("Master Prompt & Sequential Steps Editor")
+        title_lbl.setStyleSheet("font-size: 15px; font-weight: 800; color: #38bdf8;")
+        hdr.addWidget(title_lbl)
+
+        hdr.addStretch()
+
+        btn_load = QtWidgets.QPushButton("📄 Load Prompt File (.md / .txt)")
+        btn_load.setObjectName("small_btn")
+        btn_load.setStyleSheet("background-color: #0f172a; color: #38bdf8; font-size: 11px; padding: 4px 10px; border: 1px solid #1e293b; border-radius: 5px;")
+        btn_load.clicked.connect(self.load_from_file)
+        hdr.addWidget(btn_load)
+
+        btn_sep = QtWidgets.QPushButton("+ Insert Step Separator (---)")
+        btn_sep.setObjectName("small_btn")
+        btn_sep.setStyleSheet("background-color: #1e1b4b; color: #a5b4fc; font-size: 11px; padding: 4px 10px; border: 1px solid #312e81; border-radius: 5px;")
+        btn_sep.clicked.connect(self.insert_step_separator)
+        hdr.addWidget(btn_sep)
+
+        btn_steps25 = QtWidgets.QPushButton("✨ Append Steps 2–5")
+        btn_steps25.setObjectName("small_btn")
+        btn_steps25.setStyleSheet("background-color: #064e3b; color: #6ee7b7; font-size: 11px; padding: 4px 10px; border: 1px solid #047857; border-radius: 5px;")
+        btn_steps25.clicked.connect(self.append_steps_25)
+        hdr.addWidget(btn_steps25)
+
+        layout.addLayout(hdr)
+
+        # Main Text Editor
+        self.editor = QtWidgets.QTextEdit()
+        self.editor.setPlaceholderText(
+            "Paste or write your full master project specification here (5,000+ words, markdown, code blocks, lists all supported).\n\n"
+            "To add sequential commands/steps for this project, separate them with '---' on a new line:\n\n"
+            "Step 1: [Master 5,000-word Full Application Specification]\n"
+            "---\n"
+            "Step 2: Add comprehensive unit tests with Pest/PHPUnit\n"
+            "---\n"
+            "Step 3: Create Dockerfile and docker-compose.yml"
+        )
+        self.editor.setFont(QtGui.QFont("Monospace", 10))
+        self.editor.setPlainText(initial_text)
+        self.editor.textChanged.connect(self.update_metrics)
+        layout.addWidget(self.editor, stretch=1)
+
+        # Metrics bar: live words, characters, and steps count
+        self.metrics_lbl = QtWidgets.QLabel("")
+        self.metrics_lbl.setStyleSheet("color: #94a3b8; font-size: 11px; font-weight: 600;")
+        layout.addWidget(self.metrics_lbl)
+
+        # Bottom Buttons
+        btn_box = QtWidgets.QHBoxLayout()
+        btn_cancel = QtWidgets.QPushButton("Cancel")
+        btn_cancel.clicked.connect(self.reject)
+        btn_box.addWidget(btn_cancel)
+
+        btn_box.addStretch()
+
+        btn_apply = QtWidgets.QPushButton("✔ Apply to Project")
+        btn_apply.setObjectName("primary")
+        btn_apply.setStyleSheet("background-color: #2563eb; color: white; font-weight: 700; padding: 7px 18px; border-radius: 6px;")
+        btn_apply.clicked.connect(self.accept)
+        btn_box.addWidget(btn_apply)
+
+        layout.addLayout(btn_box)
+        self.update_metrics()
+
+    def update_metrics(self):
+        text = self.editor.toPlainText().strip()
+        words = len(text.split()) if text else 0
+        chars = len(text)
+        steps = split_prompts(text)
+        count = len(steps)
+        if not text:
+            self.metrics_lbl.setText("Empty • Ready to paste or load spec")
+        elif count == 1:
+            self.metrics_lbl.setText(f"📝 1 Master Prompt Step ({words:,} words, {chars:,} characters) • Use '---' to add subsequent steps")
+        else:
+            breakdown = ", ".join(f"Step {i+1}: {len(s.split()):,} words" for i, s in enumerate(steps[:4]))
+            if count > 4:
+                breakdown += f", +{count - 4} more"
+            self.metrics_lbl.setText(f"📝 {count} Sequential Steps Detected ({words:,} total words) — [{breakdown}]")
+
+    def insert_step_separator(self):
+        cursor = self.editor.textCursor()
+        cursor.insertText("\n\n---\n\n")
+        self.editor.setFocus()
+
+    def append_steps_25(self):
+        current = self.editor.toPlainText().rstrip()
+        append_txt = (
+            "\n\n---\n"
+            "Step 2: Add comprehensive unit and integration tests with 90%+ code coverage.\n"
+            "---\n"
+            "Step 3: Create production multi-stage Dockerfile, docker-compose.yml, and CI/CD workflow.\n"
+            "---\n"
+            "Step 4: Audit code for security vulnerabilities, sanitize inputs, and verify OWASP compliance.\n"
+            "---\n"
+            "Step 5: Generate complete API documentation, endpoint markdown, and production README.md."
+        )
+        self.editor.setPlainText(current + append_txt if current else append_txt.lstrip())
+
+    def load_from_file(self):
+        selected, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Select Specification / Prompt File", str(Path.home()), "Markdown / Text Files (*.md *.txt *.prompt);;All Files (*)"
+        )
+        if selected:
+            try:
+                content = Path(selected).read_text(encoding="utf-8", errors="ignore")
+                self.editor.setPlainText(content)
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "Load Failed", f"Could not read file:\n{e}")
+
+    def get_text(self) -> str:
+        return self.editor.toPlainText().strip()
 
 
 class PipelineWindow(QtWidgets.QMainWindow):
@@ -1235,6 +1374,43 @@ class PipelineWindow(QtWidgets.QMainWindow):
         cur_layout.addWidget(self.cur_proj_path_lbl)
 
         # Command input for current project
+        cur_tools_row = QtWidgets.QHBoxLayout()
+        cur_tools_row.setSpacing(6)
+        cur_tools_lbl = QtWidgets.QLabel("Prompt / Specification (supports 5,000+ words, separate steps with '---'):")
+        cur_tools_lbl.setStyleSheet("color: #64748b; font-size: 10px; font-weight: 600;")
+        cur_tools_row.addWidget(cur_tools_lbl)
+        cur_tools_row.addStretch()
+
+        btn_cur_load = QtWidgets.QPushButton("📄 Load File")
+        btn_cur_load.setObjectName("small_btn")
+        btn_cur_load.setToolTip("Load prompt from markdown or text file")
+        btn_cur_load.setStyleSheet("background-color: #0f172a; color: #38bdf8; font-size: 10px; padding: 2px 7px; border: 1px solid #1e293b; border-radius: 4px;")
+        btn_cur_load.clicked.connect(self.load_cur_prompt_file)
+        cur_tools_row.addWidget(btn_cur_load)
+
+        btn_cur_sep = QtWidgets.QPushButton("+ '---'")
+        btn_cur_sep.setObjectName("small_btn")
+        btn_cur_sep.setToolTip("Insert '---' separator to split subsequent commands")
+        btn_cur_sep.setStyleSheet("background-color: #1e1b4b; color: #a5b4fc; font-size: 10px; padding: 2px 7px; border: 1px solid #312e81; border-radius: 4px;")
+        btn_cur_sep.clicked.connect(self.insert_cur_step_separator)
+        cur_tools_row.addWidget(btn_cur_sep)
+
+        btn_cur_steps = QtWidgets.QPushButton("✨ Steps 2–5")
+        btn_cur_steps.setObjectName("small_btn")
+        btn_cur_steps.setToolTip("Append shared engineering steps 2-5 (Tests, Docker, Security, Docs)")
+        btn_cur_steps.setStyleSheet("background-color: #064e3b; color: #6ee7b7; font-size: 10px; padding: 2px 7px; border: 1px solid #047857; border-radius: 4px;")
+        btn_cur_steps.clicked.connect(self.append_cur_steps_25)
+        cur_tools_row.addWidget(btn_cur_steps)
+
+        btn_cur_expand = QtWidgets.QPushButton("⛶ Expand")
+        btn_cur_expand.setObjectName("small_btn")
+        btn_cur_expand.setToolTip("Open full-screen prompt editor modal")
+        btn_cur_expand.setStyleSheet("background-color: #1e293b; color: #f1f5f9; font-size: 10px; padding: 2px 7px; border: 1px solid #334155; border-radius: 4px;")
+        btn_cur_expand.clicked.connect(self.open_cur_prompt_editor)
+        cur_tools_row.addWidget(btn_cur_expand)
+
+        cur_layout.addLayout(cur_tools_row)
+
         cur_cmd_row = QtWidgets.QHBoxLayout()
         cur_cmd_row.setSpacing(8)
 
@@ -1242,7 +1418,9 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.current_prompt_input.setPlaceholderText(
             f"Commands for Current Project '{self.current_slug}'... (Optional: leave empty to proceed to next project)"
         )
-        self.current_prompt_input.setMaximumHeight(50)
+        self.current_prompt_input.setMinimumHeight(60)
+        self.current_prompt_input.setMaximumHeight(85)
+        self.current_prompt_input.textChanged.connect(self.update_cur_prompt_metrics)
         cur_cmd_row.addWidget(self.current_prompt_input, stretch=1)
 
         btn_add_current = QtWidgets.QPushButton("+ Queue to Current")
@@ -1251,6 +1429,11 @@ class PipelineWindow(QtWidgets.QMainWindow):
         cur_cmd_row.addWidget(btn_add_current)
 
         cur_layout.addLayout(cur_cmd_row)
+
+        self.cur_prompt_metrics_lbl = QtWidgets.QLabel("💡 Tip: Enter multi-line prompts freely. Separate steps with '---'.")
+        self.cur_prompt_metrics_lbl.setStyleSheet("color: #64748b; font-size: 10px;")
+        cur_layout.addWidget(self.cur_prompt_metrics_lbl)
+
         form_layout.addWidget(cur_section)
 
         # 3. ADD ANOTHER PROJECT / NEXT PROJECT (DYNAMIC PROJECT NUMBERING)
@@ -1295,13 +1478,53 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.next_target_preview_lbl.setStyleSheet("color: #a5b4fc; font-size: 11px; font-family: monospace;")
         next_layout.addWidget(self.next_target_preview_lbl)
 
+        # Commands toolbar for next project
+        next_tools_row = QtWidgets.QHBoxLayout()
+        next_tools_row.setSpacing(6)
+        next_tools_lbl = QtWidgets.QLabel("Project Specification / Prompts (5,000+ words preserved intact):")
+        next_tools_lbl.setStyleSheet("color: #64748b; font-size: 10px; font-weight: 600;")
+        next_tools_row.addWidget(next_tools_lbl)
+        next_tools_row.addStretch()
+
+        btn_next_load = QtWidgets.QPushButton("📄 Load Spec (.md/.txt)")
+        btn_next_load.setObjectName("small_btn")
+        btn_next_load.setToolTip("Load 5,000+ word specification file from disk")
+        btn_next_load.setStyleSheet("background-color: #0f172a; color: #38bdf8; font-size: 10px; padding: 2px 7px; border: 1px solid #1e293b; border-radius: 4px;")
+        btn_next_load.clicked.connect(self.load_next_prompt_file)
+        next_tools_row.addWidget(btn_next_load)
+
+        btn_next_sep = QtWidgets.QPushButton("+ '---' Step")
+        btn_next_sep.setObjectName("small_btn")
+        btn_next_sep.setToolTip("Insert '---' separator to add Step 2, Step 3, etc.")
+        btn_next_sep.setStyleSheet("background-color: #1e1b4b; color: #a5b4fc; font-size: 10px; padding: 2px 7px; border: 1px solid #312e81; border-radius: 4px;")
+        btn_next_sep.clicked.connect(self.insert_next_step_separator)
+        next_tools_row.addWidget(btn_next_sep)
+
+        btn_next_steps = QtWidgets.QPushButton("✨ Steps 2–5")
+        btn_next_steps.setObjectName("small_btn")
+        btn_next_steps.setToolTip("Append shared engineering steps 2-5 (Tests, Docker, Security, Docs)")
+        btn_next_steps.setStyleSheet("background-color: #064e3b; color: #6ee7b7; font-size: 10px; padding: 2px 7px; border: 1px solid #047857; border-radius: 4px;")
+        btn_next_steps.clicked.connect(self.append_next_steps_25)
+        next_tools_row.addWidget(btn_next_steps)
+
+        btn_next_expand = QtWidgets.QPushButton("⛶ Expand")
+        btn_next_expand.setObjectName("small_btn")
+        btn_next_expand.setToolTip("Open full-screen prompt editor modal")
+        btn_next_expand.setStyleSheet("background-color: #1e293b; color: #f1f5f9; font-size: 10px; padding: 2px 7px; border: 1px solid #334155; border-radius: 4px;")
+        btn_next_expand.clicked.connect(self.open_next_prompt_editor)
+        next_tools_row.addWidget(btn_next_expand)
+
+        next_layout.addLayout(next_tools_row)
+
         # Commands input for next project
         next_cmd_row = QtWidgets.QHBoxLayout()
         next_cmd_row.setSpacing(8)
 
         self.next_prompt_input = QTextEdit()
-        self.next_prompt_input.setPlaceholderText("Enter command(s) for this project (enter multiple lines for sequential steps)...")
-        self.next_prompt_input.setMaximumHeight(54)
+        self.next_prompt_input.setPlaceholderText("Enter command(s) for this project (separate multiple steps with '---' on a new line)...")
+        self.next_prompt_input.setMinimumHeight(65)
+        self.next_prompt_input.setMaximumHeight(90)
+        self.next_prompt_input.textChanged.connect(self.update_next_prompt_metrics)
         next_cmd_row.addWidget(self.next_prompt_input, stretch=1)
 
         self.btn_add_next = QtWidgets.QPushButton("+ Add Project #2 to Pipeline")
@@ -1310,6 +1533,10 @@ class PipelineWindow(QtWidgets.QMainWindow):
         next_cmd_row.addWidget(self.btn_add_next)
 
         next_layout.addLayout(next_cmd_row)
+
+        self.next_prompt_metrics_lbl = QtWidgets.QLabel("💡 Tip: Multi-line / 5,000+ word specs preserved as 1 step. Use '---' to separate sequential steps.")
+        self.next_prompt_metrics_lbl.setStyleSheet("color: #64748b; font-size: 10px;")
+        next_layout.addWidget(self.next_prompt_metrics_lbl)
 
         # GitHub Automation Row for next project
         gh_row = QtWidgets.QHBoxLayout()
@@ -1633,6 +1860,113 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.gh_check.setChecked(True)
         self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Loaded SEO Ranking Prompt Preset into input.")
 
+    def update_next_prompt_metrics(self):
+        text = self.next_prompt_input.toPlainText().strip()
+        words = len(text.split()) if text else 0
+        chars = len(text)
+        steps = split_prompts(text)
+        count = len(steps)
+        if not text:
+            self.next_prompt_metrics_lbl.setText("💡 Tip: Multi-line / 5,000+ word specs preserved as 1 step. Use '---' to separate sequential steps.")
+        elif count == 1:
+            self.next_prompt_metrics_lbl.setText(f"📝 1 Master Prompt Step ({words:,} words, {chars:,} chars) • Intact. Separate next steps with '---'")
+        else:
+            breakdown = ", ".join(f"Step {i+1}: {len(s.split()):,}w" for i, s in enumerate(steps[:4]))
+            if count > 4:
+                breakdown += f", +{count - 4} more"
+            self.next_prompt_metrics_lbl.setText(f"📝 {count} Sequential Steps ({words:,} words) • [{breakdown}]")
+
+    def update_cur_prompt_metrics(self):
+        text = self.current_prompt_input.toPlainText().strip()
+        words = len(text.split()) if text else 0
+        chars = len(text)
+        steps = split_prompts(text)
+        count = len(steps)
+        if not text:
+            self.cur_prompt_metrics_lbl.setText("💡 Tip: Enter multi-line prompts freely. Separate steps with '---'.")
+        elif count == 1:
+            self.cur_prompt_metrics_lbl.setText(f"📝 1 Step ({words:,} words, {chars:,} chars)")
+        else:
+            self.cur_prompt_metrics_lbl.setText(f"📝 {count} Steps ({words:,} words)")
+
+    def insert_next_step_separator(self):
+        cursor = self.next_prompt_input.textCursor()
+        cursor.insertText("\n\n---\n\n")
+        self.next_prompt_input.setFocus()
+
+    def append_next_steps_25(self):
+        current = self.next_prompt_input.toPlainText().rstrip()
+        append_txt = (
+            "\n\n---\n"
+            "Step 2: Add comprehensive unit and integration tests with 90%+ code coverage.\n"
+            "---\n"
+            "Step 3: Create production multi-stage Dockerfile, docker-compose.yml, and CI/CD workflow.\n"
+            "---\n"
+            "Step 4: Audit code for security vulnerabilities, sanitize inputs, and verify OWASP compliance.\n"
+            "---\n"
+            "Step 5: Generate complete API documentation, endpoint markdown, and production README.md."
+        )
+        self.next_prompt_input.setPlainText(current + append_txt if current else append_txt.lstrip())
+
+    def open_next_prompt_editor(self):
+        title = self.next_title_input.text().strip() or "Next Project"
+        initial = self.next_prompt_input.toPlainText()
+        dlg = PromptEditorDialog(initial_text=initial, project_name=title, parent=self)
+        if dlg.exec_() == QtWidgets.QDialog.Accepted:
+            self.next_prompt_input.setPlainText(dlg.get_text())
+
+    def load_next_prompt_file(self):
+        selected, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Select Specification / Prompt File", str(Path.home()), "Markdown / Text Files (*.md *.txt *.prompt);;All Files (*)"
+        )
+        if selected:
+            try:
+                content = Path(selected).read_text(encoding="utf-8", errors="ignore")
+                self.next_prompt_input.setPlainText(content)
+                if hasattr(self, "show_toast"):
+                    self.show_toast(f"Loaded {len(content.split()):,} words from {Path(selected).name}")
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "File Load Error", f"Could not load file:\n{e}")
+
+    def insert_cur_step_separator(self):
+        cursor = self.current_prompt_input.textCursor()
+        cursor.insertText("\n\n---\n\n")
+        self.current_prompt_input.setFocus()
+
+    def append_cur_steps_25(self):
+        current = self.current_prompt_input.toPlainText().rstrip()
+        append_txt = (
+            "\n\n---\n"
+            "Step 2: Add comprehensive unit and integration tests with 90%+ code coverage.\n"
+            "---\n"
+            "Step 3: Create production multi-stage Dockerfile, docker-compose.yml, and CI/CD workflow.\n"
+            "---\n"
+            "Step 4: Audit code for security vulnerabilities, sanitize inputs, and verify OWASP compliance.\n"
+            "---\n"
+            "Step 5: Generate complete API documentation, endpoint markdown, and production README.md."
+        )
+        self.current_prompt_input.setPlainText(current + append_txt if current else append_txt.lstrip())
+
+    def open_cur_prompt_editor(self):
+        title = getattr(self, "current_title", "Current Project")
+        initial = self.current_prompt_input.toPlainText()
+        dlg = PromptEditorDialog(initial_text=initial, project_name=title, parent=self)
+        if dlg.exec_() == QtWidgets.QDialog.Accepted:
+            self.current_prompt_input.setPlainText(dlg.get_text())
+
+    def load_cur_prompt_file(self):
+        selected, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Select Specification / Prompt File", str(Path.home()), "Markdown / Text Files (*.md *.txt *.prompt);;All Files (*)"
+        )
+        if selected:
+            try:
+                content = Path(selected).read_text(encoding="utf-8", errors="ignore")
+                self.current_prompt_input.setPlainText(content)
+                if hasattr(self, "show_toast"):
+                    self.show_toast(f"Loaded {len(content.split()):,} words from {Path(selected).name}")
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "File Load Error", f"Could not load file:\n{e}")
+
     @queue_error_to_log
     def add_current_project_tasks(self, *args, **kwargs):
         if self.busy():
@@ -1644,13 +1978,13 @@ class PipelineWindow(QtWidgets.QMainWindow):
             self.log_box.append("Type a command above for the current project, or use Section 3 to add a new project.")
             return
 
-        lines = [line.strip() for line in raw_text.split("\n") if line.strip()]
-        if not lines:
+        commands = split_prompts(raw_text)
+        if not commands:
             return
 
         os.makedirs(self.current_path, exist_ok=True)
         agent = self.agent_combo.currentData()
-        for idx, prompt in enumerate(lines):
+        for idx, prompt in enumerate(commands):
             step_agent = agent
             if agent == "multi":
                 hybrid_cycle = ["antigravity", "antigravity-kde", "local", "local", "antigravity-kde"]
@@ -1662,13 +1996,15 @@ class PipelineWindow(QtWidgets.QMainWindow):
                 project_title=self.current_title,
                 project_slug=self.current_slug,
                 create_repo=False,
+                notify_desktop=False,
             )
 
         self.current_prompt_input.clear()
-        count = len(lines)
+        count = len(commands)
         self.log_box.append(
             f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Queued {count} step(s) into CURRENT project '{self.current_title}' [{self.current_slug}]"
         )
+        notify("Tasks Added", f"[{self.current_slug}] Queued {count} step(s)")
         if hasattr(self, "toast_banner"):
             self.toast_banner.setText(f"✔ Queued {count} step(s) into current project '{self.current_title}'!")
             self.toast_banner.setStyleSheet(
@@ -1698,8 +2034,8 @@ class PipelineWindow(QtWidgets.QMainWindow):
             self.next_prompt_input.setFocus()
             return
 
-        lines = [line.strip() for line in raw_text.split("\n") if line.strip()]
-        if not lines:
+        commands = split_prompts(raw_text)
+        if not commands:
             return
 
         title = self.next_title_input.text().strip()
@@ -1709,7 +2045,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
             if title:
                 slug = to_slug(title)
             else:
-                slug = to_slug(lines[0][:35])
+                slug = to_slug(commands[0][:35])
 
         if not title:
             title = slug.replace("-", " ").title()
@@ -1723,7 +2059,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
         proj_dir = str(Path(base_dir) / slug)
         os.makedirs(proj_dir, exist_ok=True)
 
-        for idx, prompt in enumerate(lines):
+        for idx, prompt in enumerate(commands):
             is_repo = create_repo if idx == 0 else False
             step_agent = agent
             if agent == "multi":
@@ -1738,6 +2074,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
                 create_repo=is_repo,
                 repo_name=repo_name,
                 repo_desc=repo_desc,
+                notify_desktop=False,
             )
 
         self.next_prompt_input.clear()
@@ -1748,11 +2085,12 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.gh_desc_input.clear()
         self.gh_check.setChecked(False)
 
-        count = len(lines)
+        count = len(commands)
         tag = f" [GH Repo: {repo_name}]" if create_repo else ""
         self.log_box.append(
             f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Queued project '{title}' [folder: {slug}] with {count} step(s){tag}"
         )
+        notify("Project Added", f"[{slug}] Added '{title}' with {count} step(s)")
         self.next_title_input.setFocus()
         self.refresh_queue()
 

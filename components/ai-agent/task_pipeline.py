@@ -50,6 +50,32 @@ def to_slug(text: str) -> str:
     return slug.strip("-") or "project"
 
 
+def split_prompts(raw_text: str) -> List[str]:
+    """Splits a multi-command / multi-step prompt string into individual tasks.
+
+    Rules:
+    1. If explicit delimiters exist ('---', '===', or '### Step N' / '[Step N]' on their own line),
+       split by delimiter so each step can contain multiple paragraphs, code blocks, and 5000+ words.
+    2. If no delimiters exist:
+       The ENTIRE text (including all paragraphs, headings, bullet points, and newlines)
+       is preserved intact as ONE single comprehensive prompt step.
+    """
+    text = (raw_text or "").strip()
+    if not text:
+        return []
+
+    # Delimiters: 3 or more hyphens or equals on a line, or Step headers
+    delim_pattern = re.compile(
+        r"(?:\r?\n|^)\s*(?:-{3,}|={3,}|###\s*Step\s*\d+|\[Step\s*\d+\])\s*(?:\r?\n|$)",
+        re.IGNORECASE,
+    )
+    parts = delim_pattern.split(text)
+    cleaned = [p.strip() for p in parts if p.strip()]
+    if len(cleaned) > 1:
+        return cleaned
+    return [text]
+
+
 def is_agent_process_running(agent: str) -> tuple[bool, Optional[int]]:
     """Checks whether the agent's application process is actively running in the OS.
     Returns: (is_running, pid)
@@ -426,11 +452,10 @@ def discover_agents() -> Dict[str, Dict[str, Any]]:
 
 
 def notify(title: str, message: str, urgency: str = "normal"):
-    """Sends native desktop notification."""
+    """Sends native desktop notification asynchronously."""
     try:
-        subprocess.run(
+        subprocess.Popen(
             ["notify-send", "-a", "DevOS AI Pipeline", "-u", urgency, title, message],
-            check=False,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
@@ -774,6 +799,7 @@ class TaskPipeline:
         repo_desc: str = "",
         project_title: str = "",
         project_slug: str = "",
+        notify_desktop: bool = False,
     ) -> str:
         task_id = "task_" + uuid.uuid4().hex[:16]
         run_at = (datetime.datetime.now() + datetime.timedelta(seconds=delay_seconds)).isoformat()
@@ -818,7 +844,8 @@ class TaskPipeline:
         }
         self.queue.append(item)
         self._save()
-        notify("Task Queued", f"[{p_slug}] [{agent.upper()}] {prompt[:60]}...")
+        if notify_desktop:
+            notify("Task Queued", f"[{p_slug}] [{agent.upper()}] {prompt[:60]}...")
         return task_id
 
     def add_commands(
@@ -831,6 +858,7 @@ class TaskPipeline:
         repo_name: str = "",
         repo_desc: str = "",
         delay_seconds: int = 0,
+        notify_desktop: bool = True,
     ) -> List[str]:
         task_ids = []
         clean_prompts = [p.strip() for p in prompts if p.strip()]
@@ -845,8 +873,11 @@ class TaskPipeline:
                 repo_name=repo_name,
                 repo_desc=repo_desc,
                 delay_seconds=delay_seconds,
+                notify_desktop=False,
             )
             task_ids.append(tid)
+        if notify_desktop and clean_prompts:
+            notify("Project Queued", f"[{project_slug or 'project'}] Added {len(clean_prompts)} step(s)")
         return task_ids
 
     def list(self) -> List[Dict[str, Any]]:
