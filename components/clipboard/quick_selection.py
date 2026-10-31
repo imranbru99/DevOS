@@ -16,6 +16,7 @@ https://imrandev.bd
 """
 
 import ctypes
+import fcntl
 import math
 import os
 import subprocess
@@ -23,6 +24,23 @@ import sys
 import time
 import urllib.parse
 from PyQt5 import QtCore, QtGui, QtWidgets, QtDBus
+
+_lock_file_handle = None
+
+
+def acquire_single_instance_lock():
+    """Ensure only one instance of the quick selection bar runs per user session."""
+    global _lock_file_handle
+    runtime_dir = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
+    lock_file = os.path.join(runtime_dir, "devos-quick-selection.lock")
+    try:
+        _lock_file_handle = open(lock_file, "w")
+        fcntl.flock(_lock_file_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _lock_file_handle.write(str(os.getpid()))
+        _lock_file_handle.flush()
+        return True
+    except (IOError, OSError):
+        return False
 
 
 class X11Pointer:
@@ -241,7 +259,7 @@ class SelectionPill(QtWidgets.QWidget):
         self.frame.setObjectName("pillFrame")
         self.frame.setStyleSheet("""
             #pillFrame {
-                background-color: rgba(15, 23, 42, 0.94);
+                background-color: rgba(15, 23, 42, 0.95);
                 border: 1px solid rgba(56, 189, 248, 0.6);
                 border-radius: 18px;
             }
@@ -249,11 +267,11 @@ class SelectionPill(QtWidgets.QWidget):
                 background: transparent;
                 color: #f8fafc;
                 font-family: 'Inter', -apple-system, sans-serif;
-                font-size: 10pt;
+                font-size: 9.5pt;
                 font-weight: 600;
-                padding: 6px 14px;
+                padding: 6px 12px;
                 border: none;
-                border-radius: 12px;
+                border-radius: 10px;
             }
             QPushButton:hover {
                 background-color: rgba(56, 189, 248, 0.25);
@@ -265,12 +283,18 @@ class SelectionPill(QtWidgets.QWidget):
             #closeBtn {
                 color: #94a3b8;
                 font-size: 9pt;
-                padding: 6px 10px;
-                margin-left: 2px;
+                padding: 6px 9px;
+                margin-left: 1px;
             }
             #closeBtn:hover {
                 background-color: rgba(239, 68, 68, 0.25);
                 color: #ef4444;
+            }
+            #divider {
+                background-color: rgba(148, 163, 184, 0.25);
+                width: 1px;
+                max-width: 1px;
+                margin: 4px 1px;
             }
         """)
 
@@ -291,7 +315,35 @@ class SelectionPill(QtWidgets.QWidget):
         self.btn_copy.clicked.connect(self.on_copy)
         layout.addWidget(self.btn_copy)
 
-        # 2. Close / Dismiss button
+        # 2. Cut button
+        self.btn_cut = QtWidgets.QPushButton("✂️ Cut")
+        self.btn_cut.setToolTip("Copy and delete selected text")
+        self.btn_cut.clicked.connect(self.on_cut)
+        layout.addWidget(self.btn_cut)
+
+        layout.addWidget(self._make_divider())
+
+        # 3. Screenshot button
+        self.btn_shot = QtWidgets.QPushButton("📸 Screenshot")
+        self.btn_shot.setToolTip("Take a rectangular screenshot region")
+        self.btn_shot.clicked.connect(self.on_screenshot)
+        layout.addWidget(self.btn_shot)
+
+        # 4. AI Understand button
+        self.btn_ai = QtWidgets.QPushButton("🤖 AI Understand")
+        self.btn_ai.setToolTip("Ask DevOS AI to explain or assist with this text")
+        self.btn_ai.clicked.connect(self.on_ai)
+        layout.addWidget(self.btn_ai)
+
+        # 5. Search button
+        self.btn_search = QtWidgets.QPushButton("🔍 Search")
+        self.btn_search.setToolTip("Search this text in web browser")
+        self.btn_search.clicked.connect(self.on_search)
+        layout.addWidget(self.btn_search)
+
+        layout.addWidget(self._make_divider())
+
+        # 6. Close / Dismiss button
         self.btn_close = QtWidgets.QPushButton("✕")
         self.btn_close.setObjectName("closeBtn")
         self.btn_close.setToolTip("Dismiss")
@@ -300,11 +352,24 @@ class SelectionPill(QtWidgets.QWidget):
 
         main_layout.addWidget(self.frame)
 
+    def _make_divider(self):
+        div = QtWidgets.QFrame()
+        div.setObjectName("divider")
+        div.setFrameShape(QtWidgets.QFrame.VLine)
+        return div
+
     def popup_for_text(self, text, x=None, y=None):
-        """Position and display the pill near cursor or above selection."""
+        """Position and display the pill near cursor or above selection, cleanly replacing old popups."""
+        # Cleanly dismiss any previous popup first to prevent ghost/duplicate buttons
+        self.auto_hide_timer.stop()
+        if self.isVisible():
+            self.hide()
+
         self.selected_text = text
         self.btn_copy.setText("📋 Copy")
         self.btn_copy.setStyleSheet("")
+        self.btn_cut.setText("✂️ Cut")
+        self.btn_cut.setStyleSheet("")
 
         self.adjustSize()
         w = self.sizeHint().width()
@@ -317,11 +382,11 @@ class SelectionPill(QtWidgets.QWidget):
                 x, y = coords
 
         if x is not None and y is not None and x > 0 and y > 0:
-            # Place the Copy pill right above cursor centered horizontally
+            # Place the pill centered horizontally right above the cursor
             pos_x = min(screen.right() - w - 10, max(screen.left() + 10, x - (w // 2)))
-            pos_y = y - h - 10
+            pos_y = y - h - 12
             if pos_y < screen.top() + 8:
-                pos_y = y + 20
+                pos_y = y + 22
         else:
             # Fallback to Top-Center HUD
             pos_x = screen.left() + (screen.width() - w) // 2
@@ -332,8 +397,8 @@ class SelectionPill(QtWidgets.QWidget):
         self.raise_()
         self._ensure_skip_taskbar()
 
-        # Auto hide after 5 seconds of inactivity
-        self.auto_hide_timer.start(5000)
+        # Auto hide after 6 seconds of inactivity
+        self.auto_hide_timer.start(6000)
 
     def _ensure_skip_taskbar(self):
         """Explicitly add _NET_WM_STATE_SKIP_TASKBAR and _NET_WM_STATE_SKIP_PAGER via X11 if on X11."""
@@ -403,10 +468,24 @@ class SelectionPill(QtWidgets.QWidget):
         except Exception:
             pass
 
-    def on_cut(self):
-        self.on_copy(deselect=False)
+        # 4. Instant Klipper synchronization
         try:
-            subprocess.Popen(["xdotool", "key", "BackSpace"])
+            subprocess.Popen(
+                ["qdbus6", "org.kde.klipper", "/klipper", "setClipboardContents", text],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            pass
+
+    def on_cut(self):
+        self.on_copy()
+        try:
+            subprocess.Popen(
+                ["xdotool", "key", "--clearmodifiers", "BackSpace"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
         except Exception:
             pass
 
@@ -418,11 +497,19 @@ class SelectionPill(QtWidgets.QWidget):
             pass
 
     def on_ai(self):
-        self.on_copy(deselect=True)
+        query = self.selected_text.strip()
+        self.on_copy()
+        self.hide_pill()
         try:
-            subprocess.Popen(["devos-chat"])
+            if query:
+                subprocess.Popen(["devos-chat", "--ask", f"Explain this:\n{query}"])
+            else:
+                subprocess.Popen(["devos-chat"])
         except Exception:
-            pass
+            try:
+                subprocess.Popen(["devos-chat"])
+            except Exception:
+                pass
 
     def on_search(self):
         self.hide_pill()
@@ -457,9 +544,14 @@ class QuickSelectionDaemon(QtCore.QObject):
 
 
 def main():
+    if not acquire_single_instance_lock():
+        sys.exit(0)
+
     app = QtWidgets.QApplication(sys.argv)
     app.setApplicationName("devos-quick-selection")
     app.setQuitOnLastWindowClosed(False)
+    # Prevent KDE session manager from starting duplicate zombie instances on login
+    app.setFallbackSessionManagementEnabled(False)
 
     pill = SelectionPill()
     daemon = QuickSelectionDaemon(pill)

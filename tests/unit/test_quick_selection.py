@@ -32,22 +32,29 @@ class TestQuickSelection(unittest.TestCase):
                 timeout=0.2,
             )
 
-    def test_selection_pill_ui_has_only_copy_and_close(self):
+    def test_selection_pill_ui_actions(self):
         pill = quick_selection.SelectionPill()
         self.assertTrue(hasattr(pill, "btn_copy"))
+        self.assertTrue(hasattr(pill, "btn_cut"))
+        self.assertTrue(hasattr(pill, "btn_shot"))
+        self.assertTrue(hasattr(pill, "btn_ai"))
+        self.assertTrue(hasattr(pill, "btn_search"))
         self.assertTrue(hasattr(pill, "btn_close"))
         self.assertEqual(pill.btn_copy.text(), "📋 Copy")
+        self.assertEqual(pill.btn_cut.text(), "✂️ Cut")
+        self.assertEqual(pill.btn_shot.text(), "📸 Screenshot")
+        self.assertEqual(pill.btn_ai.text(), "🤖 AI Understand")
+        self.assertEqual(pill.btn_search.text(), "🔍 Search")
         self.assertEqual(pill.btn_close.text(), "✕")
 
-        # Must not contain Cut, Capture, AI, Search in the layout
         buttons = pill.findChildren(QtWidgets.QPushButton)
         button_texts = [b.text() for b in buttons]
         self.assertIn("📋 Copy", button_texts)
+        self.assertIn("✂️ Cut", button_texts)
+        self.assertIn("📸 Screenshot", button_texts)
+        self.assertIn("🤖 AI Understand", button_texts)
+        self.assertIn("🔍 Search", button_texts)
         self.assertIn("✕", button_texts)
-        self.assertNotIn("✂️ Cut", button_texts)
-        self.assertNotIn("📸 Capture", button_texts)
-        self.assertNotIn("🤖 AI", button_texts)
-        self.assertNotIn("🔍 Search", button_texts)
 
     def test_popup_and_copy(self):
         pill = quick_selection.SelectionPill()

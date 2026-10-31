@@ -6,5 +6,6 @@ Exec=/usr/local/bin/devos-quick-selection
 Icon=edit-copy
 Categories=Utility;
 X-KDE-autostart-phase=2
+X-systemd-skip=true
 StartupNotify=false
 Terminal=false
