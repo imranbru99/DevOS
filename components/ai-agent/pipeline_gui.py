@@ -359,7 +359,11 @@ def queue_error_to_log(method):
     @functools.wraps(method)
     def wrapped(self, *args, **kwargs):
         try:
-            return method(self, *args, **kwargs)
+            try:
+                return method(self, *args, **kwargs)
+            except TypeError:
+                # Slot called from Qt signal passing unwanted arguments (e.g. checked: bool)
+                return method(self)
         except (OSError, RuntimeError, ValueError) as exc:
             self.log_box.append("Queue unchanged: " + str(exc))
     return wrapped
@@ -1228,7 +1232,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
         btn_add_current = QtWidgets.QPushButton("+ Queue to Current")
         btn_add_current.setObjectName("accent_action")
-        btn_add_current.clicked.connect(self.add_current_project_tasks)
+        btn_add_current.clicked.connect(lambda: self.add_current_project_tasks())
         cur_cmd_row.addWidget(btn_add_current)
 
         cur_layout.addLayout(cur_cmd_row)
@@ -1287,7 +1291,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
         self.btn_add_next = QtWidgets.QPushButton("+ Add Project #2 to Pipeline")
         self.btn_add_next.setObjectName("primary")
-        self.btn_add_next.clicked.connect(self.add_next_project_tasks)
+        self.btn_add_next.clicked.connect(lambda: self.add_next_project_tasks())
         next_cmd_row.addWidget(self.btn_add_next)
 
         next_layout.addLayout(next_cmd_row)
@@ -1535,7 +1539,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Loaded SEO Ranking Prompt Preset into input.")
 
     @queue_error_to_log
-    def add_current_project_tasks(self):
+    def add_current_project_tasks(self, *args, **kwargs):
         if self.busy():
             self.log_box.append("Wait for the current task to finish before changing the queue.")
             return
@@ -1549,6 +1553,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
         if not lines:
             return
 
+        os.makedirs(self.current_path, exist_ok=True)
         agent = self.agent_combo.currentData()
         for idx, prompt in enumerate(lines):
             step_agent = agent
@@ -1580,7 +1585,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.refresh_queue()
 
     @queue_error_to_log
-    def add_next_project_tasks(self):
+    def add_next_project_tasks(self, *args, **kwargs):
         if self.busy():
             self.log_box.append("Wait for the current task to finish before changing the queue.")
             return
@@ -1621,6 +1626,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
         base_dir = self.pipeline.get_base_dir()
         proj_dir = str(Path(base_dir) / slug)
+        os.makedirs(proj_dir, exist_ok=True)
 
         for idx, prompt in enumerate(lines):
             is_repo = create_repo if idx == 0 else False
