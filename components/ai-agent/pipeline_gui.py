@@ -35,6 +35,7 @@ from task_pipeline import (
     to_slug,
     split_prompts,
     notify,
+    copy_to_clipboard,
     get_grouped_projects,
     detect_current_project,
     list_existing_projects,
@@ -387,6 +388,47 @@ class PipelineWorker(QtCore.QThread):
             self.result.emit(str(exc))
 
 
+class FullPromptViewerDialog(QtWidgets.QDialog):
+    """Full Prompt Inspector dialog with line wrapping and one-click copy."""
+    def __init__(self, step_idx: int, task: dict, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Step {step_idx} Prompt Inspector — {task.get('project_title', 'Project')}")
+        self.resize(780, 540)
+        self.setStyleSheet(STYLE)
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(10)
+
+        hdr = QtWidgets.QHBoxLayout()
+        badge = QtWidgets.QLabel(f"Step {step_idx} • {task.get('agent', '').upper()}")
+        badge.setObjectName("badge_cyan")
+        hdr.addWidget(badge)
+
+        prompt = task.get("prompt", "")
+        meta = QtWidgets.QLabel(f"{len(prompt.split()):,} words • {len(prompt):,} characters")
+        meta.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        hdr.addWidget(meta)
+        hdr.addStretch()
+
+        btn_copy = QtWidgets.QPushButton("📋 Copy Prompt")
+        btn_copy.setObjectName("small_btn")
+        btn_copy.setStyleSheet("background-color: #0f172a; color: #38bdf8; font-size: 11px; padding: 4px 10px; border: 1px solid #1e293b; border-radius: 4px;")
+        btn_copy.clicked.connect(lambda: copy_to_clipboard(prompt))
+        hdr.addWidget(btn_copy)
+        layout.addLayout(hdr)
+
+        editor = QtWidgets.QTextEdit()
+        editor.setPlainText(prompt)
+        editor.setReadOnly(True)
+        editor.setFont(QtGui.QFont("Monospace", 10))
+        layout.addWidget(editor, stretch=1)
+
+        btn_close = QtWidgets.QPushButton("Close")
+        btn_close.clicked.connect(self.accept)
+        layout.addWidget(btn_close, alignment=Qt.AlignRight)
+
+
 class StepRow(QtWidgets.QFrame):
     def __init__(self, step_idx: int, task: dict, on_failover=None, on_confirm=None, on_delete=None, parent=None):
         super().__init__(parent)
@@ -397,6 +439,10 @@ class StepRow(QtWidgets.QFrame):
         self.on_delete = on_delete
         self.setObjectName("step_row")
         self.init_ui()
+
+    def view_full_prompt(self):
+        dlg = FullPromptViewerDialog(self.step_idx, self.task, parent=self)
+        dlg.exec_()
 
     def init_ui(self):
         layout = QtWidgets.QHBoxLayout(self)
@@ -424,10 +470,37 @@ class StepRow(QtWidgets.QFrame):
         center_box = QtWidgets.QVBoxLayout()
         center_box.setSpacing(3)
 
-        prompt_lbl = QtWidgets.QLabel(self.task.get("prompt", ""))
-        prompt_lbl.setWordWrap(True)
-        prompt_lbl.setStyleSheet("font-size: 12px; font-weight: 500; color: #f1f5f9;")
-        center_box.addWidget(prompt_lbl)
+        prompt_text = self.task.get("prompt", "").strip()
+        words = len(prompt_text.split())
+
+        if words > 25 or len(prompt_text) > 160:
+            prompt_box = QtWidgets.QTextEdit()
+            prompt_box.setPlainText(prompt_text)
+            prompt_box.setReadOnly(True)
+            prompt_box.setMaximumHeight(85)
+            prompt_box.setStyleSheet(
+                "background-color: #080d1a; color: #f1f5f9; font-size: 11px; "
+                "border: 1px solid #1e293b; border-radius: 4px; padding: 4px;"
+            )
+            center_box.addWidget(prompt_box)
+
+            meta_row = QtWidgets.QHBoxLayout()
+            word_tag = QtWidgets.QLabel(f"📄 Full Specification: {words:,} words ({len(prompt_text):,} chars)")
+            word_tag.setStyleSheet("color: #64748b; font-size: 10px; font-weight: 600;")
+            meta_row.addWidget(word_tag)
+            meta_row.addStretch()
+
+            btn_view = QtWidgets.QPushButton("⛶ View Full Prompt")
+            btn_view.setObjectName("small_btn")
+            btn_view.setStyleSheet("background-color: #0f172a; color: #38bdf8; font-size: 10px; padding: 2px 7px; border: 1px solid #1e293b; border-radius: 4px;")
+            btn_view.clicked.connect(self.view_full_prompt)
+            meta_row.addWidget(btn_view)
+            center_box.addLayout(meta_row)
+        else:
+            prompt_lbl = QtWidgets.QLabel(prompt_text)
+            prompt_lbl.setWordWrap(True)
+            prompt_lbl.setStyleSheet("font-size: 12px; font-weight: 500; color: #f1f5f9;")
+            center_box.addWidget(prompt_lbl)
 
         status = self.task.get("status", "QUEUED")
         status_text = f"○ Queued"
@@ -633,6 +706,57 @@ class ProjectPipelineCard(QtWidgets.QFrame):
             pbar.setTextVisible(False)
             main_layout.addWidget(pbar)
 
+        # Step navigation bar with the 2 buttons requested by user:
+        # "▲ Upper Command/Prompt" and "▼ Next Command/Prompt"
+        self.step_rows = []
+        self.current_step_idx = 0
+        self.show_all_mode = False
+
+        if total_tasks > 1:
+            nav_bar = QtWidgets.QFrame()
+            nav_bar.setObjectName("step_nav_bar")
+            nav_bar.setStyleSheet("background-color: #0b1120; border: 1px solid #1e293b; border-radius: 6px; padding: 2px;")
+            nav_layout = QtWidgets.QHBoxLayout(nav_bar)
+            nav_layout.setContentsMargins(6, 4, 6, 4)
+            nav_layout.setSpacing(8)
+
+            self.btn_prev_step = QtWidgets.QPushButton("▲ Upper Command/Prompt")
+            self.btn_prev_step.setObjectName("small_btn")
+            self.btn_prev_step.setStyleSheet(
+                "background-color: #1e1b4b; color: #a5b4fc; font-size: 11px; font-weight: 700; "
+                "padding: 4px 10px; border: 1px solid #312e81; border-radius: 5px;"
+            )
+            self.btn_prev_step.setToolTip("Switch / Scroll to upper (previous) command prompt")
+            self.btn_prev_step.clicked.connect(self.goto_prev_step)
+            nav_layout.addWidget(self.btn_prev_step)
+
+            self.step_nav_lbl = QtWidgets.QLabel(f"Step 1 of {total_tasks}")
+            self.step_nav_lbl.setStyleSheet("font-size: 11px; font-weight: 700; color: #38bdf8;")
+            nav_layout.addWidget(self.step_nav_lbl)
+
+            self.btn_next_step = QtWidgets.QPushButton("▼ Next Command/Prompt")
+            self.btn_next_step.setObjectName("small_btn")
+            self.btn_next_step.setStyleSheet(
+                "background-color: #0f172a; color: #38bdf8; font-size: 11px; font-weight: 700; "
+                "padding: 4px 10px; border: 1px solid #1e293b; border-radius: 5px;"
+            )
+            self.btn_next_step.setToolTip("Switch / Scroll to next command prompt")
+            self.btn_next_step.clicked.connect(self.goto_next_step)
+            nav_layout.addWidget(self.btn_next_step)
+
+            nav_layout.addStretch()
+
+            self.btn_all_steps = QtWidgets.QPushButton("Show All Steps")
+            self.btn_all_steps.setObjectName("small_btn")
+            self.btn_all_steps.setStyleSheet(
+                "background-color: #1e293b; color: #94a3b8; font-size: 10px; padding: 3px 8px; border: 1px solid #334155; border-radius: 4px;"
+            )
+            self.btn_all_steps.setToolTip("Toggle between focused single step view and all steps stacked")
+            self.btn_all_steps.clicked.connect(self.toggle_all_steps_view)
+            nav_layout.addWidget(self.btn_all_steps)
+
+            main_layout.addWidget(nav_bar)
+
         # Step rows container
         self.steps_container = QtWidgets.QWidget()
         steps_vbox = QtWidgets.QVBoxLayout(self.steps_container)
@@ -646,14 +770,63 @@ class ProjectPipelineCard(QtWidgets.QFrame):
                 on_confirm=self.on_confirm,
                 on_delete=self.on_delete_task,
             )
+            self.step_rows.append(row)
             steps_vbox.addWidget(row)
 
         main_layout.addWidget(self.steps_container)
+        self.update_step_visibility()
 
         # Auto-collapse completed projects to keep the view clean
         if completed_tasks == total_tasks and total_tasks > 0:
             self.steps_container.setVisible(False)
             self.btn_toggle.setText("▼")
+
+    def goto_prev_step(self):
+        if not self.step_rows:
+            return
+        if self.current_step_idx > 0:
+            self.current_step_idx -= 1
+            self.update_step_visibility()
+
+    def goto_next_step(self):
+        if not self.step_rows:
+            return
+        if self.current_step_idx < len(self.step_rows) - 1:
+            self.current_step_idx += 1
+            self.update_step_visibility()
+
+    def toggle_all_steps_view(self):
+        self.show_all_mode = not self.show_all_mode
+        if hasattr(self, "btn_all_steps"):
+            self.btn_all_steps.setText("Focused View" if self.show_all_mode else "Show All Steps")
+        self.update_step_visibility()
+
+    def update_step_visibility(self):
+        total = len(self.step_rows)
+        if total <= 1:
+            return
+
+        if hasattr(self, "step_nav_lbl"):
+            task = self.step_rows[self.current_step_idx].task
+            words = len(task.get("prompt", "").split())
+            self.step_nav_lbl.setText(f"Step {self.current_step_idx + 1} of {total} ({words:,} words)")
+
+        if hasattr(self, "btn_prev_step"):
+            self.btn_prev_step.setEnabled(self.current_step_idx > 0)
+        if hasattr(self, "btn_next_step"):
+            self.btn_next_step.setEnabled(self.current_step_idx < total - 1)
+
+        if self.show_all_mode:
+            for idx, r in enumerate(self.step_rows):
+                r.setVisible(True)
+                if idx == self.current_step_idx:
+                    r.setStyleSheet("#step_row { border: 2px solid #38bdf8; background-color: #0a1120; }")
+                else:
+                    r.setStyleSheet("")
+        else:
+            for idx, r in enumerate(self.step_rows):
+                r.setVisible(idx == self.current_step_idx)
+                r.setStyleSheet("")
 
     def toggle_steps(self):
         visible = not self.steps_container.isVisible()
@@ -1456,6 +1629,20 @@ class PipelineWindow(QtWidgets.QMainWindow):
         btn_cur_sep.clicked.connect(self.insert_cur_step_separator)
         cur_tools_row.addWidget(btn_cur_sep)
 
+        btn_cur_upper = QtWidgets.QPushButton("▲ Upper")
+        btn_cur_upper.setObjectName("small_btn")
+        btn_cur_upper.setToolTip("Navigate cursor up to the previous '---' command step")
+        btn_cur_upper.setStyleSheet("background-color: #1e1b4b; color: #a5b4fc; font-size: 10px; padding: 2px 7px; border: 1px solid #312e81; border-radius: 4px;")
+        btn_cur_upper.clicked.connect(self.navigate_cur_prompt_prev)
+        cur_tools_row.addWidget(btn_cur_upper)
+
+        btn_cur_down = QtWidgets.QPushButton("▼ Next")
+        btn_cur_down.setObjectName("small_btn")
+        btn_cur_down.setToolTip("Navigate cursor down to the next '---' command step")
+        btn_cur_down.setStyleSheet("background-color: #0f172a; color: #38bdf8; font-size: 10px; padding: 2px 7px; border: 1px solid #1e293b; border-radius: 4px;")
+        btn_cur_down.clicked.connect(self.navigate_cur_prompt_next)
+        cur_tools_row.addWidget(btn_cur_down)
+
         btn_cur_steps = QtWidgets.QPushButton("✨ Steps 2–5")
         btn_cur_steps.setObjectName("small_btn")
         btn_cur_steps.setToolTip("Append shared engineering steps 2-5 (Tests, Docker, Security, Docs)")
@@ -1567,6 +1754,20 @@ class PipelineWindow(QtWidgets.QMainWindow):
         btn_next_sep.setStyleSheet("background-color: #1e1b4b; color: #a5b4fc; font-size: 10px; padding: 2px 7px; border: 1px solid #312e81; border-radius: 4px;")
         btn_next_sep.clicked.connect(self.insert_next_step_separator)
         next_tools_row.addWidget(btn_next_sep)
+
+        btn_next_upper = QtWidgets.QPushButton("▲ Upper")
+        btn_next_upper.setObjectName("small_btn")
+        btn_next_upper.setToolTip("Navigate cursor up to the previous '---' command step")
+        btn_next_upper.setStyleSheet("background-color: #1e1b4b; color: #a5b4fc; font-size: 10px; padding: 2px 7px; border: 1px solid #312e81; border-radius: 4px;")
+        btn_next_upper.clicked.connect(self.navigate_next_prompt_prev)
+        next_tools_row.addWidget(btn_next_upper)
+
+        btn_next_down = QtWidgets.QPushButton("▼ Next")
+        btn_next_down.setObjectName("small_btn")
+        btn_next_down.setToolTip("Navigate cursor down to the next '---' command step")
+        btn_next_down.setStyleSheet("background-color: #0f172a; color: #38bdf8; font-size: 10px; padding: 2px 7px; border: 1px solid #1e293b; border-radius: 4px;")
+        btn_next_down.clicked.connect(self.navigate_next_prompt_next)
+        next_tools_row.addWidget(btn_next_down)
 
         btn_next_steps = QtWidgets.QPushButton("✨ Steps 2–5")
         btn_next_steps.setObjectName("small_btn")
@@ -2024,6 +2225,62 @@ class PipelineWindow(QtWidgets.QMainWindow):
                     self.show_toast(f"Loaded {len(content.split()):,} words from {Path(selected).name}")
             except Exception as e:
                 QtWidgets.QMessageBox.critical(self, "File Load Error", f"Could not load file:\n{e}")
+
+    def navigate_next_prompt_next(self):
+        """Navigate cursor forward to the next '---' command step."""
+        text = self.next_prompt_input.toPlainText()
+        cursor = self.next_prompt_input.textCursor()
+        pos = cursor.position()
+        match = re.search(r'(?:\r?\n|^)\s*(?:-{3,}|={3,}|###\s*Step\s*\d+|\[Step\s*\d+\])\s*(?:\r?\n|$)', text[pos:])
+        if match:
+            new_pos = pos + match.end()
+            cursor.setPosition(new_pos)
+            self.next_prompt_input.setTextCursor(cursor)
+            self.next_prompt_input.ensureCursorVisible()
+
+    def navigate_next_prompt_prev(self):
+        """Navigate cursor backward to the upper (previous) '---' command step."""
+        text = self.next_prompt_input.toPlainText()
+        cursor = self.next_prompt_input.textCursor()
+        pos = max(0, cursor.position() - 4)
+        matches = list(re.finditer(r'(?:\r?\n|^)\s*(?:-{3,}|={3,}|###\s*Step\s*\d+|\[Step\s*\d+\])\s*(?:\r?\n|$)', text[:pos]))
+        if matches:
+            target = matches[-1]
+            cursor.setPosition(target.end())
+            self.next_prompt_input.setTextCursor(cursor)
+            self.next_prompt_input.ensureCursorVisible()
+        else:
+            cursor.setPosition(0)
+            self.next_prompt_input.setTextCursor(cursor)
+            self.next_prompt_input.ensureCursorVisible()
+
+    def navigate_cur_prompt_next(self):
+        """Navigate cursor forward to the next '---' command step in current project input."""
+        text = self.current_prompt_input.toPlainText()
+        cursor = self.current_prompt_input.textCursor()
+        pos = cursor.position()
+        match = re.search(r'(?:\r?\n|^)\s*(?:-{3,}|={3,}|###\s*Step\s*\d+|\[Step\s*\d+\])\s*(?:\r?\n|$)', text[pos:])
+        if match:
+            new_pos = pos + match.end()
+            cursor.setPosition(new_pos)
+            self.current_prompt_input.setTextCursor(cursor)
+            self.current_prompt_input.ensureCursorVisible()
+
+    def navigate_cur_prompt_prev(self):
+        """Navigate cursor backward to the upper (previous) '---' command step in current project input."""
+        text = self.current_prompt_input.toPlainText()
+        cursor = self.current_prompt_input.textCursor()
+        pos = max(0, cursor.position() - 4)
+        matches = list(re.finditer(r'(?:\r?\n|^)\s*(?:-{3,}|={3,}|###\s*Step\s*\d+|\[Step\s*\d+\])\s*(?:\r?\n|$)', text[:pos]))
+        if matches:
+            target = matches[-1]
+            cursor.setPosition(target.end())
+            self.current_prompt_input.setTextCursor(cursor)
+            self.current_prompt_input.ensureCursorVisible()
+        else:
+            cursor.setPosition(0)
+            self.current_prompt_input.setTextCursor(cursor)
+            self.current_prompt_input.ensureCursorVisible()
 
     @queue_error_to_log
     def add_current_project_tasks(self, *args, **kwargs):
