@@ -8,4 +8,5 @@ Terminal=false
 Categories=Utility;AudioVideo;Audio;
 X-GNOME-Autostart-enabled=true
 X-KDE-autostart-phase=2
+X-systemd-skip=true
 NoDisplay=true

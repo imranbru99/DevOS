@@ -4,9 +4,8 @@ After=NetworkManager.service systemd-resolved.service devos-rfkill.service
 Wants=NetworkManager.service systemd-resolved.service
 
 [Service]
-Type=oneshot
+Type=simple
 ExecStart=/bin/bash /usr/local/sbin/devos-bring-up-network
-RemainAfterExit=yes
 
 [Install]
 WantedBy=multi-user.target

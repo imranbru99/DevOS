@@ -67,7 +67,9 @@ ALLOWLIST = common.DATA_DIR + "/allowlist.json"        # sha256 restored by an a
 HISTORY = common.DATA_DIR + "/history.json"            # scans run as root
 CLAMAV_DB = "/var/lib/clamav"
 CLAMD_SOCKETS = ("/run/clamav/clamd.ctl", "/var/run/clamav/clamd.ctl")
-CLAMD_MIN_RAM = 8 * common.GB
+# Default to on-demand clamscan and scheduled freshclam to save ~1 GB RAM.
+# Persistent clamd resident daemon is reserved for high-memory systems (>= 64 GB).
+CLAMD_MIN_RAM = 64 * common.GB
 SETTLE_S = 3            # a file written in the last 3 s may still be growing
 BATCH_WAIT_S = 8        # clamscan: wait for more files so signatures load once
 MAX_ROUNDS = 30

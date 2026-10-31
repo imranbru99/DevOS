@@ -40,15 +40,6 @@ for candidate in qdbus6 qdbus-qt6 qdbus qdbus-qt5; do
     fi
 done
 
-ready=0
-for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
-    if [ -n "${qdbus_bin}" ] && "${qdbus_bin}" org.kde.plasmashell >/dev/null 2>&1; then
-        ready=1
-        break
-    fi
-    sleep 1
-done
-
 kw_bin=""
 for candidate in kwriteconfig6 kwriteconfig5; do
     if command -v "${candidate}" >/dev/null 2>&1; then
@@ -58,7 +49,6 @@ for candidate in kwriteconfig6 kwriteconfig5; do
 done
 
 # Migrate only our exact old font defaults, preserving custom fonts and sizes.
-# This also gives native password/confirmation dialogs readable default text.
 font_stamp="${HOME}/.config/devos-dialog-fonts-v1.stamp"
 read_bin="$(command -v kreadconfig6 || command -v kreadconfig5 || true)"
 if [ ! -e "${font_stamp}" ] && [ -n "${kw_bin}" ] && [ -n "${read_bin}" ]; then
@@ -83,7 +73,16 @@ if [ -n "${kw_bin}" ]; then
 fi
 
 stamp="${HOME}/.config/devos-ui.stamp"
-if [ ! -f "${stamp}" ]; then
+if [ ! -f "${stamp}" ] || [ "${1:-}" = "--force" ]; then
+    ready=0
+    for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+        if [ -n "${qdbus_bin}" ] && "${qdbus_bin}" org.kde.plasmashell >/dev/null 2>&1; then
+            ready=1
+            break
+        fi
+        sleep 1
+    done
+
     if [ -n "${kw_bin}" ]; then
         "${kw_bin}" --file kdeglobals --group General --key ColorScheme DevOS
         "${kw_bin}" --file kdeglobals --group Icons --key Theme Papirus-Dark
@@ -92,24 +91,20 @@ if [ ! -f "${stamp}" ]; then
         "${kw_bin}" --file kdeglobals --group "KFileDialog Settings" --key "Automatically select filename extension" false
         "${kw_bin}" --file plasmarc --group Theme --key name breeze-dark
     fi
-    # Do not run lookandfeeltool here: it rebuilds the whole layout and can
-    # leave a desktop with icons but no taskbar. Theme keys above are enough;
-    # apply-ui.js paints the background and creates the panel when missing.
+
+    # Native KDE wallpaper tool (sets all screens)
+    if command -v plasma-apply-wallpaperimage >/dev/null 2>&1; then
+        plasma-apply-wallpaperimage /usr/share/wallpapers/DevOS/DevOS-Default.png >/dev/null 2>&1 || true
+    fi
+
+    # PlasmaShell script fallback (restores panel on first login)
+    if [ "${ready}" -eq 1 ]; then
+        script="/usr/local/share/devos/apply-ui.js"
+        [ -f "$script" ] || script="/usr/local/share/devos/apply-wallpaper.js"
+        "${qdbus_bin}" org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript \
+            "$(cat "$script")" >/dev/null 2>&1 || true
+    fi
     touch "${stamp}"
-fi
-
-# Every login: DevOS background, and a taskbar if Plasma omitted it.
-# 1. Native KDE wallpaper tool (fastest, sets all screens immediately)
-if command -v plasma-apply-wallpaperimage >/dev/null 2>&1; then
-    plasma-apply-wallpaperimage /usr/share/wallpapers/DevOS/DevOS-Default.png >/dev/null 2>&1 || true
-fi
-
-# 2. PlasmaShell script fallback (also restores panel if omitted)
-if [ "${ready}" -eq 1 ]; then
-    script="/usr/local/share/devos/apply-ui.js"
-    [ -f "$script" ] || script="/usr/local/share/devos/apply-wallpaper.js"
-    "${qdbus_bin}" org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript \
-        "$(cat "$script")" >/dev/null 2>&1 || true
 fi
 
 # Hide duplicate Chrome secondary-profile PWA launchers (Profile 1, Profile 2...)

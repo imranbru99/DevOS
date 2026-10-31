@@ -17,6 +17,7 @@ SERVICES_TO_MASK=(
     "snapd.socket"
     "snapd.seeded.service"
     "dnsmasq.service"
+    "NetworkManager-wait-online.service"
 )
 
 for svc in "${SERVICES_TO_MASK[@]}"; do
@@ -24,6 +25,13 @@ for svc in "${SERVICES_TO_MASK[@]}"; do
         echo "Masking ${svc}..."
         systemctl mask "${svc}" || true
     fi
+done
+# Ensure NetworkManager-wait-online does not stall boot even when masked in chroot
+ln -sfn /dev/null /etc/systemd/system/NetworkManager-wait-online.service
+
+# Developer databases should start on-demand, not stall OS boot
+for db_svc in postgresql mariadb mysql php8.5-fpm; do
+    systemctl disable "${db_svc}" 2>/dev/null || true
 done
 # dnsmasq and systemd-resolved both want port 53. Keep resolved, and mask
 # dnsmasq even when systemctl cannot see the unit inside the build chroot.
