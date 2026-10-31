@@ -76,6 +76,28 @@ QFrame#banner_strip {
     border: 1px solid #1e293b;
     border-radius: 8px;
 }
+QFrame#stats_bar {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #091124, stop:1 #0c1630);
+    border: 1px solid #1e293b;
+    border-radius: 10px;
+}
+QFrame#kpi_card {
+    background-color: #0c172e;
+    border: 1px solid #1e2c45;
+    border-radius: 8px;
+}
+QLabel#kpi_num {
+    font-size: 15px;
+    font-weight: 800;
+    color: #38bdf8;
+    letter-spacing: -0.2px;
+}
+QLabel#kpi_label {
+    font-size: 10px;
+    font-weight: 700;
+    color: #94a3b8;
+    letter-spacing: 0.6px;
+}
 QFrame#section_current {
     background-color: #081224;
     border: 1px solid #0f274a;
@@ -112,6 +134,30 @@ QLabel#title {
     font-weight: 700;
     color: #f8fafc;
     letter-spacing: -0.3px;
+}
+QProgressBar {
+    background-color: #0b1220;
+    border: 1px solid #1e293b;
+    border-radius: 4px;
+    height: 6px;
+    text-align: center;
+}
+QProgressBar::chunk {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0284c7, stop:1 #10b981);
+    border-radius: 3px;
+}
+QScrollBar:vertical {
+    background: #080d1a;
+    width: 8px;
+    margin: 0px;
+}
+QScrollBar::handle:vertical {
+    background: #253347;
+    min-height: 24px;
+    border-radius: 4px;
+}
+QScrollBar::handle:vertical:hover {
+    background: #3b82f6;
 }
 QLabel#subtitle {
     color: #94a3b8;
@@ -370,29 +416,31 @@ class StepRow(QtWidgets.QFrame):
         center_box.addWidget(prompt_lbl)
 
         status = self.task.get("status", "QUEUED")
-        status_text = f"Status: {status}"
+        status_text = f"○ Queued"
         status_color = "#94a3b8"
 
         if status == "RUNNING":
-            status_text = "RUNNING: Execution in progress..."
+            status_text = "⚡ Running: Execution in progress..."
             status_color = "#38bdf8"
         elif status == "RATE_LIMITED":
             retry_at = self.task.get("retry_at", "")
             if retry_at:
                 try:
                     dt = datetime.datetime.fromisoformat(retry_at)
-                    status_text = f"RATE LIMITED: Cooldown active until {dt.strftime('%I:%M %p')}"
+                    status_text = f"⏳ Rate-Limited: Cooldown active until {dt.strftime('%I:%M %p')}"
                 except Exception:
-                    status_text = "RATE LIMITED"
+                    status_text = "⏳ Rate-Limited"
+            else:
+                status_text = "⏳ Rate-Limited"
             status_color = "#fbbf24"
         elif status == "SUBMITTED":
-            status_text = "Submitted • verify completion in the agent"
+            status_text = "📩 Submitted • verify completion in agent"
             status_color = "#fbbf24"
         elif status == "COMPLETED":
-            status_text = "COMPLETED"
+            status_text = "✔ Completed"
             status_color = "#34d399"
         elif status == "FAILED":
-            status_text = "FAILED"
+            status_text = "✖ Failed"
             status_color = "#f87171"
 
         status_lbl = QtWidgets.QLabel(status_text)
@@ -553,6 +601,14 @@ class ProjectPipelineCard(QtWidgets.QFrame):
             btn_del_proj.clicked.connect(lambda: self.on_delete_project(slug))
             header.addWidget(btn_del_proj)
 
+        # Toggle Expand/Collapse button
+        self.btn_toggle = QtWidgets.QPushButton("▲")
+        self.btn_toggle.setObjectName("small_btn")
+        self.btn_toggle.setFixedWidth(28)
+        self.btn_toggle.setToolTip("Expand or collapse project steps")
+        self.btn_toggle.clicked.connect(self.toggle_steps)
+        header.addWidget(self.btn_toggle)
+
         main_layout.addLayout(header)
 
         # Progress bar (if more than 1 task)
@@ -564,7 +620,9 @@ class ProjectPipelineCard(QtWidgets.QFrame):
             main_layout.addWidget(pbar)
 
         # Step rows container
-        steps_vbox = QtWidgets.QVBoxLayout()
+        self.steps_container = QtWidgets.QWidget()
+        steps_vbox = QtWidgets.QVBoxLayout(self.steps_container)
+        steps_vbox.setContentsMargins(0, 4, 0, 0)
         steps_vbox.setSpacing(6)
         for idx, task in enumerate(tasks, start=1):
             row = StepRow(
@@ -576,7 +634,17 @@ class ProjectPipelineCard(QtWidgets.QFrame):
             )
             steps_vbox.addWidget(row)
 
-        main_layout.addLayout(steps_vbox)
+        main_layout.addWidget(self.steps_container)
+
+        # Auto-collapse completed projects to keep the view clean
+        if completed_tasks == total_tasks and total_tasks > 0:
+            self.steps_container.setVisible(False)
+            self.btn_toggle.setText("▼")
+
+    def toggle_steps(self):
+        visible = not self.steps_container.isVisible()
+        self.steps_container.setVisible(visible)
+        self.btn_toggle.setText("▲" if visible else "▼")
 
     def open_local_folder(self, folder_path: str):
         try:
@@ -706,6 +774,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
             self.setWindowIcon(icon)
         self.resize(1000, 840)
         self.setStyleSheet(STYLE)
+        self.is_running = False
         self.init_ui()
 
         # Timer for refreshing queue and ticking countdowns
@@ -714,7 +783,6 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.timer.start(1000)
 
         # Worker timer for executing next pipeline task if running
-        self.is_running = False
         self.runner_timer = QTimer(self)
         self.runner_timer.timeout.connect(self.run_step)
 
@@ -746,6 +814,12 @@ class PipelineWindow(QtWidgets.QMainWindow):
         header_layout.addLayout(header_vbox, stretch=1)
 
         # Top Control Buttons
+        btn_import_specs = QtWidgets.QPushButton("⚡ Import Specs Folder...")
+        btn_import_specs.setObjectName("accent_action")
+        btn_import_specs.setToolTip("Batch import all .md project specs and auto-attach multi-agent steps")
+        btn_import_specs.clicked.connect(self.import_specs_folder)
+        header_layout.addWidget(btn_import_specs)
+
         self.btn_run = QtWidgets.QPushButton("Run Pipeline")
         self.btn_run.setObjectName("primary")
         self.btn_run.clicked.connect(self.toggle_runner)
@@ -756,6 +830,38 @@ class PipelineWindow(QtWidgets.QMainWindow):
         header_layout.addWidget(btn_clear)
 
         main_layout.addLayout(header_layout)
+
+        # KPI Metrics Overview Card Bar
+        self.stats_bar = QtWidgets.QFrame()
+        self.stats_bar.setObjectName("stats_bar")
+        stats_layout = QtWidgets.QHBoxLayout(self.stats_bar)
+        stats_layout.setContentsMargins(14, 8, 14, 8)
+        stats_layout.setSpacing(10)
+
+        def make_kpi(label_text, default_val="0"):
+            frame = QtWidgets.QFrame()
+            frame.setObjectName("kpi_card")
+            vl = QtWidgets.QVBoxLayout(frame)
+            vl.setContentsMargins(10, 6, 10, 6)
+            vl.setSpacing(2)
+            num = QtWidgets.QLabel(default_val)
+            num.setObjectName("kpi_num")
+            lbl = QtWidgets.QLabel(label_text)
+            lbl.setObjectName("kpi_label")
+            vl.addWidget(num)
+            vl.addWidget(lbl)
+            return frame, num
+
+        self.card_projects, self.kpi_projects_val = make_kpi("PROJECTS", "0")
+        self.card_tasks, self.kpi_tasks_val = make_kpi("TOTAL STEPS", "0")
+        self.card_completed, self.kpi_completed_val = make_kpi("COMPLETED", "0 (0%)")
+        self.card_status, self.kpi_status_val = make_kpi("PIPELINE STATUS", "IDLE")
+
+        stats_layout.addWidget(self.card_projects)
+        stats_layout.addWidget(self.card_tasks)
+        stats_layout.addWidget(self.card_completed)
+        stats_layout.addWidget(self.card_status)
+        main_layout.addWidget(self.stats_bar)
 
         # Rate Limit Alert Banner (Dynamic)
         self.banner_frame = QtWidgets.QFrame()
@@ -1270,6 +1376,31 @@ class PipelineWindow(QtWidgets.QMainWindow):
         # Group tasks by project
         grouped = get_grouped_projects(tasks)
 
+        # Update KPI dashboard numbers
+        total_projects = len(grouped)
+        total_tasks = len(tasks)
+        completed_tasks = sum(1 for t in tasks if t["status"] == "COMPLETED")
+        running_tasks = [t for t in tasks if t["status"] == "RUNNING"]
+
+        self.kpi_projects_val.setText(f"{total_projects}")
+        self.kpi_tasks_val.setText(f"{total_tasks}")
+        pct = int((completed_tasks / total_tasks * 100)) if total_tasks > 0 else 0
+        self.kpi_completed_val.setText(f"{completed_tasks}/{total_tasks} ({pct}%)")
+
+        if self.is_running and running_tasks:
+            curr_task = running_tasks[0]
+            self.kpi_status_val.setText(f"RUNNING: {curr_task.get('agent', '').upper()}")
+            self.kpi_status_val.setStyleSheet("color: #38bdf8; font-size: 14px; font-weight: 800;")
+        elif rate_limited_tasks:
+            self.kpi_status_val.setText("RATE-LIMITED COOLDOWN")
+            self.kpi_status_val.setStyleSheet("color: #fbbf24; font-size: 14px; font-weight: 800;")
+        elif self.is_running:
+            self.kpi_status_val.setText("ACTIVE (WAITING)")
+            self.kpi_status_val.setStyleSheet("color: #34d399; font-size: 14px; font-weight: 800;")
+        else:
+            self.kpi_status_val.setText("IDLE / PAUSED")
+            self.kpi_status_val.setStyleSheet("color: #94a3b8; font-size: 14px; font-weight: 800;")
+
         # Rebuild list items
         while self.task_list_layout.count() > 1:
             item = self.task_list_layout.takeAt(0)
@@ -1396,6 +1527,88 @@ class PipelineWindow(QtWidgets.QMainWindow):
             if t["status"] == "RATE_LIMITED":
                 self.pipeline.update_task(t["id"], {"agent": "antigravity", "status": "QUEUED", "retry_at": None})
         self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] All rate-limited tasks switched to Antigravity!")
+        self.refresh_queue()
+
+    @queue_error_to_log
+    def import_specs_folder(self):
+        if self.busy():
+            self.log_box.append("Wait for the current task to finish before importing projects.")
+            return
+
+        default_dir = str(Path.home() / "project" / "dev-os" / "specs")
+        if not os.path.exists(default_dir):
+            default_dir = str(Path.home() / "project" / "dev-os")
+        folder = QtWidgets.QFileDialog.getExistingDirectory(
+            self, "Select Folder Containing Project Specs (.md files)", default_dir
+        )
+        if not folder:
+            return
+
+        folder_path = Path(folder)
+        spec_files = sorted(list(folder_path.glob("*.md")) + list(folder_path.glob("*.txt")))
+        if not spec_files:
+            QtWidgets.QMessageBox.information(
+                self, "No Spec Files Found", f"No .md or .txt specification files found in:\n{folder}"
+            )
+            return
+
+        agent = self.agent_combo.currentData() or "antigravity"
+        base_dir = self.pipeline.get_base_dir()
+        count_projects = 0
+        count_steps = 0
+
+        # Multi-agent shared workflow for steps 2 to 5
+        shared_steps = [
+            ("codex", "Step 2: Add comprehensive unit and integration tests with mocks."),
+            ("local", "Step 3: Create multi-stage Dockerfile, docker-compose.yml, and CI/CD workflow."),
+            ("local", "Step 4: Generate API documentation, OpenAPI/Swagger specs, and README.md."),
+            ("antigravity", "Step 5: Run security audit, lint code, and optimize performance bottlenecks."),
+        ]
+
+        for sf in spec_files:
+            content = sf.read_text(encoding="utf-8", errors="ignore").strip()
+            if not content:
+                continue
+            lines = content.splitlines()
+            first_line = lines[0].strip()
+            if first_line.startswith("#"):
+                title = first_line.lstrip("#").strip()
+                prompt1 = "\n".join(lines[1:]).strip() or content
+            else:
+                title = sf.stem.replace("_", " ").replace("-", " ").title()
+                prompt1 = content
+
+            slug = to_slug(title)
+            proj_dir = str(Path(base_dir) / slug)
+            os.makedirs(proj_dir, exist_ok=True)
+
+            # Step 1: Full application specification
+            self.pipeline.add(
+                prompt=prompt1,
+                agent=agent,
+                project=proj_dir,
+                project_title=title,
+                project_slug=slug,
+                create_repo=True,
+            )
+            count_steps += 1
+
+            # Steps 2-5: Shared multi-agent steps
+            for step_agent, step_prompt in shared_steps:
+                self.pipeline.add(
+                    prompt=step_prompt,
+                    agent=step_agent,
+                    project=proj_dir,
+                    project_title=title,
+                    project_slug=slug,
+                    create_repo=False,
+                )
+                count_steps += 1
+            count_projects += 1
+
+        self.log_box.append(
+            f"[{datetime.datetime.now().strftime('%H:%M:%S')}] ⚡ Batch Imported {count_projects} projects ({count_steps} total steps) from '{folder}'"
+        )
         self.refresh_queue()
 
     @queue_error_to_log
