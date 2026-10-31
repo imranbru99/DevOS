@@ -351,6 +351,9 @@ class TestTaskPipeline(unittest.TestCase):
         self.assertTrue(hasattr(win, "queue_badge_lbl"))
         self.assertTrue(hasattr(win, "btn_add_next"))
         self.assertIn("3. ADD NEXT PROJECT", win.next_badge_lbl.text())
+        self.assertTrue(win.cur_proj_title_lbl.wordWrap())
+        self.assertEqual(win.cur_proj_title_lbl.sizePolicy().horizontalPolicy(), QtWidgets.QSizePolicy.Ignored)
+        self.assertLess(win.minimumSizeHint().width(), 1200)
         
         win.close()
 

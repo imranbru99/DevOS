@@ -1127,10 +1127,10 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.resize(1180, 680)
         try:
             screen = QtWidgets.QApplication.primaryScreen().availableGeometry()
-            target_w = min(1260, max(960, screen.width() - 40))
-            target_h = min(690, max(540, screen.height() - 50))
+            target_w = min(1200, max(800, screen.width() - 30))
+            target_h = min(680, max(500, screen.height() - 40))
             self.resize(target_w, target_h)
-            self.move((screen.width() - target_w) // 2, (screen.height() - target_h) // 2)
+            self.move(max(0, (screen.width() - target_w) // 2), max(0, (screen.height() - target_h) // 2))
         except Exception:
             pass
         self.setStyleSheet(STYLE)
@@ -1332,17 +1332,13 @@ class PipelineWindow(QtWidgets.QMainWindow):
         cur_section = QtWidgets.QFrame()
         cur_section.setObjectName("section_current")
         cur_layout = QtWidgets.QVBoxLayout(cur_section)
-        cur_layout.setContentsMargins(12, 9, 12, 9)
-        cur_layout.setSpacing(6)
+        cur_layout.setContentsMargins(12, 8, 12, 8)
+        cur_layout.setSpacing(5)
 
         cur_header = QtWidgets.QHBoxLayout()
         cur_badge = QtWidgets.QLabel("2. CURRENT ACTIVE PROJECT")
         cur_badge.setObjectName("badge_cyan")
         cur_header.addWidget(cur_badge)
-
-        self.cur_proj_title_lbl = QtWidgets.QLabel(f"{self.current_title} ({self.current_slug})")
-        self.cur_proj_title_lbl.setStyleSheet("font-weight: 700; color: #f8fafc; font-size: 12px;")
-        cur_header.addWidget(self.cur_proj_title_lbl)
 
         cur_header.addStretch()
 
@@ -1369,15 +1365,26 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
         cur_layout.addLayout(cur_header)
 
+        # Row 2: Title & slug (word-wrap enabled, never forces parent width)
+        self.cur_proj_title_lbl = QtWidgets.QLabel(f"{self.current_title} ({self.current_slug})")
+        self.cur_proj_title_lbl.setStyleSheet("font-weight: 700; color: #38bdf8; font-size: 12px;")
+        self.cur_proj_title_lbl.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
+        self.cur_proj_title_lbl.setWordWrap(True)
+        cur_layout.addWidget(self.cur_proj_title_lbl)
+
+        # Row 3: Folder path
         self.cur_proj_path_lbl = QtWidgets.QLabel(f"Path: {self.current_path}")
         self.cur_proj_path_lbl.setObjectName("path_info")
+        self.cur_proj_path_lbl.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
+        self.cur_proj_path_lbl.setWordWrap(True)
         cur_layout.addWidget(self.cur_proj_path_lbl)
 
         # Command input for current project
         cur_tools_row = QtWidgets.QHBoxLayout()
         cur_tools_row.setSpacing(6)
-        cur_tools_lbl = QtWidgets.QLabel("Prompt / Specification (supports 5,000+ words, separate steps with '---'):")
+        cur_tools_lbl = QtWidgets.QLabel("Commands / Prompts:")
         cur_tools_lbl.setStyleSheet("color: #64748b; font-size: 10px; font-weight: 600;")
+        cur_tools_lbl.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
         cur_tools_row.addWidget(cur_tools_lbl)
         cur_tools_row.addStretch()
 
@@ -1432,6 +1439,8 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
         self.cur_prompt_metrics_lbl = QtWidgets.QLabel("💡 Tip: Enter multi-line prompts freely. Separate steps with '---'.")
         self.cur_prompt_metrics_lbl.setStyleSheet("color: #64748b; font-size: 10px;")
+        self.cur_prompt_metrics_lbl.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
+        self.cur_prompt_metrics_lbl.setWordWrap(True)
         cur_layout.addWidget(self.cur_prompt_metrics_lbl)
 
         form_layout.addWidget(cur_section)
@@ -1450,6 +1459,8 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
         next_desc = QtWidgets.QLabel("Auto-creates local project folder, then executes commands")
         next_desc.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        next_desc.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
+        next_desc.setWordWrap(True)
         next_header.addWidget(next_desc)
 
         next_header.addStretch()
@@ -1476,13 +1487,16 @@ class PipelineWindow(QtWidgets.QMainWindow):
         # Folder location preview
         self.next_target_preview_lbl = QtWidgets.QLabel("")
         self.next_target_preview_lbl.setStyleSheet("color: #a5b4fc; font-size: 11px; font-family: monospace;")
+        self.next_target_preview_lbl.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
+        self.next_target_preview_lbl.setWordWrap(True)
         next_layout.addWidget(self.next_target_preview_lbl)
 
         # Commands toolbar for next project
         next_tools_row = QtWidgets.QHBoxLayout()
         next_tools_row.setSpacing(6)
-        next_tools_lbl = QtWidgets.QLabel("Project Specification / Prompts (5,000+ words preserved intact):")
+        next_tools_lbl = QtWidgets.QLabel("Specification / Prompts:")
         next_tools_lbl.setStyleSheet("color: #64748b; font-size: 10px; font-weight: 600;")
+        next_tools_lbl.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
         next_tools_row.addWidget(next_tools_lbl)
         next_tools_row.addStretch()
 
@@ -1536,6 +1550,8 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
         self.next_prompt_metrics_lbl = QtWidgets.QLabel("💡 Tip: Multi-line / 5,000+ word specs preserved as 1 step. Use '---' to separate sequential steps.")
         self.next_prompt_metrics_lbl.setStyleSheet("color: #64748b; font-size: 10px;")
+        self.next_prompt_metrics_lbl.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
+        self.next_prompt_metrics_lbl.setWordWrap(True)
         next_layout.addWidget(self.next_prompt_metrics_lbl)
 
         # GitHub Automation Row for next project
@@ -1658,8 +1674,14 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.log_box.setStyleSheet("background-color: #050811; border: 1px solid #1a2436; color: #94a3b8; font-family: monospace; font-size: 11px;")
         right_layout.addWidget(self.log_box)
 
+        left_widget.setMinimumWidth(320)
+        right_widget.setMinimumWidth(280)
         content_splitter.addWidget(right_widget)
-        content_splitter.setSizes([500, 680])
+        content_splitter.setCollapsible(0, False)
+        content_splitter.setCollapsible(1, False)
+        w_left = int(self.width() * 0.52)
+        w_right = max(280, self.width() - w_left)
+        content_splitter.setSizes([w_left, w_right])
         main_layout.addWidget(content_splitter, stretch=1)
 
         self.agent_combo.currentIndexChanged.connect(self.on_agent_changed)
