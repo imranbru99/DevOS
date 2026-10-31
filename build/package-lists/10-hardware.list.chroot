@@ -59,3 +59,6 @@ avahi-daemon
 sane-utils
 fprintd
 libpam-fprintd
+
+# 8. Mobile & Media Devices (MTP & udev probe)
+libmtp-runtime

@@ -1,7 +1,6 @@
 [Unit]
 Description=DevOS Security: find this user's download folders
 ConditionPathExists=/usr/bin/clamscan
-Before=devos-av-watch.path
 
 [Service]
 Type=oneshot

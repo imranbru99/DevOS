@@ -3,7 +3,6 @@ Description=DevOS Security: scan new downloads
 Documentation=file:///usr/local/share/devos/components/security/av.py
 # inotify inside the user's own systemd: no extra process while nothing changes.
 ConditionPathExists=/usr/bin/clamscan
-After=devos-av-watch-setup.service
 
 [Path]
 # More folders (XDG download folder, Telegram, Flatpak apps) are added by
