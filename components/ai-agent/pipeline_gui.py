@@ -927,7 +927,8 @@ class PipelineWindow(QtWidgets.QMainWindow):
         agent_row.addWidget(lbl_step1)
 
         self.agent_combo = QtWidgets.QComboBox()
-        self.agent_combo.setMinimumWidth(280)
+        self.agent_combo.setMinimumWidth(320)
+        self.agent_combo.addItem("✨ Multi-Agent Hybrid (Antigravity + KDE Studio + Local)", "multi")
         known = discover_agents()
         is_kde_session = ("KDE" in os.environ.get("XDG_CURRENT_DESKTOP", "")) or (
             os.environ.get("DESKTOP_SESSION") == "plasma"
@@ -1149,6 +1150,14 @@ class PipelineWindow(QtWidgets.QMainWindow):
             return
 
         agent_key = self.agent_combo.itemData(index)
+        if agent_key == "multi":
+            if hasattr(self, "agent_status_lbl"):
+                self.agent_status_lbl.setText("Multi-Agent: Collaborative Routing")
+                self.agent_status_lbl.setStyleSheet(
+                    "background-color: #3b0764; color: #d8b4fe; border: 1px solid #9333ea; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 700;"
+                )
+            return
+
         known = discover_agents()
         agent_info = known.get(agent_key, {})
         is_running = agent_info.get("running", False)
@@ -1259,10 +1268,14 @@ class PipelineWindow(QtWidgets.QMainWindow):
             return
 
         agent = self.agent_combo.currentData()
-        for prompt in lines:
+        for idx, prompt in enumerate(lines):
+            step_agent = agent
+            if agent == "multi":
+                hybrid_cycle = ["antigravity", "antigravity-kde", "local", "local", "antigravity-kde"]
+                step_agent = hybrid_cycle[idx % len(hybrid_cycle)]
             self.pipeline.add(
                 prompt=prompt,
-                agent=agent,
+                agent=step_agent,
                 project=self.current_path,
                 project_title=self.current_title,
                 project_slug=self.current_slug,
@@ -1312,9 +1325,13 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
         for idx, prompt in enumerate(lines):
             is_repo = create_repo if idx == 0 else False
+            step_agent = agent
+            if agent == "multi":
+                hybrid_cycle = ["antigravity", "antigravity-kde", "local", "local", "antigravity-kde"]
+                step_agent = hybrid_cycle[idx % len(hybrid_cycle)]
             self.pipeline.add(
                 prompt=prompt,
-                agent=agent,
+                agent=step_agent,
                 project=proj_dir,
                 project_title=title,
                 project_slug=slug,
