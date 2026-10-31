@@ -756,6 +756,74 @@ class TaskCard(QtWidgets.QFrame):
             layout.addWidget(btn_failover)
 
 
+IMRAN_PRODUCTION_STEPS_25 = """
+---
+Step 2: make complete readme.md file include all feature, all possiblity, everything what opportunity they got, how much time saver for their business,,,everything,,,then put some images of our application in readme.md to attaract them for github readme...to make them best attracted...
+
+---
+Step 3: in the last of readme.md file put my contact info:
+🤝 Let's Connect & Collaborate
+I am open to Senior Remote Full-Stack Roles, AI Platform Architecture Contracts, and Enterprise Technical Advisory.
+
+Timezone: UTC+6 (Dhaka / Rangpur, Bangladesh) — Flexible overlap with US, UK, and European business hours.
+Delivery Mode: Async-ready, Slack, Discord, Jira, GitHub, and production-first accountability.
+
+| Channel | Address / Handle | Quick Action |
+| :--- | :--- | :--- |
+| 🌐 Primary Portfolio | imrandev.bd | Visit Site ↗ (https://imrandev.bd) |
+| 📦 Packagist Packages | packagist.org/packages/imrandevbd/ | View Packages ↗ (https://packagist.org/packages/imrandevbd/) |
+| 💼 LinkedIn Profile | linkedin.com/in/imranbru99 | Connect ↗ (https://linkedin.com/in/imranbru99) |
+| 🐙 GitHub Profile | github.com/imranbru99 | Follow ↗ (https://github.com/imranbru99) |
+| 💬 WhatsApp Direct | +880 1576-918420 | Chat Now ↗ (https://wa.me/8801576918420) |
+| 📧 Direct Email | me@imrandev.bd | Send Email ↗ (mailto:me@imrandev.bd) |
+| 🐦 X (Twitter) | @imrandev_bd | Follow ↗ (https://x.com/imrandev_bd) |
+| 📺 YouTube Tech | @ImranDevBD | Subscribe ↗ (https://youtube.com/@ImranDevBD) |
+
+---
+Step 4: Permanent Developer Identity & Git Author Configuration
+
+For this project and all future repositories, follow these rules.
+
+Developer Identity:
+- Developer Name: Imran Ahmed
+- Git Author: Imran Ahmed
+- Git Committer: Imran Ahmed
+- Email: me@imrandev.bd
+- Official Website: https://imrandev.bd
+
+Mandatory Rules:
+- Always use Imran Ahmed as the Git author and committer name.
+- Always use me@imrandev.bd as the Git commit email.
+- Never replace the developer identity with an AI coding agent's name.
+- Apply this identity to future commits and new repositories.
+- Preserve all existing Git history unless explicitly instructed otherwise.
+- Verify Git identity before committing.
+- Use https://imrandev.bd as the developer website in appropriate project metadata, documentation and author information.
+- Do not overwrite existing third-party authorship or licensing information.
+
+Required Git Configuration:
+git config --global user.name "Imran Ahmed"
+git config --global user.email "me@imrandev.bd"
+
+Verify Before Committing:
+git config user.name
+git config user.email
+
+Expected output:
+Imran Ahmed
+me@imrandev.bd
+
+Commit Identity Verification:
+Before creating a Git commit, verify that both GIT_AUTHOR and GIT_COMMITTER identities use Imran Ahmed and me@imrandev.bd.
+Do not create commits with an incorrect identity.
+
+Permanent Instruction:
+Maintain this configuration across future development sessions wherever possible. If a new agent environment or repository does not have the configuration, configure it before committing.
+
+---
+Step 5: based this project, give me the best github repo name with 400 character descripion for reaching organically to rank or any related search our repo will be search able rank in google or github in github.txt file"""
+
+
 class BatchProjectDialog(QtWidgets.QDialog):
     """Visual Batch Project Generator: automatically queues up to 20+ projects
     with a custom/templated Step 1 specification prompt, and shared Steps 2-5 boilerplate.
@@ -843,12 +911,7 @@ class BatchProjectDialog(QtWidgets.QDialog):
         rl.addWidget(step25_lbl)
 
         self.step25_text = QtWidgets.QTextEdit()
-        self.step25_text.setPlainText(
-            "Step 2: Add comprehensive unit and integration tests with 90%+ code coverage.\n"
-            "Step 3: Create production multi-stage Dockerfile, docker-compose.yml, and CI/CD workflow.\n"
-            "Step 4: Audit code for security vulnerabilities, sanitize inputs, and verify OWASP compliance.\n"
-            "Step 5: Generate complete API documentation, endpoint markdown, and production README.md."
-        )
+        self.step25_text.setPlainText(IMRAN_PRODUCTION_STEPS_25.strip())
         rl.addWidget(self.step25_text)
 
         # Agent & GitHub options
@@ -916,7 +979,7 @@ class BatchProjectDialog(QtWidgets.QDialog):
             return
 
         step1_template = self.step1_input.toPlainText().strip()
-        shared_steps = [s.strip() for s in self.step25_text.toPlainText().splitlines() if s.strip()]
+        shared_steps = split_prompts(self.step25_text.toPlainText())
 
         base_dir = self.pipeline.get_base_dir()
         agent = self.agent_combo.currentData() or "multi"
@@ -1067,16 +1130,7 @@ class PromptEditorDialog(QtWidgets.QDialog):
 
     def append_steps_25(self):
         current = self.editor.toPlainText().rstrip()
-        append_txt = (
-            "\n\n---\n"
-            "Step 2: Add comprehensive unit and integration tests with 90%+ code coverage.\n"
-            "---\n"
-            "Step 3: Create production multi-stage Dockerfile, docker-compose.yml, and CI/CD workflow.\n"
-            "---\n"
-            "Step 4: Audit code for security vulnerabilities, sanitize inputs, and verify OWASP compliance.\n"
-            "---\n"
-            "Step 5: Generate complete API documentation, endpoint markdown, and production README.md."
-        )
+        append_txt = IMRAN_PRODUCTION_STEPS_25
         self.editor.setPlainText(current + append_txt if current else append_txt.lstrip())
 
     def load_from_file(self):
@@ -1918,16 +1972,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
     def append_next_steps_25(self):
         current = self.next_prompt_input.toPlainText().rstrip()
-        append_txt = (
-            "\n\n---\n"
-            "Step 2: Add comprehensive unit and integration tests with 90%+ code coverage.\n"
-            "---\n"
-            "Step 3: Create production multi-stage Dockerfile, docker-compose.yml, and CI/CD workflow.\n"
-            "---\n"
-            "Step 4: Audit code for security vulnerabilities, sanitize inputs, and verify OWASP compliance.\n"
-            "---\n"
-            "Step 5: Generate complete API documentation, endpoint markdown, and production README.md."
-        )
+        append_txt = IMRAN_PRODUCTION_STEPS_25
         self.next_prompt_input.setPlainText(current + append_txt if current else append_txt.lstrip())
 
     def open_next_prompt_editor(self):
@@ -1957,16 +2002,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
     def append_cur_steps_25(self):
         current = self.current_prompt_input.toPlainText().rstrip()
-        append_txt = (
-            "\n\n---\n"
-            "Step 2: Add comprehensive unit and integration tests with 90%+ code coverage.\n"
-            "---\n"
-            "Step 3: Create production multi-stage Dockerfile, docker-compose.yml, and CI/CD workflow.\n"
-            "---\n"
-            "Step 4: Audit code for security vulnerabilities, sanitize inputs, and verify OWASP compliance.\n"
-            "---\n"
-            "Step 5: Generate complete API documentation, endpoint markdown, and production README.md."
-        )
+        append_txt = IMRAN_PRODUCTION_STEPS_25
         self.current_prompt_input.setPlainText(current + append_txt if current else append_txt.lstrip())
 
     def open_cur_prompt_editor(self):

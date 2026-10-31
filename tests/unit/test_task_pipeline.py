@@ -404,7 +404,8 @@ class TestTaskPipeline(unittest.TestCase):
         dlg.insert_step_separator()
         self.assertIn("---", dlg.get_text())
         dlg.append_steps_25()
-        self.assertIn("OWASP", dlg.get_text())
+        self.assertIn("Imran Ahmed", dlg.get_text())
+        self.assertIn("imrandev.bd", dlg.get_text())
         dlg.close()
 
 
