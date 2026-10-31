@@ -60,30 +60,37 @@ def get_app_icon():
 
 
 STYLE = """
-QWidget {
-    background-color: #080d1a;
+QMainWindow, QWidget {
+    background-color: #060a17;
     color: #e2e8f0;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     font-size: 13px;
 }
+QWidget#centralWidget {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 #050814,
+        stop:0.35 #070e24,
+        stop:0.7 #0a1533,
+        stop:1 #060b18);
+}
 QFrame#card {
-    background-color: #0f172a;
-    border: 1px solid #1e293b;
-    border-radius: 10px;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(15, 23, 42, 0.95), stop:1 rgba(10, 16, 32, 0.95));
+    border: 1px solid rgba(56, 189, 248, 0.22);
+    border-radius: 12px;
 }
 QFrame#banner_strip {
-    background-color: #0c1427;
-    border: 1px solid #1e293b;
+    background-color: #0b152d;
+    border: 1px solid #1e355b;
     border-radius: 8px;
 }
 QFrame#stats_bar {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #091124, stop:1 #0c1630);
-    border: 1px solid #1e293b;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0a1634, stop:1 #0d1e42);
+    border: 1px solid #1e3a6f;
     border-radius: 10px;
 }
 QFrame#kpi_card {
-    background-color: #0c172e;
-    border: 1px solid #1e2c45;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #0e1d3d, stop:1 #0a152d);
+    border: 1px solid #1e3a68;
     border-radius: 8px;
 }
 QLabel#kpi_num {
@@ -99,30 +106,30 @@ QLabel#kpi_label {
     letter-spacing: 0.6px;
 }
 QFrame#section_current {
-    background-color: #081224;
-    border: 1px solid #0f274a;
-    border-radius: 8px;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #081a33, stop:1 #061124);
+    border: 1px solid #0e7490;
+    border-radius: 10px;
 }
 QFrame#section_next {
-    background-color: #0c1022;
-    border: 1px solid #1f2544;
-    border-radius: 8px;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #0c1433, stop:1 #080d22);
+    border: 1px solid #4338ca;
+    border-radius: 10px;
 }
 QFrame#project_card {
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #0f182c, stop:1 #0b1120);
-    border: 1px solid #1e2a42;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #101c38, stop:1 #0b1326);
+    border: 1px solid #223759;
     border-radius: 10px;
 }
 QFrame#project_card:hover {
-    border-color: #334768;
+    border-color: #38bdf8;
 }
 QFrame#step_row {
-    background-color: #060b16;
-    border: 1px solid #182338;
-    border-radius: 6px;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #070e1c, stop:1 #0a1428);
+    border: 1px solid #1c2e4a;
+    border-radius: 7px;
 }
 QFrame#step_row:hover {
-    border-color: #2a3c5a;
+    border-color: #38bdf8;
 }
 QFrame#banner_rate_limit {
     background-color: #2a1b06;
@@ -130,8 +137,8 @@ QFrame#banner_rate_limit {
     border-radius: 8px;
 }
 QLabel#title {
-    font-size: 20px;
-    font-weight: 700;
+    font-size: 21px;
+    font-weight: 800;
     color: #f8fafc;
     letter-spacing: -0.3px;
 }
@@ -788,6 +795,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
     def init_ui(self):
         central = QtWidgets.QWidget()
+        central.setObjectName("centralWidget")
         self.setCentralWidget(central)
         main_layout = QtWidgets.QVBoxLayout(central)
         main_layout.setContentsMargins(24, 18, 24, 18)
@@ -830,6 +838,13 @@ class PipelineWindow(QtWidgets.QMainWindow):
         header_layout.addWidget(btn_clear)
 
         main_layout.addLayout(header_layout)
+
+        # Toast Banner for Instant Visual Action Feedback
+        self.toast_banner = QtWidgets.QLabel("")
+        self.toast_banner.setObjectName("toast_banner")
+        self.toast_banner.setAlignment(Qt.AlignCenter)
+        self.toast_banner.hide()
+        main_layout.addWidget(self.toast_banner)
 
         # KPI Metrics Overview Card Bar
         self.stats_bar = QtWidgets.QFrame()
@@ -1047,11 +1062,13 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.next_title_input = QLineEdit()
         self.next_title_input.setPlaceholderText("Next Project Title (e.g. 'Build Laravel Auth API', 'Payment Service')...")
         self.next_title_input.textChanged.connect(self.on_next_title_changed)
+        self.next_title_input.returnPressed.connect(lambda: self.next_prompt_input.setFocus())
         meta_row.addWidget(self.next_title_input, stretch=2)
 
         self.next_slug_input = QLineEdit()
         self.next_slug_input.setPlaceholderText("Folder Slug (auto-generated)")
         self.next_slug_input.textChanged.connect(self.update_next_target_preview)
+        self.next_slug_input.returnPressed.connect(lambda: self.next_prompt_input.setFocus())
         meta_row.addWidget(self.next_slug_input, stretch=1)
 
         next_layout.addLayout(meta_row)
@@ -1107,6 +1124,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
         self.scroll = QtWidgets.QScrollArea()
         self.scroll.setWidgetResizable(True)
+        self.scroll.setMinimumHeight(280)
         self.scroll_content = QtWidgets.QWidget()
         self.task_list_layout = QtWidgets.QVBoxLayout(self.scroll_content)
         self.task_list_layout.setContentsMargins(0, 0, 0, 0)
@@ -1287,6 +1305,14 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.log_box.append(
             f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Queued {count} step(s) into CURRENT project '{self.current_title}' [{self.current_slug}]"
         )
+        if hasattr(self, "toast_banner"):
+            self.toast_banner.setText(f"✔ Queued {count} step(s) into current project '{self.current_title}'!")
+            self.toast_banner.setStyleSheet(
+                "background-color: #064e3b; color: #34d399; font-weight: 700; font-size: 13px; "
+                "padding: 8px 16px; border-radius: 8px; border: 1px solid #059669;"
+            )
+            self.toast_banner.show()
+            QtCore.QTimer.singleShot(3500, self.toast_banner.hide)
         self.refresh_queue()
 
     @queue_error_to_log
@@ -1297,6 +1323,15 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
         raw_text = self.next_prompt_input.toPlainText().strip()
         if not raw_text:
+            if hasattr(self, "toast_banner"):
+                self.toast_banner.setText("⚠️ Please enter command(s) or prompt before clicking Add.")
+                self.toast_banner.setStyleSheet(
+                    "background-color: #451a03; color: #fcd34d; font-weight: 700; font-size: 12px; "
+                    "padding: 8px 14px; border-radius: 8px; border: 1px solid #d97706;"
+                )
+                self.toast_banner.show()
+                QtCore.QTimer.singleShot(3500, self.toast_banner.hide)
+            self.next_prompt_input.setFocus()
             return
 
         lines = [line.strip() for line in raw_text.split("\n") if line.strip()]
@@ -1356,6 +1391,20 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.next_title_input.setPlaceholderText("Next Project Title (e.g. 'Payment Service API')...")
         self.next_title_input.setFocus()
         self.refresh_queue()
+
+        if hasattr(self, "toast_banner"):
+            self.toast_banner.setText(f"✔ Successfully added '{title}' ({count} step(s)) to pipeline queue below!")
+            self.toast_banner.setStyleSheet(
+                "background-color: #064e3b; color: #34d399; font-weight: 700; font-size: 13px; "
+                "padding: 10px 16px; border-radius: 8px; border: 1px solid #059669;"
+            )
+            self.toast_banner.show()
+            QtCore.QTimer.singleShot(4000, self.toast_banner.hide)
+
+        # Smooth auto-scroll down to the newly queued project in the list!
+        QtCore.QTimer.singleShot(100, lambda: self.scroll.verticalScrollBar().setValue(
+            self.scroll.verticalScrollBar().maximum()
+        ))
 
     def refresh_queue(self):
         tasks = self.pipeline.list()
