@@ -313,6 +313,46 @@ class TestTaskPipeline(unittest.TestCase):
         self.assertEqual(title, "My Custom Kde Project")
         self.assertEqual(path, str(sub))
 
+    def test_batch_project_dialog_generation(self):
+        from PyQt5 import QtWidgets
+        import pipeline_gui
+        app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(["--platform", "offscreen"])
+        
+        dlg = pipeline_gui.BatchProjectDialog(self.pipeline)
+        dlg.load_sample_projects()
+        
+        # Verify 20 sample projects loaded
+        lines = [l.strip() for l in dlg.projects_text.toPlainText().splitlines() if l.strip()]
+        self.assertEqual(len(lines), 20)
+        self.assertIn("01-user-auth-service", lines[0])
+
+        # Test batch project generation with 2 projects
+        dlg.projects_text.setPlainText("Project Alpha\nProject Beta")
+        dlg.generate_projects()
+
+        tasks = self.pipeline.list()
+        # Each project has 1 spec prompt + 4 shared prompts = 5 steps * 2 = 10 steps
+        self.assertEqual(len(tasks), 10)
+        grouped = pipeline_gui.get_grouped_projects(tasks)
+        self.assertEqual(len(grouped), 2)
+        self.assertEqual(grouped[0]["slug"], "project-alpha")
+        self.assertEqual(grouped[1]["slug"], "project-beta")
+        dlg.close()
+
+    def test_pipeline_gui_responsive_split_layout(self):
+        from PyQt5 import QtWidgets
+        import pipeline_gui
+        app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(["--platform", "offscreen"])
+        win = pipeline_gui.PipelineWindow()
+        
+        # Verify responsive splitter and dynamic widgets exist
+        self.assertTrue(hasattr(win, "next_badge_lbl"))
+        self.assertTrue(hasattr(win, "queue_badge_lbl"))
+        self.assertTrue(hasattr(win, "btn_add_next"))
+        self.assertIn("3. ADD NEXT PROJECT", win.next_badge_lbl.text())
+        
+        win.close()
+
 
 if __name__ == "__main__":
     unittest.main()

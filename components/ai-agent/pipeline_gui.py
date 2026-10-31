@@ -749,6 +749,207 @@ class TaskCard(QtWidgets.QFrame):
             layout.addWidget(btn_failover)
 
 
+class BatchProjectDialog(QtWidgets.QDialog):
+    """Visual Batch Project Generator: automatically queues up to 20+ projects
+    with a custom/templated Step 1 specification prompt, and shared Steps 2-5 boilerplate.
+    """
+    def __init__(self, pipeline, parent=None, default_agent="multi"):
+        super().__init__(parent)
+        self.pipeline = pipeline
+        self.default_agent = default_agent
+        self.setWindowTitle("⚡ Batch Multi-Project Generator (20 Projects)")
+        self.setMinimumSize(800, 580)
+        self.setStyleSheet(STYLE)
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(12)
+
+        # Title / Description
+        header_lbl = QtWidgets.QLabel("⚡ Batch Project & Multi-Agent Step Generator")
+        header_lbl.setStyleSheet("font-size: 16px; font-weight: 800; color: #38bdf8;")
+        layout.addWidget(header_lbl)
+
+        desc_lbl = QtWidgets.QLabel(
+            "Quickly configure up to 20 separate project folders. Step 1 executes the full application spec, "
+            "and Steps 2–5 automatically execute shared engineering tasks (testing, docker, security, docs) across AI agents."
+        )
+        desc_lbl.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        desc_lbl.setWordWrap(True)
+        layout.addWidget(desc_lbl)
+
+        # Split: Left (Projects List) | Right (Step Prompts & Config)
+        splitter = QtWidgets.QSplitter(Qt.Horizontal)
+
+        # Left: Project Titles
+        left_box = QtWidgets.QWidget()
+        ll = QtWidgets.QVBoxLayout(left_box)
+        ll.setContentsMargins(0, 0, 0, 0)
+        ll.setSpacing(6)
+
+        proj_header_row = QtWidgets.QHBoxLayout()
+        proj_lbl = QtWidgets.QLabel("Project Titles (One per line):")
+        proj_lbl.setStyleSheet("font-weight: 700; color: #f1f5f9;")
+        proj_header_row.addWidget(proj_lbl)
+
+        btn_sample = QtWidgets.QPushButton("Load 20 Sample Tech Projects")
+        btn_sample.setObjectName("small_btn")
+        btn_sample.setStyleSheet("background-color: #0f172a; color: #38bdf8; font-size: 11px; padding: 4px 8px; border: 1px solid #1e293b; border-radius: 4px;")
+        btn_sample.clicked.connect(self.load_sample_projects)
+        proj_header_row.addWidget(btn_sample)
+        ll.addLayout(proj_header_row)
+
+        self.projects_text = QtWidgets.QTextEdit()
+        self.projects_text.setPlaceholderText(
+            "Enter project titles, one per line:\n\n"
+            "01-user-auth-service\n"
+            "02-billing-stripe-api\n"
+            "03-crm-lead-pipeline\n"
+            "04-ecommerce-catalog\n"
+            "...\n(Up to 20 or more projects)"
+        )
+        ll.addWidget(self.projects_text)
+
+        splitter.addWidget(left_box)
+
+        # Right: Prompt Configuration
+        right_box = QtWidgets.QWidget()
+        rl = QtWidgets.QVBoxLayout(right_box)
+        rl.setContentsMargins(0, 0, 0, 0)
+        rl.setSpacing(8)
+
+        step1_lbl = QtWidgets.QLabel("Step 1 Spec Prompt (Unique per project):")
+        step1_lbl.setStyleSheet("font-weight: 700; color: #38bdf8;")
+        rl.addWidget(step1_lbl)
+
+        self.step1_input = QtWidgets.QTextEdit()
+        self.step1_input.setMaximumHeight(85)
+        self.step1_input.setPlainText(
+            "Build complete, production-ready backend and web interface for {title} with database migrations, API routes, and models."
+        )
+        rl.addWidget(self.step1_input)
+
+        step25_lbl = QtWidgets.QLabel("Steps 2–5 Shared Engineering Steps (Applied to ALL projects):")
+        step25_lbl.setStyleSheet("font-weight: 700; color: #a78bfa;")
+        rl.addWidget(step25_lbl)
+
+        self.step25_text = QtWidgets.QTextEdit()
+        self.step25_text.setPlainText(
+            "Step 2: Add comprehensive unit and integration tests with 90%+ code coverage.\n"
+            "Step 3: Create production multi-stage Dockerfile, docker-compose.yml, and CI/CD workflow.\n"
+            "Step 4: Audit code for security vulnerabilities, sanitize inputs, and verify OWASP compliance.\n"
+            "Step 5: Generate complete API documentation, endpoint markdown, and production README.md."
+        )
+        rl.addWidget(self.step25_text)
+
+        # Agent & GitHub options
+        opt_row = QtWidgets.QHBoxLayout()
+        self.agent_combo = QtWidgets.QComboBox()
+        self.agent_combo.addItem("✨ Multi-Agent Hybrid (Antigravity + KDE Studio + Local)", "multi")
+        self.agent_combo.addItem("Antigravity AI (Primary CLI)", "antigravity")
+        self.agent_combo.addItem("Antigravity Studio (KDE GUI)", "antigravity-kde")
+        self.agent_combo.addItem("DevOS Local AI", "local")
+        opt_row.addWidget(self.agent_combo)
+
+        self.cb_github = QtWidgets.QCheckBox("Auto-create GitHub Repo")
+        self.cb_github.setChecked(True)
+        opt_row.addWidget(self.cb_github)
+        rl.addLayout(opt_row)
+
+        splitter.addWidget(right_box)
+        layout.addWidget(splitter, stretch=1)
+
+        # Bottom Buttons
+        btn_box = QtWidgets.QHBoxLayout()
+        btn_cancel = QtWidgets.QPushButton("Cancel")
+        btn_cancel.clicked.connect(self.reject)
+        btn_box.addWidget(btn_cancel)
+
+        btn_box.addStretch()
+
+        self.btn_generate = QtWidgets.QPushButton("⚡ Generate Projects into Pipeline")
+        self.btn_generate.setObjectName("primary")
+        self.btn_generate.setStyleSheet("background-color: #2563eb; color: white; font-weight: 700; padding: 8px 18px; border-radius: 6px;")
+        self.btn_generate.clicked.connect(self.generate_projects)
+        btn_box.addWidget(self.btn_generate)
+
+        layout.addLayout(btn_box)
+
+    def load_sample_projects(self):
+        samples = [
+            "01-user-auth-service",
+            "02-billing-stripe-api",
+            "03-realtime-chat-engine",
+            "04-crm-lead-pipeline",
+            "05-ecommerce-catalog",
+            "06-inventory-tracker",
+            "07-invoice-vat-engine",
+            "08-prompt-analytics-dashboard",
+            "09-support-ticket-helpdesk",
+            "10-cloud-media-cdn",
+            "11-api-rate-limiter",
+            "12-feed-comment-system",
+            "13-appointment-booking",
+            "14-seo-sitemap-generator",
+            "15-web3-payment-processor",
+            "16-multitenant-org-manager",
+            "17-kanban-sprint-board",
+            "18-iot-telemetry-collector",
+            "19-newsletter-campaign-dispatcher",
+            "20-patient-healthcare-portal",
+        ]
+        self.projects_text.setPlainText("\n".join(samples))
+
+    def generate_projects(self):
+        lines = [l.strip() for l in self.projects_text.toPlainText().splitlines() if l.strip()]
+        if not lines:
+            QtWidgets.QMessageBox.warning(self, "No Projects", "Please enter at least one project title.")
+            return
+
+        step1_template = self.step1_input.toPlainText().strip()
+        shared_steps = [s.strip() for s in self.step25_text.toPlainText().splitlines() if s.strip()]
+
+        base_dir = self.pipeline.get_base_dir()
+        agent = self.agent_combo.currentData() or "multi"
+        create_repo = self.cb_github.isChecked()
+
+        for line in lines:
+            title = line.strip()
+            slug = to_slug(title)
+            proj_dir = str(Path(base_dir) / slug)
+            os.makedirs(proj_dir, exist_ok=True)
+
+            # Step 1
+            prompt1 = step1_template.replace("{title}", title).replace("{slug}", slug)
+            step1_agent = "antigravity" if agent == "multi" else agent
+            self.pipeline.add(
+                prompt=prompt1,
+                agent=step1_agent,
+                project=proj_dir,
+                project_title=title,
+                project_slug=slug,
+                create_repo=create_repo,
+                repo_name=slug if create_repo else "",
+            )
+
+            # Steps 2-5
+            hybrid_cycle = ["antigravity-kde", "local", "local", "antigravity-kde"]
+            for idx, shared_prompt in enumerate(shared_steps):
+                step_agent = hybrid_cycle[idx % len(hybrid_cycle)] if agent == "multi" else agent
+                self.pipeline.add(
+                    prompt=shared_prompt,
+                    agent=step_agent,
+                    project=proj_dir,
+                    project_title=title,
+                    project_slug=slug,
+                    create_repo=False,
+                )
+
+        self.accept()
+
+
 class PipelineWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -779,7 +980,15 @@ class PipelineWindow(QtWidgets.QMainWindow):
         icon = get_app_icon()
         if not icon.isNull():
             self.setWindowIcon(icon)
-        self.resize(1000, 840)
+        self.resize(1180, 680)
+        try:
+            screen = QtWidgets.QApplication.primaryScreen().availableGeometry()
+            target_w = min(1260, max(960, screen.width() - 40))
+            target_h = min(690, max(540, screen.height() - 50))
+            self.resize(target_w, target_h)
+            self.move((screen.width() - target_w) // 2, (screen.height() - target_h) // 2)
+        except Exception:
+            pass
         self.setStyleSheet(STYLE)
         self.is_running = False
         self.init_ui()
@@ -798,17 +1007,17 @@ class PipelineWindow(QtWidgets.QMainWindow):
         central.setObjectName("centralWidget")
         self.setCentralWidget(central)
         main_layout = QtWidgets.QVBoxLayout(central)
-        main_layout.setContentsMargins(24, 18, 24, 18)
-        main_layout.setSpacing(12)
+        main_layout.setContentsMargins(18, 14, 18, 14)
+        main_layout.setSpacing(10)
 
         # Header
         header_layout = QtWidgets.QHBoxLayout()
-        header_layout.setSpacing(14)
+        header_layout.setSpacing(12)
 
         icon_lbl = QtWidgets.QLabel()
         app_icon = get_app_icon()
         if not app_icon.isNull():
-            icon_lbl.setPixmap(app_icon.pixmap(46, 46))
+            icon_lbl.setPixmap(app_icon.pixmap(42, 42))
         header_layout.addWidget(icon_lbl)
 
         header_vbox = QtWidgets.QVBoxLayout()
@@ -822,9 +1031,16 @@ class PipelineWindow(QtWidgets.QMainWindow):
         header_layout.addLayout(header_vbox, stretch=1)
 
         # Top Control Buttons
-        btn_import_specs = QtWidgets.QPushButton("⚡ Import Specs Folder...")
-        btn_import_specs.setObjectName("accent_action")
-        btn_import_specs.setToolTip("Batch import all .md project specs and auto-attach multi-agent steps")
+        btn_batch_top = QtWidgets.QPushButton("⚡ Batch 20 Projects...")
+        btn_batch_top.setObjectName("accent_action")
+        btn_batch_top.setToolTip("Auto-generate 20 separate project folders with 1st spec prompt + shared 2-5 prompts")
+        btn_batch_top.clicked.connect(self.open_batch_dialog)
+        header_layout.addWidget(btn_batch_top)
+
+        btn_import_specs = QtWidgets.QPushButton("📁 Import Specs...")
+        btn_import_specs.setObjectName("small_btn")
+        btn_import_specs.setStyleSheet("background-color: #1e293b; color: #38bdf8; font-size: 11px; padding: 6px 12px; border: 1px solid #334155; border-radius: 6px;")
+        btn_import_specs.setToolTip("Batch import all .md project specs from a folder and auto-attach multi-agent steps")
         btn_import_specs.clicked.connect(self.import_specs_folder)
         header_layout.addWidget(btn_import_specs)
 
@@ -846,43 +1062,11 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.toast_banner.hide()
         main_layout.addWidget(self.toast_banner)
 
-        # KPI Metrics Overview Card Bar
-        self.stats_bar = QtWidgets.QFrame()
-        self.stats_bar.setObjectName("stats_bar")
-        stats_layout = QtWidgets.QHBoxLayout(self.stats_bar)
-        stats_layout.setContentsMargins(14, 8, 14, 8)
-        stats_layout.setSpacing(10)
-
-        def make_kpi(label_text, default_val="0"):
-            frame = QtWidgets.QFrame()
-            frame.setObjectName("kpi_card")
-            vl = QtWidgets.QVBoxLayout(frame)
-            vl.setContentsMargins(10, 6, 10, 6)
-            vl.setSpacing(2)
-            num = QtWidgets.QLabel(default_val)
-            num.setObjectName("kpi_num")
-            lbl = QtWidgets.QLabel(label_text)
-            lbl.setObjectName("kpi_label")
-            vl.addWidget(num)
-            vl.addWidget(lbl)
-            return frame, num
-
-        self.card_projects, self.kpi_projects_val = make_kpi("PROJECTS", "0")
-        self.card_tasks, self.kpi_tasks_val = make_kpi("TOTAL STEPS", "0")
-        self.card_completed, self.kpi_completed_val = make_kpi("COMPLETED", "0 (0%)")
-        self.card_status, self.kpi_status_val = make_kpi("PIPELINE STATUS", "IDLE")
-
-        stats_layout.addWidget(self.card_projects)
-        stats_layout.addWidget(self.card_tasks)
-        stats_layout.addWidget(self.card_completed)
-        stats_layout.addWidget(self.card_status)
-        main_layout.addWidget(self.stats_bar)
-
         # Rate Limit Alert Banner (Dynamic)
         self.banner_frame = QtWidgets.QFrame()
         self.banner_frame.setObjectName("banner_rate_limit")
         banner_box = QtWidgets.QHBoxLayout(self.banner_frame)
-        banner_box.setContentsMargins(16, 12, 16, 12)
+        banner_box.setContentsMargins(14, 8, 14, 8)
 
         self.banner_tag = QtWidgets.QLabel("RATE LIMIT")
         self.banner_tag.setObjectName("tag_label")
@@ -900,14 +1084,30 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.banner_frame.hide()
         main_layout.addWidget(self.banner_frame)
 
+        # =====================================================================
+        # CONTENT SPLITTER: Left (Project Builder) | Right (Queue & KPI)
+        # =====================================================================
+        content_splitter = QtWidgets.QSplitter(Qt.Horizontal)
+        content_splitter.setObjectName("content_splitter")
+        content_splitter.setHandleWidth(8)
+        content_splitter.setStyleSheet("QSplitter::handle { background-color: #1e293b; border-radius: 4px; margin: 4px 1px; }")
+
+        # ---------------------------------------------------------------------
+        # LEFT PANEL: Multi-Project Builder & Console
+        # ---------------------------------------------------------------------
+        left_widget = QtWidgets.QWidget()
+        left_layout = QtWidgets.QVBoxLayout(left_widget)
+        left_layout.setContentsMargins(0, 0, 4, 0)
+        left_layout.setSpacing(10)
+
         # Base Project Directory Selection Bar
         base_dir_card = QtWidgets.QFrame()
         base_dir_card.setObjectName("banner_strip")
         base_dir_layout = QtWidgets.QHBoxLayout(base_dir_card)
-        base_dir_layout.setContentsMargins(14, 7, 14, 7)
-        base_dir_layout.setSpacing(10)
+        base_dir_layout.setContentsMargins(12, 6, 12, 6)
+        base_dir_layout.setSpacing(8)
 
-        base_badge = QtWidgets.QLabel("BASE WORKSPACE")
+        base_badge = QtWidgets.QLabel("WORKSPACE")
         base_badge.setObjectName("tag_label")
         base_dir_layout.addWidget(base_badge)
 
@@ -917,32 +1117,30 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.base_dir_input.editingFinished.connect(self.on_base_dir_changed)
         base_dir_layout.addWidget(self.base_dir_input, stretch=1)
 
-        btn_browse_dir = QtWidgets.QPushButton("Browse Folder...")
+        btn_browse_dir = QtWidgets.QPushButton("Browse...")
         btn_browse_dir.setObjectName("small_btn")
         btn_browse_dir.clicked.connect(self.browse_base_dir)
         base_dir_layout.addWidget(btn_browse_dir)
 
-        main_layout.addWidget(base_dir_card)
+        left_layout.addWidget(base_dir_card)
 
-        # =====================================================================
-        # MAIN PIPELINE INPUT CONSOLE
-        # =====================================================================
+        # Main Input Console Form
         form_card = QtWidgets.QFrame()
         form_card.setObjectName("card")
         form_layout = QtWidgets.QVBoxLayout(form_card)
-        form_layout.setContentsMargins(18, 14, 18, 14)
-        form_layout.setSpacing(12)
+        form_layout.setContentsMargins(14, 12, 14, 12)
+        form_layout.setSpacing(10)
 
-        # 1. Choose Option Agent (1ST STEP)
+        # 1. Target Agent Selection
         agent_row = QtWidgets.QHBoxLayout()
-        agent_row.setSpacing(12)
+        agent_row.setSpacing(8)
 
-        lbl_step1 = QtWidgets.QLabel("1. Target AI Agent:")
+        lbl_step1 = QtWidgets.QLabel("1. Agent:")
         lbl_step1.setObjectName("field_label")
         agent_row.addWidget(lbl_step1)
 
         self.agent_combo = QtWidgets.QComboBox()
-        self.agent_combo.setMinimumWidth(320)
+        self.agent_combo.setMinimumWidth(240)
         self.agent_combo.addItem("✨ Multi-Agent Hybrid (Antigravity + KDE Studio + Local)", "multi")
         known = discover_agents()
         is_kde_session = ("KDE" in os.environ.get("XDG_CURRENT_DESKTOP", "")) or (
@@ -950,7 +1148,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
         )
         default_index = 0
 
-        idx = 0
+        idx = 1
         for k, v in known.items():
             if v.get("running"):
                 label = f"● {v['name']} [Running]"
@@ -978,20 +1176,20 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
         agent_row.addStretch()
 
-        btn_seo = QtWidgets.QPushButton("SEO Repo Ranking Preset")
+        btn_seo = QtWidgets.QPushButton("SEO Preset")
         btn_seo.setToolTip("Auto-fill prompt for best ranking repo name & 400-char SEO description")
-        btn_seo.setStyleSheet("background-color: #1e293b; color: #38bdf8; font-size: 11px; padding: 4px 10px; border: 1px solid #334155; border-radius: 6px;")
+        btn_seo.setStyleSheet("background-color: #1e293b; color: #38bdf8; font-size: 11px; padding: 4px 8px; border: 1px solid #334155; border-radius: 5px;")
         btn_seo.clicked.connect(self.fill_seo_prompt)
         agent_row.addWidget(btn_seo)
 
         form_layout.addLayout(agent_row)
 
-        # 2. CURRENT WORKING PROJECT SECTION (2ND STEP)
+        # 2. CURRENT WORKING PROJECT SECTION
         cur_section = QtWidgets.QFrame()
         cur_section.setObjectName("section_current")
         cur_layout = QtWidgets.QVBoxLayout(cur_section)
-        cur_layout.setContentsMargins(14, 11, 14, 11)
-        cur_layout.setSpacing(8)
+        cur_layout.setContentsMargins(12, 9, 12, 9)
+        cur_layout.setSpacing(6)
 
         cur_header = QtWidgets.QHBoxLayout()
         cur_badge = QtWidgets.QLabel("2. CURRENT ACTIVE PROJECT")
@@ -999,36 +1197,36 @@ class PipelineWindow(QtWidgets.QMainWindow):
         cur_header.addWidget(cur_badge)
 
         self.cur_proj_title_lbl = QtWidgets.QLabel(f"{self.current_title} ({self.current_slug})")
-        self.cur_proj_title_lbl.setStyleSheet("font-weight: 700; color: #f8fafc; font-size: 13px;")
+        self.cur_proj_title_lbl.setStyleSheet("font-weight: 700; color: #f8fafc; font-size: 12px;")
         cur_header.addWidget(self.cur_proj_title_lbl)
-
-        self.cur_proj_path_lbl = QtWidgets.QLabel(f"Path: {self.current_path}")
-        self.cur_proj_path_lbl.setObjectName("path_info")
-        cur_header.addWidget(self.cur_proj_path_lbl)
 
         cur_header.addStretch()
 
-        btn_rescan_cur = QtWidgets.QPushButton("Re-Detect Workspace")
+        btn_rescan_cur = QtWidgets.QPushButton("Re-Detect")
         btn_rescan_cur.setObjectName("small_btn")
         btn_rescan_cur.setToolTip("Re-scan running agent process and workspace storage for open project")
-        btn_rescan_cur.setStyleSheet("background-color: #0f172a; color: #38bdf8; font-size: 11px; padding: 3px 8px; border: 1px solid #1e293b; border-radius: 4px;")
+        btn_rescan_cur.setStyleSheet("background-color: #0f172a; color: #38bdf8; font-size: 10px; padding: 2px 6px; border: 1px solid #1e293b; border-radius: 4px;")
         btn_rescan_cur.clicked.connect(lambda: self.refresh_current_project(manual=True))
         cur_header.addWidget(btn_rescan_cur)
 
         cur_layout.addLayout(cur_header)
 
+        self.cur_proj_path_lbl = QtWidgets.QLabel(f"Path: {self.current_path}")
+        self.cur_proj_path_lbl.setObjectName("path_info")
+        cur_layout.addWidget(self.cur_proj_path_lbl)
+
         # Command input for current project
         cur_cmd_row = QtWidgets.QHBoxLayout()
-        cur_cmd_row.setSpacing(10)
+        cur_cmd_row.setSpacing(8)
 
         self.current_prompt_input = QTextEdit()
         self.current_prompt_input.setPlaceholderText(
-            f"Enter command(s) for Current Project '{self.current_slug}'... (Optional: leave empty to proceed directly to next project)"
+            f"Commands for Current Project '{self.current_slug}'... (Optional: leave empty to proceed to next project)"
         )
-        self.current_prompt_input.setMaximumHeight(54)
+        self.current_prompt_input.setMaximumHeight(50)
         cur_cmd_row.addWidget(self.current_prompt_input, stretch=1)
 
-        btn_add_current = QtWidgets.QPushButton("+ Queue to Current Project")
+        btn_add_current = QtWidgets.QPushButton("+ Queue to Current")
         btn_add_current.setObjectName("accent_action")
         btn_add_current.clicked.connect(self.add_current_project_tasks)
         cur_cmd_row.addWidget(btn_add_current)
@@ -1036,19 +1234,19 @@ class PipelineWindow(QtWidgets.QMainWindow):
         cur_layout.addLayout(cur_cmd_row)
         form_layout.addWidget(cur_section)
 
-        # 3. ADD ANOTHER PROJECT / NEXT PROJECT (3RD STEP)
+        # 3. ADD ANOTHER PROJECT / NEXT PROJECT (DYNAMIC PROJECT NUMBERING)
         next_section = QtWidgets.QFrame()
         next_section.setObjectName("section_next")
         next_layout = QtWidgets.QVBoxLayout(next_section)
-        next_layout.setContentsMargins(14, 11, 14, 11)
-        next_layout.setSpacing(8)
+        next_layout.setContentsMargins(12, 10, 12, 10)
+        next_layout.setSpacing(7)
 
         next_header = QtWidgets.QHBoxLayout()
-        next_badge = QtWidgets.QLabel("3. ADD ANOTHER / NEXT PROJECT")
-        next_badge.setObjectName("badge_indigo")
-        next_header.addWidget(next_badge)
+        self.next_badge_lbl = QtWidgets.QLabel("3. ADD NEXT PROJECT (#2)")
+        self.next_badge_lbl.setObjectName("badge_indigo")
+        next_header.addWidget(self.next_badge_lbl)
 
-        next_desc = QtWidgets.QLabel("Auto-creates local project folder based on slug, then executes commands smoothly")
+        next_desc = QtWidgets.QLabel("Auto-creates local project folder, then executes commands")
         next_desc.setStyleSheet("color: #94a3b8; font-size: 11px;")
         next_header.addWidget(next_desc)
 
@@ -1057,10 +1255,10 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
         # Project Title & Slug inputs
         meta_row = QtWidgets.QHBoxLayout()
-        meta_row.setSpacing(10)
+        meta_row.setSpacing(8)
 
         self.next_title_input = QLineEdit()
-        self.next_title_input.setPlaceholderText("Next Project Title (e.g. 'Build Laravel Auth API', 'Payment Service')...")
+        self.next_title_input.setPlaceholderText("Next Project Title (e.g. 'Build Laravel Auth API')...")
         self.next_title_input.textChanged.connect(self.on_next_title_changed)
         self.next_title_input.returnPressed.connect(lambda: self.next_prompt_input.setFocus())
         meta_row.addWidget(self.next_title_input, stretch=2)
@@ -1080,14 +1278,14 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
         # Commands input for next project
         next_cmd_row = QtWidgets.QHBoxLayout()
-        next_cmd_row.setSpacing(10)
+        next_cmd_row.setSpacing(8)
 
         self.next_prompt_input = QTextEdit()
         self.next_prompt_input.setPlaceholderText("Enter command(s) for this project (enter multiple lines for sequential steps)...")
-        self.next_prompt_input.setMaximumHeight(58)
+        self.next_prompt_input.setMaximumHeight(54)
         next_cmd_row.addWidget(self.next_prompt_input, stretch=1)
 
-        self.btn_add_next = QtWidgets.QPushButton("+ Add Next Project to Pipeline")
+        self.btn_add_next = QtWidgets.QPushButton("+ Add Project #2 to Pipeline")
         self.btn_add_next.setObjectName("primary")
         self.btn_add_next.clicked.connect(self.add_next_project_tasks)
         next_cmd_row.addWidget(self.btn_add_next)
@@ -1096,50 +1294,116 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
         # GitHub Automation Row for next project
         gh_row = QtWidgets.QHBoxLayout()
-        gh_row.setSpacing(10)
+        gh_row.setSpacing(8)
 
-        self.gh_check = QtWidgets.QCheckBox("Auto-Create GitHub Repo & Push Code (README included)")
+        self.gh_check = QtWidgets.QCheckBox("Auto-Create GitHub Repo (README included)")
         gh_row.addWidget(self.gh_check)
 
         self.gh_name_input = QLineEdit()
-        self.gh_name_input.setPlaceholderText("Repo Name (defaults to slug)")
-        self.gh_name_input.setMaximumWidth(200)
+        self.gh_name_input.setPlaceholderText("Repo Name")
+        self.gh_name_input.setMaximumWidth(140)
         gh_row.addWidget(self.gh_name_input)
 
         self.gh_desc_input = QLineEdit()
-        self.gh_desc_input.setPlaceholderText("Description (e.g. 'Production auth module')")
+        self.gh_desc_input.setPlaceholderText("Description")
         gh_row.addWidget(self.gh_desc_input, stretch=1)
 
         next_layout.addLayout(gh_row)
         form_layout.addWidget(next_section)
 
-        main_layout.addWidget(form_card)
+        # Quick Batch 20-Projects Bar
+        btn_batch_inline = QtWidgets.QPushButton("⚡ Batch 20-Projects Generator (1st Prompt + Steps 2-5 Shared)")
+        btn_batch_inline.setStyleSheet(
+            "background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #1e1b4b, stop:1 #312e81); "
+            "color: #c7d2fe; font-weight: 700; padding: 7px 12px; border: 1px solid #4338ca; border-radius: 7px;"
+        )
+        btn_batch_inline.setToolTip("Open generator to create 20 projects with 5 prompts each in 1 click")
+        btn_batch_inline.clicked.connect(self.open_batch_dialog)
+        form_layout.addWidget(btn_batch_inline)
 
-        # =====================================================================
-        # PIPELINE QUEUE LIST (Sequential Execution Order)
-        # =====================================================================
+        left_layout.addWidget(form_card)
+        left_layout.addStretch()
+
+        content_splitter.addWidget(left_widget)
+
+        # ---------------------------------------------------------------------
+        # RIGHT PANEL: KPI Metrics, Visual Projects Queue & Execution Log
+        # ---------------------------------------------------------------------
+        right_widget = QtWidgets.QWidget()
+        right_layout = QtWidgets.QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(4, 0, 0, 0)
+        right_layout.setSpacing(8)
+
+        # KPI Metrics Overview Card Bar
+        self.stats_bar = QtWidgets.QFrame()
+        self.stats_bar.setObjectName("stats_bar")
+        stats_layout = QtWidgets.QHBoxLayout(self.stats_bar)
+        stats_layout.setContentsMargins(12, 6, 12, 6)
+        stats_layout.setSpacing(8)
+
+        def make_kpi(label_text, default_val="0"):
+            frame = QtWidgets.QFrame()
+            frame.setObjectName("kpi_card")
+            vl = QtWidgets.QVBoxLayout(frame)
+            vl.setContentsMargins(8, 5, 8, 5)
+            vl.setSpacing(1)
+            num = QtWidgets.QLabel(default_val)
+            num.setObjectName("kpi_num")
+            lbl = QtWidgets.QLabel(label_text)
+            lbl.setObjectName("kpi_label")
+            vl.addWidget(num)
+            vl.addWidget(lbl)
+            return frame, num
+
+        self.card_projects, self.kpi_projects_val = make_kpi("PROJECTS", "0")
+        self.card_tasks, self.kpi_tasks_val = make_kpi("TOTAL STEPS", "0")
+        self.card_completed, self.kpi_completed_val = make_kpi("COMPLETED", "0 (0%)")
+        self.card_status, self.kpi_status_val = make_kpi("PIPELINE STATUS", "IDLE")
+
+        stats_layout.addWidget(self.card_projects)
+        stats_layout.addWidget(self.card_tasks)
+        stats_layout.addWidget(self.card_completed)
+        stats_layout.addWidget(self.card_status)
+        right_layout.addWidget(self.stats_bar)
+
+        # Queue Header Row
+        queue_header_row = QtWidgets.QHBoxLayout()
         list_header = QtWidgets.QLabel("Pipeline Queue (Sequential Multi-Project Order)")
-        list_header.setStyleSheet("font-weight: 700; color: #94a3b8; margin-top: 4px;")
-        main_layout.addWidget(list_header)
+        list_header.setStyleSheet("font-weight: 700; color: #94a3b8; font-size: 13px;")
+        queue_header_row.addWidget(list_header)
 
+        self.queue_badge_lbl = QtWidgets.QLabel("0 Projects • 0 Steps")
+        self.queue_badge_lbl.setStyleSheet(
+            "background-color: #0e1e38; color: #38bdf8; font-size: 11px; font-weight: 700; "
+            "padding: 3px 8px; border-radius: 4px; border: 1px solid #1e3a68;"
+        )
+        queue_header_row.addWidget(self.queue_badge_lbl)
+        queue_header_row.addStretch()
+        right_layout.addLayout(queue_header_row)
+
+        # Scroll Area for Project Pipeline Cards
         self.scroll = QtWidgets.QScrollArea()
         self.scroll.setWidgetResizable(True)
-        self.scroll.setMinimumHeight(280)
+        self.scroll.setMinimumHeight(240)
         self.scroll_content = QtWidgets.QWidget()
         self.task_list_layout = QtWidgets.QVBoxLayout(self.scroll_content)
         self.task_list_layout.setContentsMargins(0, 0, 0, 0)
-        self.task_list_layout.setSpacing(12)
+        self.task_list_layout.setSpacing(10)
         self.task_list_layout.addStretch()
         self.scroll.setWidget(self.scroll_content)
-        main_layout.addWidget(self.scroll, stretch=1)
+        right_layout.addWidget(self.scroll, stretch=1)
 
         # Live Execution Output Box
         self.log_box = QtWidgets.QTextEdit()
         self.log_box.setReadOnly(True)
-        self.log_box.setMaximumHeight(95)
+        self.log_box.setMaximumHeight(85)
         self.log_box.setPlaceholderText("Pipeline activity and agent dispatch log will stream here...")
         self.log_box.setStyleSheet("background-color: #050811; border: 1px solid #1a2436; color: #94a3b8; font-family: monospace; font-size: 11px;")
-        main_layout.addWidget(self.log_box)
+        right_layout.addWidget(self.log_box)
+
+        content_splitter.addWidget(right_widget)
+        content_splitter.setSizes([500, 680])
+        main_layout.addWidget(content_splitter, stretch=1)
 
         self.agent_combo.currentIndexChanged.connect(self.on_agent_changed)
         self.on_agent_changed(self.agent_combo.currentIndex())
@@ -1388,12 +1652,14 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.log_box.append(
             f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Queued project '{title}' [folder: {slug}] with {count} step(s){tag}"
         )
-        self.next_title_input.setPlaceholderText("Next Project Title (e.g. 'Payment Service API')...")
         self.next_title_input.setFocus()
         self.refresh_queue()
 
+        total_projects = len(get_grouped_projects(self.pipeline.list()))
+        next_num = total_projects + 1
+
         if hasattr(self, "toast_banner"):
-            self.toast_banner.setText(f"✔ Successfully added '{title}' ({count} step(s)) to pipeline queue below!")
+            self.toast_banner.setText(f"✔ Successfully added Project #{total_projects} '{title}' ({count} step(s))! Ready for Project #{next_num}.")
             self.toast_banner.setStyleSheet(
                 "background-color: #064e3b; color: #34d399; font-weight: 700; font-size: 13px; "
                 "padding: 10px 16px; border-radius: 8px; border: 1px solid #059669;"
@@ -1405,6 +1671,25 @@ class PipelineWindow(QtWidgets.QMainWindow):
         QtCore.QTimer.singleShot(100, lambda: self.scroll.verticalScrollBar().setValue(
             self.scroll.verticalScrollBar().maximum()
         ))
+
+    def open_batch_dialog(self):
+        agent = self.agent_combo.currentData() if hasattr(self, "agent_combo") else "multi"
+        dlg = BatchProjectDialog(self.pipeline, self, default_agent=agent or "multi")
+        if dlg.exec_() == QtWidgets.QDialog.Accepted:
+            self.refresh_queue()
+            if hasattr(self, "toast_banner"):
+                tasks = self.pipeline.list()
+                grouped = get_grouped_projects(tasks)
+                self.toast_banner.setText(f"✔ Generated batch projects into pipeline ({len(grouped)} projects, {len(tasks)} steps)!")
+                self.toast_banner.setStyleSheet(
+                    "background-color: #064e3b; color: #34d399; font-weight: 700; font-size: 13px; "
+                    "padding: 10px 16px; border-radius: 8px; border: 1px solid #059669;"
+                )
+                self.toast_banner.show()
+                QtCore.QTimer.singleShot(4000, self.toast_banner.hide)
+            QtCore.QTimer.singleShot(100, lambda: self.scroll.verticalScrollBar().setValue(
+                self.scroll.verticalScrollBar().maximum()
+            ))
 
     def refresh_queue(self):
         tasks = self.pipeline.list()
@@ -1452,6 +1737,16 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.kpi_tasks_val.setText(f"{total_tasks}")
         pct = int((completed_tasks / total_tasks * 100)) if total_tasks > 0 else 0
         self.kpi_completed_val.setText(f"{completed_tasks}/{total_tasks} ({pct}%)")
+
+        next_num = total_projects + 1
+        if hasattr(self, "next_badge_lbl"):
+            self.next_badge_lbl.setText(f"3. ADD NEXT PROJECT (#{next_num})")
+        if hasattr(self, "next_title_input") and not self.next_title_input.text():
+            self.next_title_input.setPlaceholderText(f"Next Project #{next_num} Title (e.g. 'Build Laravel Auth API')...")
+        if hasattr(self, "btn_add_next"):
+            self.btn_add_next.setText(f"+ Add Project #{next_num} to Pipeline")
+        if hasattr(self, "queue_badge_lbl"):
+            self.queue_badge_lbl.setText(f"{total_projects} Project(s) • {total_tasks} Step(s)")
 
         if self.is_running and running_tasks:
             curr_task = running_tasks[0]
