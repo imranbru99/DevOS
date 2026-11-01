@@ -178,17 +178,12 @@ class WaylandPrimaryWatcher(QtCore.QThread):
                         self.dismiss_requested.emit()
                         self._last_emitted_text = ""
 
-                # 2. Track mouse drag vs click without touching clipboard or popups
+                # 2. Track mouse drag selection (strictly for text selection; ignore all stationary clicks/double-clicks)
                 if left_down and not was_down:
                     was_down = True
                     press_x = x
                     press_y = y
                     max_dist = 0
-                    now = time.time()
-                    if now - last_up_time < 0.4:
-                        consecutive_clicks += 1
-                    else:
-                        consecutive_clicks = 1
 
                 elif left_down and was_down:
                     dist = math.hypot(x - press_x, y - press_y)
@@ -197,29 +192,17 @@ class WaylandPrimaryWatcher(QtCore.QThread):
 
                 elif not left_down and was_down:
                     was_down = False
-                    now = time.time()
-                    last_up_time = now
 
-                    # CASE A: Genuine text drag selection (mouse moved >= 12px while held)
+                    # Only show floating copy pill when text has genuinely been selected by dragging
+                    # (Never show on clicks, double-clicks, or taps anywhere)
                     if max_dist >= 12:
-                        consecutive_clicks = 0
                         time.sleep(0.06)  # Settling pause for application to commit selection
                         text = get_primary_text()
                         if text and len(text) >= 1 and text != self._last_emitted_text:
                             self._last_emitted_text = text
                             self.selection_changed.emit(text, x, y)
-
-                    # CASE B: Double-click or Triple-click on a word/line
-                    elif consecutive_clicks >= 2 and max_dist < 8:
-                        time.sleep(0.07)  # Settling pause for application to highlight word
-                        text = get_primary_text()
-                        if text and len(text) >= 1 and text != self._last_emitted_text:
-                            self._last_emitted_text = text
-                            self.selection_changed.emit(text, x, y)
-
-                elif not left_down and not was_down:
-                    if consecutive_clicks == 1 and (time.time() - last_up_time) > 0.45:
-                        consecutive_clicks = 0
+                    else:
+                        # Non-drag click or double-click: clear tracking so stale text is never emitted
                         self._last_emitted_text = ""
 
             except Exception:
