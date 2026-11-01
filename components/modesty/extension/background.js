@@ -23,8 +23,12 @@ async function readManaged() {
   try { return await chrome.storage.managed.get(null); } catch (e) { return {}; }
 }
 async function readLocal() {
-  const got = await chrome.storage.local.get(['settings', 'totalBlurred']);
-  return { settings: got.settings || {}, totalBlurred: got.totalBlurred || 0 };
+  try {
+    const got = await chrome.storage.local.get(['settings', 'totalBlurred']);
+    return { settings: got.settings || {}, totalBlurred: got.totalBlurred || 0 };
+  } catch (e) {
+    return { settings: {}, totalBlurred: 0 };
+  }
 }
 async function currentSettings() {
   const [managed, local] = await Promise.all([readManaged(), readLocal()]);
@@ -177,7 +181,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       currentSettings().then((s) => sendResponse({
         effective: s.effective, managed: s.managed, local: s.local,
         total: s.totalBlurred, tab: msg.tabId !== undefined ? tabCount(msg.tabId) : 0,
-      }));
+      })).catch((err) => {
+        sendResponse({ effective: ModestyRules.DEFAULTS, managed: {}, local: {}, total: 0, tab: 0, error: String(err) });
+      });
       return true;
     case 'popup-set': {
       // effectiveSettings() enforces the lock, so a locked filter cannot be
@@ -187,7 +193,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (typeof msg.enabled === 'boolean') next.enabled = msg.enabled;
         if (ModestyRules.MODES.includes(msg.mode)) next.mode = msg.mode;
         return chrome.storage.local.set({ settings: next });
-      }).then(() => currentSettings()).then((s) => sendResponse(s.effective));
+      }).then(() => currentSettings()).then((s) => sendResponse(s.effective))
+        .catch((err) => sendResponse(Object.assign({}, ModestyRules.DEFAULTS, { error: String(err) })));
       return true;
     }
     default:

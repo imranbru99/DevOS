@@ -8,17 +8,20 @@
 <body>
   <h1>Modesty filter</h1>
   <p id="lock" class="lock" hidden>Locked by DevOS. It stays on; you can only make it stricter.</p>
-  <label class="row" id="enabledRow">
-    <span>Filter on</span>
-    <input type="checkbox" id="enabled">
-  </label>
-  <label class="row">
-    <span>Blur</span>
+  <div class="row" id="enabledRow">
+    <label for="enabled">Filter on</label>
+    <label class="switch">
+      <input type="checkbox" id="enabled">
+      <span class="slider"></span>
+    </label>
+  </div>
+  <div class="row">
+    <label for="mode">Blur</label>
     <select id="mode">
       <option value="women">Adult women</option>
       <option value="people">All people</option>
     </select>
-  </label>
+  </div>
   <div class="counts">
     <div><strong id="tabCount">0</strong><span>blurred on this page</span></div>
     <div><strong id="total">0</strong><span>blurred in total</span></div>
