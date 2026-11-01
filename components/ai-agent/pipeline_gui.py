@@ -709,8 +709,18 @@ class ProjectPipelineCard(QtWidgets.QFrame):
         # Step navigation bar with the 2 buttons requested by user:
         # "▲ Upper Command/Prompt" and "▼ Next Command/Prompt"
         self.step_rows = []
-        self.current_step_idx = 0
-        self.show_all_mode = False
+        slug = self.project_data.get("slug", "project")
+
+        # Restore navigation state so timer refreshes don't reset view
+        win = self.window()
+        nav_state = {}
+        if win and hasattr(win, "card_nav_states"):
+            nav_state = win.card_nav_states.get(slug, {})
+        elif self.parent() and hasattr(self.parent(), "card_nav_states"):
+            nav_state = self.parent().card_nav_states.get(slug, {})
+
+        self.current_step_idx = min(nav_state.get("step_idx", 0), max(0, total_tasks - 1))
+        self.show_all_mode = nav_state.get("show_all", False)
 
         if total_tasks > 1:
             nav_bar = QtWidgets.QFrame()
@@ -730,7 +740,7 @@ class ProjectPipelineCard(QtWidgets.QFrame):
             self.btn_prev_step.clicked.connect(self.goto_prev_step)
             nav_layout.addWidget(self.btn_prev_step)
 
-            self.step_nav_lbl = QtWidgets.QLabel(f"Step 1 of {total_tasks}")
+            self.step_nav_lbl = QtWidgets.QLabel(f"Step {self.current_step_idx + 1} of {total_tasks}")
             self.step_nav_lbl.setStyleSheet("font-size: 11px; font-weight: 700; color: #38bdf8;")
             nav_layout.addWidget(self.step_nav_lbl)
 
@@ -746,7 +756,7 @@ class ProjectPipelineCard(QtWidgets.QFrame):
 
             nav_layout.addStretch()
 
-            self.btn_all_steps = QtWidgets.QPushButton("Show All Steps")
+            self.btn_all_steps = QtWidgets.QPushButton("Focused View" if self.show_all_mode else "Show All Steps")
             self.btn_all_steps.setObjectName("small_btn")
             self.btn_all_steps.setStyleSheet(
                 "background-color: #1e293b; color: #94a3b8; font-size: 10px; padding: 3px 8px; border: 1px solid #334155; border-radius: 4px;"
@@ -781,11 +791,21 @@ class ProjectPipelineCard(QtWidgets.QFrame):
             self.steps_container.setVisible(False)
             self.btn_toggle.setText("▼")
 
+    def _save_nav_state(self):
+        slug = self.project_data.get("slug", "project")
+        win = self.window()
+        if win and hasattr(win, "card_nav_states"):
+            win.card_nav_states[slug] = {
+                "step_idx": self.current_step_idx,
+                "show_all": self.show_all_mode
+            }
+
     def goto_prev_step(self, *args, **kwargs):
         if not self.step_rows:
             return
         if self.current_step_idx > 0:
             self.current_step_idx -= 1
+            self._save_nav_state()
             self.update_step_visibility()
 
     def goto_next_step(self, *args, **kwargs):
@@ -793,10 +813,12 @@ class ProjectPipelineCard(QtWidgets.QFrame):
             return
         if self.current_step_idx < len(self.step_rows) - 1:
             self.current_step_idx += 1
+            self._save_nav_state()
             self.update_step_visibility()
 
     def toggle_all_steps_view(self, *args, **kwargs):
         self.show_all_mode = not self.show_all_mode
+        self._save_nav_state()
         if hasattr(self, "btn_all_steps"):
             self.btn_all_steps.setText("Focused View" if self.show_all_mode else "Show All Steps")
         self.update_step_visibility()
@@ -1371,6 +1393,8 @@ class PipelineWindow(QtWidgets.QMainWindow):
             pass
         self.setStyleSheet(STYLE)
         self.is_running = False
+        self.card_nav_states = {}
+        self.last_grouped_sig = None
         self.init_ui()
 
         # Timer for refreshing queue and ticking countdowns
@@ -2524,6 +2548,12 @@ class PipelineWindow(QtWidgets.QMainWindow):
         else:
             self.kpi_status_val.setText("IDLE / PAUSED")
             self.kpi_status_val.setStyleSheet("color: #94a3b8; font-size: 14px; font-weight: 800;")
+
+        # Check if queue tasks data changed before doing a destructive rebuild
+        grouped_sig = [(p.get("slug"), [(t.get("id"), t.get("status"), t.get("retry_at")) for t in p.get("tasks", [])]) for p in grouped]
+        if grouped_sig == getattr(self, "last_grouped_sig", None):
+            return
+        self.last_grouped_sig = grouped_sig
 
         # Rebuild list items
         while self.task_list_layout.count() > 1:
