@@ -907,9 +907,43 @@ class TaskPipeline:
         self.queue = []
         self._save()
 
+    def check_running_tasks(self) -> bool:
+        """Inspects active agent background conversations and marks finished tasks as COMPLETED."""
+        updated = False
+        brain_dir = Path.home() / ".gemini/antigravity/brain"
+        for task in self.queue:
+            if task.get("status") in ("RUNNING", "SUBMITTED") and task.get("conversation_id"):
+                conv_id = task["conversation_id"]
+                transcript_path = brain_dir / conv_id / ".system_generated/logs/transcript.jsonl"
+                if transcript_path.exists():
+                    try:
+                        with open(transcript_path, "r", encoding="utf-8") as f:
+                            lines = [line.strip() for line in f if line.strip()]
+                        if lines:
+                            last = json.loads(lines[-1])
+                            is_done = (
+                                last.get("status") == "DONE" and 
+                                last.get("type") == "PLANNER_RESPONSE" and 
+                                not last.get("tool_calls")
+                            )
+                            if is_done:
+                                task["status"] = "COMPLETED"
+                                notify("Task Completed", f"[{task['agent'].upper()}] Step {task.get('step_order', 1)} completed.")
+                                updated = True
+                            elif last.get("status") == "RUNNING" or last.get("tool_calls"):
+                                if task["status"] != "RUNNING":
+                                    task["status"] = "RUNNING"
+                                    updated = True
+                    except Exception:
+                        pass
+        if updated:
+            self._save()
+        return updated
+
     @queue_transaction
     def execute_next(self) -> bool:
         """Finds next eligible task and executes it."""
+        self.check_running_tasks()
         now = datetime.datetime.now()
         for task in self.queue:
             if task["status"] == "COMPLETED":
@@ -978,6 +1012,12 @@ class TaskPipeline:
                 success, output = False, str(exc)
             output = str(output)[-65536:]
             task["output"] = output
+
+            if output.startswith("STARTED:"):
+                task["status"] = "RUNNING"
+                self._save()
+                notify("Task Running", f"[{p_slug}] [{task['agent'].upper()}] Task is running in background.")
+                return True
 
             if output.startswith("SUBMITTED:"):
                 task["status"] = "SUBMITTED"
@@ -1056,6 +1096,15 @@ class TaskPipeline:
                 try:
                     res = subprocess.run(cmd, capture_output=True, text=True, timeout=300, cwd=task.get("project") or None)
                     if res.returncode == 0:
+                        conv_id = None
+                        try:
+                            data = json.loads(res.stdout)
+                            conv_id = data.get("response", {}).get("newConversation", {}).get("conversationId")
+                        except Exception:
+                            pass
+                        if conv_id:
+                            task["conversation_id"] = conv_id
+                            return True, f"STARTED:{conv_id}"
                         return False, "SUBMITTED: " + (res.stdout or "Antigravity accepted the conversation; completion is not verified.")
                     return False, res.stderr or res.stdout
                 except Exception as e:

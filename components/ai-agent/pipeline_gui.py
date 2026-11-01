@@ -2579,14 +2579,20 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.refresh_queue()
         tasks = self.pipeline.list()
         pending = [t for t in tasks if t["status"] not in ("COMPLETED", "FAILED")]
-        blocked = any(t["status"] in ("RUNNING", "SUBMITTED") for t in pending) or (bool(pending) and any(t["status"] == "FAILED" for t in tasks))
-        if (not pending or blocked or error) and self.is_running:
+        running = [t for t in pending if t["status"] in ("RUNNING", "SUBMITTED")]
+        failed = [t for t in tasks if t["status"] == "FAILED"]
+
+        if not pending and self.is_running:
             self.toggle_runner()
-            if blocked:
-                self.log_box.append("Paused: resolve the failed task or verify submitted work before continuing.")
-            elif not pending:
-                failed = any(t["status"] == "FAILED" for t in tasks)
-                self.log_box.append("Finished with failed tasks." if failed else "All pipeline commands completed.")
+            failed_count = len(failed)
+            self.log_box.append(f"Finished with {failed_count} failed tasks." if failed_count else "All pipeline commands completed successfully!")
+        elif failed and not running and self.is_running:
+            self.toggle_runner()
+            self.log_box.append("Pipeline paused: a task failed. Resolve or remove it before continuing.")
+        elif running and self.is_running:
+            # Task is actively executing in background agent (e.g. Antigravity)
+            # Keep runner timer alive so it auto-detects completion and triggers the next step!
+            pass
 
     @queue_error_to_log
     def confirm_completed(self, task_id):
