@@ -11,6 +11,7 @@
 # That stays inside Windows App only when this launches the installed app
 # (--app-id). A plain --app= window sends the Cloud PC to a Chrome tab.
 # The Chrome launcher itself keeps the new window in the app.
+unset LD_PRELOAD
 url="${1:?usage: devos-pwa URL [NAMES] [DESKTOP]}"
 names="${2:-}"
 ours="${3:-}"

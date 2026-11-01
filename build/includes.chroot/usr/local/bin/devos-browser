@@ -68,6 +68,14 @@ if [ -z "$chrome" ]; then
     exit 1
 fi
 
+for arg in "$@"; do
+    case "$arg" in
+        --version|-v|-version|--help|-h|-help)
+            exec "$chrome" "$@"
+            ;;
+    esac
+done
+
 lang=$(search_language)
 # Under Wayland on KDE Plasma, Chromium native Wayland backend has an upstream bug
 # where xdg_popup menus (bookmark folders, profile switcher, extension bubbles)
@@ -85,14 +93,6 @@ for uevent in /sys/class/drm/card*/device/uevent; do
     fi
 done
 
-# Inject policy override so Chrome Guest Mode and Add Person are always enabled
-override_so="/usr/local/lib/devos/libdevos_browser_override.so"
-user_override_so="$HOME/.local/lib/devos/libdevos_browser_override.so"
-if [ -f "$override_so" ]; then
-    export LD_PRELOAD="${override_so}${LD_PRELOAD:+:$LD_PRELOAD}"
-elif [ -f "$user_override_so" ]; then
-    export LD_PRELOAD="${user_override_so}${LD_PRELOAD:+:$LD_PRELOAD}"
-fi
 
 # Sync profile badged icons & desktop launchers
 sync_script="/usr/local/share/devos/components/browser/chrome_profiles.py"
