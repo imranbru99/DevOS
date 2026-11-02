@@ -76,12 +76,39 @@ for arg in "$@"; do
     esac
 done
 
+cleanup_stale_chrome_lock() {
+    local config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/google-chrome"
+    local lock="$config_dir/SingletonLock"
+    [ -L "$lock" ] || return 0
+
+    local target target_pid state
+    target=$(readlink "$lock" 2>/dev/null || true)
+    target_pid="${target##*-}"
+
+    if [ -n "$target_pid" ] && [ "$target_pid" -gt 0 ] 2>/dev/null; then
+        if [ ! -d "/proc/$target_pid" ]; then
+            rm -f "$config_dir/SingletonLock" "$config_dir/SingletonSocket" "$config_dir/SingletonCookie"
+            return 0
+        fi
+        state=$(awk '/^State:/ {print $2}' "/proc/$target_pid/status" 2>/dev/null || true)
+        if [ "$state" = "Z" ] || [ "$state" = "D" ]; then
+            pkill -P "$target_pid" 2>/dev/null || true
+            kill -9 "$target_pid" 2>/dev/null || true
+            rm -f "$config_dir/SingletonLock" "$config_dir/SingletonSocket" "$config_dir/SingletonCookie"
+            return 0
+        fi
+    fi
+}
+
+cleanup_stale_chrome_lock
+
 lang=$(search_language)
 # Under Wayland on KDE Plasma, Chromium native Wayland backend has an upstream bug
 # where xdg_popup menus (bookmark folders, profile switcher, extension bubbles)
 # instantly dismiss upon click. Forcing --ozone-platform=x11 routes through XWayland,
 # making all bookmark dropdowns, profile switchers, and menus 100% stable.
-args=(--accept-lang="$lang" --ozone-platform=x11)
+# --disable-dev-shm-usage prevents shared memory exhaustion deadlocks in renderers.
+args=(--accept-lang="$lang" --ozone-platform=x11 --disable-dev-shm-usage)
 # A virtual display (the test VM, and some other virtual PCs) makes Chrome's
 # graphics process quit immediately, so the window never appears. Draw in
 # software there. A normal graphics card is left alone, and the sandbox stays on.
