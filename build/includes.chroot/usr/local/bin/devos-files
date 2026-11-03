@@ -162,18 +162,15 @@ def get_win_icon(name, size=32):
         # Drive LED
         p.setBrush(QColor("#22c55e"))
         p.drawEllipse(QPointF(47 * s, 46 * s), 2.5 * s, 2.5 * s)
-        # Windows 4-square blue badge
-        bx, by, bw = 34 * s, 30 * s, 22 * s
-        p.setBrush(QColor("#0078d4"))
-        p.setPen(QPen(QColor("#ffffff"), 1.5 * s))
-        p.drawRoundedRect(QRectF(bx, by, bw, bw), 3 * s, 3 * s)
-        p.setBrush(QColor("#ffffff"))
+        # DevOS orbital badge.
+        p.setBrush(QColor("#087eaa"))
+        p.setPen(QPen(QColor("#e6f8ff"), 1.8 * s))
+        p.drawEllipse(QPointF(46 * s, 41 * s), 12 * s, 12 * s)
+        p.setBrush(QColor("#38bdf8"))
         p.setPen(Qt.NoPen)
-        gw = bw / 2 - 2 * s
-        p.drawRect(QRectF(bx + 1.5 * s, by + 1.5 * s, gw, gw))
-        p.drawRect(QRectF(bx + gw + 3 * s, by + 1.5 * s, gw, gw))
-        p.drawRect(QRectF(bx + 1.5 * s, by + gw + 3 * s, gw, gw))
-        p.drawRect(QRectF(bx + gw + 3 * s, by + gw + 3 * s, gw, gw))
+        p.drawEllipse(QPointF(46 * s, 41 * s), 7 * s, 7 * s)
+        p.setBrush(QColor("#ffffff"))
+        p.drawEllipse(QPointF(55 * s, 34 * s), 2.4 * s, 2.4 * s)
 
     elif name == "drive-fixed":
         # Secondary fixed hard drive (D:, E:, etc.)
@@ -232,12 +229,12 @@ def get_win_icon(name, size=32):
 
     elif name == "folder-desktop":
         # Folder with desktop monitor overlay
-        p.setBrush(QColor("#f59e0b"))
+        p.setBrush(QColor("#0284c7"))
         p.setPen(Qt.NoPen)
         p.drawRoundedRect(QRectF(6 * s, 10 * s, 24 * s, 12 * s), 3 * s, 3 * s)
         grad = QLinearGradient(0, 14 * s, 0, 56 * s)
-        grad.setColorAt(0, QColor("#fbbf24"))
-        grad.setColorAt(1, QColor("#f59e0b"))
+        grad.setColorAt(0, QColor("#38bdf8"))
+        grad.setColorAt(1, QColor("#0284c7"))
         p.setBrush(grad)
         p.drawRoundedRect(QRectF(6 * s, 14 * s, 52 * s, 42 * s), 4 * s, 4 * s)
         # Desktop monitor badge
@@ -250,12 +247,12 @@ def get_win_icon(name, size=32):
 
     elif name == "folder-documents":
         # Folder with document sheet overlay
-        p.setBrush(QColor("#f59e0b"))
+        p.setBrush(QColor("#475569"))
         p.setPen(Qt.NoPen)
         p.drawRoundedRect(QRectF(6 * s, 10 * s, 24 * s, 12 * s), 3 * s, 3 * s)
         grad = QLinearGradient(0, 14 * s, 0, 56 * s)
-        grad.setColorAt(0, QColor("#fbbf24"))
-        grad.setColorAt(1, QColor("#f59e0b"))
+        grad.setColorAt(0, QColor("#94a3b8"))
+        grad.setColorAt(1, QColor("#475569"))
         p.setBrush(grad)
         p.drawRoundedRect(QRectF(6 * s, 14 * s, 52 * s, 42 * s), 4 * s, 4 * s)
         # Document sheet
@@ -270,12 +267,12 @@ def get_win_icon(name, size=32):
 
     elif name == "folder-downloads":
         # Folder with blue arrow down
-        p.setBrush(QColor("#f59e0b"))
+        p.setBrush(QColor("#059669"))
         p.setPen(Qt.NoPen)
         p.drawRoundedRect(QRectF(6 * s, 10 * s, 24 * s, 12 * s), 3 * s, 3 * s)
         grad = QLinearGradient(0, 14 * s, 0, 56 * s)
-        grad.setColorAt(0, QColor("#fbbf24"))
-        grad.setColorAt(1, QColor("#f59e0b"))
+        grad.setColorAt(0, QColor("#34d399"))
+        grad.setColorAt(1, QColor("#059669"))
         p.setBrush(grad)
         p.drawRoundedRect(QRectF(6 * s, 14 * s, 52 * s, 42 * s), 4 * s, 4 * s)
         # Circle badge with down arrow
@@ -297,12 +294,12 @@ def get_win_icon(name, size=32):
 
     elif name == "folder-music":
         # Folder with musical note
-        p.setBrush(QColor("#f59e0b"))
+        p.setBrush(QColor("#e11d48"))
         p.setPen(Qt.NoPen)
         p.drawRoundedRect(QRectF(6 * s, 10 * s, 24 * s, 12 * s), 3 * s, 3 * s)
         grad = QLinearGradient(0, 14 * s, 0, 56 * s)
-        grad.setColorAt(0, QColor("#fbbf24"))
-        grad.setColorAt(1, QColor("#f59e0b"))
+        grad.setColorAt(0, QColor("#fb7185"))
+        grad.setColorAt(1, QColor("#e11d48"))
         p.setBrush(grad)
         p.drawRoundedRect(QRectF(6 * s, 14 * s, 52 * s, 42 * s), 4 * s, 4 * s)
         # Music badge
@@ -319,12 +316,12 @@ def get_win_icon(name, size=32):
 
     elif name == "folder-pictures":
         # Folder with landscape photo
-        p.setBrush(QColor("#f59e0b"))
+        p.setBrush(QColor("#0891b2"))
         p.setPen(Qt.NoPen)
         p.drawRoundedRect(QRectF(6 * s, 10 * s, 24 * s, 12 * s), 3 * s, 3 * s)
         grad = QLinearGradient(0, 14 * s, 0, 56 * s)
-        grad.setColorAt(0, QColor("#fbbf24"))
-        grad.setColorAt(1, QColor("#f59e0b"))
+        grad.setColorAt(0, QColor("#22d3ee"))
+        grad.setColorAt(1, QColor("#0891b2"))
         p.setBrush(grad)
         p.drawRoundedRect(QRectF(6 * s, 14 * s, 52 * s, 42 * s), 4 * s, 4 * s)
         # Photo badge
@@ -332,7 +329,7 @@ def get_win_icon(name, size=32):
         p.setPen(QPen(QColor("#ffffff"), 1.5 * s))
         p.drawRoundedRect(QRectF(19 * s, 23 * s, 26 * s, 22 * s), 2 * s, 2 * s)
         # Mountain / sun
-        p.setBrush(QColor("#fbbf24"))
+        p.setBrush(QColor("#22d3ee"))
         p.setPen(Qt.NoPen)
         p.drawEllipse(QPointF(25 * s, 28 * s), 2.5 * s, 2.5 * s)
         p.setBrush(QColor("#ffffff"))
@@ -345,12 +342,12 @@ def get_win_icon(name, size=32):
 
     elif name == "folder-videos":
         # Folder with film reel
-        p.setBrush(QColor("#f59e0b"))
+        p.setBrush(QColor("#7c3aed"))
         p.setPen(Qt.NoPen)
         p.drawRoundedRect(QRectF(6 * s, 10 * s, 24 * s, 12 * s), 3 * s, 3 * s)
         grad = QLinearGradient(0, 14 * s, 0, 56 * s)
-        grad.setColorAt(0, QColor("#fbbf24"))
-        grad.setColorAt(1, QColor("#f59e0b"))
+        grad.setColorAt(0, QColor("#a78bfa"))
+        grad.setColorAt(1, QColor("#7c3aed"))
         p.setBrush(grad)
         p.drawRoundedRect(QRectF(6 * s, 14 * s, 52 * s, 42 * s), 4 * s, 4 * s)
         # Film badge
@@ -1375,7 +1372,7 @@ class DriveCard(QFrame):
         self.on_context = on_context
         self.setObjectName("driveCard")
         self.setCursor(Qt.PointingHandCursor)
-        self.setFocusPolicy(Qt.ClickFocus)
+        self.setFocusPolicy(Qt.StrongFocus)
         self.setMinimumHeight(86)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
@@ -1386,6 +1383,7 @@ class DriveCard(QFrame):
         # Drive Icon
         icon_type = "drive-c" if drive["is_system"] else ("drive-usb" if drive["removable"] else "drive-fixed")
         icon_label = QLabel()
+        icon_label.setStyleSheet("background: transparent;")
         icon_label.setPixmap(get_win_icon(icon_type, 44).pixmap(44, 44))
         icon_label.setFixedSize(44, 44)
         row.addWidget(icon_label, 0, Qt.AlignVCenter)
@@ -1430,6 +1428,13 @@ class DriveCard(QFrame):
         text_layout.addWidget(space)
         row.addLayout(text_layout, 1)
 
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space):
+            self.on_open(self.drive)
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.on_open(self.drive)
@@ -1454,7 +1459,7 @@ class FolderTile(QFrame):
         self.on_context = on_context
         self.setObjectName("folderTile")
         self.setCursor(Qt.PointingHandCursor)
-        self.setFocusPolicy(Qt.ClickFocus)
+        self.setFocusPolicy(Qt.StrongFocus)
         self.setMinimumHeight(66)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
@@ -1464,6 +1469,7 @@ class FolderTile(QFrame):
 
         # 42x42 Vibrant Windows 11 Folder Icon
         icon_label = QLabel()
+        icon_label.setStyleSheet("background: transparent;")
         icon_label.setPixmap(get_win_icon(icon_name, 42).pixmap(42, 42))
         icon_label.setFixedSize(42, 42)
         icon_label.setAlignment(Qt.AlignCenter)
@@ -1478,15 +1484,8 @@ class FolderTile(QFrame):
         title.setObjectName("folderTileTitle")
         title.setFont(QFont("Inter", 11, QFont.DemiBold))
 
-        # Dynamic Item Count / Subtitle
-        try:
-            if os.path.isdir(path):
-                cnt = len(os.listdir(path))
-                sub_text = f"{cnt} {'item' if cnt == 1 else 'items'}"
-            else:
-                sub_text = "Personal folder"
-        except Exception:
-            sub_text = "Personal folder"
+        # Avoid scanning large or remote home folders on every dashboard refresh.
+        sub_text = "Personal folder"
 
         subtitle = QLabel(sub_text)
         subtitle.setObjectName("folderTileSub")
@@ -1495,6 +1494,13 @@ class FolderTile(QFrame):
         text_layout.addWidget(title)
         text_layout.addWidget(subtitle)
         layout.addLayout(text_layout, 1)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space):
+            self.on_open(self.path)
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -4336,6 +4342,15 @@ class WindowsFileExplorer(QMainWindow):
                 background: #242b36;
                 color: #f8fafc;
             }
+            QScrollBar:vertical {
+                background: transparent; width: 8px; margin: 3px 0; border: none;
+            }
+            QScrollBar::handle:vertical {
+                background: #64748b; min-height: 30px; border-radius: 4px;
+            }
+            QScrollBar::handle:vertical:hover { background: #0078d4; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; border: none; background: transparent; }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
             QStatusBar#statusBar {
                 background: #17191e;
                 border-top: 1px solid #242a34;
@@ -4537,7 +4552,7 @@ class WindowsFileExplorer(QMainWindow):
 
     def _apply_appearance(self):
         if not hasattr(self, "_base_style"):
-            self._base_style = self.styleSheet()
+            self._base_style = self.property("_devosSourceStyle") or self.styleSheet()
         self.setStyleSheet(self._base_style + """
             QMainWindow, QDialog { background: #0c131f; color: #f1f5f9; font-family: 'Segoe UI', 'Inter', sans-serif; }
             QWidget#tabContainer { background: #090e17; border-bottom: 1px solid #1a2638; }
@@ -4708,6 +4723,15 @@ class WindowsFileExplorer(QMainWindow):
             QHeaderView::section:hover { background: #172437; color: #f8fafc; }
 
             QWidget#previewPane { background: #0c131f; border-left: 1px solid #1a2638; }
+            QScrollBar:vertical {
+                background: transparent; width: 8px; margin: 3px 0; border: none;
+            }
+            QScrollBar::handle:vertical {
+                background: #64748b; min-height: 30px; border-radius: 4px;
+            }
+            QScrollBar::handle:vertical:hover { background: #0078d4; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; border: none; background: transparent; }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
             QStatusBar#statusBar { background: #090e17; border-top: 1px solid #1a2638; color: #94a3b8; font-size: 12px; padding: 2px 10px; }
 
             QGroupBox { font-weight: 600; color: #cbd5e1; border: 1px solid #233247; border-radius: 8px; margin-top: 14px; padding-top: 16px; }
@@ -4887,6 +4911,25 @@ class WindowsFileExplorer(QMainWindow):
             if drive.get("mount"):
                 self._side_btns[drive["mount"]] = btn
 
+    def _reflow_storage_cards(self):
+        if not hasattr(self, "this_pc_scroll_widget"):
+            return
+        width = self.this_pc_scroll_widget.width()
+        for grid, minimum, maximum in ((self.folders_grid, 225, 3), (self.drives_grid, 330, 2)):
+            columns = max(1, min(maximum, width // minimum))
+            if all(grid.getItemPosition(i)[:2] == (i // columns, i % columns) for i in range(grid.count())):
+                continue
+            cards = []
+            while grid.count():
+                item = grid.takeAt(0)
+                if item.widget(): cards.append(item.widget())
+            for column in range(maximum): grid.setColumnStretch(column, 1 if column < columns else 0)
+            for index, card in enumerate(cards): grid.addWidget(card, index // columns, index % columns)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        QTimer.singleShot(0, self._reflow_storage_cards)
+
     def reload_folders(self):
         """Fetch and populate user standard folders in This PC view."""
         while self.folders_grid.count():
@@ -4928,6 +4971,7 @@ class WindowsFileExplorer(QMainWindow):
         for idx, drive in enumerate(self._drives):
             card = DriveCard(drive, on_open=self.open_drive, on_context=self._show_drive_context_menu)
             self.drives_grid.addWidget(card, idx // columns, idx % columns)
+        QTimer.singleShot(0, self._reflow_storage_cards)
 
     def open_drive(self, drive):
         """Open a drive; mounts it automatically if unmounted."""

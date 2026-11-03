@@ -104,7 +104,7 @@ class Appearance(QtCore.QObject):
         finally:self.busy=False
 
     def eventFilter(self,widget,event):
-        if not self.busy and isinstance(widget,QtWidgets.QWidget) and event.type() in (QtCore.QEvent.Polish,QtCore.QEvent.Show,QtCore.QEvent.StyleChange):
+        if not self.busy and isinstance(widget,QtWidgets.QWidget) and (event.type() == QtCore.QEvent.Show or (event.type() == QtCore.QEvent.StyleChange and widget.isVisible())):
             self.busy=True
             try:
                 self.sync_app();self.style(widget)

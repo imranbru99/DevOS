@@ -36,3 +36,23 @@ def test_native_kde_change_overrides_old_saved_mode(monkeypatch,tmp_path):
     (tmp_path/'devos/settings.json').write_text('{"appearance":{"theme":"dark"}}')
     (tmp_path/'kdeglobals').write_text('[General]\nColorScheme=DevOS-Light\n')
     assert current_mode()=='light'
+
+
+def test_construction_keeps_original_style_for_dark_roundtrip(monkeypatch,tmp_path):
+    from devos_appearance import install
+    monkeypatch.setenv('XDG_CONFIG_HOME',str(tmp_path))
+    (tmp_path/'devos').mkdir()
+    (tmp_path/'devos/settings.json').write_text('{"appearance":{"theme":"light"}}')
+    app=QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    install(app)
+    widget=QtWidgets.QWidget()
+    original='QWidget {background:#101828;color:#edf3fc;}'
+    widget.setStyleSheet(original)
+    assert widget.styleSheet()==original
+    widget.show();app.processEvents()
+    assert widget.styleSheet()!=original
+    manager=app._devos_appearance;manager.mode='dark';manager.busy=True
+    try:manager.style(widget)
+    finally:manager.busy=False
+    assert widget.styleSheet()==original
+    widget.close()

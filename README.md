@@ -931,3 +931,10 @@ menu or `devos-antigravity --software-rendering`. Launch flags cannot change the
 rendering mode of an already-running instance. The separate Antigravity Studio IDE
 launcher remains separate. These settings cannot prevent every upstream app or
 graphics-driver failure.
+
+The **This PC** overview uses color-coded personal folders, a DevOS system-drive
+badge, and storage cards that rearrange to fit the available width. Folder and
+drive cards support Enter/Space as well as double-click. Opening the overview no
+longer scans each personal folder just to display an item count.
+
+![DevOS This PC in light mode](docs/images/devos_thispc_light.png)
