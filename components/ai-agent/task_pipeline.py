@@ -716,11 +716,42 @@ def queue_transaction(method):
 
 class TaskPipeline:
     def __init__(self, state_file: Path = STATE_FILE, context_file: Path = CONTEXT_FILE):
+        self.event_callback = None
+        self._last_event = None
         self.state_file = state_file
         self.context_file = context_file
         self.state_file.parent.mkdir(parents=True, exist_ok=True)
         self.queue: List[Dict[str, Any]] = self._load()
         self.context: Dict[str, Any] = self._load_context()
+
+    def emit_event(self, message):
+        if message == self._last_event:
+            return
+        self._last_event = message
+        line = f"[{datetime.datetime.now():%H:%M:%S}] {message}"
+        path = self.state_file.with_suffix('.events.jsonl')
+        try:
+            if path.exists() and path.stat().st_size > 1024 * 1024:
+                os.replace(path, path.with_suffix('.previous.jsonl'))
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, 'a', encoding='utf-8') as stream:
+                stream.write(json.dumps({'message': line}) + '\n')
+        except OSError:
+            pass
+        if self.event_callback:
+            self.event_callback(line)
+
+    def recent_events(self):
+        path = self.state_file.with_suffix('.events.jsonl')
+        if not path.exists():
+            return []
+        result = []
+        for line in path.read_text().splitlines()[-100:]:
+            try:
+                result.append(json.loads(line)['message'])
+            except (ValueError, KeyError):
+                continue
+        return result
 
     def _load(self) -> List[Dict[str, Any]]:
         if not self.state_file.exists():
@@ -767,7 +798,6 @@ class TaskPipeline:
             if p.exists() and p.is_dir():
                 return str(p)
         candidates = [
-            Path("/home/imran/project"),
             Path.home() / "project",
             Path.home() / "Projects",
             Path.cwd(),
@@ -806,7 +836,7 @@ class TaskPipeline:
 
         # Derive slug and title
         p_title = (project_title or "").strip()
-        p_slug = (project_slug or "").strip()
+        p_slug = to_slug(project_slug) if (project_slug or "").strip() else ""
 
         if not p_slug:
             if p_title:
@@ -908,37 +938,62 @@ class TaskPipeline:
         self._save()
 
     def check_running_tasks(self) -> bool:
-        """Inspects active agent background conversations and marks finished tasks as COMPLETED."""
+        """Observe task-specific activity without approving questions or inferring success."""
         updated = False
-        brain_dir = Path.home() / ".gemini/antigravity/brain"
         for task in self.queue:
-            if task.get("status") in ("RUNNING", "SUBMITTED") and task.get("conversation_id"):
-                conv_id = task["conversation_id"]
-                transcript_path = brain_dir / conv_id / ".system_generated/logs/transcript.jsonl"
-                if transcript_path.exists():
+            if task.get('status') not in ('RUNNING', 'SUBMITTED'):
+                continue
+            conv_id = task.get('conversation_id')
+            if not conv_id:
+                # Repair older queues whose dispatch output had the ID but dropped the field.
+                output = task.get('output') or ''
+                if output.startswith('STARTED:'):
+                    conv_id = output.split(':', 1)[1].strip()
+                elif output.startswith('SUBMITTED:'):
                     try:
-                        with open(transcript_path, "r", encoding="utf-8") as f:
-                            lines = [line.strip() for line in f if line.strip()]
-                        if lines:
-                            last = json.loads(lines[-1])
-                            is_done = (
-                                last.get("status") == "DONE" and 
-                                last.get("type") == "PLANNER_RESPONSE" and 
-                                not last.get("tool_calls")
-                            )
-                            if is_done:
-                                task["status"] = "COMPLETED"
-                                notify("Task Completed", f"[{task['agent'].upper()}] Step {task.get('step_order', 1)} completed.")
-                                updated = True
-                            elif last.get("status") == "RUNNING" or last.get("tool_calls"):
-                                if task["status"] != "RUNNING":
-                                    task["status"] = "RUNNING"
-                                    updated = True
-                    except Exception:
+                        data = json.loads(output.split(':', 1)[1])
+                        conv_id = data.get('response', {}).get('newConversation', {}).get('conversationId')
+                    except (ValueError, AttributeError):
                         pass
+                if conv_id:
+                    task['conversation_id'] = conv_id
+                    updated = True
+            if not conv_id or not re.fullmatch(r'[A-Za-z0-9_-]+', conv_id):
+                self.emit_event(f"{task['id']}: awaiting verification; no tracked conversation. Do not resubmit until checked.")
+                continue
+            path = Path.home()/'.gemini/antigravity/brain'/conv_id/'.system_generated/logs/transcript.jsonl'
+            try:
+                with path.open('rb') as stream:
+                    stream.seek(max(0, path.stat().st_size-65536))
+                    lines = stream.read().decode('utf-8', errors='replace').splitlines()
+                last = next((json.loads(line) for line in reversed(lines) if line.strip().startswith('{') and line.strip().endswith('}')), {})
+                tools = [t.get('name','') for t in last.get('tool_calls', [])]
+                marker = f"{last.get('step_index', '?')}:{last.get('status', '?')}:{last.get('type', '?')}"
+                if task.get('last_agent_event') != marker:
+                    task['last_agent_event'] = marker
+                    task['status_message'] = 'Awaiting your answer in Antigravity' if 'ask_question' in tools else f"Agent event {marker}" + (f" · {', '.join(tools)}" if tools else '')
+                    self.emit_event(f"{task['id']}: {task['status_message']}")
+                    updated = True
+                if time.time() - path.stat().st_mtime > 120:
+                    task['status'] = 'SUBMITTED'
+                    task['status_message'] = 'No recent agent activity. Verify the conversation before continuing or resubmitting.'
+                    self.emit_event(f"{task['id']}: {task['status_message']}")
+                    updated = True
+                if last.get('status') == 'DONE' and last.get('type') == 'PLANNER_RESPONSE' and not tools:
+                    task['status'] = 'SUBMITTED'
+                    task['status_message'] = 'Agent response available. Verify the result, then Confirm completed.'
+                    self.emit_event(f"{task['id']}: {task['status_message']}")
+                    updated = True
+            except (OSError, ValueError):
+                self.emit_event(f"{task['id']}: conversation submitted; waiting for agent activity.")
         if updated:
             self._save()
         return updated
+
+    @queue_transaction
+    def observe_tasks(self) -> bool:
+        """Refresh accepted conversations without dispatching queued work."""
+        return self.check_running_tasks()
 
     @queue_transaction
     def execute_next(self) -> bool:
@@ -992,15 +1047,35 @@ class TaskPipeline:
             context_vars["project_slug"] = p_slug
             for k, v in context_vars.items():
                 resolved_prompt = resolved_prompt.replace(f"{{{k}}}", str(v))
+
+            # Prepend strict workspace directive so the agent never confuses the active IDE workspace with the target project directory
+            ws_directive = (
+                f"================================================================================\n"
+                f"[MANDATORY TARGET PROJECT DIRECTORY: {proj_dir}]\n"
+                f"You MUST create, initialize, build, and write all project files, directories, code,\n"
+                f"and configurations directly inside:\n"
+                f"{proj_dir}\n\n"
+                f"DO NOT create or modify files in any other workspace (such as dev-os).\n"
+                f"All shell commands (composer, artisan, npm, git, etc.) must be executed with\n"
+                f"working directory inside: {proj_dir}\n"
+                f"Ask for clarification if required information or authorization is missing.\n"
+                f"================================================================================\n\n"
+            )
+            if not resolved_prompt.startswith("================================================================================"):
+                resolved_prompt = ws_directive + resolved_prompt
+
             task["resolved_prompt"] = resolved_prompt
+            self.emit_event(f"Project folder ready: {proj_dir}")
 
             # If target agent is currently busy doing work, wait for current turn to complete
             if is_agent_working(task["agent"]):
-                print(f"[{task['agent'].upper()}] Agent is currently working. Waiting for turn to finish before dispatching...")
+                self.emit_event(f"{task['agent']}: another turn is active; waiting before submission.")
                 return False
 
             # Run this task
             task["status"] = "RUNNING"
+            task["started_at"] = datetime.datetime.now().isoformat()
+            self.emit_event(f"{task['id']}: dispatching to {task['agent']}…")
             self._save()
             notify("Executing Task", f"[{p_slug}] [{task['agent'].upper()}] {resolved_prompt[:60]}...")
 
@@ -1011,10 +1086,13 @@ class TaskPipeline:
             except Exception as exc:
                 success, output = False, str(exc)
             output = str(output)[-65536:]
+            task["status_message"] = output[:600]
             task["output"] = output
 
             if output.startswith("STARTED:"):
+                task["conversation_id"] = task_dispatch.get("conversation_id") or output.split(":", 1)[1].strip()
                 task["status"] = "RUNNING"
+                self.emit_event(f"{task['id']}: prompt accepted; tracking conversation {task['conversation_id']}.")
                 self._save()
                 notify("Task Running", f"[{p_slug}] [{task['agent'].upper()}] Task is running in background.")
                 return True
@@ -1079,6 +1157,7 @@ class TaskPipeline:
                 notify("Task Completed", f"[{task['agent'].upper()}] Command finished! Ready for next in chain.")
             else:
                 task["status"] = "FAILED"
+                self.emit_event(f"{task['id']}: failed: {output[:1000]}")
                 notify("Task Failed", f"[{task['agent'].upper()}] Error: {output[:80]}", urgency="critical")
 
             self._save()
@@ -1092,9 +1171,21 @@ class TaskPipeline:
 
         if agent == "antigravity":
             if AGENTAPI_BIN.exists():
-                cmd = [str(AGENTAPI_BIN), "new-conversation", prompt]
+                title = f"[Pipeline] {task.get('project_slug') or 'Project'}"
+                proj_path = task.get("project")
+                if proj_path:
+                    try:
+                        launcher = Path("/opt/antigravity/antigravity")
+                        if launcher.is_file():
+                            subprocess.Popen([str(launcher), str(proj_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    except Exception:
+                        pass
+                cmd = [str(AGENTAPI_BIN), "new-conversation", f"--title={title}", "--", prompt]
                 try:
-                    res = subprocess.run(cmd, capture_output=True, text=True, timeout=300, cwd=task.get("project") or None)
+                    from antigravity_connection import ensure_connection, bind_project
+                    env = bind_project(ensure_connection(task.get("project"), self.emit_event), task["project"])
+                    self.emit_event("Antigravity API ready; submitting the project prompt…")
+                    res = subprocess.run(cmd, capture_output=True, text=True, timeout=60, cwd=task.get("project") or None, env=env)
                     if res.returncode == 0:
                         conv_id = None
                         try:
@@ -1105,8 +1196,10 @@ class TaskPipeline:
                         if conv_id:
                             task["conversation_id"] = conv_id
                             return True, f"STARTED:{conv_id}"
-                        return False, "SUBMITTED: " + (res.stdout or "Antigravity accepted the conversation; completion is not verified.")
+                        return False, "SUBMITTED: Antigravity accepted the request without a conversation ID; verify it in the agent before retrying."
                     return False, res.stderr or res.stdout
+                except subprocess.TimeoutExpired:
+                    return False, "SUBMITTED: Antigravity submission timed out; acceptance is uncertain. Check the agent before retrying."
                 except Exception as e:
                     return False, str(e)
             else:
@@ -1119,7 +1212,7 @@ class TaskPipeline:
             try:
                 target_dir = task.get("project") or str(Path.cwd())
                 subprocess.Popen([str(kde_bin), target_dir], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                return True, f"Opened Antigravity KDE workspace: {target_dir}"
+                return False, f"Opened Antigravity KDE workspace: {target_dir}, but no supported prompt-submission API is configured for this IDE. Select Google Antigravity for API dispatch. No prompt was sent."
             except Exception as e:
                 return False, str(e)
 

@@ -375,17 +375,27 @@ def queue_error_to_log(method):
 
 class PipelineWorker(QtCore.QThread):
     result = QtCore.pyqtSignal(str)
+    progress = QtCore.pyqtSignal(str)
 
-    def __init__(self, pipeline, parent):
+    def __init__(self, pipeline, parent, observe_only=False):
         super().__init__(parent)
         self.pipeline = pipeline
+        self.observe_only = observe_only
 
     def run(self):
+        previous = self.pipeline.event_callback
+        self.pipeline.event_callback = self.progress.emit
         try:
-            self.pipeline.execute_next()
+            if self.observe_only:
+                self.pipeline.observe_tasks()
+            else:
+                self.pipeline.execute_next()
             self.result.emit("")
         except Exception as exc:
+            self.pipeline.emit_event("Pipeline error: " + str(exc))
             self.result.emit(str(exc))
+        finally:
+            self.pipeline.event_callback = previous
 
 
 class FullPromptViewerDialog(QtWidgets.QDialog):
@@ -545,7 +555,7 @@ class StepRow(QtWidgets.QFrame):
         status_color = "#94a3b8"
 
         if status == "RUNNING":
-            status_text = "⚡ Running: Execution in progress..."
+            status_text = self.task.get("status_message") or "⚡ Running: Execution in progress..."
             status_color = "#38bdf8"
         elif status == "RATE_LIMITED":
             retry_at = self.task.get("retry_at", "")
@@ -565,10 +575,12 @@ class StepRow(QtWidgets.QFrame):
             status_text = "✔ Completed"
             status_color = "#34d399"
         elif status == "FAILED":
-            status_text = "✖ Failed"
+            status_text = "✖ Failed: " + (self.task.get("status_message") or self.task.get("output") or "See activity log")[:300]
             status_color = "#f87171"
 
         status_lbl = QtWidgets.QLabel(status_text)
+        status_lbl.setWordWrap(True)
+        status_lbl.setTextFormat(Qt.PlainText)
         status_lbl.setStyleSheet(f"font-size: 11px; font-weight: 600; color: {status_color};")
         center_box.addWidget(status_lbl)
 
@@ -589,6 +601,11 @@ class StepRow(QtWidgets.QFrame):
             btn_confirm.setObjectName("small_btn")
             btn_confirm.clicked.connect(lambda: self.on_confirm(self.task["id"]))
             layout.addWidget(btn_confirm)
+
+        if status == "FAILED":
+            retry = QtWidgets.QPushButton("Retry step")
+            retry.clicked.connect(lambda: self.window().retry_task(self.task["id"]))
+            layout.addWidget(retry)
 
         # Failover action button if rate limited
         if status == "RATE_LIMITED" and self.on_failover:
@@ -691,6 +708,13 @@ class ProjectPipelineCard(QtWidgets.QFrame):
             btn_folder.setToolTip(f"Open {proj_dir} in file manager")
             btn_folder.clicked.connect(lambda: self.open_local_folder(proj_dir))
             actions_box.addWidget(btn_folder)
+
+            btn_ide = QtWidgets.QPushButton("IDE")
+            btn_ide.setObjectName("small_btn")
+            btn_ide.setStyleSheet("background-color: #2563eb; color: white; font-weight: 600; padding: 3px 8px; border-radius: 5px;")
+            btn_ide.setToolTip(f"Open {proj_dir} in Antigravity IDE")
+            btn_ide.clicked.connect(lambda _, d=proj_dir: subprocess.Popen(["/opt/antigravity/antigravity", d], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+            actions_box.addWidget(btn_ide)
 
         gh_url = self.project_data.get("github_url")
         if gh_url:
@@ -974,6 +998,8 @@ class TaskCard(QtWidgets.QFrame):
             status_color = "#f87171"
 
         status_lbl = QtWidgets.QLabel(status_text)
+        status_lbl.setWordWrap(True)
+        status_lbl.setTextFormat(Qt.PlainText)
         status_lbl.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {status_color};")
         center_box.addWidget(status_lbl)
 
@@ -1000,78 +1026,13 @@ class TaskCard(QtWidgets.QFrame):
             layout.addWidget(btn_failover)
 
 
-IMRAN_PRODUCTION_STEPS_25 = """
----
-Step 2: make complete readme.md file include all feature, all possiblity, everything what opportunity they got, how much time saver for their business,,,everything,,,then put some images of our application in readme.md to attaract them for github readme...to make them best attracted...
-
----
-Step 3: in the last of readme.md file put my contact info:
-🤝 Let's Connect & Collaborate
-I am open to Senior Remote Full-Stack Roles, AI Platform Architecture Contracts, and Enterprise Technical Advisory.
-
-Timezone: UTC+6 (Dhaka / Rangpur, Bangladesh) — Flexible overlap with US, UK, and European business hours.
-Delivery Mode: Async-ready, Slack, Discord, Jira, GitHub, and production-first accountability.
-
-| Channel | Address / Handle | Quick Action |
-| :--- | :--- | :--- |
-| 🌐 Primary Portfolio | imrandev.bd | Visit Site ↗ (https://imrandev.bd) |
-| 📦 Packagist Packages | packagist.org/packages/imrandevbd/ | View Packages ↗ (https://packagist.org/packages/imrandevbd/) |
-| 💼 LinkedIn Profile | linkedin.com/in/imranbru99 | Connect ↗ (https://linkedin.com/in/imranbru99) |
-| 🐙 GitHub Profile | github.com/imranbru99 | Follow ↗ (https://github.com/imranbru99) |
-| 💬 WhatsApp Direct | +880 1576-918420 | Chat Now ↗ (https://wa.me/8801576918420) |
-| 📧 Direct Email | me@imrandev.bd | Send Email ↗ (mailto:me@imrandev.bd) |
-| 🐦 X (Twitter) | @imrandev_bd | Follow ↗ (https://x.com/imrandev_bd) |
-| 📺 YouTube Tech | @ImranDevBD | Subscribe ↗ (https://youtube.com/@ImranDevBD) |
-
----
-Step 4: Permanent Developer Identity & Git Author Configuration
-
-For this project and all future repositories, follow these rules.
-
-Developer Identity:
-- Developer Name: Imran Ahmed
-- Git Author: Imran Ahmed
-- Git Committer: Imran Ahmed
-- Email: me@imrandev.bd
-- Official Website: https://imrandev.bd
-
-Mandatory Rules:
-- Always use Imran Ahmed as the Git author and committer name.
-- Always use me@imrandev.bd as the Git commit email.
-- Never replace the developer identity with an AI coding agent's name.
-- Apply this identity to future commits and new repositories.
-- Preserve all existing Git history unless explicitly instructed otherwise.
-- Verify Git identity before committing.
-- Use https://imrandev.bd as the developer website in appropriate project metadata, documentation and author information.
-- Do not overwrite existing third-party authorship or licensing information.
-
-Required Git Configuration:
-git config --global user.name "Imran Ahmed"
-git config --global user.email "me@imrandev.bd"
-
-Verify Before Committing:
-git config user.name
-git config user.email
-
-Expected output:
-Imran Ahmed
-me@imrandev.bd
-
-Commit Identity Verification:
-Before creating a Git commit, verify that both GIT_AUTHOR and GIT_COMMITTER identities use Imran Ahmed and me@imrandev.bd.
-Do not create commits with an incorrect identity.
-
-Permanent Instruction:
-Maintain this configuration across future development sessions wherever possible. If a new agent environment or repository does not have the configuration, configure it before committing.
-
----
-Step 5: based this project, give me the best github repo name with 400 character descripion for reaching organically to rank or any related search our repo will be search able rank in google or github in github.txt file"""
+DEFAULT_STEPS_25 = ""  # Personal steps are loaded only from this PC’s config.
 
 STEPS_25_TEMPLATE_FILE = Path.home() / ".config/devos/pipeline_steps_25.md"
 
 
 def get_steps_25_template() -> str:
-    """Load customized Steps 2–5 template or fallback to default production template."""
+    """Load this PC’s private Steps 2–5 template; no personal prompts ship in source."""
     if STEPS_25_TEMPLATE_FILE.exists():
         try:
             content = STEPS_25_TEMPLATE_FILE.read_text(encoding="utf-8")
@@ -1079,13 +1040,16 @@ def get_steps_25_template() -> str:
                 return content
         except Exception:
             pass
-    return IMRAN_PRODUCTION_STEPS_25
+    return DEFAULT_STEPS_25
 
 
 def save_steps_25_template(content: str):
     """Save user-customized Steps 2–5 template to persistent config."""
     STEPS_25_TEMPLATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    STEPS_25_TEMPLATE_FILE.write_text(content, encoding="utf-8")
+    fd = os.open(STEPS_25_TEMPLATE_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as stream:
+        stream.write(content)
+    STEPS_25_TEMPLATE_FILE.chmod(0o600)
 
 
 class Steps25TemplateDialog(QtWidgets.QDialog):
@@ -1105,7 +1069,7 @@ class Steps25TemplateDialog(QtWidgets.QDialog):
         layout.addWidget(header)
 
         desc = QtWidgets.QLabel(
-            "Customize the boilerplate engineering steps (README, Contact, Git author, GitHub SEO). "
+            "Customize your private steps 2–5 on this computer only. "
             "Separate each step with '---' on a new line. When saved, this template will be used whenever "
             "you click '✨ Steps 2–5' or run the Batch Generator."
         )
@@ -1139,7 +1103,7 @@ class Steps25TemplateDialog(QtWidgets.QDialog):
         layout.addLayout(bottom)
 
     def _reset_default(self):
-        self.editor.setPlainText(IMRAN_PRODUCTION_STEPS_25.strip())
+        self.editor.setPlainText(DEFAULT_STEPS_25.strip())
 
     def _save(self):
         text = self.editor.toPlainText().strip()
@@ -1528,6 +1492,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
         # Timer for refreshing queue and ticking countdowns
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.refresh_queue)
+        self.timer.timeout.connect(self.run_step)
         self.timer.start(1000)
 
         # Worker timer for executing next pipeline task if running
@@ -2099,10 +2064,14 @@ class PipelineWindow(QtWidgets.QMainWindow):
         # Live Execution Output Box
         self.log_box = QtWidgets.QTextEdit()
         self.log_box.setReadOnly(True)
-        self.log_box.setMaximumHeight(85)
+        self.log_box.setMinimumHeight(100)
+        self.log_box.setMaximumHeight(160)
+        self.log_box.document().setMaximumBlockCount(500)
         self.log_box.setPlaceholderText("Pipeline activity and agent dispatch log will stream here...")
         self.log_box.setStyleSheet("background-color: #050811; border: 1px solid #1a2436; color: #94a3b8; font-family: monospace; font-size: 11px;")
-        right_layout.addWidget(self.log_box)
+        right_layout.insertWidget(1, self.log_box)
+        for line in self.pipeline.recent_events():
+            self.append_pipeline_log(line)
 
         left_widget.setMinimumWidth(320)
         right_widget.setMinimumWidth(280)
@@ -2696,7 +2665,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
             self.kpi_status_val.setStyleSheet("color: #94a3b8; font-size: 14px; font-weight: 800;")
 
         # Check if queue tasks data changed before doing a destructive rebuild
-        grouped_sig = [(p.get("slug"), [(t.get("id"), t.get("status"), t.get("retry_at")) for t in p.get("tasks", [])]) for p in grouped]
+        grouped_sig = [(p.get("slug"), [(t.get("id"), t.get("status"), t.get("retry_at"), t.get("status_message")) for t in p.get("tasks", [])]) for p in grouped]
         if grouped_sig == getattr(self, "last_grouped_sig", None):
             return
         self.last_grouped_sig = grouped_sig
@@ -2724,6 +2693,19 @@ class PipelineWindow(QtWidgets.QMainWindow):
                 )
                 self.task_list_layout.insertWidget(idx, card)
 
+    @queue_error_to_log
+    def retry_task(self, task_id):
+        if self.busy():
+            return
+        task = next((t for t in self.pipeline.list() if t['id'] == task_id), None)
+        if not task or task['status'] != 'FAILED':
+            return
+        self.pipeline.update_task(task_id, {'status': 'QUEUED', 'retry_at': None, 'output': None,
+                                           'status_message': 'Retry queued'})
+        self.pipeline.emit_event(f"{task_id}: retry queued by user.")
+        self.last_grouped_sig = None
+        self.refresh_queue()
+
     def update_single_task_prompt(self, task_id: str, new_prompt: str):
         try:
             self.pipeline.update_task(task_id, {"prompt": new_prompt})
@@ -2733,6 +2715,11 @@ class PipelineWindow(QtWidgets.QMainWindow):
             self.refresh_ui()
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "Update Failed", f"Could not update task prompt:\n{e}")
+
+    def append_pipeline_log(self, line):
+        self.log_box.moveCursor(QtGui.QTextCursor.End)
+        self.log_box.insertPlainText(line + "\n")
+        self.log_box.ensureCursorVisible()
 
     def toggle_runner(self):
         if not self.is_running:
@@ -2754,9 +2741,12 @@ class PipelineWindow(QtWidgets.QMainWindow):
         return self.worker is not None and self.worker.isRunning()
 
     def run_step(self):
-        if not self.is_running or self.busy():
+        if self.busy():
             return
-        self.worker = PipelineWorker(self.pipeline, self)
+        if not self.is_running and not any(t.get('status') in ('RUNNING', 'SUBMITTED') for t in self.pipeline.queue):
+            return
+        self.worker = PipelineWorker(self.pipeline, self, observe_only=not self.is_running)
+        self.worker.progress.connect(self.append_pipeline_log)
         self.worker.result.connect(self.step_finished)
         self.worker.start()
 

@@ -4,6 +4,7 @@ Tests for DevOS AI Multi-Agent Task Pipeline & Rate-Limit Scheduler.
 
 import os
 import sys
+import json
 import datetime
 import unittest
 from pathlib import Path
@@ -387,6 +388,50 @@ class TestTaskPipeline(unittest.TestCase):
         self.assertTrue(steps[1].startswith("Step 2"))
         self.assertTrue(steps[2].startswith("Step 3"))
 
+    def test_workspace_directive_prepended_on_execute(self):
+        custom_base = Path(self.test_dir) / "work"
+        self.pipeline.set_base_dir(str(custom_base))
+        self.pipeline.add("Scaffold Laravel application", agent="antigravity", project_slug="my-saas")
+
+        with patch.object(self.pipeline, "_dispatch", return_value=(True, "STARTED:conv123")) as mock_dispatch:
+            with patch("task_pipeline.is_agent_working", return_value=False):
+                self.assertTrue(self.pipeline.execute_next())
+                dispatched_task = mock_dispatch.call_args[0][0]
+                self.assertIn("[MANDATORY TARGET PROJECT DIRECTORY:", dispatched_task["prompt"])
+                self.assertIn(str(custom_base / "my-saas"), dispatched_task["prompt"])
+                self.assertIn("Scaffold Laravel application", dispatched_task["prompt"])
+
+    def test_check_running_tasks_reports_questions_without_answering(self):
+        conv_id = "test-conv-ask-123"
+        task_id = self.pipeline.add("Build App", agent="antigravity", project_slug="demo-app")
+        self.pipeline.queue[0]["status"] = "RUNNING"
+        self.pipeline.queue[0]["conversation_id"] = conv_id
+        self.pipeline.queue[0]["project"] = "/tmp/demo-app"
+
+        # Mock brain dir with transcript containing ask_question
+        fake_brain = Path(self.test_dir) / ".gemini/antigravity/brain"
+        transcript_dir = fake_brain / conv_id / ".system_generated/logs"
+        transcript_dir.mkdir(parents=True, exist_ok=True)
+        transcript_file = transcript_dir / "transcript.jsonl"
+
+        step_data = {
+            "step_index": 12,
+            "source": "MODEL",
+            "type": "PLANNER_RESPONSE",
+            "status": "DONE",
+            "tool_calls": [{"name": "ask_question", "args": {"question": "Which dir?"}}]
+        }
+        transcript_file.write_text(json.dumps(step_data) + "\n")
+
+        with patch("pathlib.Path.home", return_value=Path(self.test_dir)), \
+             patch("task_pipeline.AGENTAPI_BIN", Path("/mock/agentapi")), \
+             patch.object(Path, "exists", autospec=True, side_effect=lambda p: True if "transcript.jsonl" in str(p) or "/mock/agentapi" in str(p) else os.path.exists(str(p))), \
+             patch("subprocess.run") as mock_run:
+            self.pipeline.check_running_tasks()
+            self.assertEqual(self.pipeline.queue[0]["status"], "RUNNING")
+            mock_run.assert_not_called()
+            self.assertIn("Awaiting your answer", self.pipeline.queue[0]["status_message"])
+
     def test_split_prompts_empty(self):
         self.assertEqual(split_prompts(""), [])
         self.assertEqual(split_prompts("   \n\n  "), [])
@@ -403,9 +448,9 @@ class TestTaskPipeline(unittest.TestCase):
         self.assertIn("2 Sequential Steps Detected", dlg.metrics_lbl.text())
         dlg.insert_step_separator()
         self.assertIn("---", dlg.get_text())
-        dlg.append_steps_25()
-        self.assertIn("Imran Ahmed", dlg.get_text())
-        self.assertIn("imrandev.bd", dlg.get_text())
+        with patch("pipeline_gui.get_steps_25_template", return_value="---\nStep 2: Synthetic test instructions"):
+            dlg.append_steps_25()
+        self.assertIn("Synthetic test instructions", dlg.get_text())
         dlg.close()
 
 
