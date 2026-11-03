@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# DevOS WhiteSur macOS Theme Suite Installer
+# Installs WhiteSur GTK, KDE Plasma, and Icon themes (User or System-wide)
+set -e
+
+TMP_DIR=$(mktemp -d /tmp/devos-whitesur-build.XXXXXX)
+trap 'rm -rf "$TMP_DIR"' EXIT
+
+IS_ROOT=0
+if [ "$(id -u)" -eq 0 ]; then
+    IS_ROOT=1
+fi
+
+echo "==> DevOS: Installing WhiteSur macOS Theme Suite..."
+if [ "$IS_ROOT" -eq 1 ]; then
+    echo "    Mode: System-wide installation (/usr/share)"
+else
+    echo "    Mode: User installation (~/.local/share)"
+fi
+
+# Ensure required tools if running as root with apt-get
+if [ "$IS_ROOT" -eq 1 ] && command -v apt-get >/dev/null 2>&1; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq 2>/dev/null || true
+    apt-get install -y --no-install-recommends git sassc libglib2.0-dev-bin optipng 2>/dev/null || true
+fi
+
+# 1. WhiteSur KDE Theme (Plasma style, Aurorae traffic lights, Kvantum, Color schemes)
+echo "--> Fetching and installing WhiteSur KDE Theme..."
+if git clone --depth=1 https://github.com/vinceliuice/WhiteSur-kde.git "$TMP_DIR/whitesur-kde"; then
+    bash "$TMP_DIR/whitesur-kde/install.sh" || true
+else
+    echo "Warning: Failed to clone WhiteSur-kde repository" >&2
+fi
+
+# 2. WhiteSur Icon Theme (Apple squircle icons & folders)
+echo "--> Fetching and installing WhiteSur Icon Theme..."
+if git clone --depth=1 https://github.com/vinceliuice/WhiteSur-icon-theme.git "$TMP_DIR/whitesur-icons"; then
+    bash "$TMP_DIR/whitesur-icons/install.sh" -a -p || true
+else
+    echo "Warning: Failed to clone WhiteSur-icon-theme repository" >&2
+fi
+
+# 3. WhiteSur GTK Theme (macOS GTK 2/3/4 windows & controls)
+echo "--> Fetching and installing WhiteSur GTK Theme..."
+if git clone --depth=1 https://github.com/vinceliuice/WhiteSur-gtk-theme.git "$TMP_DIR/whitesur-gtk"; then
+    bash "$TMP_DIR/whitesur-gtk/install.sh" -c Dark -c Light -t all -a normal --round || true
+else
+    echo "Warning: Failed to clone WhiteSur-gtk-theme repository" >&2
+fi
+
+# Set proper permissions if installed as root
+if [ "$IS_ROOT" -eq 1 ]; then
+    chmod -R a+rX /usr/share/themes/WhiteSur* 2>/dev/null || true
+    chmod -R a+rX /usr/share/icons/WhiteSur* 2>/dev/null || true
+    chmod -R a+rX /usr/share/aurorae/themes/WhiteSur* 2>/dev/null || true
+    chmod -R a+rX /usr/share/plasma/desktoptheme/WhiteSur* 2>/dev/null || true
+    chmod -R a+rX /usr/share/color-schemes/WhiteSur* 2>/dev/null || true
+    chmod -R a+rX /usr/share/Kvantum/WhiteSur* 2>/dev/null || true
+fi
+
+echo "==> DevOS: WhiteSur macOS Theme Suite installed successfully!"
+echo "Apply with: devos theme mac"

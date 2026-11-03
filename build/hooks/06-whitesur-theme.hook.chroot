@@ -1,0 +1,9 @@
+#!/bin/bash
+# 06-whitesur-theme.hook.chroot - Pre-install WhiteSur macOS theme suite during ISO remaster
+set -euo pipefail
+
+echo "==> Running DevOS 06-whitesur-theme hook..."
+
+if [ -f /usr/local/sbin/devos-install-whitesur ]; then
+    /bin/bash /usr/local/sbin/devos-install-whitesur || echo "WhiteSur install skipped (network or package unavailable during chroot)"
+fi

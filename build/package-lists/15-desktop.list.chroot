@@ -32,6 +32,8 @@ qt5-style-kvantum
 # KDE / Polkit use Qt 6; both toolkits need the same native style.
 qt6-style-kvantum
 breeze-gtk-theme
+sassc
+optipng
 python3
 python3-pip
 python3-pyqt5

@@ -24,8 +24,8 @@ def test_theme_switcher_get_default_theme():
 
 
 def test_theme_switcher_specs_defined():
-    """Verify both dark and light specs have all required desktop keys."""
-    for mode in ("dark", "light"):
+    """Verify all dark, light, and mac specs have all required desktop keys."""
+    for mode in ("dark", "light", "mac", "mac-light"):
         assert mode in ThemeSwitcher.THEMES
         spec = ThemeSwitcher.THEMES[mode]
         assert "kdeglobals_scheme" in spec
@@ -34,6 +34,30 @@ def test_theme_switcher_specs_defined():
         assert "gtk_icon_theme" in spec
         assert "gtk_prefer_dark" in spec
         assert "code_theme" in spec
+        assert "buttons_left" in spec
+        assert "buttons_right" in spec
+
+
+def test_theme_switcher_apply_mac(monkeypatch):
+    """Verify applying mac theme sets Cupertino settings and buttons on left."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        settings_path = os.path.join(tmpdir, "devos", "settings.json")
+        gtk3_path = os.path.join(tmpdir, "gtk-3.0", "settings.ini")
+        kdeglobals_path = os.path.join(tmpdir, "kdeglobals")
+        kwinrc_path = os.path.join(tmpdir, "kwinrc")
+
+        monkeypatch.setattr("theme_switcher.SETTINGS_FILE", settings_path)
+        monkeypatch.setattr("theme_switcher.GTK3_FILE", gtk3_path)
+        monkeypatch.setattr("theme_switcher.KDEGLOBALS_FILE", kdeglobals_path)
+        monkeypatch.setattr("theme_switcher.KWINRC_FILE", kwinrc_path)
+
+        ok = ThemeSwitcher.apply_theme("mac")
+        assert ok is True
+        assert ThemeSwitcher.get_current_theme() == "mac"
+
+        with open(settings_path, "r") as f:
+            data = json.load(f)
+            assert data["appearance"]["theme"] == "mac"
 
 
 def test_theme_switcher_apply_and_toggle(monkeypatch):

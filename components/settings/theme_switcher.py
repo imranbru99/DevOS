@@ -19,6 +19,7 @@ PLASMARC_FILE = os.path.expanduser("~/.config/plasmarc")
 GTK3_FILE = os.path.expanduser("~/.config/gtk-3.0/settings.ini")
 GTK4_FILE = os.path.expanduser("~/.config/gtk-4.0/settings.ini")
 KVANTUM_FILE = os.path.expanduser("~/.config/Kvantum/kvantum.kvconfig")
+KWINRC_FILE = os.path.expanduser("~/.config/kwinrc")
 CODE_SETTINGS = os.path.expanduser("~/.config/Code/User/settings.json")
 VSCODIUM_SETTINGS = os.path.expanduser("~/.config/VSCodium/User/settings.json")
 
@@ -57,6 +58,9 @@ class ThemeSwitcher:
             "gsettings_color_scheme": "prefer-dark",
             "kvantum_theme": "KvSimplicityDark",
             "code_theme": "Default Dark Modern",
+            "buttons_left": "M",
+            "buttons_right": "IAX",
+            "kdecoration_theme": "Breeze",
         },
         "light": {
             "name": "DevOS Light",
@@ -71,19 +75,68 @@ class ThemeSwitcher:
             "gsettings_color_scheme": "prefer-light",
             "kvantum_theme": "KvSimplicity",
             "code_theme": "Default Light Modern",
+            "buttons_left": "M",
+            "buttons_right": "IAX",
+            "kdecoration_theme": "Breeze",
+        },
+        "mac": {
+            "name": "DevOS Cupertino (macOS WhiteSur Dark)",
+            "kdeglobals_scheme": "WhiteSurDark",
+            "fallback_scheme": "DevOS",
+            "plasma_desktoptheme": "WhiteSur-dark",
+            "lookandfeel": "com.github.vinceliuice.WhiteSur-dark",
+            "fallback_lookandfeel": "org.devos.desktop",
+            "gtk_theme": "WhiteSur-Dark",
+            "gtk_icon_theme": "WhiteSur-dark",
+            "gtk_prefer_dark": "1",
+            "gsettings_color_scheme": "prefer-dark",
+            "kvantum_theme": "WhiteSurDark",
+            "code_theme": "Default Dark Modern",
+            "buttons_left": "XAI",
+            "buttons_right": "",
+            "kdecoration_theme": "WhiteSur-dark",
+        },
+        "mac-light": {
+            "name": "DevOS Cupertino Light (macOS WhiteSur Light)",
+            "kdeglobals_scheme": "WhiteSurLight",
+            "fallback_scheme": "DevOS-Light",
+            "plasma_desktoptheme": "WhiteSur-light",
+            "lookandfeel": "com.github.vinceliuice.WhiteSur",
+            "fallback_lookandfeel": "org.kde.breeze.desktop",
+            "gtk_theme": "WhiteSur-Light",
+            "gtk_icon_theme": "WhiteSur",
+            "gtk_prefer_dark": "0",
+            "gsettings_color_scheme": "prefer-light",
+            "kvantum_theme": "WhiteSur",
+            "code_theme": "Default Light Modern",
+            "buttons_left": "XAI",
+            "buttons_right": "",
+            "kdecoration_theme": "WhiteSur-light",
         }
     }
 
     @classmethod
+    def is_whitesur_installed(cls) -> bool:
+        """Checks if WhiteSur GTK / KDE assets are present on the system."""
+        indicators = [
+            "/usr/share/themes/WhiteSur-Dark",
+            "/usr/share/plasma/desktoptheme/WhiteSur-dark",
+            "/usr/share/icons/WhiteSur-dark",
+            os.path.expanduser("~/.local/share/themes/WhiteSur-Dark"),
+            os.path.expanduser("~/.local/share/icons/WhiteSur-dark"),
+        ]
+        return any(os.path.exists(p) for p in indicators)
+
+    @classmethod
     def get_current_theme(cls) -> str:
-        """Determines if the system is currently using dark or light theme."""
+        """Determines if the system is currently using dark, light, or mac theme."""
         # 1. Check DevOS settings
         if os.path.exists(SETTINGS_FILE):
             try:
                 with open(SETTINGS_FILE, "r") as f:
                     data = json.load(f)
                     theme = data.get("appearance", {}).get("theme", "").lower()
-                    if theme in ("dark", "light"):
+                    if theme in cls.THEMES:
                         return theme
             except Exception:
                 pass
@@ -94,6 +147,10 @@ class ThemeSwitcher:
                 cp = configparser.ConfigParser()
                 cp.read(KDEGLOBALS_FILE)
                 scheme = cp.get("General", "ColorScheme", fallback="").lower()
+                if "whitesurlight" in scheme:
+                    return "mac-light"
+                if "whitesur" in scheme:
+                    return "mac"
                 if "light" in scheme or scheme in ("breeze", "breezelight"):
                     return "light"
             except Exception:
@@ -104,6 +161,11 @@ class ThemeSwitcher:
             try:
                 cp = configparser.ConfigParser()
                 cp.read(GTK3_FILE)
+                theme_name = cp.get("Settings", "gtk-theme-name", fallback="").lower()
+                if "whitesur-light" in theme_name:
+                    return "mac-light"
+                if "whitesur" in theme_name:
+                    return "mac"
                 prefer_dark = cp.get("Settings", "gtk-application-prefer-dark-theme", fallback="1")
                 if prefer_dark == "0":
                     return "light"
@@ -202,10 +264,21 @@ class ThemeSwitcher:
             _run_cmd([kwrite_bin, "--file", "kdeglobals", "--group", "General", "--key", "ColorScheme", spec["kdeglobals_scheme"]])
             _run_cmd([kwrite_bin, "--file", "kdeglobals", "--group", "Icons", "--key", "Theme", spec["gtk_icon_theme"]])
             _run_cmd([kwrite_bin, "--file", "plasmarc", "--group", "Theme", "--key", "name", spec["plasma_desktoptheme"]])
+            _run_cmd([kwrite_bin, "--file", "kwinrc", "--group", "org.kde.kdecoration2", "--key", "ButtonsOnLeft", spec.get("buttons_left", "M")])
+            _run_cmd([kwrite_bin, "--file", "kwinrc", "--group", "org.kde.kdecoration2", "--key", "ButtonsOnRight", spec.get("buttons_right", "IAX")])
+            if "kdecoration_theme" in spec:
+                _run_cmd([kwrite_bin, "--file", "kwinrc", "--group", "org.kde.kdecoration2", "--key", "theme", spec["kdecoration_theme"]])
         else:
             cls._update_ini_file(KDEGLOBALS_FILE, "General", {"ColorScheme": spec["kdeglobals_scheme"]})
             cls._update_ini_file(KDEGLOBALS_FILE, "Icons", {"Theme": spec["gtk_icon_theme"]})
             cls._update_ini_file(PLASMARC_FILE, "Theme", {"name": spec["plasma_desktoptheme"]})
+            kwin_vals = {
+                "ButtonsOnLeft": spec.get("buttons_left", "M"),
+                "ButtonsOnRight": spec.get("buttons_right", "IAX"),
+            }
+            if "kdecoration_theme" in spec:
+                kwin_vals["theme"] = spec["kdecoration_theme"]
+            cls._update_ini_file(KWINRC_FILE, "org.kde.kdecoration2", kwin_vals)
 
         # 7. Apply live Plasma 6 runtime hooks if active session exists
         if shutil.which("plasma-apply-colorscheme"):
@@ -219,13 +292,17 @@ class ThemeSwitcher:
             if not _run_cmd(["lookandfeeltool", "-a", spec["lookandfeel"]]):
                 _run_cmd(["lookandfeeltool", "-a", spec["fallback_lookandfeel"]])
 
+        qdbus_bin = shutil.which("qdbus6") or shutil.which("qdbus")
+        if qdbus_bin:
+            _run_cmd([qdbus_bin, "org.kde.KWin", "/KWin", "reconfigure"])
+
         return True
 
     @classmethod
     def toggle(cls) -> str:
         """Toggles current theme between dark and light, returning the new theme."""
         current = cls.get_current_theme()
-        new_theme = "light" if current == "dark" else "dark"
+        new_theme = "light" if current in ("dark", "mac") else "dark"
         cls.apply_theme(new_theme)
         return new_theme
 
@@ -233,13 +310,18 @@ class ThemeSwitcher:
 def main():
     if len(sys.argv) < 2:
         current = ThemeSwitcher.get_current_theme()
-        print(f"\nDevOS Theme Manager")
-        print(f"Current Theme: {current.upper()} MODE\n")
+        whitesur_status = "Installed" if ThemeSwitcher.is_whitesur_installed() else "Not Installed (Run 'devos theme install-mac')"
+        print(f"\nDevOS Theme & Appearance Manager")
+        print(f"Current Theme: {current.upper()} MODE")
+        print(f"macOS Theme Suite: {whitesur_status}\n")
         print("Available options:")
-        print("  devos theme dark    - Switch to DevOS Dark theme (ergonomic graphite & cyan)")
-        print("  devos theme light   - Switch to DevOS Light theme (clean daylight & crisp blue)")
-        print("  devos theme toggle  - Toggle between Dark and Light mode")
-        print("  devos theme status  - Print active theme ('dark' or 'light')\n")
+        print("  devos theme dark        - Switch to DevOS Dark theme (ergonomic graphite & cyan)")
+        print("  devos theme light       - Switch to DevOS Light theme (clean daylight & crisp blue)")
+        print("  devos theme mac         - Switch to Cupertino macOS Dark theme (WhiteSur traffic lights)")
+        print("  devos theme mac-light   - Switch to Cupertino macOS Light theme")
+        print("  devos theme toggle      - Toggle between Dark and Light mode")
+        print("  devos theme status      - Print active theme mode")
+        print("  devos theme install-mac - Download & install WhiteSur macOS Theme Suite\n")
         sys.exit(0)
 
     arg = sys.argv[1].lower().strip()
@@ -252,12 +334,36 @@ def main():
     elif arg in ("light", "l"):
         ThemeSwitcher.apply_theme("light")
         print("✓ Switched system appearance to LIGHT MODE (Plasma, GTK, Kvantum, Code).")
+    elif arg in ("mac", "macos", "whitesur"):
+        if not ThemeSwitcher.is_whitesur_installed():
+            print("Notice: WhiteSur macOS assets are not yet installed.")
+            print("Tip: Run 'devos theme install-mac' or 'sudo devos-install-whitesur' to install full assets.")
+        ThemeSwitcher.apply_theme("mac")
+        print("✓ Switched system appearance to macOS CUPERTINO DARK (WhiteSur, Traffic Lights, Kvantum).")
+    elif arg in ("mac-light", "macos-light"):
+        if not ThemeSwitcher.is_whitesur_installed():
+            print("Notice: WhiteSur macOS assets are not yet installed.")
+            print("Tip: Run 'devos theme install-mac' or 'sudo devos-install-whitesur' to install full assets.")
+        ThemeSwitcher.apply_theme("mac-light")
+        print("✓ Switched system appearance to macOS CUPERTINO LIGHT (WhiteSur Light).")
+    elif arg in ("install-mac", "install-whitesur"):
+        candidates = [
+            shutil.which("devos-install-whitesur"),
+            os.path.expanduser("~/.local/bin/devos-install-whitesur"),
+            "/usr/local/sbin/devos-install-whitesur",
+            os.path.join(os.path.dirname(__file__), "../../build/includes.chroot/usr/local/sbin/devos-install-whitesur"),
+        ]
+        installer = next((c for c in candidates if c and os.path.exists(c)), None)
+        if installer:
+            subprocess.run(["bash", installer])
+        else:
+            print("Installer script not found. Please ensure devos-install-whitesur is in PATH.")
     elif arg in ("toggle", "t"):
         new_mode = ThemeSwitcher.toggle()
         print(f"✓ Toggled system appearance to {new_mode.upper()} MODE.")
     else:
         print(f"Unknown theme option: {arg}")
-        print("Usage: devos theme [dark|light|toggle|status]")
+        print("Usage: devos theme [dark|light|mac|mac-light|toggle|status|install-mac]")
         sys.exit(1)
 
 
