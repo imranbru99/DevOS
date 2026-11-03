@@ -906,3 +906,28 @@ References to 24.04 in supported upgrade paths, update-bundle compatibility, tes
 and build-host CI remain intentional. Installing a DevOS component update does not
 perform an Ubuntu release upgrade. Use the documented OS upgrade flow and retain a
 separate backup before changing the base release.
+
+### Light appearance and Antigravity window recovery
+
+Use `devos theme light` or `devos theme dark`. DevOS Qt apps that load the shared
+appearance helper adapt their legacy stylesheets to the selected mode, including
+File Explorer. Restart apps that were already running when this update was
+installed. The dashboard follows the browser's preferred color scheme. Third-party
+apps with their own explicit appearance settings may still need to be changed in
+that app.
+
+Light mode pairs DevOS-owned wallpapers with **DevOS Daylight**. Returning to dark
+mode restores the previous wallpaper plugin and image; existing slideshow settings
+are retained. Custom wallpapers outside the DevOS collection are left unchanged.
+The switcher applies the global theme before the selected color/icon overrides and
+recognizes failed desktop commands, allowing its configured fallbacks to run.
+
+Antigravity's desktop hub uses `devos-antigravity`, which launches the vendor binary
+with `--ozone-platform=x11`. This addresses the Wayland window rendering mismatch
+observed on this KDE desktop. The launcher retains the normal sandbox, profile,
+credentials and hardware acceleration. If a separate GPU rendering failure occurs,
+quit Antigravity first, then use **Open with software rendering** from its launcher
+menu or `devos-antigravity --software-rendering`. Launch flags cannot change the
+rendering mode of an already-running instance. The separate Antigravity Studio IDE
+launcher remains separate. These settings cannot prevent every upstream app or
+graphics-driver failure.

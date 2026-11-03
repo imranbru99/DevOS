@@ -1240,3 +1240,25 @@ body:not(.is-live) .live-only,
 body:not(.is-installed) .installed-only {
   display: none !important;
 }
+
+/* Follow the desktop color-scheme preference without losing DevOS accents. */
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --bg-canvas: #f8fafc;
+    --bg-card: rgba(255,255,255,.96);
+    --bg-card-hover: #edf4fd;
+    --bg-inset: #eef3f9;
+    --border-subtle: #cbd5e1;
+    --border-hover: #2563eb;
+    --accent-cyan: #087eaa;
+    --accent-blue: #2563eb;
+    --accent-purple: #7050b5;
+    --accent-emerald: #087e59;
+    --accent-amber: #9a6007;
+    --accent-rose: #be2449;
+    --text-main: #172438;
+    --text-muted: #475569;
+    --text-sub: #52647a;
+  }
+}

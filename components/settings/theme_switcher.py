@@ -29,14 +29,14 @@ def _run_cmd(cmd: list) -> bool:
     if not shutil.which(cmd[0]):
         return False
     try:
-        subprocess.run(
+        result = subprocess.run(
             cmd,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,
             timeout=5
         )
-        return True
+        return result.returncode == 0
     except Exception:
         return False
 
@@ -178,7 +178,8 @@ class ThemeSwitcher:
     def _update_ini_file(cls, path: str, section: str, values: Dict[str, str]):
         """Helper to safely read and update INI config files."""
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        cp = configparser.ConfigParser()
+        cp = configparser.ConfigParser(interpolation=None, strict=False)
+        cp.optionxform = str
         if os.path.exists(path):
             try:
                 cp.read(path)
@@ -237,6 +238,10 @@ class ThemeSwitcher:
         except Exception:
             pass
 
+        if shutil.which("lookandfeeltool"):
+            if not _run_cmd(["lookandfeeltool", "-a", spec["lookandfeel"]]):
+                _run_cmd(["lookandfeeltool", "-a", spec["fallback_lookandfeel"]])
+
         # 2. Update GTK 3 & GTK 4
         gtk_vals = {
             "gtk-theme-name": spec["gtk_theme"],
@@ -288,15 +293,53 @@ class ThemeSwitcher:
         if shutil.which("plasma-apply-desktoptheme"):
             _run_cmd(["plasma-apply-desktoptheme", spec["plasma_desktoptheme"]])
 
-        if shutil.which("lookandfeeltool"):
-            if not _run_cmd(["lookandfeeltool", "-a", spec["lookandfeel"]]):
-                _run_cmd(["lookandfeeltool", "-a", spec["fallback_lookandfeel"]])
-
         qdbus_bin = shutil.which("qdbus6") or shutil.which("qdbus")
         if qdbus_bin:
             _run_cmd([qdbus_bin, "org.kde.KWin", "/KWin", "reconfigure"])
 
+        cls.apply_wallpaper(mode)
         return True
+
+    @classmethod
+    def apply_wallpaper(cls, mode):
+        """Pair DevOS-owned wallpapers; keep a user's custom wallpaper unchanged."""
+        qdbus = shutil.which("qdbus6") or shutil.which("qdbus")
+        candidates = [os.path.expanduser("~/.local/share/wallpapers/DevOS-Daylight/contents/images/daylight.svg"),
+                      "/usr/share/wallpapers/DevOS-Daylight/contents/images/daylight.svg"]
+        image = next((p for p in candidates if os.path.isfile(p)), None)
+        if not qdbus or not image:
+            return False
+        script = """
+var light = LIGHT_MODE;
+var target = LIGHT_IMAGE;
+var screens = desktops();
+for (var i=0; i<screens.length; i++) {
+    var d=screens[i];
+    var plugin=d.wallpaperPlugin;
+    d.currentConfigGroup=["Wallpaper",plugin,"General"];
+    var current=d.readConfig("Image", "");
+    var paths=d.readConfig("SlidePaths", []);
+    var owned=String(current).indexOf("/DevOS-")>=0 || String(paths).indexOf("/DevOS-")>=0;
+    if(light && owned && current!==target) {
+        d.currentConfigGroup=["DevOSAppearance"];
+        d.writeConfig("PreviousWallpaperPlugin",plugin);
+        d.writeConfig("PreviousWallpaperImage",current);
+        d.wallpaperPlugin="org.kde.image";
+        d.currentConfigGroup=["Wallpaper","org.kde.image","General"];
+        d.writeConfig("Image",target);
+    } else if(!light && current===target) {
+        d.currentConfigGroup=["DevOSAppearance"];
+        var oldPlugin=d.readConfig("PreviousWallpaperPlugin","org.kde.image");
+        var oldImage=d.readConfig("PreviousWallpaperImage","");
+        if(oldImage) {
+            d.wallpaperPlugin=oldPlugin;
+            d.currentConfigGroup=["Wallpaper",oldPlugin,"General"];
+            d.writeConfig("Image",oldImage);
+        }
+    }
+}
+""".replace("LIGHT_MODE", "true" if mode in ("light", "mac-light") else "false").replace("LIGHT_IMAGE", json.dumps("file://" + image))
+        return _run_cmd([qdbus, "org.kde.plasmashell", "/PlasmaShell", "org.kde.PlasmaShell.evaluateScript", script])
 
     @classmethod
     def toggle(cls) -> str:

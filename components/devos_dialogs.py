@@ -46,6 +46,8 @@ class DialogStyle(QtCore.QObject):
 
 def install(app):
     """Install once per application without changing dialog results or safe defaults."""
+    from devos_appearance import install as install_appearance
+    install_appearance(app)
     if not hasattr(app, '_devos_dialog_style'):
         app._devos_dialog_style = DialogStyle(app)
         app.installEventFilter(app._devos_dialog_style)

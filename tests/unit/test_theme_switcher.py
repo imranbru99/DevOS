@@ -88,3 +88,12 @@ def test_theme_switcher_apply_and_toggle(monkeypatch):
         with open(settings_path, "r") as f:
             data = json.load(f)
             assert data["appearance"]["theme"] == "dark"
+
+@pytest.fixture(autouse=True)
+def isolate_desktop_configuration(monkeypatch, tmp_path):
+    """Theme tests must never write the developer's live desktop settings."""
+    import theme_switcher as module
+    for key in ('SETTINGS_FILE','KDEGLOBALS_FILE','PLASMARC_FILE','GTK3_FILE','GTK4_FILE','KVANTUM_FILE','KWINRC_FILE','CODE_SETTINGS','VSCODIUM_SETTINGS'):
+        monkeypatch.setattr(module,key,str(tmp_path/key/'settings'))
+    monkeypatch.setattr(module,'_run_cmd',lambda _cmd: True)
+    monkeypatch.setattr(module.shutil,'which',lambda _name: None)

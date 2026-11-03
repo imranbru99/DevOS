@@ -6835,6 +6835,17 @@ def main():
     picker_mode = bool(args.picker or args.save or args.directory or args.multiple)
 
     app = QApplication(sys.argv)
+    # Shared appearance follows DevOS light/dark mode, including dialogs.
+    for components_dir in (
+        os.path.expanduser("~/.local/share/devos/components"),
+        "/usr/local/share/devos/components",
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../../components")),
+    ):
+        if os.path.isfile(os.path.join(components_dir, "devos_appearance.py")):
+            sys.path.insert(0, components_dir)
+            from devos_appearance import install as install_appearance
+            install_appearance(app)
+            break
     app.setApplicationName("devos-thispc")
     app.setApplicationDisplayName("File Explorer" if not picker_mode else (args.title or "Open File"))
     if hasattr(app, "setDesktopFileName"):

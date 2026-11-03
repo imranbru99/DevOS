@@ -1,10 +1,15 @@
-#!/bin/bash
-# DevOS AI Code Agent Launcher (legacy compatibility alias)
-if command -v devos-ai-code-agent >/dev/null 2>&1; then
-    exec devos-ai-code-agent "$@"
+#!/usr/bin/env bash
+# Use the verified XWayland path for the Antigravity desktop hub.
+# Keep the vendor sandbox, profile, credentials and GPU acceleration intact.
+set -euo pipefail
+binary=/opt/antigravity/antigravity
+if [[ ! -x "$binary" ]]; then
+    printf '%s\n' 'Antigravity is not installed at /opt/antigravity/antigravity.' >&2
+    exit 127
 fi
-HERE="$(dirname "$0")"
-if [ -x "${HERE}/devos-ai-code-agent" ]; then
-    exec "${HERE}/devos-ai-code-agent" "$@"
+flags=(--ozone-platform=x11)
+if [[ "${1:-}" == --software-rendering ]]; then
+    flags+=(--disable-gpu)
+    shift
 fi
-exec /usr/local/bin/devos-ai-code-agent "$@"
+exec "$binary" "${flags[@]}" "$@"
