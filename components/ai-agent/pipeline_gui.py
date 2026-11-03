@@ -389,11 +389,14 @@ class PipelineWorker(QtCore.QThread):
 
 
 class FullPromptViewerDialog(QtWidgets.QDialog):
-    """Full Prompt Inspector dialog with line wrapping and one-click copy."""
-    def __init__(self, step_idx: int, task: dict, parent=None):
+    """Full Prompt Inspector & Editor dialog with live editing, saving, and copy."""
+    def __init__(self, step_idx: int, task: dict, on_save=None, parent=None):
         super().__init__(parent)
-        self.setWindowTitle(f"Step {step_idx} Prompt Inspector — {task.get('project_title', 'Project')}")
-        self.resize(780, 540)
+        self.step_idx = step_idx
+        self.task = task
+        self.on_save = on_save
+        self.setWindowTitle(f"Step {step_idx} Prompt Inspector & Editor — {task.get('project_title', 'Project')}")
+        self.resize(800, 560)
         self.setStyleSheet(STYLE)
 
         layout = QtWidgets.QVBoxLayout(self)
@@ -406,42 +409,70 @@ class FullPromptViewerDialog(QtWidgets.QDialog):
         hdr.addWidget(badge)
 
         prompt = task.get("prompt", "")
-        meta = QtWidgets.QLabel(f"{len(prompt.split()):,} words • {len(prompt):,} characters")
-        meta.setStyleSheet("color: #94a3b8; font-size: 11px;")
-        hdr.addWidget(meta)
+        self.meta_lbl = QtWidgets.QLabel(f"{len(prompt.split()):,} words • {len(prompt):,} characters")
+        self.meta_lbl.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        hdr.addWidget(self.meta_lbl)
         hdr.addStretch()
 
         btn_copy = QtWidgets.QPushButton("📋 Copy Prompt")
         btn_copy.setObjectName("small_btn")
         btn_copy.setStyleSheet("background-color: #0f172a; color: #38bdf8; font-size: 11px; padding: 4px 10px; border: 1px solid #1e293b; border-radius: 4px;")
-        btn_copy.clicked.connect(lambda: copy_to_clipboard(prompt))
+        btn_copy.clicked.connect(lambda: copy_to_clipboard(self.editor.toPlainText()))
         hdr.addWidget(btn_copy)
         layout.addLayout(hdr)
 
-        editor = QtWidgets.QTextEdit()
-        editor.setPlainText(prompt)
-        editor.setReadOnly(True)
-        editor.setFont(QtGui.QFont("Monospace", 10))
-        layout.addWidget(editor, stretch=1)
+        self.editor = QtWidgets.QTextEdit()
+        self.editor.setPlainText(prompt)
+        self.editor.setFont(QtGui.QFont("Monospace", 10))
+        self.editor.textChanged.connect(self._update_metrics)
+        layout.addWidget(self.editor, stretch=1)
 
-        btn_close = QtWidgets.QPushButton("Close")
-        btn_close.clicked.connect(self.accept)
-        layout.addWidget(btn_close, alignment=Qt.AlignRight)
+        bottom_bar = QtWidgets.QHBoxLayout()
+        tip_lbl = QtWidgets.QLabel("💡 You can edit this prompt directly and click 'Save & Update Step' below.")
+        tip_lbl.setStyleSheet("color: #64748b; font-size: 11px;")
+        bottom_bar.addWidget(tip_lbl)
+        bottom_bar.addStretch()
+
+        btn_close = QtWidgets.QPushButton("Cancel")
+        btn_close.clicked.connect(self.reject)
+        bottom_bar.addWidget(btn_close)
+
+        btn_save = QtWidgets.QPushButton("💾 Save & Update Step")
+        btn_save.setObjectName("primary")
+        btn_save.setStyleSheet("background-color: #2563eb; color: white; font-weight: 700; padding: 6px 16px; border-radius: 5px;")
+        btn_save.clicked.connect(self._save_prompt)
+        bottom_bar.addWidget(btn_save)
+
+        layout.addLayout(bottom_bar)
+
+    def _update_metrics(self):
+        txt = self.editor.toPlainText()
+        self.meta_lbl.setText(f"{len(txt.split()):,} words • {len(txt):,} characters")
+
+    def _save_prompt(self):
+        new_prompt = self.editor.toPlainText().strip()
+        if not new_prompt:
+            QtWidgets.QMessageBox.warning(self, "Empty Prompt", "Prompt cannot be empty.")
+            return
+        if self.on_save:
+            self.on_save(self.task["id"], new_prompt)
+        self.accept()
 
 
 class StepRow(QtWidgets.QFrame):
-    def __init__(self, step_idx: int, task: dict, on_failover=None, on_confirm=None, on_delete=None, parent=None):
+    def __init__(self, step_idx: int, task: dict, on_failover=None, on_confirm=None, on_delete=None, on_update=None, parent=None):
         super().__init__(parent)
         self.step_idx = step_idx
         self.task = task
         self.on_failover = on_failover
         self.on_confirm = on_confirm
         self.on_delete = on_delete
+        self.on_update = on_update
         self.setObjectName("step_row")
         self.init_ui()
 
     def view_full_prompt(self, *args, **kwargs):
-        dlg = FullPromptViewerDialog(self.step_idx, self.task, parent=self)
+        dlg = FullPromptViewerDialog(self.step_idx, self.task, on_save=self.on_update, parent=self)
         dlg.exec_()
 
     def init_ui(self):
@@ -490,17 +521,24 @@ class StepRow(QtWidgets.QFrame):
             meta_row.addWidget(word_tag)
             meta_row.addStretch()
 
-            btn_view = QtWidgets.QPushButton("⛶ View Full Prompt")
+            btn_view = QtWidgets.QPushButton("✏️ View / Edit Prompt")
             btn_view.setObjectName("small_btn")
             btn_view.setStyleSheet("background-color: #0f172a; color: #38bdf8; font-size: 10px; padding: 2px 7px; border: 1px solid #1e293b; border-radius: 4px;")
             btn_view.clicked.connect(self.view_full_prompt)
             meta_row.addWidget(btn_view)
             center_box.addLayout(meta_row)
         else:
+            p_row = QtWidgets.QHBoxLayout()
             prompt_lbl = QtWidgets.QLabel(prompt_text)
             prompt_lbl.setWordWrap(True)
             prompt_lbl.setStyleSheet("font-size: 12px; font-weight: 500; color: #f1f5f9;")
-            center_box.addWidget(prompt_lbl)
+            p_row.addWidget(prompt_lbl, stretch=1)
+            btn_edit_short = QtWidgets.QPushButton("✏️ Edit")
+            btn_edit_short.setObjectName("small_btn")
+            btn_edit_short.setStyleSheet("background-color: #0f172a; color: #38bdf8; font-size: 10px; padding: 2px 7px; border: 1px solid #1e293b; border-radius: 4px;")
+            btn_edit_short.clicked.connect(self.view_full_prompt)
+            p_row.addWidget(btn_edit_short)
+            center_box.addLayout(p_row)
 
         status = self.task.get("status", "QUEUED")
         status_text = f"○ Queued"
@@ -571,13 +609,14 @@ class StepRow(QtWidgets.QFrame):
 
 
 class ProjectPipelineCard(QtWidgets.QFrame):
-    def __init__(self, project_data: dict, on_failover=None, on_confirm=None, on_delete_task=None, on_delete_project=None, parent=None):
+    def __init__(self, project_data: dict, on_failover=None, on_confirm=None, on_delete_task=None, on_delete_project=None, on_update_task=None, parent=None):
         super().__init__(parent)
         self.project_data = project_data
         self.on_failover = on_failover
         self.on_confirm = on_confirm
         self.on_delete_task = on_delete_task
         self.on_delete_project = on_delete_project
+        self.on_update_task = on_update_task
         self.setObjectName("project_card")
         self.init_ui()
 
@@ -779,6 +818,7 @@ class ProjectPipelineCard(QtWidgets.QFrame):
                 on_failover=self.on_failover,
                 on_confirm=self.on_confirm,
                 on_delete=self.on_delete_task,
+                on_update=self.on_update_task,
             )
             self.step_rows.append(row)
             steps_vbox.addWidget(row)
@@ -1027,6 +1067,94 @@ Maintain this configuration across future development sessions wherever possible
 ---
 Step 5: based this project, give me the best github repo name with 400 character descripion for reaching organically to rank or any related search our repo will be search able rank in google or github in github.txt file"""
 
+STEPS_25_TEMPLATE_FILE = Path.home() / ".config/devos/pipeline_steps_25.md"
+
+
+def get_steps_25_template() -> str:
+    """Load customized Steps 2–5 template or fallback to default production template."""
+    if STEPS_25_TEMPLATE_FILE.exists():
+        try:
+            content = STEPS_25_TEMPLATE_FILE.read_text(encoding="utf-8")
+            if content.strip():
+                return content
+        except Exception:
+            pass
+    return IMRAN_PRODUCTION_STEPS_25
+
+
+def save_steps_25_template(content: str):
+    """Save user-customized Steps 2–5 template to persistent config."""
+    STEPS_25_TEMPLATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    STEPS_25_TEMPLATE_FILE.write_text(content, encoding="utf-8")
+
+
+class Steps25TemplateDialog(QtWidgets.QDialog):
+    """Dialog to customize and persist the master Steps 2–5 prompt template."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("⚙ Master Steps 2–5 Template Editor")
+        self.resize(820, 580)
+        self.setStyleSheet(STYLE)
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(10)
+
+        header = QtWidgets.QLabel("⚙ Master Steps 2–5 Shared Template Editor")
+        header.setStyleSheet("font-size: 15px; font-weight: 700; color: #38bdf8;")
+        layout.addWidget(header)
+
+        desc = QtWidgets.QLabel(
+            "Customize the boilerplate engineering steps (README, Contact, Git author, GitHub SEO). "
+            "Separate each step with '---' on a new line. When saved, this template will be used whenever "
+            "you click '✨ Steps 2–5' or run the Batch Generator."
+        )
+        desc.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
+
+        self.editor = QtWidgets.QTextEdit()
+        self.editor.setPlainText(get_steps_25_template().strip())
+        self.editor.setFont(QtGui.QFont("Monospace", 10))
+        layout.addWidget(self.editor, stretch=1)
+
+        bottom = QtWidgets.QHBoxLayout()
+        btn_reset = QtWidgets.QPushButton("Reset to Default")
+        btn_reset.setStyleSheet("background-color: #334155; color: #f1f5f9; font-size: 11px; padding: 5px 12px; border-radius: 4px;")
+        btn_reset.clicked.connect(self._reset_default)
+        bottom.addWidget(btn_reset)
+
+        bottom.addStretch()
+
+        btn_cancel = QtWidgets.QPushButton("Cancel")
+        btn_cancel.clicked.connect(self.reject)
+        bottom.addWidget(btn_cancel)
+
+        btn_save = QtWidgets.QPushButton("💾 Save Template")
+        btn_save.setObjectName("primary")
+        btn_save.setStyleSheet("background-color: #2563eb; color: white; font-weight: 700; padding: 6px 16px; border-radius: 5px;")
+        btn_save.clicked.connect(self._save)
+        bottom.addWidget(btn_save)
+
+        layout.addLayout(bottom)
+
+    def _reset_default(self):
+        self.editor.setPlainText(IMRAN_PRODUCTION_STEPS_25.strip())
+
+    def _save(self):
+        text = self.editor.toPlainText().strip()
+        if not text:
+            QtWidgets.QMessageBox.warning(self, "Empty Template", "Template cannot be empty.")
+            return
+        # Ensure leading separator for clean concatenation
+        if not text.startswith("---"):
+            text = "\n---\n" + text
+        else:
+            text = "\n" + text
+        save_steps_25_template(text)
+        QtWidgets.QMessageBox.information(self, "Template Saved", "Master Steps 2–5 template updated successfully!")
+        self.accept()
+
 
 class BatchProjectDialog(QtWidgets.QDialog):
     """Visual Batch Project Generator: automatically queues up to 20+ projects
@@ -1115,7 +1243,7 @@ class BatchProjectDialog(QtWidgets.QDialog):
         rl.addWidget(step25_lbl)
 
         self.step25_text = QtWidgets.QTextEdit()
-        self.step25_text.setPlainText(IMRAN_PRODUCTION_STEPS_25.strip())
+        self.step25_text.setPlainText(get_steps_25_template().strip())
         rl.addWidget(self.step25_text)
 
         # Agent & GitHub options
@@ -1334,7 +1462,7 @@ class PromptEditorDialog(QtWidgets.QDialog):
 
     def append_steps_25(self):
         current = self.editor.toPlainText().rstrip()
-        append_txt = IMRAN_PRODUCTION_STEPS_25
+        append_txt = get_steps_25_template()
         self.editor.setPlainText(current + append_txt if current else append_txt.lstrip())
 
     def load_from_file(self):
@@ -1683,6 +1811,13 @@ class PipelineWindow(QtWidgets.QMainWindow):
         btn_cur_steps.clicked.connect(self.append_cur_steps_25)
         cur_tools_row.addWidget(btn_cur_steps)
 
+        btn_cur_steps_edit = QtWidgets.QPushButton("⚙")
+        btn_cur_steps_edit.setObjectName("small_btn")
+        btn_cur_steps_edit.setToolTip("Edit & customize master Steps 2–5 template")
+        btn_cur_steps_edit.setStyleSheet("background-color: #1e1b4b; color: #a5b4fc; font-size: 10px; padding: 2px 6px; border: 1px solid #312e81; border-radius: 4px;")
+        btn_cur_steps_edit.clicked.connect(self.open_steps_25_template_editor)
+        cur_tools_row.addWidget(btn_cur_steps_edit)
+
         btn_cur_expand = QtWidgets.QPushButton("⛶ Expand")
         btn_cur_expand.setObjectName("small_btn")
         btn_cur_expand.setToolTip("Open full-screen prompt editor modal")
@@ -1808,6 +1943,13 @@ class PipelineWindow(QtWidgets.QMainWindow):
         btn_next_steps.setStyleSheet("background-color: #064e3b; color: #6ee7b7; font-size: 10px; padding: 2px 7px; border: 1px solid #047857; border-radius: 4px;")
         btn_next_steps.clicked.connect(self.append_next_steps_25)
         next_tools_row.addWidget(btn_next_steps)
+
+        btn_next_steps_edit = QtWidgets.QPushButton("⚙")
+        btn_next_steps_edit.setObjectName("small_btn")
+        btn_next_steps_edit.setToolTip("Edit & customize master Steps 2–5 template")
+        btn_next_steps_edit.setStyleSheet("background-color: #1e1b4b; color: #a5b4fc; font-size: 10px; padding: 2px 6px; border: 1px solid #312e81; border-radius: 4px;")
+        btn_next_steps_edit.clicked.connect(self.open_steps_25_template_editor)
+        next_tools_row.addWidget(btn_next_steps_edit)
 
         btn_next_expand = QtWidgets.QPushButton("⛶ Expand")
         btn_next_expand.setObjectName("small_btn")
@@ -2206,7 +2348,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
     def append_next_steps_25(self):
         current = self.next_prompt_input.toPlainText().rstrip()
-        append_txt = IMRAN_PRODUCTION_STEPS_25
+        append_txt = get_steps_25_template()
         self.next_prompt_input.setPlainText(current + append_txt if current else append_txt.lstrip())
 
     def open_next_prompt_editor(self):
@@ -2236,8 +2378,12 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
     def append_cur_steps_25(self):
         current = self.current_prompt_input.toPlainText().rstrip()
-        append_txt = IMRAN_PRODUCTION_STEPS_25
+        append_txt = get_steps_25_template()
         self.current_prompt_input.setPlainText(current + append_txt if current else append_txt.lstrip())
+
+    def open_steps_25_template_editor(self):
+        dlg = Steps25TemplateDialog(parent=self)
+        dlg.exec_()
 
     def open_cur_prompt_editor(self):
         title = getattr(self, "current_title", "Current Project")
@@ -2574,8 +2720,19 @@ class PipelineWindow(QtWidgets.QMainWindow):
                     on_confirm=self.confirm_completed,
                     on_delete_task=self.delete_single_task,
                     on_delete_project=self.delete_single_project,
+                    on_update_task=self.update_single_task_prompt,
                 )
                 self.task_list_layout.insertWidget(idx, card)
+
+    def update_single_task_prompt(self, task_id: str, new_prompt: str):
+        try:
+            self.pipeline.update_task(task_id, {"prompt": new_prompt})
+            if hasattr(self, "show_toast"):
+                self.show_toast("✓ Step prompt updated successfully!")
+            self.last_grouped_sig = None
+            self.refresh_ui()
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Update Failed", f"Could not update task prompt:\n{e}")
 
     def toggle_runner(self):
         if not self.is_running:
