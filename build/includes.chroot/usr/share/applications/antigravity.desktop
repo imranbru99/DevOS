@@ -1,6 +1,6 @@
 [Desktop Entry]
 Name=Antigravity
-Exec=/opt/antigravity/antigravity %U
+Exec=/opt/antigravity/antigravity --ozone-platform=x11 %U
 Icon=antigravity
 Terminal=false
 Type=Application

@@ -30,6 +30,7 @@ mkdir -p "$HOME/.antigravity-kde/extensions"
 rm -f "$HOME/.gemini/cache/antigravity-keyring-unavailable"
 
 exec "$IDE_BIN" \
+    --ozone-platform=x11 \
     --no-sandbox \
     --password-store=basic \
     --user-data-dir="${HOME}/.config/Antigravity-KDE" \
