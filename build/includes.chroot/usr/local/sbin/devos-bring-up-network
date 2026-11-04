@@ -59,7 +59,14 @@ printf '%s\n' "$devices" | while IFS=: read -r dev kind; do
             ;;
     esac
     if [ "$kind" = "ethernet" ]; then
-        nmcli device connect "$dev" >/dev/null 2>&1
+        # Do not force device auto-creation; activate the permanent DevOS connection if not already connected.
+        state="$(nmcli -g GENERAL.STATE device show "$dev" 2>/dev/null)"
+        case "$state" in
+            *connected*|*connecting*) ;;
+            *)
+                nmcli connection up uuid "8f3c1a2e-6b47-4d9a-9e21-0c5d7a8b4e16" ifname "$dev" >/dev/null 2>&1 || true
+                ;;
+        esac
     fi
     case "$kind" in
         ethernet|wifi)
