@@ -5,13 +5,13 @@ import re
 import tempfile
 
 
-def integrate(directory):
+def integrate(directory, command='/usr/local/bin/devos-windows-app'):
     directory = Path(directory)
     if not directory.is_dir():
         return 0
     changed = 0
-    for path in directory.glob('chrome-*-Default.desktop'):
-        match = re.fullmatch(r'chrome-([a-p]{32})-Default\.desktop', path.name)
+    for path in directory.glob('chrome-*.desktop'):
+        match = re.fullmatch(r'chrome-([a-p]{32})-(?:Default|Profile_\d+)\.desktop', path.name)
         if not match or path.is_symlink():
             continue
         try:
@@ -25,12 +25,12 @@ def integrate(directory):
             values = dict(line.split('=', 1) for line in lines[start:end] if '=' in line and not line.startswith('#'))
             if values.get('Name', '').lower() != 'windows app':
                 continue
-            if values.get('X-DevOS-Cloud-Companion') == 'true':
+            if values.get('X-DevOS-Cloud-Companion') == 'true' and values.get('Exec') == command and 'StartupWMClass' not in values:
                 continue
-            if '--app-id=' + match[1] not in values.get('Exec', ''):
+            if values.get('X-DevOS-Cloud-Companion') != 'true' and '--app-id=' + match[1] not in values.get('Exec', ''):
                 continue
-            body = [line for line in lines[start:end] if not line.startswith(('Exec=', 'NoDisplay=', 'X-DevOS-Cloud-Companion='))]
-            body += ['Exec=/usr/local/bin/devos-windows-app', 'NoDisplay=true', 'X-DevOS-Cloud-Companion=true']
+            body = [line for line in lines[start:end] if not line.startswith(('Exec=', 'NoDisplay=', 'X-DevOS-Cloud-Companion=', 'StartupWMClass='))]
+            body += ['Exec=' + command, 'NoDisplay=true', 'X-DevOS-Cloud-Companion=true']
             fd, temporary = tempfile.mkstemp(prefix='.devos-cloudpc-', dir=directory)
             try:
                 with os.fdopen(fd, 'w') as handle:

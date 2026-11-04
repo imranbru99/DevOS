@@ -43,10 +43,8 @@ def load_settings(path):
 
 
 def open_windows_app():
-    launcher = shutil.which('devos-pwa')
-    args = [launcher, URL, 'Windows App', ''] if launcher else ['xdg-open', URL]
-    return subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL, start_new_session=True)
+    from browser_launch import open_isolated
+    return open_isolated()
 
 
 STYLE = '''
@@ -115,7 +113,7 @@ def main(argv=None):
                 item=QtWidgets.QLabel(text);item.setObjectName(name);item.setWordWrap(True);return item
             layout.addWidget(label('DEVOS  /  CLOUD WORKSPACE', 'eyebrow'))
             layout.addWidget(label('Windows App', 'heading'))
-            layout.addWidget(label('Your Cloud PC, with a timely reminder to return.', 'muted'))
+            layout.addWidget(label('Your Cloud PC, in a separate browser session.', 'muted'))
             card=QtWidgets.QFrame();card.setObjectName('card');box=QtWidgets.QVBoxLayout(card)
             box.setContentsMargins(24, 18, 24, 20)
             self.status=label('Local reminder • paused', 'eyebrow');box.addWidget(self.status)
@@ -150,7 +148,7 @@ def main(argv=None):
         def open_app(self):
             try:
                 open_windows_app()
-                self.notice.setText('Windows App was requested. Connect to and use your Cloud PC, then confirm “I’ve used the Cloud PC”.')
+                self.notice.setText('Windows App opened separately from your everyday browser. Sign in on first use. Portal theme: Settings → Dark Mode off. Remote desktop theme: Windows Settings → Personalization → Colors.')
             except OSError as exc:
                 self.notice.setText('Could not open Windows App: '+str(exc))
                 self.show_window()
@@ -228,7 +226,7 @@ def main(argv=None):
         nonlocal attempts
         directory = Path(os.environ.get('XDG_DATA_HOME', Path.home()/'.local/share'))/'applications'
         restore_companion(directory)
-        integrate(directory)
+        integrate(directory, shutil.which("devos-windows-app") or "/usr/local/bin/devos-windows-app")
         attempts += 1
         if attempts >= 8: launcher_timer.stop()
     refresh_launchers()
@@ -242,7 +240,7 @@ def main(argv=None):
     server.newConnection.connect(receive)
     app.aboutToQuit.connect(window.shutdown)
     window.show()
-    if args.open:window.open_app();window.reset()
+    if args.open:window.open_app()
     return app.exec_()
 
 
