@@ -47,11 +47,10 @@ class ReminderTests(unittest.TestCase):
             path.write_text('{broken')
             self.assertEqual(load_settings(path),(600,120))
 
-    def test_open_uses_vendor_launcher_without_shell(self):
-        with patch('cloudpc.shutil.which',return_value='/usr/local/bin/devos-pwa'), patch('cloudpc.subprocess.Popen') as launch:
+    def test_open_uses_isolated_browser(self):
+        with patch('browser_launch.open_isolated') as launch:
             open_windows_app()
-            self.assertEqual(launch.call_args.args[0], ['/usr/local/bin/devos-pwa','https://windows.cloud.microsoft/','Windows App',''])
-            self.assertNotIn('shell',launch.call_args.kwargs)
+            launch.assert_called_once_with()
 
     def test_existing_vendor_shortcut_keeps_actions_and_other_apps(self):
         with tempfile.TemporaryDirectory() as directory:

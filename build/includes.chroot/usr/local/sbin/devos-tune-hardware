@@ -41,6 +41,15 @@ for dev in /sys/block/*; do
     elif [ "$rot" != "0" ]; then
         choices="bfq mq-deadline"
         ahead=1024
+        # Mechanical HDD: configure idle spindown (10 minutes = 600s) for quiet operation
+        if command -v gdbus >/dev/null 2>&1; then
+            for drive_obj in /org/freedesktop/UDisks2/drives/*; do
+                gdbus call --system --dest org.freedesktop.UDisks2 \
+                    --object-path "$drive_obj" \
+                    --method org.freedesktop.UDisks2.Drive.SetConfiguration \
+                    "{'standby-timeout': <uint32 600>}" "{}" >/dev/null 2>&1 || true
+            done
+        fi
     fi
     for candidate in $choices; do
         if printf '%s' "$available" | grep -qw "$candidate"; then

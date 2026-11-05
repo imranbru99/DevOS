@@ -1,0 +1,14 @@
+{
+  "KPlugin": {
+    "Id": "DevOS-Premium-19-OpalHorizon",
+    "Name": "DevOS Premium \u00b7 Opal Horizon",
+    "Authors": [
+      {
+        "Name": "Imran Ahmed",
+        "Email": "me@imrandev.bd"
+      }
+    ],
+    "Website": "https://imrandev.bd",
+    "Description": "Original AI-generated desktop artwork for DevOS."
+  }
+}

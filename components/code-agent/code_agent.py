@@ -1247,6 +1247,9 @@ def read_sse(lines, on_token=None, should_stop=None, meta: Optional[Dict[str, An
                 chunk = json.loads(data)
             except ValueError:
                 continue
+            if chunk.get("error"):
+                error = chunk["error"]
+                raise AgentError(error.get("message", str(error)) if isinstance(error, dict) else str(error))
             for choice in chunk.get("choices") or []:
                 if meta is not None and choice.get("finish_reason"):
                     meta["finish_reason"] = choice["finish_reason"]
@@ -1549,6 +1552,7 @@ class CodeAgent:
             if final is None:
                 final = self._run_task(task)
         except AgentError as exc:
+            self._outcome = "error"
             if self.changed:  # keep what was built; say how to carry on
                 final = (f"Stopped: {exc}\nFiles changed so far: {', '.join(sorted(set(self.changed))[:12])}."
                          + ("\nSay `go` to continue the current phase." if brief.BriefState.load(self.ws.root) else ""))

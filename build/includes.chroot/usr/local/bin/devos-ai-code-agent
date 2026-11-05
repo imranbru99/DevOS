@@ -33,5 +33,20 @@ if [ $# -gt 0 ] && [ "$1" = "--cli" ]; then
     exec /usr/bin/python3 "${DIR}/code_agent.py" "$@"
 fi
 
-# Launch the visual DevOS AI Code Agent app
-exec /usr/bin/python3 "${DIR}/agent_gui.py" "$@"
+# Keep startup failures visible instead of silently disappearing from the desktop.
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/devos"
+mkdir -p "$STATE_DIR"
+LOG_FILE="$STATE_DIR/code-agent.log"
+umask 077
+if /usr/bin/python3 "${DIR}/agent_gui.py" "$@" >>"$LOG_FILE" 2>&1; then
+    exit 0
+else
+    result=$?
+    message="DevOS AI Code Agent stopped (exit $result). Details: $LOG_FILE"
+    if command -v kdialog >/dev/null 2>&1; then
+        kdialog --error "$message" --title "DevOS AI Code Agent" || true
+    elif command -v notify-send >/dev/null 2>&1; then
+        notify-send "DevOS AI Code Agent" "$message" || true
+    fi
+    exit "$result"
+fi

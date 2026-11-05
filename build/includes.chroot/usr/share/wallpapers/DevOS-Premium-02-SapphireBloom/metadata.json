@@ -1,0 +1,14 @@
+{
+  "KPlugin": {
+    "Id": "DevOS-Premium-02-SapphireBloom",
+    "Name": "DevOS Premium \u00b7 Sapphire Bloom",
+    "Authors": [
+      {
+        "Name": "Imran Ahmed",
+        "Email": "me@imrandev.bd"
+      }
+    ],
+    "Website": "https://imrandev.bd",
+    "Description": "Original AI-generated desktop artwork for DevOS."
+  }
+}

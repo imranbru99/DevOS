@@ -1,0 +1,14 @@
+{
+  "KPlugin": {
+    "Id": "DevOS-Premium-14-PorcelainWave",
+    "Name": "DevOS Premium \u00b7 Porcelain Wave",
+    "Authors": [
+      {
+        "Name": "Imran Ahmed",
+        "Email": "me@imrandev.bd"
+      }
+    ],
+    "Website": "https://imrandev.bd",
+    "Description": "Original AI-generated desktop artwork for DevOS."
+  }
+}

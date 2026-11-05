@@ -383,19 +383,15 @@ class PipelineWorker(QtCore.QThread):
         self.observe_only = observe_only
 
     def run(self):
-        previous = self.pipeline.event_callback
-        self.pipeline.event_callback = self.progress.emit
         try:
             if self.observe_only:
                 self.pipeline.observe_tasks()
             else:
-                self.pipeline.execute_next()
+                self.pipeline.execute_parallel_tick(limit=2)
             self.result.emit("")
         except Exception as exc:
             self.pipeline.emit_event("Pipeline error: " + str(exc))
             self.result.emit(str(exc))
-        finally:
-            self.pipeline.event_callback = previous
 
 
 class FullPromptViewerDialog(QtWidgets.QDialog):
@@ -470,8 +466,11 @@ class FullPromptViewerDialog(QtWidgets.QDialog):
 
 
 class StepRow(QtWidgets.QFrame):
-    def __init__(self, step_idx: int, task: dict, on_failover=None, on_confirm=None, on_delete=None, on_update=None, parent=None):
+    def __init__(self, step_idx: int, task: dict, on_failover=None, on_confirm=None, on_delete=None, on_update=None, parent=None, on_move=None, can_up=False, can_down=False):
         super().__init__(parent)
+        self.on_move = on_move
+        self.can_up = can_up
+        self.can_down = can_down
         self.step_idx = step_idx
         self.task = task
         self.on_failover = on_failover
@@ -514,41 +513,27 @@ class StepRow(QtWidgets.QFrame):
         prompt_text = self.task.get("prompt", "").strip()
         words = len(prompt_text.split())
 
-        if words > 25 or len(prompt_text) > 160:
-            prompt_box = QtWidgets.QTextEdit()
-            prompt_box.setPlainText(prompt_text)
-            prompt_box.setReadOnly(True)
-            prompt_box.setMaximumHeight(85)
-            prompt_box.setStyleSheet(
-                "background-color: #080d1a; color: #f1f5f9; font-size: 11px; "
-                "border: 1px solid #1e293b; border-radius: 4px; padding: 4px;"
-            )
-            center_box.addWidget(prompt_box)
-
-            meta_row = QtWidgets.QHBoxLayout()
-            word_tag = QtWidgets.QLabel(f"📄 Full Specification: {words:,} words ({len(prompt_text):,} chars)")
-            word_tag.setStyleSheet("color: #64748b; font-size: 10px; font-weight: 600;")
-            meta_row.addWidget(word_tag)
-            meta_row.addStretch()
-
-            btn_view = QtWidgets.QPushButton("✏️ View / Edit Prompt")
-            btn_view.setObjectName("small_btn")
-            btn_view.setStyleSheet("background-color: #0f172a; color: #38bdf8; font-size: 10px; padding: 2px 7px; border: 1px solid #1e293b; border-radius: 4px;")
-            btn_view.clicked.connect(self.view_full_prompt)
-            meta_row.addWidget(btn_view)
-            center_box.addLayout(meta_row)
-        else:
-            p_row = QtWidgets.QHBoxLayout()
-            prompt_lbl = QtWidgets.QLabel(prompt_text)
-            prompt_lbl.setWordWrap(True)
-            prompt_lbl.setStyleSheet("font-size: 12px; font-weight: 500; color: #f1f5f9;")
-            p_row.addWidget(prompt_lbl, stretch=1)
-            btn_edit_short = QtWidgets.QPushButton("✏️ Edit")
-            btn_edit_short.setObjectName("small_btn")
-            btn_edit_short.setStyleSheet("background-color: #0f172a; color: #38bdf8; font-size: 10px; padding: 2px 7px; border: 1px solid #1e293b; border-radius: 4px;")
-            btn_edit_short.clicked.connect(self.view_full_prompt)
-            p_row.addWidget(btn_edit_short)
-            center_box.addLayout(p_row)
+        preview = ' '.join(prompt_text.split()[:5]) + (' …' if words > 5 else '')
+        prompt_lbl = QtWidgets.QLabel(preview)
+        prompt_lbl.setObjectName('prompt_preview')
+        prompt_lbl.setTextFormat(Qt.PlainText)
+        prompt_lbl.setWordWrap(True)
+        center_box.addWidget(prompt_lbl)
+        controls = QtWidgets.QHBoxLayout()
+        controls.addWidget(QtWidgets.QLabel(f"{words:,} words"))
+        edit = QtWidgets.QPushButton("View / Edit")
+        edit.setObjectName('small_btn')
+        edit.clicked.connect(self.view_full_prompt)
+        controls.addWidget(edit)
+        for label, direction, enabled in (("↑", -1, self.can_up), ("↓", 1, self.can_down)):
+            button = QtWidgets.QPushButton(label)
+            button.setObjectName('small_btn')
+            button.setToolTip('Move prompt up' if direction == -1 else 'Move prompt down')
+            button.setEnabled(bool(self.on_move) and enabled)
+            button.clicked.connect(lambda _, d=direction: self.on_move(self.task['id'], d))
+            controls.addWidget(button)
+        controls.addStretch()
+        center_box.addLayout(controls)
 
         status = self.task.get("status", "QUEUED")
         status_text = f"○ Queued"
@@ -626,8 +611,10 @@ class StepRow(QtWidgets.QFrame):
 
 
 class ProjectPipelineCard(QtWidgets.QFrame):
-    def __init__(self, project_data: dict, on_failover=None, on_confirm=None, on_delete_task=None, on_delete_project=None, on_update_task=None, parent=None):
+    def __init__(self, project_data: dict, on_failover=None, on_confirm=None, on_delete_task=None, on_delete_project=None, on_update_task=None, parent=None, on_add_prompt=None, on_move_prompt=None):
         super().__init__(parent)
+        self.on_add_prompt = on_add_prompt
+        self.on_move_prompt = on_move_prompt
         self.project_data = project_data
         self.on_failover = on_failover
         self.on_confirm = on_confirm
@@ -769,66 +756,15 @@ class ProjectPipelineCard(QtWidgets.QFrame):
             pbar.setTextVisible(False)
             main_layout.addWidget(pbar)
 
-        # Step navigation bar with the 2 buttons requested by user:
-        # "▲ Upper Command/Prompt" and "▼ Next Command/Prompt"
+        # Compact list: every prompt is visible in its execution order.
         self.step_rows = []
-        slug = self.project_data.get("slug", "project")
-
-        # Restore navigation state so timer refreshes don't reset view
-        win = self.window()
-        nav_state = {}
-        if win and hasattr(win, "card_nav_states"):
-            nav_state = win.card_nav_states.get(slug, {})
-        elif self.parent() and hasattr(self.parent(), "card_nav_states"):
-            nav_state = self.parent().card_nav_states.get(slug, {})
-
-        self.current_step_idx = min(nav_state.get("step_idx", 0), max(0, total_tasks - 1))
-        self.show_all_mode = nav_state.get("show_all", False)
-
-        if total_tasks > 1:
-            nav_bar = QtWidgets.QFrame()
-            nav_bar.setObjectName("step_nav_bar")
-            nav_bar.setStyleSheet("background-color: #0b1120; border: 1px solid #1e293b; border-radius: 6px; padding: 2px;")
-            nav_layout = QtWidgets.QHBoxLayout(nav_bar)
-            nav_layout.setContentsMargins(6, 4, 6, 4)
-            nav_layout.setSpacing(8)
-
-            self.btn_prev_step = QtWidgets.QPushButton("▲ Upper Command/Prompt")
-            self.btn_prev_step.setObjectName("small_btn")
-            self.btn_prev_step.setStyleSheet(
-                "background-color: #1e1b4b; color: #a5b4fc; font-size: 11px; font-weight: 700; "
-                "padding: 4px 10px; border: 1px solid #312e81; border-radius: 5px;"
-            )
-            self.btn_prev_step.setToolTip("Switch / Scroll to upper (previous) command prompt")
-            self.btn_prev_step.clicked.connect(self.goto_prev_step)
-            nav_layout.addWidget(self.btn_prev_step)
-
-            self.step_nav_lbl = QtWidgets.QLabel(f"Step {self.current_step_idx + 1} of {total_tasks}")
-            self.step_nav_lbl.setStyleSheet("font-size: 11px; font-weight: 700; color: #38bdf8;")
-            nav_layout.addWidget(self.step_nav_lbl)
-
-            self.btn_next_step = QtWidgets.QPushButton("▼ Next Command/Prompt")
-            self.btn_next_step.setObjectName("small_btn")
-            self.btn_next_step.setStyleSheet(
-                "background-color: #0f172a; color: #38bdf8; font-size: 11px; font-weight: 700; "
-                "padding: 4px 10px; border: 1px solid #1e293b; border-radius: 5px;"
-            )
-            self.btn_next_step.setToolTip("Switch / Scroll to next command prompt")
-            self.btn_next_step.clicked.connect(self.goto_next_step)
-            nav_layout.addWidget(self.btn_next_step)
-
-            nav_layout.addStretch()
-
-            self.btn_all_steps = QtWidgets.QPushButton("Focused View" if self.show_all_mode else "Show All Steps")
-            self.btn_all_steps.setObjectName("small_btn")
-            self.btn_all_steps.setStyleSheet(
-                "background-color: #1e293b; color: #94a3b8; font-size: 10px; padding: 3px 8px; border: 1px solid #334155; border-radius: 4px;"
-            )
-            self.btn_all_steps.setToolTip("Toggle between focused single step view and all steps stacked")
-            self.btn_all_steps.clicked.connect(self.toggle_all_steps_view)
-            nav_layout.addWidget(self.btn_all_steps)
-
-            main_layout.addWidget(nav_bar)
+        self.current_step_idx = 0
+        self.show_all_mode = True
+        add_prompt = QtWidgets.QPushButton("+ Add Prompt to This Project")
+        add_prompt.setObjectName('add_project_prompt')
+        add_prompt.setEnabled(self.on_add_prompt is not None)
+        add_prompt.clicked.connect(lambda _: self.on_add_prompt(self.project_data['slug']))
+        main_layout.addWidget(add_prompt)
 
         # Step rows container
         self.steps_container = QtWidgets.QWidget()
@@ -843,17 +779,15 @@ class ProjectPipelineCard(QtWidgets.QFrame):
                 on_confirm=self.on_confirm,
                 on_delete=self.on_delete_task,
                 on_update=self.on_update_task,
+                on_move=self.on_move_prompt,
+                can_up=idx > 1 and task['status'] == 'QUEUED' and tasks[idx-2]['status'] == 'QUEUED',
+                can_down=idx < total_tasks and task['status'] == 'QUEUED' and tasks[idx]['status'] == 'QUEUED',
             )
             self.step_rows.append(row)
             steps_vbox.addWidget(row)
 
         main_layout.addWidget(self.steps_container)
         self.update_step_visibility()
-
-        # Auto-collapse completed projects to keep the view clean
-        if completed_tasks == total_tasks and total_tasks > 0:
-            self.steps_container.setVisible(False)
-            self.btn_toggle.setText("▼")
 
     def _save_nav_state(self):
         slug = self.project_data.get("slug", "project")
@@ -914,14 +848,6 @@ class ProjectPipelineCard(QtWidgets.QFrame):
             for idx, r in enumerate(self.step_rows):
                 r.setVisible(idx == self.current_step_idx)
                 r.setStyleSheet("")
-
-        # Automatically ensure active step is scrolled into view
-        p = self.parent()
-        while p:
-            if isinstance(p, QtWidgets.QScrollArea):
-                p.ensureWidgetVisible(target_row)
-                break
-            p = p.parent()
 
     def toggle_steps(self, *args, **kwargs):
         visible = not self.steps_container.isVisible()
@@ -1213,9 +1139,8 @@ class BatchProjectDialog(QtWidgets.QDialog):
         # Agent & GitHub options
         opt_row = QtWidgets.QHBoxLayout()
         self.agent_combo = QtWidgets.QComboBox()
-        self.agent_combo.addItem("✨ Multi-Agent Hybrid (Antigravity + KDE Studio + Local)", "multi")
+        self.agent_combo.addItem("✨ Multi-Agent Hybrid (Antigravity + DevOS Code)", "multi")
         self.agent_combo.addItem("Antigravity AI (Primary CLI)", "antigravity")
-        self.agent_combo.addItem("Antigravity Studio (KDE GUI)", "antigravity-kde")
         self.agent_combo.addItem("DevOS Local AI", "local")
         opt_row.addWidget(self.agent_combo)
 
@@ -1302,7 +1227,7 @@ class BatchProjectDialog(QtWidgets.QDialog):
             )
 
             # Steps 2-5
-            hybrid_cycle = ["antigravity-kde", "local", "local", "antigravity-kde"]
+            hybrid_cycle = ["antigravity", "local", "local", "antigravity"]
             for idx, shared_prompt in enumerate(shared_steps):
                 step_agent = hybrid_cycle[idx % len(hybrid_cycle)] if agent == "multi" else agent
                 self.pipeline.add(
@@ -1445,9 +1370,12 @@ class PromptEditorDialog(QtWidgets.QDialog):
 
 
 class PipelineWindow(QtWidgets.QMainWindow):
+    pipeline_activity = QtCore.pyqtSignal(str)
     def __init__(self):
         super().__init__()
         self.pipeline = TaskPipeline()
+        self.pipeline_activity.connect(self.append_pipeline_log)
+        self.pipeline.event_callback = self.pipeline_activity.emit
         self.worker = None
 
         # Determine initial preferred agent (e.g. Antigravity KDE in KDE desktop)
@@ -1485,6 +1413,8 @@ class PipelineWindow(QtWidgets.QMainWindow):
             pass
         self.setStyleSheet(STYLE)
         self.is_running = False
+        self.draft_prompts = []
+        self.project_page = 0
         self.card_nav_states = {}
         self.last_grouped_sig = None
         self.init_ui()
@@ -1521,7 +1451,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
         header_vbox.setSpacing(2)
         title = QtWidgets.QLabel("DevOS AI Command Pipeline")
         title.setObjectName("title")
-        subtitle = QtWidgets.QLabel("Serial multi-agent execution & auto-scheduling across ChatGPT, Antigravity & Local AI")
+        subtitle = QtWidgets.QLabel("Parallel projects · Sequential prompts · Up to 2 independent agents")
         subtitle.setObjectName("subtitle")
         header_vbox.addWidget(title)
         header_vbox.addWidget(subtitle)
@@ -1546,7 +1476,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.btn_run.clicked.connect(self.toggle_runner)
         header_layout.addWidget(self.btn_run)
 
-        btn_clear = QtWidgets.QPushButton("Clear")
+        btn_clear = QtWidgets.QPushButton("Clear Queue")
         btn_clear.clicked.connect(self.clear_queue)
         header_layout.addWidget(btn_clear)
 
@@ -1638,7 +1568,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
         self.agent_combo = QtWidgets.QComboBox()
         self.agent_combo.setMinimumWidth(240)
-        self.agent_combo.addItem("✨ Multi-Agent Hybrid (Antigravity + KDE Studio + Local)", "multi")
+        self.agent_combo.addItem("✨ Multi-Agent Hybrid (Antigravity + DevOS Code)", "multi")
         known = discover_agents()
         is_kde_session = ("KDE" in os.environ.get("XDG_CURRENT_DESKTOP", "")) or (
             os.environ.get("DESKTOP_SESSION") == "plasma"
@@ -1817,7 +1747,12 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.cur_prompt_metrics_lbl.setWordWrap(True)
         cur_layout.addWidget(self.cur_prompt_metrics_lbl)
 
+        current_toggle = QtWidgets.QPushButton("Show detected current project (optional)")
+        current_toggle.setCheckable(True)
+        current_toggle.toggled.connect(cur_section.setVisible)
+        form_layout.addWidget(current_toggle)
         form_layout.addWidget(cur_section)
+        cur_section.hide()
 
         # 3. ADD ANOTHER PROJECT / NEXT PROJECT (DYNAMIC PROJECT NUMBERING)
         next_section = QtWidgets.QFrame()
@@ -1825,17 +1760,14 @@ class PipelineWindow(QtWidgets.QMainWindow):
         next_layout = QtWidgets.QVBoxLayout(next_section)
         next_layout.setContentsMargins(12, 10, 12, 10)
         next_layout.setSpacing(7)
+        next_layout.setAlignment(Qt.AlignTop)
 
         next_header = QtWidgets.QHBoxLayout()
         self.next_badge_lbl = QtWidgets.QLabel("3. ADD NEXT PROJECT (#2)")
         self.next_badge_lbl.setObjectName("badge_indigo")
+        self.next_badge_lbl.setFixedHeight(30)
+        self.next_badge_lbl.setSizePolicy(QtWidgets.QSizePolicy.Maximum, QtWidgets.QSizePolicy.Fixed)
         next_header.addWidget(self.next_badge_lbl)
-
-        next_desc = QtWidgets.QLabel("Auto-creates local project folder, then executes commands")
-        next_desc.setStyleSheet("color: #94a3b8; font-size: 11px;")
-        next_desc.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
-        next_desc.setWordWrap(True)
-        next_header.addWidget(next_desc)
 
         next_header.addStretch()
         next_layout.addLayout(next_header)
@@ -1881,27 +1813,6 @@ class PipelineWindow(QtWidgets.QMainWindow):
         btn_next_load.clicked.connect(self.load_next_prompt_file)
         next_tools_row.addWidget(btn_next_load)
 
-        btn_next_sep = QtWidgets.QPushButton("+ '---' Step")
-        btn_next_sep.setObjectName("small_btn")
-        btn_next_sep.setToolTip("Insert '---' separator to add Step 2, Step 3, etc.")
-        btn_next_sep.setStyleSheet("background-color: #1e1b4b; color: #a5b4fc; font-size: 10px; padding: 2px 7px; border: 1px solid #312e81; border-radius: 4px;")
-        btn_next_sep.clicked.connect(self.insert_next_step_separator)
-        next_tools_row.addWidget(btn_next_sep)
-
-        btn_next_upper = QtWidgets.QPushButton("▲ Upper")
-        btn_next_upper.setObjectName("small_btn")
-        btn_next_upper.setToolTip("Navigate cursor up to the previous '---' command step")
-        btn_next_upper.setStyleSheet("background-color: #1e1b4b; color: #a5b4fc; font-size: 10px; padding: 2px 7px; border: 1px solid #312e81; border-radius: 4px;")
-        btn_next_upper.clicked.connect(self.navigate_next_prompt_prev)
-        next_tools_row.addWidget(btn_next_upper)
-
-        btn_next_down = QtWidgets.QPushButton("▼ Next")
-        btn_next_down.setObjectName("small_btn")
-        btn_next_down.setToolTip("Navigate cursor down to the next '---' command step")
-        btn_next_down.setStyleSheet("background-color: #0f172a; color: #38bdf8; font-size: 10px; padding: 2px 7px; border: 1px solid #1e293b; border-radius: 4px;")
-        btn_next_down.clicked.connect(self.navigate_next_prompt_next)
-        next_tools_row.addWidget(btn_next_down)
-
         btn_next_steps = QtWidgets.QPushButton("✨ Steps 2–5")
         btn_next_steps.setObjectName("small_btn")
         btn_next_steps.setToolTip("Append shared engineering steps 2-5 (Tests, Docker, Security, Docs)")
@@ -1930,16 +1841,19 @@ class PipelineWindow(QtWidgets.QMainWindow):
         next_cmd_row.setSpacing(8)
 
         self.next_prompt_input = QTextEdit()
-        self.next_prompt_input.setPlaceholderText("Enter command(s) for this project (separate multiple steps with '---' on a new line)...")
+        self.next_prompt_input.setPlaceholderText("Paste one complete prompt, then click Add Prompt. Add more prompts before submitting the project.")
         self.next_prompt_input.setMinimumHeight(65)
-        self.next_prompt_input.setMaximumHeight(90)
+        self.next_prompt_input.setMaximumHeight(75)
         self.next_prompt_input.textChanged.connect(self.update_next_prompt_metrics)
         next_cmd_row.addWidget(self.next_prompt_input, stretch=1)
 
         self.btn_add_next = QtWidgets.QPushButton("+ Add Project #2 to Pipeline")
         self.btn_add_next.setObjectName("primary")
         self.btn_add_next.clicked.connect(lambda: self.add_next_project_tasks())
-        next_cmd_row.addWidget(self.btn_add_next)
+        self.btn_stage_prompt = QtWidgets.QPushButton("+ Add Prompt")
+        self.btn_stage_prompt.setObjectName("primary")
+        self.btn_stage_prompt.clicked.connect(self.stage_prompt)
+        next_cmd_row.addWidget(self.btn_stage_prompt)
 
         next_layout.addLayout(next_cmd_row)
 
@@ -1948,6 +1862,24 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.next_prompt_metrics_lbl.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
         self.next_prompt_metrics_lbl.setWordWrap(True)
         next_layout.addWidget(self.next_prompt_metrics_lbl)
+
+        self.draft_list = QtWidgets.QListWidget()
+        self.draft_list.setMinimumHeight(85)
+        self.draft_list.setMaximumHeight(85)
+        self.draft_list.itemDoubleClicked.connect(lambda _: self.edit_draft_prompt())
+        next_layout.addWidget(self.draft_list)
+        self.draft_controls = QtWidgets.QWidget()
+        draft_controls = QtWidgets.QHBoxLayout(self.draft_controls)
+        draft_controls.setContentsMargins(0, 0, 0, 0)
+        for label, callback in [("↑ Move up", lambda: self.move_draft_prompt(-1)),
+                                ("↓ Move down", lambda: self.move_draft_prompt(1)),
+                                ("Edit", self.edit_draft_prompt), ("Remove", self.remove_draft_prompt)]:
+            button = QtWidgets.QPushButton(label)
+            button.clicked.connect(callback)
+            draft_controls.addWidget(button)
+        next_layout.addWidget(self.draft_controls)
+        self.draft_list.hide()
+        self.draft_controls.hide()
 
         # GitHub Automation Row for next project
         gh_row = QtWidgets.QHBoxLayout()
@@ -1966,6 +1898,8 @@ class PipelineWindow(QtWidgets.QMainWindow):
         gh_row.addWidget(self.gh_desc_input, stretch=1)
 
         next_layout.addLayout(gh_row)
+        next_layout.addWidget(self.btn_add_next)
+        self.update_next_prompt_metrics()
         form_layout.addWidget(next_section)
 
         # Quick Batch 20-Projects Bar
@@ -1981,7 +1915,10 @@ class PipelineWindow(QtWidgets.QMainWindow):
         left_layout.addWidget(form_card)
         left_layout.addStretch()
 
-        content_splitter.addWidget(left_widget)
+        left_scroll = QtWidgets.QScrollArea()
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setWidget(left_widget)
+        content_splitter.addWidget(left_scroll)
 
         # ---------------------------------------------------------------------
         # RIGHT PANEL: KPI Metrics, Visual Projects Queue & Execution Log
@@ -2025,7 +1962,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
         # Queue Header Row
         queue_header_row = QtWidgets.QHBoxLayout()
-        list_header = QtWidgets.QLabel("Pipeline Queue (Sequential Multi-Project Order)")
+        list_header = QtWidgets.QLabel("Project queue")
         list_header.setStyleSheet("font-weight: 700; color: #94a3b8; font-size: 13px;")
         queue_header_row.addWidget(list_header)
 
@@ -2061,15 +1998,33 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.scroll.setWidget(self.scroll_content)
         right_layout.addWidget(self.scroll, stretch=1)
 
+        pagination = QtWidgets.QHBoxLayout()
+        self.prev_project_btn = QtWidgets.QPushButton("← Previous project")
+        self.next_project_btn = QtWidgets.QPushButton("Next project →")
+        self.project_page_label = QtWidgets.QLabel()
+        self.prev_project_btn.clicked.connect(lambda: self.change_project_page(-1))
+        self.next_project_btn.clicked.connect(lambda: self.change_project_page(1))
+        pagination.addWidget(self.prev_project_btn)
+        pagination.addWidget(self.project_page_label, 1, Qt.AlignCenter)
+        pagination.addWidget(self.next_project_btn)
+        right_layout.addLayout(pagination)
+        log_controls = QtWidgets.QHBoxLayout()
+        log_controls.addWidget(QtWidgets.QLabel("Activity log"))
+        log_controls.addStretch()
+        clear_logs_btn = QtWidgets.QPushButton("Clear Logs")
+        clear_logs_btn.clicked.connect(self.clear_logs)
+        log_controls.addWidget(clear_logs_btn)
+        right_layout.addLayout(log_controls)
+
         # Live Execution Output Box
         self.log_box = QtWidgets.QTextEdit()
         self.log_box.setReadOnly(True)
-        self.log_box.setMinimumHeight(100)
-        self.log_box.setMaximumHeight(160)
+        self.log_box.setMinimumHeight(80)
+        self.log_box.setMaximumHeight(100)
         self.log_box.document().setMaximumBlockCount(500)
         self.log_box.setPlaceholderText("Pipeline activity and agent dispatch log will stream here...")
         self.log_box.setStyleSheet("background-color: #050811; border: 1px solid #1a2436; color: #94a3b8; font-family: monospace; font-size: 11px;")
-        right_layout.insertWidget(1, self.log_box)
+        right_layout.addWidget(self.log_box)
         for line in self.pipeline.recent_events():
             self.append_pipeline_log(line)
 
@@ -2282,20 +2237,71 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Loaded SEO Ranking Prompt Preset into input.")
 
     def update_next_prompt_metrics(self):
-        text = self.next_prompt_input.toPlainText().strip()
-        words = len(text.split()) if text else 0
-        chars = len(text)
-        steps = split_prompts(text)
-        count = len(steps)
-        if not text:
-            self.next_prompt_metrics_lbl.setText("💡 Tip: Multi-line / 5,000+ word specs preserved as 1 step. Use '---' to separate sequential steps.")
-        elif count == 1:
-            self.next_prompt_metrics_lbl.setText(f"📝 1 Master Prompt Step ({words:,} words, {chars:,} chars) • Intact. Separate next steps with '---'")
-        else:
-            breakdown = ", ".join(f"Step {i+1}: {len(s.split()):,}w" for i, s in enumerate(steps[:4]))
-            if count > 4:
-                breakdown += f", +{count - 4} more"
-            self.next_prompt_metrics_lbl.setText(f"📝 {count} Sequential Steps ({words:,} words) • [{breakdown}]")
+        words = len(self.next_prompt_input.toPlainText().split())
+        self.next_prompt_metrics_lbl.setText(
+            f"{len(self.draft_prompts)} prompts staged • {words:,} words in editor • Add Prompt keeps the full text as one step.")
+
+    def refresh_draft_prompts(self, selected=-1):
+        has_prompts = bool(self.draft_prompts)
+        self.draft_list.setVisible(has_prompts)
+        self.draft_controls.setVisible(has_prompts)
+        self.draft_list.clear()
+        for index, prompt in enumerate(self.draft_prompts):
+            words = prompt.split()
+            preview = " ".join(words[:5]) + (" …" if len(words) > 5 else "")
+            self.draft_list.addItem(f"{index + 1}. {preview}  ({len(words):,} words)")
+        self.draft_list.setCurrentRow(selected)
+        self.update_next_prompt_metrics()
+
+    def stage_prompt(self):
+        prompt = self.next_prompt_input.toPlainText().strip()
+        if not prompt:
+            self.next_prompt_input.setFocus()
+            return
+        self.draft_prompts.append(prompt)
+        self.next_prompt_input.clear()
+        self.refresh_draft_prompts(len(self.draft_prompts) - 1)
+
+    def move_draft_prompt(self, direction):
+        index = self.draft_list.currentRow()
+        target = index + direction
+        if 0 <= index < len(self.draft_prompts) and 0 <= target < len(self.draft_prompts):
+            self.draft_prompts[index], self.draft_prompts[target] = self.draft_prompts[target], self.draft_prompts[index]
+            self.refresh_draft_prompts(target)
+
+    def remove_draft_prompt(self):
+        index = self.draft_list.currentRow()
+        if 0 <= index < len(self.draft_prompts):
+            self.draft_prompts.pop(index)
+            self.refresh_draft_prompts(min(index, len(self.draft_prompts) - 1))
+
+    def edit_draft_prompt(self):
+        index = self.draft_list.currentRow()
+        if not 0 <= index < len(self.draft_prompts):
+            return
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle(f"Edit prompt {index + 1}")
+        dialog.resize(760, 540)
+        layout = QtWidgets.QVBoxLayout(dialog)
+        editor = QtWidgets.QPlainTextEdit(self.draft_prompts[index])
+        layout.addWidget(editor)
+        buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Save | QtWidgets.QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        if dialog.exec_() == QtWidgets.QDialog.Accepted and editor.toPlainText().strip():
+            self.draft_prompts[index] = editor.toPlainText().strip()
+            self.refresh_draft_prompts(index)
+
+    def change_project_page(self, direction):
+        self.project_page += direction
+        self.refresh_queue()
+        self.scroll.verticalScrollBar().setValue(0)
+
+    @queue_error_to_log
+    def clear_logs(self):
+        self.pipeline.clear_events()
+        self.log_box.clear()
 
     def update_cur_prompt_metrics(self):
         text = self.current_prompt_input.toPlainText().strip()
@@ -2316,9 +2322,9 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.next_prompt_input.setFocus()
 
     def append_next_steps_25(self):
-        current = self.next_prompt_input.toPlainText().rstrip()
-        append_txt = get_steps_25_template()
-        self.next_prompt_input.setPlainText(current + append_txt if current else append_txt.lstrip())
+        self.stage_prompt()
+        self.draft_prompts.extend(split_prompts(get_steps_25_template()))
+        self.refresh_draft_prompts(len(self.draft_prompts) - 1)
 
     def open_next_prompt_editor(self):
         title = self.next_title_input.text().strip() or "Next Project"
@@ -2450,7 +2456,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
         for idx, prompt in enumerate(commands):
             step_agent = agent
             if agent == "multi":
-                hybrid_cycle = ["antigravity", "antigravity-kde", "local", "local", "antigravity-kde"]
+                hybrid_cycle = ["antigravity", "antigravity", "local", "local", "antigravity"]
                 step_agent = hybrid_cycle[idx % len(hybrid_cycle)]
             self.pipeline.add(
                 prompt=prompt,
@@ -2485,7 +2491,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
             return
 
         raw_text = self.next_prompt_input.toPlainText().strip()
-        if not raw_text:
+        if not raw_text and not self.draft_prompts:
             if hasattr(self, "toast_banner"):
                 self.toast_banner.setText("⚠️ Please enter command(s) or prompt before clicking Add.")
                 self.toast_banner.setStyleSheet(
@@ -2497,7 +2503,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
             self.next_prompt_input.setFocus()
             return
 
-        commands = split_prompts(raw_text)
+        commands = list(self.draft_prompts) + ([raw_text] if raw_text else [])
         if not commands:
             return
 
@@ -2526,7 +2532,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
             is_repo = create_repo if idx == 0 else False
             step_agent = agent
             if agent == "multi":
-                hybrid_cycle = ["antigravity", "antigravity-kde", "local", "local", "antigravity-kde"]
+                hybrid_cycle = ["antigravity", "antigravity", "local", "local", "antigravity"]
                 step_agent = hybrid_cycle[idx % len(hybrid_cycle)]
             self.pipeline.add(
                 prompt=prompt,
@@ -2535,11 +2541,13 @@ class PipelineWindow(QtWidgets.QMainWindow):
                 project_title=title,
                 project_slug=slug,
                 create_repo=is_repo,
-                repo_name=repo_name,
-                repo_desc=repo_desc,
+                repo_name=repo_name if is_repo else "",
+                repo_desc=repo_desc if is_repo else "",
                 notify_desktop=False,
             )
 
+        self.draft_prompts.clear()
+        self.refresh_draft_prompts()
         self.next_prompt_input.clear()
         self.next_title_input.clear()
         self.next_slug_input.clear()
@@ -2555,6 +2563,8 @@ class PipelineWindow(QtWidgets.QMainWindow):
         )
         notify("Project Added", f"[{slug}] Added '{title}' with {count} step(s)")
         self.next_title_input.setFocus()
+        groups = get_grouped_projects(self.pipeline.list())
+        self.project_page = next(i for i, group in enumerate(groups) if group["slug"] == slug)
         self.refresh_queue()
 
         total_projects = len(get_grouped_projects(self.pipeline.list()))
@@ -2652,7 +2662,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
         if self.is_running and running_tasks:
             curr_task = running_tasks[0]
-            self.kpi_status_val.setText(f"RUNNING: {curr_task.get('agent', '').upper()}")
+            self.kpi_status_val.setText(f"RUNNING: {len(running_tasks)} / 2")
             self.kpi_status_val.setStyleSheet("color: #38bdf8; font-size: 14px; font-weight: 800;")
         elif rate_limited_tasks:
             self.kpi_status_val.setText("RATE-LIMITED COOLDOWN")
@@ -2664,8 +2674,14 @@ class PipelineWindow(QtWidgets.QMainWindow):
             self.kpi_status_val.setText("IDLE / PAUSED")
             self.kpi_status_val.setStyleSheet("color: #94a3b8; font-size: 14px; font-weight: 800;")
 
+        self.project_page = max(0, min(self.project_page, total_projects - 1))
+        self.project_page_label.setText(f"Project {self.project_page + 1 if total_projects else 0} of {total_projects}")
+        self.prev_project_btn.setEnabled(self.project_page > 0)
+        self.next_project_btn.setEnabled(self.project_page + 1 < total_projects)
+
         # Check if queue tasks data changed before doing a destructive rebuild
         grouped_sig = [(p.get("slug"), [(t.get("id"), t.get("status"), t.get("retry_at"), t.get("status_message")) for t in p.get("tasks", [])]) for p in grouped]
+        grouped_sig = (self.project_page, grouped_sig)
         if grouped_sig == getattr(self, "last_grouped_sig", None):
             return
         self.last_grouped_sig = grouped_sig
@@ -2674,6 +2690,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
         while self.task_list_layout.count() > 1:
             item = self.task_list_layout.takeAt(0)
             if item.widget():
+                item.widget().hide()
                 item.widget().deleteLater()
 
         if not grouped:
@@ -2682,7 +2699,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
             empty_lbl.setAlignment(Qt.AlignCenter)
             self.task_list_layout.insertWidget(0, empty_lbl)
         else:
-            for idx, proj_data in enumerate(grouped):
+            for idx, proj_data in enumerate(grouped[self.project_page:self.project_page + 1]):
                 card = ProjectPipelineCard(
                     project_data=proj_data,
                     on_failover=self.failover_single_task,
@@ -2690,8 +2707,55 @@ class PipelineWindow(QtWidgets.QMainWindow):
                     on_delete_task=self.delete_single_task,
                     on_delete_project=self.delete_single_project,
                     on_update_task=self.update_single_task_prompt,
+                    on_add_prompt=self.add_prompt_to_project,
+                    on_move_prompt=self.move_project_prompt,
+                    parent=self,
                 )
                 self.task_list_layout.insertWidget(idx, card)
+
+    @queue_error_to_log
+    def add_prompt_to_project(self, slug):
+        if self.busy():
+            self.append_pipeline_log("Wait for the current queue operation, then add the prompt.")
+            return
+        project = next((p for p in get_grouped_projects(self.pipeline.list()) if p['slug'] == slug), None)
+        if not project:
+            return
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle(f"Add Prompt — {project['title']}")
+        dialog.resize(760, 540)
+        layout = QtWidgets.QVBoxLayout(dialog)
+        layout.addWidget(QtWidgets.QLabel("One full prompt = one step in this project. Paste the entire specification below."))
+        editor = QtWidgets.QPlainTextEdit()
+        layout.addWidget(editor)
+        agents = QtWidgets.QComboBox()
+        for key, info in discover_agents().items():
+            agents.addItem(info['name'], key)
+        agents.setCurrentIndex(max(0, agents.findData(project['tasks'][-1]['agent'])))
+        layout.addWidget(agents)
+        buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Save | QtWidgets.QDialogButtonBox.Cancel)
+        buttons.button(QtWidgets.QDialogButtonBox.Save).setText("Add Prompt")
+        buttons.button(QtWidgets.QDialogButtonBox.Save).setEnabled(False)
+        editor.textChanged.connect(lambda: buttons.button(QtWidgets.QDialogButtonBox.Save).setEnabled(bool(editor.toPlainText().strip())))
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        self.editing_queue = True
+        try:
+            if dialog.exec_() == QtWidgets.QDialog.Accepted:
+                self.pipeline.append_project_prompt(slug, editor.toPlainText(), agents.currentData())
+                self.last_grouped_sig = None
+                self.refresh_queue()
+        finally:
+            self.editing_queue = False
+
+    @queue_error_to_log
+    def move_project_prompt(self, task_id, direction):
+        if self.busy():
+            return
+        self.pipeline.move_project_prompt(task_id, direction)
+        self.last_grouped_sig = None
+        self.refresh_queue()
 
     @queue_error_to_log
     def retry_task(self, task_id):
@@ -2712,7 +2776,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
             if hasattr(self, "show_toast"):
                 self.show_toast("✓ Step prompt updated successfully!")
             self.last_grouped_sig = None
-            self.refresh_ui()
+            self.refresh_queue()
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "Update Failed", f"Could not update task prompt:\n{e}")
 
@@ -2741,7 +2805,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
         return self.worker is not None and self.worker.isRunning()
 
     def run_step(self):
-        if self.busy():
+        if self.busy() or getattr(self, "editing_queue", False):
             return
         if not self.is_running and not any(t.get('status') in ('RUNNING', 'SUBMITTED') for t in self.pipeline.queue):
             return
@@ -2763,7 +2827,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
             self.toggle_runner()
             failed_count = len(failed)
             self.log_box.append(f"Finished with {failed_count} failed tasks." if failed_count else "All pipeline commands completed successfully!")
-        elif failed and not running and self.is_running:
+        elif failed and not running and self.is_running and all(t["status"] == "FAILED" or any(f.get("project") == t.get("project") for f in failed) for t in pending):
             self.toggle_runner()
             self.log_box.append("Pipeline paused: a task failed. Resolve or remove it before continuing.")
         elif running and self.is_running:
@@ -2815,7 +2879,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.refresh_queue()
 
     def closeEvent(self, event):
-        if self.busy():
+        if self.busy() or any(t.is_alive() for t in self.pipeline._dispatch_threads):
             self.log_box.append("Pause stops the next task; wait for the current command to finish before closing.")
             event.ignore()
         else:
@@ -2967,6 +3031,8 @@ def main():
     if not icon.isNull():
         win.setWindowIcon(icon)
     win.show()
+    if "--run" in sys.argv:
+        QtCore.QTimer.singleShot(0, win.toggle_runner)
     sys.exit(app.exec_())
 
 

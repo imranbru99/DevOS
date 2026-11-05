@@ -95,5 +95,27 @@ def isolate_desktop_configuration(monkeypatch, tmp_path):
     import theme_switcher as module
     for key in ('SETTINGS_FILE','KDEGLOBALS_FILE','PLASMARC_FILE','GTK3_FILE','GTK4_FILE','KVANTUM_FILE','KWINRC_FILE','CODE_SETTINGS','VSCODIUM_SETTINGS'):
         monkeypatch.setattr(module,key,str(tmp_path/key/'settings'))
+    monkeypatch.setattr(module,'KATE_FILES',[])
     monkeypatch.setattr(module,'_run_cmd',lambda _cmd: True)
     monkeypatch.setattr(module.shutil,'which',lambda _name: None)
+
+
+def test_premium_light_wallpaper_preferred(monkeypatch):
+    import theme_switcher as module
+    scripts = []
+    monkeypatch.setattr(module.shutil, 'which', lambda _: '/usr/bin/qdbus6')
+    monkeypatch.setattr(module.os.path, 'isfile', lambda p: p.startswith('/usr/share/wallpapers/'))
+    monkeypatch.setattr(module, '_run_cmd', lambda args: scripts.append(args[-1]) or True)
+    assert ThemeSwitcher.apply_wallpaper('light')
+    assert 'file:///usr/share/wallpapers/DevOS-Premium-01-PearlFold/contents/images/wallpaper.png' in scripts[0]
+    assert 'var light = true;' in scripts[0]
+
+
+def test_legacy_wallpaper_fallback(monkeypatch):
+    import theme_switcher as module
+    scripts = []
+    monkeypatch.setattr(module.shutil, 'which', lambda _: '/usr/bin/qdbus6')
+    monkeypatch.setattr(module.os.path, 'isfile', lambda p: p == '/usr/share/wallpapers/DevOS-Daylight/contents/images/daylight.svg')
+    monkeypatch.setattr(module, '_run_cmd', lambda args: scripts.append(args[-1]) or True)
+    assert ThemeSwitcher.apply_wallpaper('light')
+    assert 'file:///usr/share/wallpapers/DevOS-Daylight/contents/images/daylight.svg' in scripts[0]

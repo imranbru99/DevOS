@@ -49,6 +49,24 @@ class X11Pointer:
     def __init__(self):
         try:
             self.x11 = ctypes.cdll.LoadLibrary("libX11.so.6")
+            self.x11.XInitThreads()
+            # ctypes defaults to int: declare pointer-sized Xlib signatures.
+            self.x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+            self.x11.XOpenDisplay.restype = ctypes.c_void_p
+            self.x11.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+            self.x11.XDefaultRootWindow.restype = ctypes.c_ulong
+            self.x11.XQueryPointer.argtypes = [ctypes.c_void_p, ctypes.c_ulong,
+                ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_ulong),
+                ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int),
+                ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_uint)]
+            self.x11.XQueryKeymap.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+            self.x11.XKeysymToKeycode.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+            self.x11.XKeysymToKeycode.restype = ctypes.c_ubyte
+            self.x11.XInternAtom.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+            self.x11.XInternAtom.restype = ctypes.c_ulong
+            self.x11.XChangeProperty.argtypes = [ctypes.c_void_p, ctypes.c_ulong,
+                ctypes.c_ulong, ctypes.c_ulong, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
+            self.x11.XFlush.argtypes = [ctypes.c_void_p]
             # Install silent error handler so any X11 error is non-fatal
             ERROR_HANDLER = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p)
             self._error_cb = ERROR_HANDLER(lambda d, e: 0)
@@ -66,6 +84,16 @@ class X11Pointer:
         except Exception:
             self.display = None
 
+    def copy_shortcut_down(self):
+        if not self.display:
+            return False
+        keys = (ctypes.c_ubyte * 32)()
+        self.x11.XQueryKeymap(self.display, keys)
+        def down(symbol):
+            code = self.x11.XKeysymToKeycode(self.display, symbol)
+            return bool(code and keys[code // 8] & (1 << (code % 8)))
+        return (down(0xffe3) or down(0xffe4)) and (down(ord('c')) or down(ord('x')))
+
     def get_state(self):
         if not self.display:
             return None, None, False, False
@@ -80,7 +108,7 @@ class X11Pointer:
             x = self.root_x.value
             y = self.root_y.value
             left_down = bool(self.mask.value & 256)   # Button 1
-            right_down = bool(self.mask.value & 1024) # Button 3
+            right_down = bool(self.mask.value & (512 | 1024 | 2048 | 4096)) # Button 3
             return x, y, left_down, right_down
         except Exception:
             return None, None, False, False
@@ -143,6 +171,7 @@ class WaylandPrimaryWatcher(QtCore.QThread):
 
     selection_changed = QtCore.pyqtSignal(str, int, int)
     dismiss_requested = QtCore.pyqtSignal()
+    pointer_pressed = QtCore.pyqtSignal(int, int)
 
     def __init__(self, pointer: X11Pointer, pill: QtWidgets.QWidget, parent=None):
         super().__init__(parent)
@@ -171,12 +200,13 @@ class WaylandPrimaryWatcher(QtCore.QThread):
                     time.sleep(0.05)
                     continue
 
-                # 1. Dismiss pill immediately if user clicks outside of it
-                if (left_down or right_down) and self.pill.isVisible():
-                    geom = self.pill.geometry()
-                    if not (geom.left() <= x <= geom.right() and geom.top() <= y <= geom.bottom()):
-                        self.dismiss_requested.emit()
-                        self._last_emitted_text = ""
+                if self.pointer.copy_shortcut_down():
+                    self.dismiss_requested.emit()
+                    was_down = False
+                    time.sleep(0.015)
+                    continue
+                if left_down or right_down:
+                    self.pointer_pressed.emit(x, y)
 
                 # 2. Track mouse drag selection (strictly for text selection; ignore all stationary clicks/double-clicks)
                 if left_down and not was_down:
@@ -207,7 +237,7 @@ class WaylandPrimaryWatcher(QtCore.QThread):
 
             except Exception:
                 pass
-            time.sleep(0.03)
+            time.sleep(0.015)
 
 
 class SelectionPill(QtWidgets.QWidget):
@@ -512,15 +542,33 @@ class QuickSelectionDaemon(QtCore.QObject):
         super().__init__()
         self.pill = pill
         self.last_handled_text = ""
+        self.suppress_until = 0.0
+        clipboard = QtWidgets.QApplication.clipboard()
+        clipboard.dataChanged.connect(self.dismiss_after_copy)
+        # Klipper also observes copies made by native Wayland applications.
+        QtDBus.QDBusConnection.sessionBus().connect(
+            "org.kde.klipper", "/klipper", "org.kde.klipper.klipper",
+            "clipboardHistoryUpdated", self.dismiss_after_copy)
 
         # Wayland / X11 Primary Selection Watcher Thread
         self.wayland_watcher = WaylandPrimaryWatcher(_global_pointer, self.pill, self)
         self.wayland_watcher.selection_changed.connect(self._handle_new_text)
-        self.wayland_watcher.dismiss_requested.connect(self.pill.hide_pill)
+        self.wayland_watcher.dismiss_requested.connect(self.dismiss_after_copy)
+        self.wayland_watcher.pointer_pressed.connect(self.dismiss_outside)
         self.wayland_watcher.start()
 
+    @QtCore.pyqtSlot()
+    def dismiss_after_copy(self):
+        self.suppress_until = time.monotonic() + 0.25
+        self.pill.hide_pill()
+
+    @QtCore.pyqtSlot(int, int)
+    def dismiss_outside(self, x, y):
+        if self.pill.isVisible() and not self.pill.frameGeometry().contains(x, y):
+            self.pill.hide_pill()
+
     def _handle_new_text(self, text, x, y):
-        if not text or len(text) < 1:
+        if not text or time.monotonic() < self.suppress_until:
             return
         self.last_handled_text = text
         self.pill.popup_for_text(text, x, y)

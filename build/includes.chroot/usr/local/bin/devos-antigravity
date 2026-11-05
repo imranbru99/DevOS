@@ -2,12 +2,13 @@
 # Use the verified XWayland path for the Antigravity desktop hub.
 # Keep the vendor sandbox, profile, credentials and GPU acceleration intact.
 set -euo pipefail
+unset ELECTRON_RUN_AS_NODE
 binary=/opt/antigravity/antigravity
 if [[ ! -x "$binary" ]]; then
     printf '%s\n' 'Antigravity is not installed at /opt/antigravity/antigravity.' >&2
     exit 127
 fi
-flags=(--ozone-platform=x11)
+flags=(--ozone-platform=x11 --enable-gpu-rasterization --enable-zero-copy)
 if [[ "${1:-}" == --software-rendering ]]; then
     flags+=(--disable-gpu)
     shift

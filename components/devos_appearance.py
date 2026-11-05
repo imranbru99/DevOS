@@ -1,4 +1,4 @@
-"""Live light-mode adaptation for legacy first-party Qt stylesheets."""
+"""Shared native control styling and live light-mode adaptation for DevOS."""
 import colorsys
 import json
 import os
@@ -7,6 +7,24 @@ import re
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 COLOR = re.compile(r'#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}\b|\b(?:white|black)\b')
+
+
+# Application-level defaults let individual apps retain semantic/destructive styles.
+PREMIUM_CONTROLS = """
+QToolTip { background: #172135; color: #f8fafc; border: 1px solid #425574;
+    padding: 8px; border-radius: 6px; }
+QPushButton { border-radius: 8px; padding: 7px 14px; }
+QPushButton:focus, QToolButton:focus { border: 2px solid #38bdf8; }
+QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox { border-radius: 8px; padding: 7px; }
+QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus,
+QTextEdit:focus, QPlainTextEdit:focus { border: 2px solid #38bdf8; }
+QTabBar::tab { padding: 10px 16px; margin-right: 3px; }
+QTabBar::tab:selected { border-bottom: 2px solid #38bdf8; }
+QHeaderView::section { padding: 9px; }
+QMenu { padding: 6px; }
+QMenu::item { padding: 8px 24px; border-radius: 6px; }
+QStatusBar { padding: 4px; }
+"""
 
 
 def light_stylesheet(sheet):
@@ -90,7 +108,8 @@ class Appearance(QtCore.QObject):
     def sync_app(self):
         current=self.app.styleSheet()
         if self.app_source is None or current!=self.app_rendered:self.app_source=current
-        result=light_stylesheet(self.app_source) if self.mode in ('light','mac-light') and self.app_source else self.app_source
+        source = PREMIUM_CONTROLS + (self.app_source or '')
+        result=light_stylesheet(source) if self.mode in ('light','mac-light') else source
         self.app_rendered=result
         if current!=result:self.app.setStyleSheet(result)
 

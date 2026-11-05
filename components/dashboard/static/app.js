@@ -48,7 +48,7 @@ function pct(value) {
 
 // Navigation & Tab Switching
 function initNavigation() {
-  const buttons = document.querySelectorAll('.nav-btn');
+  const buttons = document.querySelectorAll('.nav-btn[data-tab]');
   buttons.forEach(btn => {
     btn.addEventListener('click', () => {
       const tab = btn.getAttribute('data-tab');
@@ -58,7 +58,7 @@ function initNavigation() {
 }
 
 function switchTab(tabId) {
-  document.querySelectorAll('.nav-btn').forEach(b => {
+  document.querySelectorAll('.nav-btn[data-tab]').forEach(b => {
     b.classList.toggle('active', b.getAttribute('data-tab') === tabId);
   });
   document.querySelectorAll('.tab-pane').forEach(p => {

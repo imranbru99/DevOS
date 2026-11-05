@@ -96,3 +96,58 @@ References: [Linux VM controls](https://docs.kernel.org/admin-guide/sysctl/vm.ht
 [systemd-oomd](https://www.freedesktop.org/software/systemd/man/latest/systemd-oomd.service.html).
 
 Developer: Imran Ahmed <me@imrandev.bd> — https://imrandev.bd
+
+
+## Desktop responsiveness controls (November 2026)
+
+`devos smooth status` reports live CPU/memory/I/O pressure, available memory,
+systemd-oomd status, and the configured and kernel-visible slice settings. Missing
+D-Bus access or controllers are reported as unavailable, not as working protection.
+
+`devos smooth apply --priority-only` installs only CPU/I/O contention weights,
+without new memory thresholds or OOM actions. It writes `90-devos-priority.conf`.
+
+`devos smooth apply` installs the full policy for the current user and applies it to
+running slices without restarting applications. Source-tree equivalent:
+
+```sh
+python3 components/optimizer/responsiveness.py apply
+```
+
+The session CPU weight is 400, normal apps 100, and background work 20. These are
+relative contention weights, not a fixed CPU quota. Apps retain access to idle CPU.
+The application slice starts reclaim/throttling above 85% of physical RAM; this is
+a soft threshold, not a guaranteed reserve. Existing pressure monitoring remains,
+and app/background slices additionally participate in systemd-oomd swap pressure
+recovery. The system daemon must be running for this recovery to work. I/O weights
+only work when the controller is delegated and the storage stack supports them.
+No live swap resize, forced cache purge or compositor restart is performed.
+
+For a large build, conversion or local computation:
+
+```sh
+devos smooth run -- make -j8
+# From the source tree:
+python3 components/optimizer/responsiveness.py run -- make -j8
+```
+
+Each job receives its own background scope. MemoryHigh is the smaller of 50% of
+physical RAM and 60% of currently available RAM; MemoryMax is the smaller of 70%
+and 80% respectively. Below 512 MiB available memory, the command refuses to start.
+The hard limit can terminate the entire job, so use it for restartable workloads.
+These are launch-time budgets, not reservations against future allocations by
+other apps. The scope limits process count to 2,048. It never silently runs the
+command without protection if systemd-run fails. Apps that delegate work to an
+already-running process may escape the scope and are not covered by these limits.
+
+The apply command writes only `90-devos-responsiveness.conf` in the three user
+slice drop-in folders, saving a pre-existing file as `.conf.before-devos`. It also
+sets runtime properties; if applying a property fails it reports failure and may
+leave earlier properties applied. To undo, restore the saved drop-ins (or remove
+only these new files if no backup exists), remove the matching runtime property
+overrides with `systemctl --user revert app.slice background.slice session.slice`
+only after checking for unrelated overrides, then reload the user manager and
+log out/in. The runtime overrides disappear at user-manager restart.
+
+This is a resource policy, not evidence that all applications run smoothly.
+Validate the actual workload and GPU/driver behavior on the target machine.

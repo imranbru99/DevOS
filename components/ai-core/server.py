@@ -67,6 +67,10 @@ def request_allowed(client_ip: str, auth_header: str, conf: Dict[str, str]) -> b
 import threading
 
 
+class ModelUnavailable(RuntimeError):
+    """The requested coding model could not be loaded."""
+
+
 class EngineBusy(Exception):
     """Every slot is busy and the waiting line is full (or waited too long)."""
 
@@ -84,6 +88,7 @@ class _Slot:
         self.llm = None
         self.kind = "chat"
         self.load_tried = False
+        self.load_error = ""
         self.lock = threading.RLock()
         self.busy = False
         self.last_used = time.time()
@@ -661,6 +666,8 @@ class DevOSAIEngine:
                 if slot.llm is not None:
                     reply_content, usage = self._complete_on(slot, messages, max_tokens, options)
                 else:
+                    if kind == "code":
+                        raise ModelUnavailable(slot.load_error or "Coding model unavailable. Open DevOS AI Models and check the inference runtime.")
                     reply_content = self._reason(user_prompt)
                     usage = {}
                 loaded = slot.llm is not None
@@ -847,6 +854,7 @@ class DevOSAIEngine:
         slot.load_tried = True
         path = self._find_model(kind)
         if not path:
+            slot.load_error = "No installed model found for " + kind
             return
         try:
             from llama_cpp import Llama
@@ -857,6 +865,7 @@ class DevOSAIEngine:
             # use_mmap: slots share one copy of the weights.
             profile = self.speed_kwargs(kind)
             slot.llm, dropped = open_llama(Llama, path, profile)
+            slot.load_error = ""
             if dropped:
                 sys.stderr.write("[ai-core] loaded without: " + ", ".join(dropped) + "\n")
             self._loaded_speed = dict(profile)
@@ -875,6 +884,7 @@ class DevOSAIEngine:
                 sys.stderr.write(f"[ai-core] slot {slot.index} loaded for parallel requests\n")
         except Exception as exc:
             sys.stderr.write(f"[ai-core] model did not load: {exc}\n")
+            slot.load_error = f"Coding runtime/model could not load: {exc}"
             slot.llm = None
 
     def unload_if_idle(self) -> bool:
@@ -1012,6 +1022,8 @@ class DevOSAIEngine:
             with slot.lock:
                 self._load(slot, kind)
                 if slot.llm is None:
+                    if kind == "code":
+                        raise ModelUnavailable(slot.load_error or "Coding model unavailable; check DevOS AI Models and runtime.")
                     user_prompt = next((m.get("content", "") for m in reversed(messages)
                                         if m.get("role") == "user"), "")
                     yield self._reason(user_prompt)
@@ -1372,6 +1384,10 @@ class OpenAIHandler(BaseHTTPRequestHandler):
                    "model": shown, "choices": [done]})
             self.wfile.write(b"data: [DONE]\n\n")
             self.wfile.flush()
+        except ModelUnavailable as exc:
+            event({"error": {"message": str(exc), "type": "model_unavailable"}})
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
             pass  # the window was closed while answering
 
@@ -1504,6 +1520,9 @@ class OpenAIHandler(BaseHTTPRequestHandler):
             return
         try:
             res = engine.generate_chat_response(messages, model=model, max_tokens=max_tokens, options=options)
+        except ModelUnavailable as exc:
+            self._send_json(503, {"error": {"message": str(exc), "type": "model_unavailable"}})
+            return
         except EngineBusy:
             self._send_json(503, {"error": {"message": "DevOS AI is busy with other requests; retry shortly.",
                                             "type": "server_busy"}})
@@ -1600,5 +1619,21 @@ def run_server():
         server.server_close()
 
 
+def select_runtime():
+    """Recover after a Python upgrade using an explicitly installed AI runtime."""
+    import importlib.util
+    from pathlib import Path
+    import subprocess
+    if importlib.util.find_spec("llama_cpp") is not None:
+        return
+    for root in (Path.home()/".local/share/devos/ai-runtime", Path("/opt/devos/ai-runtime")):
+        candidate = root/"bin/python"
+        if candidate.is_file() and Path(sys.prefix) != root:
+            check = subprocess.run([str(candidate), "-c", "import llama_cpp"], capture_output=True, timeout=15)
+            if check.returncode == 0:
+                os.execv(str(candidate), [str(candidate), str(Path(__file__).resolve()), *sys.argv[1:]])
+
+
 if __name__ == "__main__":
+    select_runtime()
     run_server()

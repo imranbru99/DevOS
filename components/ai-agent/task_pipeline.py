@@ -28,6 +28,7 @@ import subprocess
 import sys
 import time
 import tempfile
+import threading
 import uuid
 import urllib.parse
 from pathlib import Path
@@ -377,8 +378,13 @@ def discover_agents() -> Dict[str, Dict[str, Any]]:
     ]
     ag_kde_bin = next((str(p) for p in kde_candidates if p and Path(p).exists()), None)
     ag_kde_ok = bool(ag_kde_bin or kde_running)
+    import importlib
+    import antigravity_connection
+    importlib.reload(antigravity_connection)
+    connection_environment = antigravity_connection.connection_environment
+    kde_api_ready = connection_environment("antigravity-kde") is not None
     agents["antigravity-kde"] = {
-        "name": "Antigravity Studio (KDE)",
+        "name": "Antigravity KDE" + (" (API configured)" if kde_api_ready else " (API setup required)"),
         "bin": ag_kde_bin,
         "color": "#0ea5e9",
         "available": ag_kde_ok,
@@ -620,7 +626,10 @@ def is_antigravity_working(kde: bool = False) -> bool:
         return False
     latest = max(transcripts, key=os.path.getmtime)
     try:
+        if time.time() - latest.stat().st_mtime > 180:
+            return False  # stale transcript is not an active turn (nor proof of completion)
         with open(latest, "r", encoding="utf-8") as f:
+            f.seek(max(0, latest.stat().st_size - 65536))
             lines = f.readlines()
             if lines:
                 data = json.loads(lines[-1])
@@ -658,7 +667,7 @@ def is_agent_working(agent: str) -> bool:
     elif ag in ("chatgpt", "codex"):
         return is_codex_working()
     elif ag == "local":
-        res = subprocess.run(["pgrep", "-f", "devos-ai-code|ollama_llama_server"], capture_output=True)
+        res = subprocess.run(["pgrep", "-f", "code-agent/pipeline_worker.py"], capture_output=True)
         return res.returncode == 0
     return False
 
@@ -703,7 +712,7 @@ def queue_transaction(method):
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
-                if method.__name__ == "execute_next":
+                if method.__name__ in ("execute_next", "_claim_next"):
                     return False
                 raise RuntimeError("Another pipeline command is running. Try again after it finishes.")
             self.queue = self._load()
@@ -717,6 +726,7 @@ def queue_transaction(method):
 class TaskPipeline:
     def __init__(self, state_file: Path = STATE_FILE, context_file: Path = CONTEXT_FILE):
         self.event_callback = None
+        self._dispatch_threads = []
         self._last_event = None
         self.state_file = state_file
         self.context_file = context_file
@@ -740,6 +750,15 @@ class TaskPipeline:
             pass
         if self.event_callback:
             self.event_callback(line)
+
+    def clear_events(self):
+        """Clear activity history only; preserve all projects and task state."""
+        path = self.state_file.with_suffix('.events.jsonl')
+        for target in (path, path.with_suffix('.previous.jsonl')):
+            if target.exists():
+                fd = os.open(target, os.O_WRONLY | os.O_TRUNC | os.O_NOFOLLOW)
+                os.close(fd)
+        self._last_event = None
 
     def recent_events(self):
         path = self.state_file.with_suffix('.events.jsonl')
@@ -914,12 +933,53 @@ class TaskPipeline:
         return self.queue
 
     @queue_transaction
+    def append_project_prompt(self, project_slug, prompt, agent=None):
+        if not prompt.strip():
+            raise ValueError("Enter a prompt first.")
+        positions = [i for i, t in enumerate(self.queue) if t.get('project_slug') == project_slug]
+        if not positions:
+            raise ValueError("Project no longer exists.")
+        previous = self.queue[positions[-1]]
+        now = datetime.datetime.now().isoformat()
+        task = {k: previous.get(k, '') for k in ('project', 'project_title', 'project_slug')}
+        task.update(id='task_' + uuid.uuid4().hex[:16], prompt=prompt,
+                    agent=agent or previous['agent'], status='QUEUED', run_at=now,
+                    created_at=now, retry_at=None, output=None, create_repo=False,
+                    repo_name='', repo_desc='', github_url=previous.get('github_url'))
+        self.queue.insert(positions[-1] + 1, task)
+        self._save()
+        return task['id']
+
+    @queue_transaction
+    def move_project_prompt(self, task_id, direction):
+        if direction not in (-1, 1):
+            raise ValueError("Direction must be up or down.")
+        index = next((i for i,t in enumerate(self.queue) if t['id'] == task_id), None)
+        if index is None:
+            raise ValueError("Prompt no longer exists.")
+        task = self.queue[index]
+        positions = [i for i,t in enumerate(self.queue) if t.get('project_slug') == task.get('project_slug')]
+        target = positions.index(index) + direction
+        if target < 0 or target >= len(positions):
+            return False
+        other = positions[target]
+        if task['status'] != 'QUEUED' or self.queue[other]['status'] != 'QUEUED':
+            raise ValueError("Only unstarted prompts can move. Running or completed steps keep their order.")
+        self.queue[index], self.queue[other] = self.queue[other], self.queue[index]
+        self._save()
+        return True
+
+    @queue_transaction
     def delete_task(self, task_id: str):
+        if any(t["id"] == task_id and t["status"] in ("RUNNING", "SUBMITTED") for t in self.queue):
+            raise ValueError("Verify or finish the active task before removing it.")
         self.queue = [t for t in self.queue if t["id"] != task_id]
         self._save()
 
     @queue_transaction
     def delete_project(self, project_slug: str):
+        if any(t.get("project_slug") == project_slug and t["status"] in ("RUNNING", "SUBMITTED") for t in self.queue):
+            raise ValueError("Verify or finish the active project before removing it.")
         self.queue = [t for t in self.queue if t.get("project_slug") != project_slug]
         self._save()
 
@@ -934,14 +994,61 @@ class TaskPipeline:
 
     @queue_transaction
     def clear(self):
+        if any(t["status"] in ("RUNNING", "SUBMITTED") for t in self.queue):
+            raise ValueError("Verify or finish active tasks before clearing the queue.")
         self.queue = []
         self._save()
+
+    def _complete_task(self, task):
+        task["status"] = "COMPLETED"
+        # Check if GitHub repository creation is requested or proposed
+        if task.get("create_repo") or task.get("repo_name") or "@create-repo" in task["prompt"]:
+            r_name = task.get("repo_name") or task.get("project_slug") or ""
+            r_desc = task.get("repo_desc") or ""
+            if not r_name:
+                ext_name, ext_desc = extract_repo_metadata(task.get("output", ""))
+                r_name = ext_name or task.get("project_slug") or f"devos-project-{int(time.time())}"
+                r_desc = r_desc or (ext_desc or "")
+
+            ok_repo, repo_info = create_github_repo(
+                repo_name=r_name,
+                description=r_desc,
+                project_dir=task.get("project", ""),
+                push=True,
+                open_browser=True,
+            )
+            if not ok_repo:
+                task["status"] = "FAILED"
+                task["output"] = (task.get("output") or "") + "\nRepository creation failed: " + repo_info
+                self._save()
+                return
+            if ok_repo:
+                task["github_url"] = repo_info
+                self.context.setdefault("projects", {})[str(Path(task["project"]).resolve())] = {"github_repo": repo_info, "repo_url": repo_info, "repo_name": r_name}
+                self.context["github_repo"] = repo_info
+                self.context["repo_url"] = repo_info
+                self.context["repo_name"] = r_name
+                self._save_context()
+                notify("GitHub Repo Created", f"Created & pushed: {repo_info}")
+
+        notify("Task Completed", f"[{task['agent'].upper()}] Command finished! Ready for next in chain.")
 
     def check_running_tasks(self) -> bool:
         """Observe task-specific activity without approving questions or inferring success."""
         updated = False
         for task in self.queue:
             if task.get('status') not in ('RUNNING', 'SUBMITTED'):
+                continue
+            from pipeline_completion import read as read_completion
+            report = read_completion(task)
+            if report:
+                task['status'] = {'completed': 'COMPLETED', 'failed': 'FAILED', 'blocked': 'SUBMITTED'}[report['status']]
+                task['status_message'] = report['summary'][:600]
+                task['completion_evidence'] = report
+                if report['status'] == 'completed':
+                    self._complete_task(task)
+                self.emit_event(f"{task['id']}: agent reported {report['status']}: {report['summary'][:500]}")
+                updated = True
                 continue
             conv_id = task.get('conversation_id')
             if not conv_id:
@@ -961,7 +1068,8 @@ class TaskPipeline:
             if not conv_id or not re.fullmatch(r'[A-Za-z0-9_-]+', conv_id):
                 self.emit_event(f"{task['id']}: awaiting verification; no tracked conversation. Do not resubmit until checked.")
                 continue
-            path = Path.home()/'.gemini/antigravity/brain'/conv_id/'.system_generated/logs/transcript.jsonl'
+            profile = 'antigravity-kde' if task['agent'] in ('antigravity-kde', 'antigravity-ide') else 'antigravity'
+            path = Path.home()/'.gemini'/profile/'brain'/conv_id/'.system_generated/logs/transcript.jsonl'
             try:
                 with path.open('rb') as stream:
                     stream.seek(max(0, path.stat().st_size-65536))
@@ -995,29 +1103,76 @@ class TaskPipeline:
         """Refresh accepted conversations without dispatching queued work."""
         return self.check_running_tasks()
 
+    @staticmethod
+    def agent_slot(agent):
+        return {'codex': 'chatgpt', 'antigravity-ide': 'antigravity-kde'}.get(agent, agent)
+
+    def _run_claimed(self, task):
+        dispatched = dict(task)
+        dispatched['prompt'] = task['resolved_prompt']
+        try:
+            success, output = self._dispatch(dispatched)
+        except Exception as exc:
+            success, output = False, str(exc)
+        # Dispatch runs outside the queue lock. Merge only this task's result.
+        for attempt in range(100):
+            try:
+                return self._finish_dispatch(dispatched, success, output)
+            except RuntimeError as exc:
+                if 'Another pipeline command' not in str(exc):
+                    raise
+                time.sleep(.05)
+        self.emit_event(f"{task['id']}: result pending; queue busy. Verify completion before retrying.")
+        return False
+
+    def execute_next(self):
+        task = self._claim_next()
+        return self._run_claimed(task) if task else False
+
+    def execute_parallel_tick(self, limit=2):
+        self.observe_tasks()
+        self._dispatch_threads = [t for t in self._dispatch_threads if t.is_alive()]
+        started = False
+        for _ in range(limit):
+            task = self._claim_next(parallel=True, limit=limit)
+            if not task:
+                break
+            worker = TaskPipeline(self.state_file, self.context_file)
+            worker.event_callback = self.event_callback
+            thread = threading.Thread(target=worker._run_claimed, args=(task,),
+                                      name='pipeline-' + task['id'], daemon=False)
+            self._dispatch_threads.append(thread)
+            thread.start()
+            started = True
+        return started
+
     @queue_transaction
-    def execute_next(self) -> bool:
+    def _claim_next(self, parallel=False, limit=2):
         """Finds next eligible task and executes it."""
         self.check_running_tasks()
         now = datetime.datetime.now()
+        active = [t for t in self.queue if t['status'] in ('RUNNING', 'SUBMITTED')]
+        if parallel and len(active) >= limit:
+            return None
+        busy_agents = {self.agent_slot(t['agent']) for t in active}
+        blocked_projects = set()
         for task in self.queue:
             if task["status"] == "COMPLETED":
                 continue
-            if task["status"] == "FAILED":
-                return False
-
-            if task["status"] in ("RUNNING", "SUBMITTED"):
-                return False  # no proof of completion; never redispatch after a crash
-            if now < datetime.datetime.fromisoformat(task["run_at"]):
-                return False  # ordered chain: later tasks cannot overtake this one
-
-            # Check if delayed or rate-limited with scheduled wakeup
-            if task["retry_at"]:
-                retry_time = datetime.datetime.fromisoformat(task["retry_at"])
-                if now < retry_time:
-                    remaining = int((retry_time - now).total_seconds())
-                    print(f"[Rate-Limited] {task['id']} ({task['agent']}) waiting until {retry_time.strftime('%I:%M %p')} ({remaining}s remaining)")
-                    return False
+            project_key = str(Path(task.get('project') or (Path(self.get_base_dir()) / task.get('project_slug', 'project'))).resolve())
+            if parallel and project_key in blocked_projects:
+                continue
+            blocked_projects.add(project_key)
+            unavailable = (
+                task['status'] in ('FAILED', 'RUNNING', 'SUBMITTED')
+                or now < datetime.datetime.fromisoformat(task['run_at'])
+                or (task.get('retry_at') and now < datetime.datetime.fromisoformat(task['retry_at']))
+                or (parallel and self.agent_slot(task['agent']) in busy_agents)
+            )
+            if unavailable:
+                if parallel:
+                    continue
+                return None
 
             # Ensure project slug and local folder are created
             p_slug = task.get("project_slug") or to_slug(task.get("project_title") or "project")
@@ -1038,11 +1193,15 @@ class TaskPipeline:
                 task["status"] = "FAILED"
                 task["output"] = f"Failed to auto-create project directory '{project_path}': {e}"
                 self._save()
-                return True
+                return None
 
             # Resolve context variables in prompt: e.g. {github_repo}, {repo_url}, {repo_name}, {project_dir}, {project_slug}
             resolved_prompt = task["prompt"]
             context_vars = dict(self.context)
+            if parallel:
+                for key in ('github_repo', 'repo_url', 'repo_name'):
+                    context_vars.pop(key, None)
+                context_vars.update(self.context.get('projects', {}).get(str(proj_dir), {}))
             context_vars["project_dir"] = str(proj_dir)
             context_vars["project_slug"] = p_slug
             for k, v in context_vars.items():
@@ -1064,13 +1223,19 @@ class TaskPipeline:
             if not resolved_prompt.startswith("================================================================================"):
                 resolved_prompt = ws_directive + resolved_prompt
 
+            if task['agent'] in ('antigravity', 'antigravity-kde', 'antigravity-ide'):
+                from pipeline_completion import prepare as prepare_completion
+                resolved_prompt += prepare_completion(task)
+
             task["resolved_prompt"] = resolved_prompt
             self.emit_event(f"Project folder ready: {proj_dir}")
 
             # If target agent is currently busy doing work, wait for current turn to complete
             if is_agent_working(task["agent"]):
                 self.emit_event(f"{task['agent']}: another turn is active; waiting before submission.")
-                return False
+                if parallel:
+                    continue
+                return None
 
             # Run this task
             task["status"] = "RUNNING"
@@ -1079,111 +1244,108 @@ class TaskPipeline:
             self._save()
             notify("Executing Task", f"[{p_slug}] [{task['agent'].upper()}] {resolved_prompt[:60]}...")
 
-            task_dispatch = dict(task)
-            task_dispatch["prompt"] = resolved_prompt
-            try:
-                success, output = self._dispatch(task_dispatch)
-            except Exception as exc:
-                success, output = False, str(exc)
-            output = str(output)[-65536:]
-            task["status_message"] = output[:600]
-            task["output"] = output
+            return dict(task)
+        return None
 
-            if output.startswith("STARTED:"):
-                task["conversation_id"] = task_dispatch.get("conversation_id") or output.split(":", 1)[1].strip()
-                task["status"] = "RUNNING"
-                self.emit_event(f"{task['id']}: prompt accepted; tracking conversation {task['conversation_id']}.")
-                self._save()
-                notify("Task Running", f"[{p_slug}] [{task['agent'].upper()}] Task is running in background.")
-                return True
+    @queue_transaction
+    def _finish_dispatch(self, dispatched, success, output):
+        task = next((t for t in self.queue if t['id'] == dispatched['id']), None)
+        if not task or task.get('status') != 'RUNNING':
+            return False
+        task_dispatch = dispatched
+        p_slug = task.get('project_slug', 'project')
+        now = datetime.datetime.now()
+        output = str(output)[-65536:]
+        task["status_message"] = output[:600]
+        task["output"] = output
 
-            if output.startswith("SUBMITTED:"):
-                task["status"] = "SUBMITTED"
-                self._save()
-                notify("Task submitted", "Waiting for verified agent completion before the next task.")
-                return True
-
-            # Check if rate-limited
-            if not success and ("rate limit" in output.lower() or "usage to reset" in output.lower()):
-                reset_target = parse_reset_time(output)
-                if not reset_target:
-                    # Default 5 min cooldown if time not explicitly specified
-                    reset_target = now + datetime.timedelta(minutes=5)
-                
-                task["status"] = "RATE_LIMITED"
-                task["retry_at"] = reset_target.isoformat()
-                self._save()
-                
-                reset_str = reset_target.strftime("%I:%M %p")
-                notify(
-                    "Rate Limit Reached",
-                    f"{task['agent'].upper()} is paused. Cooldown expires at {reset_str}. Auto-resuming then!",
-                    urgency="critical"
-                )
-                print(f"--> Rate limit detected! Scheduled auto-resume for {reset_str}")
-                return True
-
-            if success:
-                task["status"] = "COMPLETED"
-                # Check if GitHub repository creation is requested or proposed
-                if task.get("create_repo") or task.get("repo_name") or "@create-repo" in task["prompt"]:
-                    r_name = task.get("repo_name") or task.get("project_slug") or ""
-                    r_desc = task.get("repo_desc") or ""
-                    if not r_name:
-                        ext_name, ext_desc = extract_repo_metadata(output)
-                        r_name = ext_name or task.get("project_slug") or f"devos-project-{int(time.time())}"
-                        r_desc = r_desc or (ext_desc or "")
-                    
-                    ok_repo, repo_info = create_github_repo(
-                        repo_name=r_name,
-                        description=r_desc,
-                        project_dir=task.get("project", ""),
-                        push=True,
-                        open_browser=True,
-                    )
-                    if not ok_repo:
-                        task["status"] = "FAILED"
-                        task["output"] += "\nRepository creation failed: " + repo_info
-                        self._save()
-                        return True
-                    if ok_repo:
-                        task["github_url"] = repo_info
-                        self.context["github_repo"] = repo_info
-                        self.context["repo_url"] = repo_info
-                        self.context["repo_name"] = r_name
-                        self._save_context()
-                        notify("GitHub Repo Created", f"Created & pushed: {repo_info}")
-                
-                notify("Task Completed", f"[{task['agent'].upper()}] Command finished! Ready for next in chain.")
-            else:
-                task["status"] = "FAILED"
-                self.emit_event(f"{task['id']}: failed: {output[:1000]}")
-                notify("Task Failed", f"[{task['agent'].upper()}] Error: {output[:80]}", urgency="critical")
-
+        if output.startswith("STARTED:"):
+            task["conversation_id"] = task_dispatch.get("conversation_id") or output.split(":", 1)[1].strip()
+            task["status"] = "RUNNING"
+            self.emit_event(f"{task['id']}: prompt accepted; tracking conversation {task['conversation_id']}.")
             self._save()
+            notify("Task Running", f"[{p_slug}] [{task['agent'].upper()}] Task is running in background.")
             return True
 
-        return False
+        if output.startswith("SUBMITTED:"):
+            task["status"] = "SUBMITTED"
+            self._save()
+            notify("Task submitted", "Waiting for verified agent completion before the next task.")
+            return True
+
+        # Check if rate-limited
+        if not success and ("rate limit" in output.lower() or "usage to reset" in output.lower()):
+            reset_target = parse_reset_time(output)
+            if not reset_target:
+                # Default 5 min cooldown if time not explicitly specified
+                reset_target = now + datetime.timedelta(minutes=5)
+
+            task["status"] = "RATE_LIMITED"
+            task["retry_at"] = reset_target.isoformat()
+            self._save()
+
+            reset_str = reset_target.strftime("%I:%M %p")
+            notify(
+                "Rate Limit Reached",
+                f"{task['agent'].upper()} is paused. Cooldown expires at {reset_str}. Auto-resuming then!",
+                urgency="critical"
+            )
+            print(f"--> Rate limit detected! Scheduled auto-resume for {reset_str}")
+            return True
+
+        if success:
+            self._complete_task(task)
+        else:
+            task["status"] = "FAILED"
+            self.emit_event(f"{task['id']}: failed: {output[:1000]}")
+            notify("Task Failed", f"[{task['agent'].upper()}] Error: {output[:80]}", urgency="critical")
+
+        self._save()
+        return True
 
     def _dispatch(self, task: Dict[str, Any]) -> tuple[bool, str]:
         agent = task["agent"]
         prompt = task["prompt"]
 
-        if agent == "antigravity":
-            if AGENTAPI_BIN.exists():
+        if agent in ("antigravity", "antigravity-kde", "antigravity-ide"):
+            kde = agent != "antigravity"
+            api_bin = Path.home()/".gemini/antigravity-kde/bin/agentapi" if kde else AGENTAPI_BIN
+            if not api_bin.exists() and kde:
+                agy_bin = Path.home()/".gemini/bin/agy"
+                if agy_bin.exists():
+                    try:
+                        api_bin.parent.mkdir(parents=True, exist_ok=True)
+                        api_bin.write_text(f'#!/bin/sh\nexec "{agy_bin}" agentapi "$@"\n')
+                        api_bin.chmod(0o755)
+                    except Exception:
+                        pass
+            if api_bin.exists():
                 title = f"[Pipeline] {task.get('project_slug') or 'Project'}"
                 proj_path = task.get("project")
                 if proj_path:
                     try:
-                        launcher = Path("/opt/antigravity/antigravity")
+                        launcher = (Path.home() / ".local/bin/antigravity-kde") if kde else Path("/opt/antigravity/antigravity")
                         if launcher.is_file():
-                            subprocess.Popen([str(launcher), str(proj_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            cmd = [str(launcher), "--new-window", str(proj_path)] if kde else [str(launcher), str(proj_path)]
+                            clean_env = dict(os.environ)
+                            clean_env.pop("ELECTRON_RUN_AS_NODE", None)
+                            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=clean_env)
                     except Exception:
                         pass
-                cmd = [str(AGENTAPI_BIN), "new-conversation", f"--title={title}", "--", prompt]
+                cmd = [str(api_bin), "new-conversation", f"--title={title}", "--", prompt]
                 try:
-                    from antigravity_connection import ensure_connection, bind_project
-                    env = bind_project(ensure_connection(task.get("project"), self.emit_event), task["project"])
+                    import importlib
+                    import antigravity_connection
+                    importlib.reload(antigravity_connection)
+                    ensure_connection = antigravity_connection.ensure_connection
+                    bind_project = antigravity_connection.bind_project
+                    connection_environment = antigravity_connection.connection_environment
+                    connection = ensure_connection(task.get("project"), self.emit_event, profile="antigravity-kde") if kde else ensure_connection(task.get("project"), self.emit_event)
+                    if kde:
+                        primary = connection_environment("antigravity")
+                        if primary and primary.get('ANTIGRAVITY_LS_ADDRESS') == connection.get('ANTIGRAVITY_LS_ADDRESS'):
+                            return False, "Antigravity KDE must use a different API endpoint from Google Antigravity; no prompt was sent."
+                    env = bind_project(connection, task["project"])
                     self.emit_event("Antigravity API ready; submitting the project prompt…")
                     res = subprocess.run(cmd, capture_output=True, text=True, timeout=60, cwd=task.get("project") or None, env=env)
                     if res.returncode == 0:
@@ -1195,6 +1357,12 @@ class TaskPipeline:
                             pass
                         if conv_id:
                             task["conversation_id"] = conv_id
+                            try:
+                                set_workspace_last_conversation = getattr(antigravity_connection, "set_workspace_last_conversation", None)
+                                if set_workspace_last_conversation and task.get("project"):
+                                    set_workspace_last_conversation(task["project"], conv_id, profile="antigravity-kde" if kde else "antigravity")
+                            except Exception:
+                                pass
                             return True, f"STARTED:{conv_id}"
                         return False, "SUBMITTED: Antigravity accepted the request without a conversation ID; verify it in the agent before retrying."
                     return False, res.stderr or res.stdout
@@ -1205,17 +1373,6 @@ class TaskPipeline:
             else:
                 return False, "Antigravity CLI (agentapi) not found"
 
-        elif agent in ("antigravity-ide", "antigravity-kde"):
-            kde_bin = discover_agents().get("antigravity-kde", {}).get("bin") or shutil.which("antigravity-kde")
-            if not kde_bin:
-                return False, "Antigravity KDE launcher not found"
-            try:
-                target_dir = task.get("project") or str(Path.cwd())
-                subprocess.Popen([str(kde_bin), target_dir], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                return False, f"Opened Antigravity KDE workspace: {target_dir}, but no supported prompt-submission API is configured for this IDE. Select Google Antigravity for API dispatch. No prompt was sent."
-            except Exception as e:
-                return False, str(e)
-
         elif agent in ("chatgpt", "codex"):
             # Process exit gives an observable result. Desktop idle heuristics
             # cannot establish whether a particular task succeeded.
@@ -1223,31 +1380,38 @@ class TaskPipeline:
             if not codex_bin:
                 return False, "Codex CLI is not installed. Install and sign in before running this task."
             try:
-                res = subprocess.run([str(codex_bin), "exec", prompt], capture_output=True, text=True, timeout=300, cwd=task.get("project") or None)
+                res = subprocess.run([str(codex_bin), "exec", prompt], capture_output=True, text=True, timeout=3600, cwd=task.get("project") or None)
                 return res.returncode == 0, res.stdout or res.stderr
             except Exception as exc:
                 return False, f"Codex CLI error: {exc}"
 
         elif agent == "local":
-            # Local DevOS AI engine
-            try:
-                import urllib.request
-                req_data = json.dumps({
-                    "model": "devos-ai-code",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 1000
-                }).encode("utf-8")
-                req = urllib.request.Request(
-                    "http://127.0.0.1:11434/v1/chat/completions",
-                    data=req_data,
-                    headers={"Content-Type": "application/json"}
+            worker = Path(__file__).resolve().parent.parent / "code-agent/pipeline_worker.py"
+            if not worker.is_file():
+                return False, "DevOS coding engine is missing; reinstall the code-agent component."
+            self.emit_event("Starting DevOS coding engine in the project workspace…")
+            # Prompts go through stdin, not command-line arguments or repository files.
+            with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as prompt_file:
+                prompt_file.write(prompt)
+                prompt_file.seek(0)
+                proc = subprocess.Popen(
+                    [sys.executable, "-u", str(worker), "--project", task["project"]],
+                    stdin=prompt_file, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, cwd=task["project"],
                 )
-                with urllib.request.urlopen(req, timeout=120) as resp:
-                    data = json.loads(resp.read().decode())
-                    content = data["choices"][0]["message"]["content"]
-                    return True, content
-            except Exception as e:
-                return False, f"Local AI Error: {e}"
+                output = ""
+                for line in proc.stdout:
+                    output = (output + line)[-65536:]
+                    try:
+                        event = json.loads(line)
+                        if event.get("event") == "thinking_status":
+                            detail = event.get("detail", {})
+                            self.emit_event(str(detail.get("status", detail))[:500])
+                        elif "result" in event:
+                            self.emit_event("DevOS coding engine: " + event["result"]["status"])
+                    except (ValueError, AttributeError, TypeError):
+                        pass
+                return proc.wait() == 0, output
 
         known_agents = discover_agents()
 
@@ -1256,7 +1420,7 @@ class TaskPipeline:
             bin_path = known_agents.get("claude", {}).get("bin") or shutil.which("claude")
             if bin_path:
                 try:
-                    res = subprocess.run([bin_path, "-p", prompt], capture_output=True, text=True, timeout=300, cwd=task.get("project") or None)
+                    res = subprocess.run([bin_path, "-p", prompt], capture_output=True, text=True, timeout=3600, cwd=task.get("project") or None)
                     return res.returncode == 0, res.stdout or res.stderr
                 except Exception as e:
                     return False, f"Claude CLI error: {e}"
@@ -1267,7 +1431,7 @@ class TaskPipeline:
             bin_path = known_agents.get("aider", {}).get("bin") or shutil.which("aider")
             if bin_path:
                 try:
-                    res = subprocess.run([bin_path, "--message", prompt, "--no-auto-commits"], capture_output=True, text=True, timeout=300, cwd=task.get("project") or None)
+                    res = subprocess.run([bin_path, "--message", prompt, "--no-auto-commits"], capture_output=True, text=True, timeout=3600, cwd=task.get("project") or None)
                     return res.returncode == 0, res.stdout or res.stderr
                 except Exception as e:
                     return False, f"Aider CLI error: {e}"
@@ -1281,7 +1445,7 @@ class TaskPipeline:
                     cmd = [sys.executable, bin_path, prompt]
                 else:
                     cmd = [bin_path, prompt]
-                res = subprocess.run(cmd, capture_output=True, text=True, timeout=300, cwd=task.get("project") or None)
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=3600, cwd=task.get("project") or None)
                 return res.returncode == 0, res.stdout or res.stderr
             except Exception as e:
                 return False, f"Custom agent '{agent}' error: {e}"
@@ -1290,7 +1454,7 @@ class TaskPipeline:
         generic_bin = shutil.which(agent)
         if generic_bin:
             try:
-                res = subprocess.run([generic_bin, prompt], capture_output=True, text=True, timeout=300, cwd=task.get("project") or None)
+                res = subprocess.run([generic_bin, prompt], capture_output=True, text=True, timeout=3600, cwd=task.get("project") or None)
                 return res.returncode == 0, res.stdout or res.stderr
             except Exception as e:
                 return False, f"Agent '{agent}' execution error: {e}"

@@ -11,3 +11,11 @@ tests/docker-vm/test-account.txt
 *.pem
 
 .devos/
+
+# Personal pipeline state and prompts belong only in the local user profile.
+ai-pipeline.json
+ai-pipeline-context.json
+pipeline_steps_25.md
+antigravity-api.json
+*.events.jsonl
+*.events.previous.jsonl

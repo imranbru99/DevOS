@@ -21,6 +21,7 @@ GTK4_FILE = os.path.expanduser("~/.config/gtk-4.0/settings.ini")
 KVANTUM_FILE = os.path.expanduser("~/.config/Kvantum/kvantum.kvconfig")
 KWINRC_FILE = os.path.expanduser("~/.config/kwinrc")
 CODE_SETTINGS = os.path.expanduser("~/.config/Code/User/settings.json")
+KATE_FILES = [os.path.expanduser("~/.config/" + name) for name in ("katerc", "kwriterc", "katepartrc")]
 VSCODIUM_SETTINGS = os.path.expanduser("~/.config/VSCodium/User/settings.json")
 
 
@@ -263,10 +264,21 @@ class ThemeSwitcher:
         cls._update_code_settings(CODE_SETTINGS, spec["code_theme"])
         cls._update_code_settings(VSCODIUM_SETTINGS, spec["code_theme"])
 
+        # Kate/KWrite have a separate syntax-editor color scheme.
+        for path in KATE_FILES:
+            if os.path.exists(path):
+                cls._update_ini_file(path, "KTextEditor Renderer", {
+                    "Auto Color Theme Selection": "true",
+                    "Color Theme": "Breeze Light" if mode in ("light", "mac-light") else "Breeze Dark",
+                })
+
         # 6. Update KDE Plasma Configuration Files
         kwrite_bin = shutil.which("kwriteconfig6") or shutil.which("kwriteconfig5")
         if kwrite_bin:
-            _run_cmd([kwrite_bin, "--file", "kdeglobals", "--group", "General", "--key", "ColorScheme", spec["kdeglobals_scheme"]])
+            # Do not pre-write the desired name: the apply tool may then
+            # consider it already active and leave the old color palette intact.
+            if not shutil.which("plasma-apply-colorscheme"):
+                _run_cmd([kwrite_bin, "--file", "kdeglobals", "--group", "General", "--key", "ColorScheme", spec["kdeglobals_scheme"]])
             _run_cmd([kwrite_bin, "--file", "kdeglobals", "--group", "Icons", "--key", "Theme", spec["gtk_icon_theme"]])
             _run_cmd([kwrite_bin, "--file", "plasmarc", "--group", "Theme", "--key", "name", spec["plasma_desktoptheme"]])
             _run_cmd([kwrite_bin, "--file", "kwinrc", "--group", "org.kde.kdecoration2", "--key", "ButtonsOnLeft", spec.get("buttons_left", "M")])
@@ -304,7 +316,9 @@ class ThemeSwitcher:
     def apply_wallpaper(cls, mode):
         """Pair DevOS-owned wallpapers; keep a user's custom wallpaper unchanged."""
         qdbus = shutil.which("qdbus6") or shutil.which("qdbus")
-        candidates = [os.path.expanduser("~/.local/share/wallpapers/DevOS-Daylight/contents/images/daylight.svg"),
+        candidates = [os.path.expanduser("~/.local/share/wallpapers/DevOS-Premium-01-PearlFold/contents/images/wallpaper.png"),
+                      "/usr/share/wallpapers/DevOS-Premium-01-PearlFold/contents/images/wallpaper.png",
+                      os.path.expanduser("~/.local/share/wallpapers/DevOS-Daylight/contents/images/daylight.svg"),
                       "/usr/share/wallpapers/DevOS-Daylight/contents/images/daylight.svg"]
         image = next((p for p in candidates if os.path.isfile(p)), None)
         if not qdbus or not image:
@@ -319,7 +333,9 @@ for (var i=0; i<screens.length; i++) {
     d.currentConfigGroup=["Wallpaper",plugin,"General"];
     var current=d.readConfig("Image", "");
     var paths=d.readConfig("SlidePaths", []);
-    var owned=String(current).indexOf("/DevOS-")>=0 || String(paths).indexOf("/DevOS-")>=0;
+    var premium=String(current).indexOf("/DevOS-Premium-")>=0;
+    var paired=String(current).indexOf("/DevOS-Premium-02-SapphireBloom/")>=0;
+    var owned=(!premium || paired) && (String(current).indexOf("/DevOS-")>=0 || String(current).indexOf("/DevOS/")>=0 || String(paths).indexOf("/DevOS-")>=0);
     if(light && owned && current!==target) {
         d.currentConfigGroup=["DevOSAppearance"];
         d.writeConfig("PreviousWallpaperPlugin",plugin);

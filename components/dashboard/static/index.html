@@ -58,6 +58,7 @@
       </nav>
 
       <div class="header-status">
+        <button class="nav-btn" id="command-open" aria-haspopup="dialog">Search DevOS <kbd>Ctrl K</kbd></button>
         <div class="status-pill online">
           <span class="pulse-dot"></span>
           <span id="system-status-text">DevOS</span>
@@ -71,6 +72,9 @@
 
       <!-- TAB 1: OVERVIEW -->
       <section id="tab-overview" class="tab-pane active">
+        <div class="workspace-heading"><div><span class="eyebrow">YOUR WORKSPACE</span><h2>A little more flow.</h2><p>Your apps, system and next task. Together.</p></div>
+          <div class="focus-widget" aria-label="Focus timer"><span id="focus-time" role="timer">25:00</span><button class="btn btn-secondary" id="focus-toggle">Start focus</button><button class="nav-btn" id="focus-reset" aria-label="Reset focus timer">Reset</button></div>
+        </div>
         <!-- Hero Banner with Quick Installer Action -->
         <div class="hero-banner glass-card">
           <div class="hero-content">
@@ -480,6 +484,14 @@
     </footer>
   </div>
 
+  <dialog id="command-dialog" aria-labelledby="command-title">
+    <div class="command-heading"><h2 id="command-title">Where would you like to go?</h2><button class="nav-btn" id="command-close" aria-label="Close command launcher">Esc</button></div>
+    <input id="command-search" type="search" placeholder="Search apps, settings and tools…" aria-label="Search DevOS commands" autocomplete="off">
+    <div id="command-results" aria-label="Matching commands"></div>
+    <p class="command-hint">↑ ↓ to browse · Enter to open · Esc to close</p>
+  </dialog>
+  <div id="workspace-announcement" class="sr-only" role="status" aria-live="polite"></div>
   <script src="app.js"></script>
+  <script src="workspace.js"></script>
 </body>
 </html>

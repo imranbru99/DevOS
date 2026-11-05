@@ -18,6 +18,7 @@ if [ -z "$IDE_BIN" ]; then
     exit 1
 fi
 
+unset ELECTRON_RUN_AS_NODE
 export DONT_PROMPT_WSL_INSTALL=1
 export GEMINI_APP_DATA_DIR="antigravity-kde"
 # Bypass host GNOME Keyring in language server to ensure full auth/session segregation

@@ -1,14 +1,14 @@
 {
   "theme": "DevOS Fluent Dark",
   "colors": {
-    "background_primary": "#121318",
-    "background_secondary": "#1a1c23",
-    "background_surface": "#232631",
+    "background_primary": "#0b1020",
+    "background_secondary": "#101a2c",
+    "background_surface": "#172135",
     "background_acrylic": "rgba(26, 28, 35, 0.78)",
-    "accent_primary": "#3b82f6",
-    "accent_hover": "#60a5fa",
+    "accent_primary": "#60a5fa",
+    "accent_hover": "#7dd3fc",
     "text_primary": "#f8fafc",
-    "text_secondary": "#94a3b8",
+    "text_secondary": "#b9c7db",
     "border_subtle": "rgba(255, 255, 255, 0.08)",
     "success": "#10b981",
     "warning": "#f59e0b",
@@ -16,9 +16,9 @@
   },
   "effects": {
     "backdrop_filter": "blur(24px) saturate(140%)",
-    "border_radius_window": "12px",
-    "border_radius_card": "8px",
-    "border_radius_button": "6px",
+    "border_radius_window": "20px",
+    "border_radius_card": "12px",
+    "border_radius_button": "8px",
     "shadow_elevation": "0 8px 32px rgba(0, 0, 0, 0.36)"
   },
   "typography": {
@@ -31,6 +31,12 @@
     "taskbar_position": "bottom",
     "taskbar_alignment": "center",
     "start_menu_style": "fluent_grid",
-    "file_manager_places": ["This PC", "DevOS Projects", "Downloads", "Android Shared", "Network"]
+    "file_manager_places": [
+      "This PC",
+      "DevOS Projects",
+      "Downloads",
+      "Android Shared",
+      "Network"
+    ]
   }
 }

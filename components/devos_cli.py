@@ -13,6 +13,7 @@ import difflib
 COMPONENTS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 COMMAND_CATALOG = {
+    "smooth": {"desc": "Desktop responsiveness policy and bounded heavy jobs", "tags": ["performance", "memory", "freeze", "priority"]},
     "dashboard": {
         "desc": "Open Luxury System Dashboard & PIN/Security Hub",
         "tags": ["panel", "security", "pin", "system", "hub"],
@@ -456,6 +457,7 @@ def main():
     disk_script = os.path.join(COMPONENTS_DIR, "settings", "disk_manager.py")
 
     dispatch_map = {
+        "smooth": os.path.join(COMPONENTS_DIR, "optimizer", "responsiveness.py"),
         "kids": os.path.join(COMPONENTS_DIR, "kids", "kids_mode.py"),
         "dashboard": dashboard_script,
         "setup": dashboard_script,

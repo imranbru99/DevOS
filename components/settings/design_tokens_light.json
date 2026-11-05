@@ -16,9 +16,9 @@
   },
   "effects": {
     "backdrop_filter": "blur(24px) saturate(140%)",
-    "border_radius_window": "12px",
-    "border_radius_card": "8px",
-    "border_radius_button": "6px",
+    "border_radius_window": "20px",
+    "border_radius_card": "12px",
+    "border_radius_button": "8px",
     "shadow_elevation": "0 8px 32px rgba(0, 0, 0, 0.12)"
   },
   "typography": {
@@ -31,6 +31,12 @@
     "taskbar_position": "bottom",
     "taskbar_alignment": "center",
     "start_menu_style": "fluent_grid",
-    "file_manager_places": ["This PC", "DevOS Projects", "Downloads", "Android Shared", "Network"]
+    "file_manager_places": [
+      "This PC",
+      "DevOS Projects",
+      "Downloads",
+      "Android Shared",
+      "Network"
+    ]
   }
 }
