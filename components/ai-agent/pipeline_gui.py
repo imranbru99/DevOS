@@ -1422,12 +1422,12 @@ class PipelineWindow(QtWidgets.QMainWindow):
         # Timer for refreshing queue and ticking countdowns
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.refresh_queue)
-        self.timer.timeout.connect(self.run_step)
         self.timer.start(1000)
 
-        # Worker timer for executing next pipeline task if running
+        # Worker timer for executing next pipeline task if running or checking status
         self.runner_timer = QTimer(self)
         self.runner_timer.timeout.connect(self.run_step)
+        self.runner_timer.start(2500)
 
     def init_ui(self):
         central = QtWidgets.QWidget()
@@ -2802,7 +2802,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
             self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Pipeline paused by user.")
 
     def busy(self):
-        return self.worker is not None and self.worker.isRunning()
+        return self.is_running and self.worker is not None and self.worker.isRunning() and not getattr(self.worker, 'observe_only', False)
 
     def run_step(self):
         if self.busy() or getattr(self, "editing_queue", False):
@@ -2857,7 +2857,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
         if self.busy():
             self.log_box.append("Wait for the current task to finish before removing tasks.")
             return
-        self.pipeline.delete_task(task_id)
+        self.pipeline.delete_task(task_id, force=True)
         self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Removed task {task_id}")
         self.refresh_queue()
 
@@ -2866,7 +2866,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
         if self.busy():
             self.log_box.append("Wait for the current task to finish before removing projects.")
             return
-        self.pipeline.delete_project(project_slug)
+        self.pipeline.delete_project(project_slug, force=True)
         self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Removed project '{project_slug}' from pipeline.")
         if hasattr(self, "toast_banner"):
             self.toast_banner.setText(f"🗑 Removed project '{project_slug}' from queue.")
@@ -2991,12 +2991,20 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.refresh_queue()
 
     @queue_error_to_log
+    @queue_error_to_log
     def clear_queue(self, *args, **kwargs):
         if self.busy():
             self.log_box.append("Wait for the current task to finish before changing the queue.")
             return
+        if self.is_running:
+            self.toggle_runner()
         count = len(self.pipeline.list())
-        self.pipeline.clear()
+        try:
+            self.pipeline.clear(force=True)
+        except Exception:
+            self.pipeline.queue = []
+            self.pipeline._save()
+        self.project_page = 0
         self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Pipeline cleared ({count} tasks removed).")
         if hasattr(self, "toast_banner"):
             self.toast_banner.setText(f"🗑 Cleared all projects from pipeline ({count} tasks removed).")

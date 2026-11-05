@@ -970,15 +970,15 @@ class TaskPipeline:
         return True
 
     @queue_transaction
-    def delete_task(self, task_id: str):
-        if any(t["id"] == task_id and t["status"] in ("RUNNING", "SUBMITTED") for t in self.queue):
+    def delete_task(self, task_id: str, force: bool = False):
+        if not force and any(t["id"] == task_id and t["status"] == "RUNNING" for t in self.queue):
             raise ValueError("Verify or finish the active task before removing it.")
         self.queue = [t for t in self.queue if t["id"] != task_id]
         self._save()
 
     @queue_transaction
-    def delete_project(self, project_slug: str):
-        if any(t.get("project_slug") == project_slug and t["status"] in ("RUNNING", "SUBMITTED") for t in self.queue):
+    def delete_project(self, project_slug: str, force: bool = False):
+        if not force and any(t.get("project_slug") == project_slug and t["status"] == "RUNNING" for t in self.queue):
             raise ValueError("Verify or finish the active project before removing it.")
         self.queue = [t for t in self.queue if t.get("project_slug") != project_slug]
         self._save()
@@ -993,8 +993,8 @@ class TaskPipeline:
         raise ValueError("Task no longer exists")
 
     @queue_transaction
-    def clear(self):
-        if any(t["status"] in ("RUNNING", "SUBMITTED") for t in self.queue):
+    def clear(self, force: bool = False):
+        if not force and any(t["status"] == "RUNNING" for t in self.queue):
             raise ValueError("Verify or finish active tasks before clearing the queue.")
         self.queue = []
         self._save()
@@ -1066,7 +1066,10 @@ class TaskPipeline:
                     task['conversation_id'] = conv_id
                     updated = True
             if not conv_id or not re.fullmatch(r'[A-Za-z0-9_-]+', conv_id):
-                self.emit_event(f"{task['id']}: awaiting verification; no tracked conversation. Do not resubmit until checked.")
+                msg = f"{task['id']}: awaiting verification; no tracked conversation. Do not resubmit until checked."
+                if task.get('last_emitted_event') != msg:
+                    task['last_emitted_event'] = msg
+                    self.emit_event(msg)
                 continue
             profile = 'antigravity-kde' if task['agent'] in ('antigravity-kde', 'antigravity-ide') else 'antigravity'
             path = Path.home()/'.gemini'/profile/'brain'/conv_id/'.system_generated/logs/transcript.jsonl'
@@ -1080,20 +1083,36 @@ class TaskPipeline:
                 if task.get('last_agent_event') != marker:
                     task['last_agent_event'] = marker
                     task['status_message'] = 'Awaiting your answer in Antigravity' if 'ask_question' in tools else f"Agent event {marker}" + (f" · {', '.join(tools)}" if tools else '')
-                    self.emit_event(f"{task['id']}: {task['status_message']}")
+                    msg = f"{task['id']}: {task['status_message']}"
+                    if task.get('last_emitted_event') != msg:
+                        task['last_emitted_event'] = msg
+                        self.emit_event(msg)
                     updated = True
-                if time.time() - path.stat().st_mtime > 120:
-                    task['status'] = 'SUBMITTED'
-                    task['status_message'] = 'No recent agent activity. Verify the conversation before continuing or resubmitting.'
-                    self.emit_event(f"{task['id']}: {task['status_message']}")
-                    updated = True
-                if last.get('status') == 'DONE' and last.get('type') == 'PLANNER_RESPONSE' and not tools:
-                    task['status'] = 'SUBMITTED'
-                    task['status_message'] = 'Agent response available. Verify the result, then Confirm completed.'
-                    self.emit_event(f"{task['id']}: {task['status_message']}")
-                    updated = True
+                elif last.get('status') == 'DONE' and last.get('type') == 'PLANNER_RESPONSE' and not tools:
+                    msg_text = 'Agent response available. Verify the result, then Confirm completed.'
+                    if task.get('status') != 'SUBMITTED' or task.get('status_message') != msg_text:
+                        task['status'] = 'SUBMITTED'
+                        task['status_message'] = msg_text
+                        msg = f"{task['id']}: {msg_text}"
+                        if task.get('last_emitted_event') != msg:
+                            task['last_emitted_event'] = msg
+                            self.emit_event(msg)
+                        updated = True
+                elif time.time() - path.stat().st_mtime > 120 and task.get('status') == 'RUNNING':
+                    msg_text = 'No recent agent activity. Verify the conversation before continuing or resubmitting.'
+                    if task.get('status') != 'SUBMITTED' or task.get('status_message') != msg_text:
+                        task['status'] = 'SUBMITTED'
+                        task['status_message'] = msg_text
+                        msg = f"{task['id']}: {msg_text}"
+                        if task.get('last_emitted_event') != msg:
+                            task['last_emitted_event'] = msg
+                            self.emit_event(msg)
+                        updated = True
             except (OSError, ValueError):
-                self.emit_event(f"{task['id']}: conversation submitted; waiting for agent activity.")
+                msg = f"{task['id']}: conversation submitted; waiting for agent activity."
+                if task.get('last_emitted_event') != msg:
+                    task['last_emitted_event'] = msg
+                    self.emit_event(msg)
         if updated:
             self._save()
         return updated

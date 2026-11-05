@@ -91,6 +91,19 @@ class TestTaskPipeline(unittest.TestCase):
         self.pipeline.clear()
         self.assertEqual(len(self.pipeline.list()), 0)
 
+    def test_clear_queue_with_submitted_or_running_tasks(self):
+        tid = self.pipeline.add("Submitted task", agent="antigravity")
+        self.pipeline.update_task(tid, {"status": "SUBMITTED"})
+        # Clearing submitted tasks should succeed
+        self.pipeline.clear()
+        self.assertEqual(len(self.pipeline.list()), 0)
+
+        # Force clearing running tasks should also succeed
+        tid2 = self.pipeline.add("Running task", agent="antigravity")
+        self.pipeline.update_task(tid2, {"status": "RUNNING"})
+        self.pipeline.clear(force=True)
+        self.assertEqual(len(self.pipeline.list()), 0)
+
     @patch("task_pipeline.notify")
     @patch("task_pipeline.is_agent_working", return_value=False)
     def test_delayed_task_cannot_run_early_or_be_overtaken(self, *_):
