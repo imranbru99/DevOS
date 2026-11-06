@@ -2,6 +2,7 @@
 import json
 import math
 import os
+import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -95,6 +96,8 @@ def export_video(source, clips, duration, has_audio, audio_mode, voice, destinat
 
 def finalize_capture(source, audio, target_format):
     """Mux capture outside the UI thread; keep source/audio if encoding fails."""
+    if not shutil.which("ffmpeg"):
+        raise RuntimeError("ffmpeg is not installed. Please install it with 'sudo apt install ffmpeg' to merge audio.")
     if target_format not in ("mp4", "webm"):
         raise ValueError("Unsupported recording format")
     destination = os.path.splitext(source)[0] + "-saved." + target_format

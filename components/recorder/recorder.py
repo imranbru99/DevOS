@@ -8,6 +8,7 @@ FFmpeg workers save MP4/WebM recordings and edited MP4 exports.
 import glob
 import math
 import os
+import shutil
 import signal
 import struct
 import subprocess
@@ -82,6 +83,24 @@ def get_default_monitor_sink() -> Optional[str]:
     return None
 
 
+def get_default_mic_name() -> str:
+    """Retrieve the human-readable description of the active microphone source."""
+    try:
+        src = subprocess.check_output(["pactl", "get-default-source"], text=True, timeout=2).strip()
+        out = subprocess.check_output(["pactl", "list", "sources"], text=True, timeout=2)
+        lines = out.splitlines()
+        for i, line in enumerate(lines):
+            if f"Name: {src}" in line:
+                for j in range(i + 1, min(i + 10, len(lines))):
+                    if lines[j].strip().startswith("Description:"):
+                        return lines[j].split(":", 1)[1].strip()
+        if src:
+            return src
+    except Exception:
+        pass
+    return "Microphone"
+
+
 def play_chime():
     """Generates and plays a pleasant 2-tone test chime."""
     system_wav = "/usr/share/sounds/alsa/Front_Center.wav"
@@ -137,22 +156,39 @@ class MicTestThread(QThread):
         os.close(fd)
         self.status_signal.emit("🎙️ Speak now (listening 2s)...", "#f59e0b")
         try:
-            subprocess.run(["parecord", "--channels=1", "--rate=48000", "--file-format=wav", test_wav], timeout=2.0)
-        except subprocess.TimeoutExpired:
-            pass
+            proc = subprocess.Popen(["parecord", "--channels=1", "--rate=48000", "--file-format=wav", test_wav])
+            time.sleep(2.0)
+            proc.send_signal(signal.SIGINT)
+            proc.wait(timeout=2.0)
         except Exception:
             pass
 
+        has_sound = False
         if os.path.isfile(test_wav) and os.path.getsize(test_wav) > 1000:
-            self.status_signal.emit("🔊 Playing back your voice...", "#38bdf8")
-            subprocess.run(["paplay", test_wav], check=False)
+            try:
+                with wave.open(test_wav, "rb") as wf:
+                    frames = wf.getnframes()
+                    if frames > 0:
+                        data = wf.readframes(frames)
+                        samples = struct.unpack(f"<{len(data)//2}h", data)
+                        peak = max(abs(s) for s in samples)
+                        has_sound = peak > 150  # non-zero audio amplitude
+            except Exception:
+                has_sound = True
+
+            if has_sound:
+                self.status_signal.emit("🔊 Playing back your voice...", "#38bdf8")
+                subprocess.run(["paplay", test_wav], check=False)
+                self.status_signal.emit("✅ Microphone working!", "#4ade80")
+            else:
+                self.status_signal.emit("⚠️ Pure silence recorded: check physical mic mute button/gain knob", "#ef4444")
+
             try:
                 os.remove(test_wav)
             except Exception:
                 pass
-            self.status_signal.emit("✅ Microphone working!", "#4ade80")
         else:
-            self.status_signal.emit("⚠️ No audio detected", "#ef4444")
+            self.status_signal.emit("⚠️ No audio detected from input device", "#ef4444")
 
         self.finished_signal.emit()
 
@@ -373,8 +409,9 @@ class DevOSRecorder(QWidget):
         audio_title.setStyleSheet("color: #94a3b8;")
         audio_layout.addWidget(audio_title)
 
+        mic_name = get_default_mic_name()
         self.audio_group = QButtonGroup(self)
-        self.radio_mic = QRadioButton("🎙️  Microphone (Voice)")
+        self.radio_mic = QRadioButton(f"🎙️  Microphone ({mic_name})")
         self.radio_system = QRadioButton("🔊  System Sound (Desktop Audio)")
         self.radio_mute = QRadioButton("🔇  No Audio (Muted)")
 
@@ -432,8 +469,13 @@ class DevOSRecorder(QWidget):
         self.meter = AudioMeter(self)
         self.meter.changed.connect(self.show_audio_level)
         audio_layout.addWidget(self.meter)
-        self.lbl_level = QLabel("Microphone off • enable listening or start recording")
-        self.lbl_level.setStyleSheet("color:#94a3b8; font-size:11px")
+        has_ffmpeg = shutil.which("ffmpeg") is not None
+        if not has_ffmpeg:
+            self.lbl_level = QLabel(f"Detected: {mic_name} • ⚠️ Run 'sudo apt install ffmpeg' to merge audio")
+            self.lbl_level.setStyleSheet("color:#f59e0b; font-size:11px")
+        else:
+            self.lbl_level = QLabel(f"Detected: {mic_name} • enable listening or record")
+            self.lbl_level.setStyleSheet("color:#94a3b8; font-size:11px")
         audio_layout.addWidget(self.lbl_level)
         layout.addWidget(audio_card)
 
@@ -557,18 +599,33 @@ class DevOSRecorder(QWidget):
         layout.addWidget(shortcuts_info)
 
     def on_audio_mode_changed(self):
+        mic_name = get_default_mic_name()
+        has_ffmpeg = shutil.which("ffmpeg") is not None
         if self.radio_mic.isChecked():
+            self.radio_mic.setText(f"🎙️  Microphone ({mic_name})")
             self.btn_test_audio.setText("🎙️ Test Microphone")
             self.btn_test_audio.setEnabled(True)
             self.btn_test_audio.setToolTip("Record 2 seconds and play it back to check mic levels")
+            if not self.chk_listen.isChecked():
+                if not has_ffmpeg:
+                    self.lbl_level.setText(f"Detected: {mic_name} • ⚠️ Run 'sudo apt install ffmpeg' to merge audio")
+                    self.lbl_level.setStyleSheet("color:#f59e0b; font-size:11px")
+                else:
+                    self.lbl_level.setText(f"Detected: {mic_name} • enable listening or record")
+                    self.lbl_level.setStyleSheet("color:#94a3b8; font-size:11px")
         elif self.radio_system.isChecked():
             self.btn_test_audio.setText("🔊 Test Sound Chime")
             self.btn_test_audio.setEnabled(True)
             self.btn_test_audio.setToolTip("Play a test chime to verify system audio playback")
+            if not self.chk_listen.isChecked():
+                self.lbl_level.setText("System audio ready • enable listening or record")
+                self.lbl_level.setStyleSheet("color:#94a3b8; font-size:11px")
         else:
             self.btn_test_audio.setText("🔇 Audio Muted")
             self.btn_test_audio.setEnabled(False)
             self.btn_test_audio.setToolTip("Audio is disabled")
+            self.lbl_level.setText("Audio recording disabled (muted)")
+            self.lbl_level.setStyleSheet("color:#94a3b8; font-size:11px")
         self.lbl_audio_test_status.setText("")
         self.refresh_meter()
 
@@ -603,6 +660,22 @@ class DevOSRecorder(QWidget):
             self.meter.start(device)
         else:
             self.meter.stop()
+            if not self.recording and not self.chk_listen.isChecked():
+                mic_name = get_default_mic_name()
+                has_ffmpeg = shutil.which("ffmpeg") is not None
+                if mode == "mic":
+                    if not has_ffmpeg:
+                        self.lbl_level.setText(f"Detected: {mic_name} • ⚠️ Run 'sudo apt install ffmpeg' to merge audio")
+                        self.lbl_level.setStyleSheet("color:#f59e0b; font-size:11px")
+                    else:
+                        self.lbl_level.setText(f"Detected: {mic_name} • enable listening or record")
+                        self.lbl_level.setStyleSheet("color:#94a3b8; font-size:11px")
+                elif mode == "system":
+                    self.lbl_level.setText("System audio ready • enable listening or record")
+                    self.lbl_level.setStyleSheet("color:#94a3b8; font-size:11px")
+                else:
+                    self.lbl_level.setText("Audio recording disabled (muted)")
+                    self.lbl_level.setStyleSheet("color:#94a3b8; font-size:11px")
 
     def show_audio_level(self, fraction, text):
         if hasattr(self, "lbl_level"):
@@ -898,7 +971,10 @@ class DevOSRecorder(QWidget):
             self.last_saved_file = final_path
             self.showNormal()
             self.lbl_timer.setText("Video kept • audio merge failed")
-            self.lbl_subtext.setText("Your source video and audio are preserved. " + error[:180])
+            if not shutil.which("ffmpeg"):
+                self.lbl_subtext.setText("Install ffmpeg with 'sudo apt install ffmpeg' to merge audio into video.")
+            else:
+                self.lbl_subtext.setText("Your source video and audio are preserved. " + error[:180])
             self.lbl_subtext.setWordWrap(True)
             self.btn_play.show()
             self.btn_folder.show()

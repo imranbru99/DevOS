@@ -67,7 +67,7 @@ class AudioMeter(QWidget):
                 self.process.waitForFinished(500)
         self.peak = 0
         self.update()
-        self.changed.emit(0, "Microphone off")
+        self.changed.emit(0, "Audio idle")
 
     def read_audio(self):
         data = self.pending + bytes(self.process.readAllStandardOutput())
