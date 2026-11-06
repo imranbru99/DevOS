@@ -3,6 +3,7 @@
 # Keep the vendor sandbox, profile, credentials and GPU acceleration intact.
 set -euo pipefail
 unset ELECTRON_RUN_AS_NODE
+export GTK_MODULES=""
 binary=/opt/antigravity/antigravity
 if [[ ! -x "$binary" ]]; then
     printf '%s\n' 'Antigravity is not installed at /opt/antigravity/antigravity.' >&2

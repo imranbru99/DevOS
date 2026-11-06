@@ -193,6 +193,9 @@ class ThemeSwitcher:
                 pass
         if not cp.has_section(section):
             cp.add_section(section)
+        # Purge problematic GTK modules that trigger SIGSEGV crashes in Chromium/Electron
+        if cp.has_option(section, "gtk-modules"):
+            cp.remove_option(section, "gtk-modules")
         for k, v in values.items():
             cp.set(section, k, v)
         try:

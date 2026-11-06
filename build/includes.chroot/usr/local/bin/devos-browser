@@ -102,6 +102,11 @@ cleanup_stale_chrome_lock() {
 
 cleanup_stale_chrome_lock
 
+# Isolate Chromium from conflicting GTK/Qt desktop modules (such as colorreload-gtk-module)
+# that cause segmentation faults on dynamic theme and palette switches under KDE Plasma.
+export GTK_MODULES=""
+export QT_QPA_PLATFORMTHEME=""
+
 lang=$(search_language)
 # Under Wayland on KDE Plasma, Chromium native Wayland backend has an upstream bug
 # where xdg_popup menus (bookmark folders, profile switcher, extension bubbles)
