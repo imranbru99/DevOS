@@ -154,10 +154,13 @@ class MicTestThread(QThread):
     def run(self):
         fd, test_wav = tempfile.mkstemp(prefix="devos-mic-test-", suffix=".wav")
         os.close(fd)
-        self.status_signal.emit("🎙️ Speak now (listening 2s)...", "#f59e0b")
+        self.status_signal.emit("🎙️ Speak now (listening 3s)...", "#f59e0b")
         try:
-            proc = subprocess.Popen(["parecord", "--channels=1", "--rate=48000", "--file-format=wav", test_wav])
-            time.sleep(2.0)
+            if shutil.which("pw-record"):
+                proc = subprocess.Popen(["pw-record", "--channels=1", "--rate=48000", test_wav])
+            else:
+                proc = subprocess.Popen(["parecord", "--channels=1", "--rate=48000", "--file-format=wav", test_wav])
+            time.sleep(3.0)
             proc.send_signal(signal.SIGINT)
             proc.wait(timeout=2.0)
         except Exception:
@@ -838,16 +841,19 @@ class DevOSRecorder(QWidget):
         if audio_mode in ("mic", "system"):
             fd, self.temp_audio_file = tempfile.mkstemp(prefix="devos-audio-", suffix=".wav")
             os.close(fd)
-            cmd = ["parecord", "--channels=1", "--rate=48000", "--file-format=wav"]
-            if audio_mode == "system":
-                monitor = get_default_monitor_sink()
-                if not monitor:
-                    os.unlink(self.temp_audio_file)
-                    self.temp_audio_file = None
-                    self.lbl_subtext.setText("System audio source unavailable. Choose a working audio source.")
-                    return
-                cmd.extend(["-d", monitor, "--channels=2"])
-            cmd.append(self.temp_audio_file)
+            if audio_mode == "mic" and shutil.which("pw-record"):
+                cmd = ["pw-record", "--channels=1", "--rate=48000", self.temp_audio_file]
+            else:
+                cmd = ["parecord", "--channels=1", "--rate=48000", "--file-format=wav"]
+                if audio_mode == "system":
+                    monitor = get_default_monitor_sink()
+                    if not monitor:
+                        os.unlink(self.temp_audio_file)
+                        self.temp_audio_file = None
+                        self.lbl_subtext.setText("System audio source unavailable. Choose a working audio source.")
+                        return
+                    cmd.extend(["-d", monitor, "--channels=2"])
+                cmd.append(self.temp_audio_file)
             try:
                 self.audio_proc = subprocess.Popen(cmd)
             except OSError as exc:
