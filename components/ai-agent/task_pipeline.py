@@ -1343,12 +1343,14 @@ class TaskPipeline:
                 proj_path = task.get("project")
                 if proj_path:
                     try:
-                        launcher = (Path.home() / ".local/bin/antigravity-kde") if kde else Path("/opt/antigravity/antigravity")
-                        if launcher.is_file():
-                            cmd = [str(launcher), "--new-window", str(proj_path)] if kde else [str(launcher), str(proj_path)]
-                            clean_env = dict(os.environ)
-                            clean_env.pop("ELECTRON_RUN_AS_NODE", None)
-                            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=clean_env)
+                        is_running, _ = is_agent_process_running(agent)
+                        if not is_running:
+                            launcher = (Path.home() / ".local/bin/antigravity-kde") if kde else Path("/opt/antigravity/antigravity")
+                            if launcher.is_file():
+                                cmd = [str(launcher), str(proj_path)]
+                                clean_env = dict(os.environ)
+                                clean_env.pop("ELECTRON_RUN_AS_NODE", None)
+                                subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=clean_env)
                     except Exception:
                         pass
                 cmd = [str(api_bin), "new-conversation", f"--title={title}", "--", prompt]

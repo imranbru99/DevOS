@@ -6,6 +6,7 @@ import os
 import sys
 import json
 import datetime
+import types
 import unittest
 from pathlib import Path
 import tempfile
@@ -465,6 +466,34 @@ class TestTaskPipeline(unittest.TestCase):
             dlg.append_steps_25()
         self.assertIn("Synthetic test instructions", dlg.get_text())
         dlg.close()
+
+
+    def test_pipeline_worker_executes_sequential_not_parallel(self):
+        import pipeline_gui
+        mock_pipeline = unittest.mock.MagicMock()
+        worker = pipeline_gui.PipelineWorker(mock_pipeline, parent=None, observe_only=False)
+        worker.run()
+        mock_pipeline.execute_next.assert_called_once()
+        mock_pipeline.execute_parallel_tick.assert_not_called()
+
+    def test_dispatch_does_not_spawn_new_window_when_agent_running(self):
+        result = types.SimpleNamespace(returncode=0, stdout=json.dumps({"response": {"newConversation": {"conversationId": "conv-test"}}}), stderr="")
+        with patch("task_pipeline.is_agent_process_running", return_value=(True, 4242)), \
+             patch("task_pipeline.AGENTAPI_BIN", Path("/mock/agentapi")), \
+             patch.object(Path, "exists", autospec=True, side_effect=lambda p: True if "/mock/agentapi" in str(p) else os.path.exists(str(p))), \
+             patch("antigravity_connection.ensure_connection", return_value={"ANTIGRAVITY_LS_ADDRESS": "127.0.0.1:1000"}), \
+             patch("antigravity_connection.bind_project", return_value={}), \
+             patch("subprocess.Popen") as mock_popen, \
+             patch("subprocess.run", return_value=result) as mock_run:
+            ok, output = self.pipeline._dispatch({
+                "agent": "antigravity",
+                "prompt": "write feature",
+                "project": self.test_dir,
+                "project_slug": "test-project"
+            })
+            self.assertTrue(ok)
+            mock_popen.assert_not_called()
+            mock_run.assert_called_once()
 
 
 if __name__ == "__main__":
