@@ -155,6 +155,9 @@ class AudioManager:
             "master_volume": 40,
             "master_muted": False,
             "default_sink": "",
+            "default_source": "",
+            "source_volume": 100,
+            "source_muted": False,
             "device_volumes": {},
             "device_mutes": {},
             "last_user_set_time": 0.0,
@@ -201,6 +204,12 @@ class AudioManager:
         cls.set_master_volume(target_vol, is_user_action=False)
         cls.set_master_mute(target_mute, is_user_action=False)
         cls._last_checked_sink = cur_sink
+
+        tracked_source = tracked.get("default_source", "")
+        if tracked_source:
+            sources = state.get("sources", [])
+            if any(s.get("name") == tracked_source for s in sources):
+                cls.set_default_source(tracked_source)
         return cls.get_audio_state()
 
     @classmethod
@@ -442,28 +451,32 @@ class AudioManager:
         target_vol = dev_vols.get(sink_name, tracked.get("master_volume", 40))
         cls.set_master_volume(target_vol, is_user_action=False)
 
-    @staticmethod
-    def set_default_source(source_name: str):
+    @classmethod
+    def set_default_source(cls, source_name: str):
         try:
             subprocess.run(["pactl", "set-default-source", source_name], check=False)
         except Exception:
             pass
+        if source_name:
+            cls.save_tracked_state({"default_source": source_name})
 
-    @staticmethod
-    def set_source_volume(percent: int):
+    @classmethod
+    def set_source_volume(cls, percent: int):
         percent = max(0, min(100, percent))
         try:
             subprocess.run(["pactl", "set-source-volume", "@DEFAULT_SOURCE@", f"{percent}%"], check=False)
         except Exception:
             pass
+        cls.save_tracked_state({"source_volume": percent})
 
-    @staticmethod
-    def set_source_mute(mute: bool):
+    @classmethod
+    def set_source_mute(cls, mute: bool):
         val = "1" if mute else "0"
         try:
             subprocess.run(["pactl", "set-source-mute", "@DEFAULT_SOURCE@", val], check=False)
         except Exception:
             pass
+        cls.save_tracked_state({"source_muted": mute})
 
     @staticmethod
     def set_app_volume(app_id: str, percent: int):
