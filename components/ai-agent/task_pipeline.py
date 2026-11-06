@@ -1124,7 +1124,18 @@ class TaskPipeline:
 
     @staticmethod
     def agent_slot(agent):
-        return {'codex': 'chatgpt', 'antigravity-ide': 'antigravity-kde'}.get(agent, agent)
+        ag = (agent or "").lower().strip()
+        if ag in ("antigravity", "antigravity-kde", "antigravity-ide", "google-antigravity"):
+            return "antigravity"
+        if ag in ("chatgpt", "codex"):
+            return "chatgpt"
+        if ag in ("claude", "claude-code"):
+            return "claude"
+        if ag in ("aider",):
+            return "aider"
+        if ag in ("local", "devos-code", "ollama"):
+            return "local"
+        return ag
 
     def _run_claimed(self, task):
         dispatched = dict(task)
@@ -1148,7 +1159,7 @@ class TaskPipeline:
         task = self._claim_next()
         return self._run_claimed(task) if task else False
 
-    def execute_parallel_tick(self, limit=2):
+    def execute_parallel_tick(self, limit=4):
         self.observe_tasks()
         self._dispatch_threads = [t for t in self._dispatch_threads if t.is_alive()]
         started = False
@@ -1166,7 +1177,7 @@ class TaskPipeline:
         return started
 
     @queue_transaction
-    def _claim_next(self, parallel=False, limit=2):
+    def _claim_next(self, parallel=False, limit=4):
         """Finds next eligible task and executes it."""
         self.check_running_tasks()
         now = datetime.datetime.now()

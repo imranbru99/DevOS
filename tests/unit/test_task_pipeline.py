@@ -468,13 +468,54 @@ class TestTaskPipeline(unittest.TestCase):
         dlg.close()
 
 
-    def test_pipeline_worker_executes_sequential_not_parallel(self):
+    def test_pipeline_worker_executes_parallel_tick(self):
         import pipeline_gui
         mock_pipeline = unittest.mock.MagicMock()
         worker = pipeline_gui.PipelineWorker(mock_pipeline, parent=None, observe_only=False)
         worker.run()
-        mock_pipeline.execute_next.assert_called_once()
-        mock_pipeline.execute_parallel_tick.assert_not_called()
+        mock_pipeline.execute_parallel_tick.assert_called_once_with(limit=4)
+
+    def test_agent_slot_unifies_antigravity_variants(self):
+        self.assertEqual(TaskPipeline.agent_slot("antigravity"), "antigravity")
+        self.assertEqual(TaskPipeline.agent_slot("antigravity-kde"), "antigravity")
+        self.assertEqual(TaskPipeline.agent_slot("antigravity-ide"), "antigravity")
+        self.assertEqual(TaskPipeline.agent_slot("google-antigravity"), "antigravity")
+        self.assertEqual(TaskPipeline.agent_slot("chatgpt"), "chatgpt")
+        self.assertEqual(TaskPipeline.agent_slot("codex"), "chatgpt")
+        self.assertEqual(TaskPipeline.agent_slot("claude"), "claude")
+        self.assertEqual(TaskPipeline.agent_slot("local"), "local")
+
+    def test_distinct_agents_run_concurrently_while_same_agent_runs_sequentially(self):
+        p = self.pipeline
+        t1 = p.add("Antigravity Proj 1", agent="antigravity", project_slug="proj1")
+        t2 = p.add("Claude Proj 2", agent="claude", project_slug="proj2")
+        t3 = p.add("Antigravity Proj 3", agent="antigravity-kde", project_slug="proj3")
+        t4 = p.add("Claude Proj 4", agent="claude", project_slug="proj4")
+
+        with patch("task_pipeline.is_agent_working", return_value=False), patch("task_pipeline.notify"):
+            claimed_1 = p._claim_next(parallel=True, limit=4)
+            self.assertIsNotNone(claimed_1)
+            self.assertEqual(claimed_1["id"], t1)
+
+            claimed_2 = p._claim_next(parallel=True, limit=4)
+            self.assertIsNotNone(claimed_2)
+            self.assertEqual(claimed_2["id"], t2)
+
+            # Neither t3 (same antigravity agent) nor t4 (same claude agent) should be claimed yet
+            claimed_3 = p._claim_next(parallel=True, limit=4)
+            self.assertIsNone(claimed_3)
+
+            # Once t1 finishes, antigravity slot frees up and t3 can be claimed
+            p.update_task(t1, {"status": "COMPLETED"})
+            claimed_t3 = p._claim_next(parallel=True, limit=4)
+            self.assertIsNotNone(claimed_t3)
+            self.assertEqual(claimed_t3["id"], t3)
+
+            # Once t2 finishes, claude slot frees up and t4 can be claimed
+            p.update_task(t2, {"status": "COMPLETED"})
+            claimed_t4 = p._claim_next(parallel=True, limit=4)
+            self.assertIsNotNone(claimed_t4)
+            self.assertEqual(claimed_t4["id"], t4)
 
     def test_dispatch_does_not_spawn_new_window_when_agent_running(self):
         result = types.SimpleNamespace(returncode=0, stdout=json.dumps({"response": {"newConversation": {"conversationId": "conv-test"}}}), stderr="")

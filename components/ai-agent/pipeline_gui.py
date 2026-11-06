@@ -387,7 +387,7 @@ class PipelineWorker(QtCore.QThread):
             if self.observe_only:
                 self.pipeline.observe_tasks()
             else:
-                self.pipeline.execute_next()
+                self.pipeline.execute_parallel_tick(limit=4)
             self.result.emit("")
         except Exception as exc:
             self.pipeline.emit_event("Pipeline error: " + str(exc))
@@ -1451,7 +1451,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
         header_vbox.setSpacing(2)
         title = QtWidgets.QLabel("DevOS AI Command Pipeline")
         title.setObjectName("title")
-        subtitle = QtWidgets.QLabel("Sequential projects · Step-by-step execution · Single workspace")
+        subtitle = QtWidgets.QLabel("Multi-agent parallel execution · Strictly 1 by 1 sequential per agent · Single workspace")
         subtitle.setObjectName("subtitle")
         header_vbox.addWidget(title)
         header_vbox.addWidget(subtitle)
