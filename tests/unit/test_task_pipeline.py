@@ -34,6 +34,9 @@ class TestTaskPipeline(unittest.TestCase):
         self.state_file = Path(self.test_dir) / "test_pipeline.json"
         self.context_file = Path(self.test_dir) / "test_context.json"
         self.pipeline = TaskPipeline(state_file=self.state_file, context_file=self.context_file)
+        self.test_projects_dir = Path(self.test_dir) / "projects"
+        self.test_projects_dir.mkdir(parents=True, exist_ok=True)
+        self.pipeline.set_base_dir(str(self.test_projects_dir))
 
     def tearDown(self):
         shutil.rmtree(self.test_dir)
