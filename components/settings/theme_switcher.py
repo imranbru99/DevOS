@@ -23,6 +23,11 @@ KWINRC_FILE = os.path.expanduser("~/.config/kwinrc")
 CODE_SETTINGS = os.path.expanduser("~/.config/Code/User/settings.json")
 KATE_FILES = [os.path.expanduser("~/.config/" + name) for name in ("katerc", "kwriterc", "katepartrc")]
 VSCODIUM_SETTINGS = os.path.expanduser("~/.config/VSCodium/User/settings.json")
+ANTIGRAVITY_SETTINGS = [
+    os.path.expanduser("~/.config/Antigravity-KDE/User/settings.json"),
+    os.path.expanduser("~/.config/Antigravity/User/settings.json"),
+    os.path.expanduser("~/.config/antigravity/User/settings.json"),
+]
 
 
 def _run_cmd(cmd: list) -> bool:
@@ -198,15 +203,21 @@ class ThemeSwitcher:
 
     @classmethod
     def _update_code_settings(cls, path: str, theme_name: str):
-        """Helper to update VS Code / VSCodium color theme."""
-        if not os.path.exists(os.path.dirname(path)):
+        """Helper to update VS Code / VSCodium / Antigravity color theme."""
+        parent_dir = os.path.dirname(path)
+        base_dir = os.path.dirname(parent_dir)
+        if not os.path.exists(parent_dir) and not os.path.exists(base_dir):
             return
+        os.makedirs(parent_dir, exist_ok=True)
         try:
             data = {}
             if os.path.exists(path):
                 with open(path, "r") as f:
                     data = json.load(f)
             data["workbench.colorTheme"] = theme_name
+            data["workbench.preferredLightColorTheme"] = "Default Light Modern"
+            data["workbench.preferredDarkColorTheme"] = "Default Dark Modern"
+            data["window.autoDetectColorScheme"] = True
             with open(path, "w") as f:
                 json.dump(data, f, indent=2)
         except Exception:
@@ -260,9 +271,11 @@ class ThemeSwitcher:
         # 4. Update Kvantum configuration
         cls._update_ini_file(KVANTUM_FILE, "General", {"theme": spec["kvantum_theme"]})
 
-        # 5. Update VS Code / VSCodium
+        # 5. Update VS Code / VSCodium / Antigravity IDE
         cls._update_code_settings(CODE_SETTINGS, spec["code_theme"])
         cls._update_code_settings(VSCODIUM_SETTINGS, spec["code_theme"])
+        for ag_path in ANTIGRAVITY_SETTINGS:
+            cls._update_code_settings(ag_path, spec["code_theme"])
 
         # Kate/KWrite have a separate syntax-editor color scheme.
         for path in KATE_FILES:

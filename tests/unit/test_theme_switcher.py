@@ -96,8 +96,24 @@ def isolate_desktop_configuration(monkeypatch, tmp_path):
     for key in ('SETTINGS_FILE','KDEGLOBALS_FILE','PLASMARC_FILE','GTK3_FILE','GTK4_FILE','KVANTUM_FILE','KWINRC_FILE','CODE_SETTINGS','VSCODIUM_SETTINGS'):
         monkeypatch.setattr(module,key,str(tmp_path/key/'settings'))
     monkeypatch.setattr(module,'KATE_FILES',[])
+    monkeypatch.setattr(module,'ANTIGRAVITY_SETTINGS',[str(tmp_path/'antigravity_kde'/'User'/'settings.json')])
     monkeypatch.setattr(module,'_run_cmd',lambda _cmd: True)
     monkeypatch.setattr(module.shutil,'which',lambda _name: None)
+
+
+def test_theme_switcher_updates_antigravity_ide(monkeypatch, tmp_path):
+    """Verify switching to light mode sets Default Light Modern on Antigravity IDE."""
+    import theme_switcher as module
+    ag_settings = tmp_path / "antigravity" / "User" / "settings.json"
+    ag_settings.parent.mkdir(parents=True)
+    monkeypatch.setattr(module, 'ANTIGRAVITY_SETTINGS', [str(ag_settings)])
+
+    assert ThemeSwitcher.apply_theme("light") is True
+    assert ag_settings.exists()
+    with open(ag_settings, "r") as f:
+        data = json.load(f)
+        assert data["workbench.colorTheme"] == "Default Light Modern"
+        assert data["window.autoDetectColorScheme"] is True
 
 
 def test_premium_light_wallpaper_preferred(monkeypatch):
