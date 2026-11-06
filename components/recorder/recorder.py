@@ -964,8 +964,12 @@ class DevOSRecorder(QWidget):
         self.finalize_thread.start()
 
     def finish_saved_file(self, final_path, error):
+        raw_source = getattr(self.finalize_thread, "source", None)
         if not error and self.temp_audio_file and os.path.isfile(self.temp_audio_file):
-            os.unlink(self.temp_audio_file)
+            try:
+                os.unlink(self.temp_audio_file)
+            except Exception:
+                pass
             self.temp_audio_file = None
         if error:
             self.last_saved_file = final_path
@@ -979,6 +983,25 @@ class DevOSRecorder(QWidget):
             self.btn_play.show()
             self.btn_folder.show()
             return
+
+        if final_path and os.path.isfile(final_path):
+            # Clean up raw intermediate video file created by Spectacle
+            if raw_source and os.path.isfile(raw_source) and os.path.abspath(raw_source) != os.path.abspath(final_path):
+                try:
+                    os.unlink(raw_source)
+                except Exception:
+                    pass
+
+            # Clean up '-saved' suffix to keep final recording filename clean
+            target_ext = f".{self.get_selected_format()}"
+            if f"-saved{target_ext}" in final_path:
+                clean_path = final_path.replace(f"-saved{target_ext}", target_ext)
+                if not os.path.exists(clean_path):
+                    try:
+                        os.rename(final_path, clean_path)
+                        final_path = clean_path
+                    except Exception:
+                        pass
 
         self.last_saved_file = final_path
         self.showNormal()
