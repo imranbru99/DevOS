@@ -2037,18 +2037,55 @@ class TaskPipeline:
                     text=True, cwd=task["project"],
                 )
                 output = ""
+                result_payload = None
+                last_status = ""
                 for line in proc.stdout:
                     output = (output + line)[-65536:]
                     try:
                         event = json.loads(line)
                         if event.get("event") == "thinking_status":
                             detail = event.get("detail", {})
-                            self.emit_event(str(detail.get("status", detail))[:500])
+                            last_status = str(detail.get("status") or detail.get("topic") or "")[:500]
+                            if last_status:
+                                self.emit_event(last_status)
                         elif "result" in event:
-                            self.emit_event("DevOS coding engine: " + event["result"]["status"])
+                            result_payload = event["result"]
+                            self.emit_event("DevOS coding engine: " + str(result_payload.get("status", "")))
                     except (ValueError, AttributeError, TypeError):
                         pass
-                return proc.wait() == 0, output
+                code = proc.wait()
+                # Prefer the worker's final result summary for success/failure text.
+                # Streaming thinking_status JSON must never become the user-facing error.
+                if isinstance(result_payload, dict):
+                    summary = str(result_payload.get("summary") or "").strip()
+                    status = str(result_payload.get("status") or "")
+                    outcome = str(result_payload.get("outcome") or "")
+                    pending = bool(result_payload.get("pending_phases"))
+                    commands = result_payload.get("commands") or {}
+                    if status == "completed" and code == 0:
+                        return True, summary or "Local coding engine completed."
+                    reasons = []
+                    if status == "failed":
+                        reasons.append(summary or "Local coding engine raised an exception.")
+                    else:
+                        if pending:
+                            reasons.append("brief still has pending phases (waiting for go / next phase)")
+                        if not commands:
+                            reasons.append("no validation commands were executed")
+                        elif any(c != 0 for c in commands.values()):
+                            failed = [f"{k}→{v}" for k, v in commands.items() if v != 0]
+                            reasons.append("command failed: " + ", ".join(failed[:4]))
+                        if outcome and outcome != "done":
+                            reasons.append(f"outcome={outcome}")
+                        if summary:
+                            reasons.append(summary[:400])
+                    msg = "; ".join(reasons) if reasons else (summary or last_status or "Local coding engine incomplete.")
+                    return False, msg[:1000]
+                # Fallback when the worker died before emitting a result line.
+                human = last_status or "Local coding engine exited without a result."
+                if output.strip().startswith("{"):
+                    return code == 0, human
+                return code == 0, (output.strip() or human)[:1000]
 
         known_agents = discover_agents()
 

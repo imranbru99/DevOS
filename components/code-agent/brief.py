@@ -418,8 +418,16 @@ class Brief:
         self.text = text
         self.sections = split_sections(text)
         h1 = next((s for s in self.sections if s.level == 1 and s.heading), None)
-        first_line = next((ln for ln in text.splitlines() if ln.strip()), "Project brief")
-        self.title = plain(h1.heading)[:120] if h1 else plain(first_line)[:90]
+        first_line = next(
+            (ln for ln in text.splitlines()
+             if ln.strip() and not set(ln.strip()) <= set("=-_*#")),
+            "Project brief",
+        )
+        raw_title = plain(h1.heading) if h1 else plain(first_line)
+        # Markdown setext underlines or rule-only "titles" are not project names.
+        if not raw_title.strip() or set(raw_title.strip()) <= set("=-_*# "):
+            raw_title = "Project brief"
+        self.title = raw_title[:120]
         self.packages = find_packages(text)
         self.owned = owned_vendors(text, self.packages)
         self.phases = extract_phases(text)

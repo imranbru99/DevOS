@@ -7,23 +7,43 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-SRC_ROOT="${DEVOS_SRC:-/home/imran/project/dev-os}"
-CHROOT_APPS="${SRC_ROOT}/build/includes.chroot/usr/share/applications"
-CHROOT_ICONS="${SRC_ROOT}/build/includes.chroot/usr/share/icons/hicolor/scalable/apps"
-CHROOT_BIN="${SRC_ROOT}/build/includes.chroot/usr/local/bin"
-CHROOT_ABOUT="${SRC_ROOT}/build/includes.chroot/etc/xdg/kcm-about-distrorc"
-CHROOT_OS="${SRC_ROOT}/build/includes.chroot/etc/os-release"
+# Prefer the live checkout when present (host remaster). During ISO chroot
+# builds, includes.chroot is already installed under /, so fall back to that.
+SRC_ROOT="${DEVOS_SRC:-}"
+if [ -z "${SRC_ROOT}" ]; then
+    for candidate in /home/imran/project/dev-os /workspace; do
+        if [ -d "${candidate}/build/includes.chroot" ]; then
+            SRC_ROOT="${candidate}"
+            break
+        fi
+    done
+fi
+if [ -n "${SRC_ROOT}" ] && [ -d "${SRC_ROOT}/build/includes.chroot" ]; then
+    CHROOT_APPS="${SRC_ROOT}/build/includes.chroot/usr/share/applications"
+    CHROOT_ICONS="${SRC_ROOT}/build/includes.chroot/usr/share/icons/hicolor/scalable/apps"
+    CHROOT_BIN="${SRC_ROOT}/build/includes.chroot/usr/local/bin"
+    CHROOT_ABOUT="${SRC_ROOT}/build/includes.chroot/etc/xdg/kcm-about-distrorc"
+    CHROOT_OS="${SRC_ROOT}/build/includes.chroot/etc/os-release"
+    IDENTITY_PY="${SRC_ROOT}/components/app_identity.py"
+else
+    CHROOT_APPS="/usr/share/applications"
+    CHROOT_ICONS="/usr/share/icons/hicolor/scalable/apps"
+    CHROOT_BIN="/usr/local/bin"
+    CHROOT_ABOUT="/etc/xdg/kcm-about-distrorc"
+    CHROOT_OS="/etc/os-release"
+    IDENTITY_PY="/usr/local/share/devos/components/app_identity.py"
+fi
 
 # 1) Icons
 install -d /usr/share/icons/hicolor/scalable/apps
-if [ -d "${CHROOT_ICONS}" ]; then
+if [ -d "${CHROOT_ICONS}" ] && [ "${CHROOT_ICONS}" != "/usr/share/icons/hicolor/scalable/apps" ]; then
     cp -a "${CHROOT_ICONS}"/devos-*.svg /usr/share/icons/hicolor/scalable/apps/ 2>/dev/null || true
 fi
 gtk-update-icon-cache -f /usr/share/icons/hicolor >/dev/null 2>&1 || true
 xdg-icon-resource forceupdate >/dev/null 2>&1 || true
 
 # 2) Desktop launchers from image tree
-if [ -d "${CHROOT_APPS}" ]; then
+if [ -d "${CHROOT_APPS}" ] && [ "${CHROOT_APPS}" != "/usr/share/applications" ]; then
     install -d /usr/share/applications
     for f in "${CHROOT_APPS}"/devos-*.desktop; do
         [ -f "$f" ] || continue
@@ -31,25 +51,35 @@ if [ -d "${CHROOT_APPS}" ]; then
     done
 fi
 
-# 3) Launch helpers
-install -m 755 "${CHROOT_BIN}/devos-run" /usr/local/bin/devos-run
+# 3) Launch helpers (skip when source path is already the live destination)
+if [ -f "${CHROOT_BIN}/devos-run" ] && [ "${CHROOT_BIN}/devos-run" != "/usr/local/bin/devos-run" ]; then
+    install -m 755 "${CHROOT_BIN}/devos-run" /usr/local/bin/devos-run
+elif [ ! -x /usr/local/bin/devos-run ]; then
+    echo "WARNING: /usr/local/bin/devos-run missing; ISO includes may be incomplete" >&2
+fi
 # Refresh wrappers that still exec python3 without -a
 for w in clipboard emoji features islamic familysafe; do
     src="${CHROOT_BIN}/devos-${w}"
     [ -f "$src" ] || continue
+    if [ "$src" = "/usr/local/bin/devos-${w}" ]; then
+        continue
+    fi
     install -m 755 "$src" "/usr/local/bin/devos-${w}"
 done
 
 # 4) Identity module
 install -d /usr/local/share/devos/components
-install -m 644 "${SRC_ROOT}/components/app_identity.py" /usr/local/share/devos/components/app_identity.py
+if [ -f "${IDENTITY_PY}" ] && [ "${IDENTITY_PY}" != "/usr/local/share/devos/components/app_identity.py" ]; then
+    install -m 644 "${IDENTITY_PY}" /usr/local/share/devos/components/app_identity.py
+fi
 
 # 5) About System / os-release branding
-if [ -f "${CHROOT_ABOUT}" ]; then
+if [ -f "${CHROOT_ABOUT}" ] && [ "${CHROOT_ABOUT}" != "/etc/xdg/kcm-about-distrorc" ]; then
     install -d /etc/xdg
     install -m 644 "${CHROOT_ABOUT}" /etc/xdg/kcm-about-distrorc
 fi
 # Force current version string even if older image file was copied earlier.
+install -d /etc/xdg
 cat > /etc/xdg/kcm-about-distrorc <<'EOF'
 [General]
 Name=DevOS
@@ -60,7 +90,7 @@ Variant=Desktop
 UseOSReleaseVersion=true
 EOF
 
-if [ -f "${CHROOT_OS}" ]; then
+if [ -f "${CHROOT_OS}" ] && [ "${CHROOT_OS}" != "/etc/os-release" ]; then
     install -m 644 "${CHROOT_OS}" /etc/os-release
     install -m 644 "${CHROOT_OS}" /usr/lib/os-release
 fi

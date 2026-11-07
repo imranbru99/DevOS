@@ -42,6 +42,52 @@ def get_chrome_profiles(config_dir=None):
     return profiles
 
 
+def get_profile_avatar_path(config_dir, profile_key, info=None):
+    """Return the on-disk Google account / profile picture for a Chrome profile."""
+    if not config_dir or not profile_key or profile_key == "guest":
+        return None
+    folder = os.path.join(config_dir, profile_key)
+    candidates = []
+    picture_name = None
+    if isinstance(info, dict):
+        picture_name = info.get("gaia_picture_file_name") or info.get("last_downloaded_gaia_picture_url_with_size")
+        if isinstance(picture_name, str) and "/" not in picture_name and picture_name.endswith((".png", ".jpg", ".jpeg", ".webp")):
+            candidates.append(os.path.join(folder, picture_name))
+    for name in (
+        "Google Profile Picture.png",
+        "Google Profile Picture.jpg",
+        "profile_picture.png",
+    ):
+        candidates.append(os.path.join(folder, name))
+    for path in candidates:
+        if path and os.path.isfile(path):
+            return path
+    return None
+
+
+def get_chrome_profile_details(config_dir=None):
+    """Map profile directory → {name, avatar} for icon generation."""
+    if not config_dir:
+        config_dir = os.path.expanduser("~/.config/google-chrome")
+    details = {}
+    local_state_file = os.path.join(config_dir, "Local State")
+    cache = {}
+    if os.path.isfile(local_state_file):
+        try:
+            with open(local_state_file, "r", encoding="utf-8") as f:
+                cache = json.load(f).get("profile", {}).get("info_cache", {}) or {}
+        except Exception:
+            cache = {}
+    profiles = get_chrome_profiles(config_dir)
+    for key, name in profiles.items():
+        info = cache.get(key) or {}
+        details[key] = {
+            "name": name,
+            "avatar": get_profile_avatar_path(config_dir, key, info),
+        }
+    return details
+
+
 def slugify(name):
     """Convert a profile name or key to a safe filename slug."""
     s = re.sub(r"[^\w\d]+", "-", name.strip().lower()).strip("-")
@@ -92,10 +138,21 @@ def get_stock_chrome_icon():
     return None
 
 
-def generate_badged_icon(name, output_48, output_128=None, base_icon=None):
+def _circle_crop(avatar, size):
+    """Return a circular RGBA avatar at the given pixel size."""
+    av = avatar.convert("RGBA").resize((size, size), Image.Resampling.LANCZOS)
+    mask = Image.new("L", (size, size), 0)
+    ImageDraw.Draw(mask).ellipse((0, 0, size - 1, size - 1), fill=255)
+    out = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    out.paste(av, (0, 0), mask)
+    return out
+
+
+def generate_badged_icon(name, output_48, output_128=None, base_icon=None, avatar_path=None):
     """
-    Render a Google Chrome icon with a bold, high-contrast banner containing the
-    profile name directly inside/on the icon at the bottom.
+    Windows-style Chrome profile icon: stock Chrome logo with the profile's
+    Google account photo as a circular badge in the lower-right corner.
+    Falls back to a short name pill when no avatar image is available.
     """
     if not base_icon or not os.path.isfile(base_icon):
         base_icon = get_stock_chrome_icon()
@@ -103,46 +160,59 @@ def generate_badged_icon(name, output_48, output_128=None, base_icon=None):
     if base_icon and os.path.isfile(base_icon):
         img = Image.open(base_icon).convert("RGBA").resize((128, 128), Image.Resampling.LANCZOS)
     else:
-        # Fallback circle if base icon is missing
         img = Image.new("RGBA", (128, 128), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
         draw.ellipse([8, 8, 120, 120], fill=(66, 133, 244, 255))
 
     draw = ImageDraw.Draw(img)
+    used_avatar = False
+    if avatar_path and os.path.isfile(avatar_path):
+        try:
+            badge_size = 56
+            ring = 4
+            badge = _circle_crop(Image.open(avatar_path), badge_size)
+            # White ring behind the photo (Windows taskbar style).
+            cx = 128 - badge_size // 2 - 4
+            cy = 128 - badge_size // 2 - 4
+            outer = badge_size + ring * 2
+            ring_img = Image.new("RGBA", (outer, outer), (0, 0, 0, 0))
+            ImageDraw.Draw(ring_img).ellipse(
+                (0, 0, outer - 1, outer - 1),
+                fill=(255, 255, 255, 245),
+            )
+            ring_img.paste(badge, (ring, ring), badge)
+            img.alpha_composite(ring_img, (cx - outer // 2, cy - outer // 2))
+            used_avatar = True
+        except Exception:
+            used_avatar = False
 
-    # Pick display text: first word, uppercase, up to 7 characters for maximum legibility
-    label = name.strip().split()[0][:7].upper()
-    bg_color = get_profile_color(name)
-
-    # Try font
-    font = None
-    for font_path in [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-        "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
-    ]:
-        if os.path.isfile(font_path):
-            try:
-                # Dynamic font size based on label length
-                font_size = 22 if len(label) <= 4 else (19 if len(label) <= 6 else 16)
-                font = ImageFont.truetype(font_path, font_size)
-                break
-            except Exception:
-                pass
-
-    # Draw bottom pill banner: [4, 76, 124, 124] (covers bottom third with rounded corners)
-    draw.rounded_rectangle(
-        [4, 76, 124, 124],
-        radius=12,
-        fill=bg_color,
-        outline=(255, 255, 255, 230),
-        width=3,
-    )
-
-    if font:
-        draw.text((64, 100), label, fill=(255, 255, 255), font=font, anchor="mm")
-    else:
-        draw.text((64, 100), label, fill=(255, 255, 255), anchor="mm")
+    if not used_avatar:
+        label = (name or "Chrome").strip().split()[0][:7].upper() or "CHROME"
+        bg_color = get_profile_color(name or "Chrome")
+        font = None
+        for font_path in [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+            "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+        ]:
+            if os.path.isfile(font_path):
+                try:
+                    font_size = 22 if len(label) <= 4 else (19 if len(label) <= 6 else 16)
+                    font = ImageFont.truetype(font_path, font_size)
+                    break
+                except Exception:
+                    pass
+        draw.rounded_rectangle(
+            [4, 76, 124, 124],
+            radius=12,
+            fill=bg_color,
+            outline=(255, 255, 255, 230),
+            width=3,
+        )
+        if font:
+            draw.text((64, 100), label, fill=(255, 255, 255), font=font, anchor="mm")
+        else:
+            draw.text((64, 100), label, fill=(255, 255, 255), anchor="mm")
 
     os.makedirs(os.path.dirname(os.path.abspath(output_48)), exist_ok=True)
     img_48 = img.resize((48, 48), Image.Resampling.LANCZOS)
@@ -237,7 +307,9 @@ def sync_all_profiles(home_dir=None):
     os.makedirs(icons_dir_128, exist_ok=True)
     os.makedirs(apps_dir, exist_ok=True)
 
-    profiles = get_chrome_profiles(os.path.join(home_dir, ".config/google-chrome"))
+    chrome_dir = os.path.join(home_dir, ".config/google-chrome")
+    details = get_chrome_profile_details(chrome_dir)
+    profiles = {k: v["name"] for k, v in details.items()}
 
     all_profiles = list(profiles.items())
     all_profiles.append(("guest", "Guest"))
@@ -274,19 +346,25 @@ Icon={icon_line}
 """)
 
     actions_str = ";".join(action_keys) + ";"
+    # Default launcher opens the first/default profile with its own WM class so
+    # Plasma/GNOME can show a separate avatar icon per profile, like Windows.
+    default_key = "Default" if "Default" in profiles else (all_profiles[0][0] if all_profiles else "Default")
+    default_name = profiles.get(default_key, "Chrome")
+    default_slug = slugify(default_name)
+    default_class = f"chrome-{default_slug}"
     common_actions = f"""Actions={actions_str}
 
 [Desktop Action new-window]
 Name=New Window
-Exec={devos_bin}
+Exec={devos_bin} --profile-directory="{default_key}" --class={default_class}
 
 [Desktop Action new-private-window]
 Name=New Incognito Window
-Exec={devos_bin} --incognito
+Exec={devos_bin} --incognito --class={default_class}
 
 [Desktop Action new-guest-window]
 Name=New Guest Window
-Exec={devos_bin} --guest
+Exec={devos_bin} --guest --class=chrome-guest
 """ + "".join(action_blocks)
 
     for key, name in all_profiles:
@@ -294,8 +372,9 @@ Exec={devos_bin} --guest
         icon_name = f"chrome-{slug}"
         icon_file_48 = os.path.join(icons_dir_48, f"{icon_name}.png")
         icon_file_128 = os.path.join(icons_dir_128, f"{icon_name}.png")
+        avatar = None if key == "guest" else (details.get(key) or {}).get("avatar")
 
-        generate_badged_icon(name, icon_file_48, icon_file_128)
+        generate_badged_icon(name, icon_file_48, icon_file_128, avatar_path=avatar)
 
         desktop_file = os.path.join(apps_dir, f"{icon_name}.desktop")
         wm_class = icon_name
@@ -322,16 +401,24 @@ Categories=Network;WebBrowser;
             f.write(content)
         created_desktops.append(desktop_file)
 
-    # Update google-chrome.desktop with all profile actions
+    # Main Chrome launcher uses the default profile's avatar + WM class so the
+    # taskbar shows the profile photo instead of a generic Chrome blob.
+    default_avatar = (details.get(default_key) or {}).get("avatar")
+    generate_badged_icon(
+        default_name,
+        os.path.join(icons_dir_48, "google-chrome.png"),
+        os.path.join(icons_dir_128, "google-chrome.png"),
+        avatar_path=default_avatar,
+    )
     user_desktop = os.path.join(home_dir, ".local/share/applications/google-chrome.desktop")
     base_content = f"""[Desktop Entry]
 Version=1.0
 Name=Google Chrome
 GenericName=Web Browser
 Comment=Access the Internet
-Exec={devos_bin} %U
+Exec={devos_bin} --profile-directory="{default_key}" --class={default_class} %U
 StartupNotify=true
-StartupWMClass=google-chrome
+StartupWMClass={default_class}
 Terminal=false
 Icon=google-chrome
 Type=Application
@@ -375,6 +462,7 @@ MimeType=application/pdf;application/rdf+xml;application/rss+xml;application/xht
 # --- X11 Window Management & Profile Watcher ---
 
 WINDOW_PROFILE_CACHE = {}
+_LAST_PLASMA_LAUNCHERS = None
 
 
 def set_window_icon(wid, icon_path_48, icon_path_128=None):
@@ -455,27 +543,61 @@ def get_x11_windows():
     return windows
 
 
-def set_window_desktop_file(wid, desktop_slug):
-    """Set _KDE_NET_WM_DESKTOP_FILE on an X11 window."""
+def set_window_desktop_file(wid, desktop_slug, home_dir=None):
+    """Point the window at a distinct .desktop so Plasma can split task icons."""
     try:
         import subprocess
-        subprocess.run(
-            ["xprop", "-id", hex(wid), "-f", "_KDE_NET_WM_DESKTOP_FILE", "8s", "-set", "_KDE_NET_WM_DESKTOP_FILE", desktop_slug],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        slug = desktop_slug if desktop_slug.endswith(".desktop") else f"{desktop_slug}.desktop"
+        home = home_dir or os.path.expanduser("~")
+        abs_desktop = os.path.join(home, ".local/share/applications", slug)
+        if not os.path.isfile(abs_desktop):
+            abs_desktop = f"/usr/share/applications/{slug}"
+        for atom, value in (
+            ("_KDE_NET_WM_DESKTOP_FILE", slug),
+            ("BAMF_DESKTOP_FILE_HINT", abs_desktop if os.path.isfile(abs_desktop) else slug),
+        ):
+            subprocess.run(
+                ["xprop", "-id", hex(wid), "-f", atom, "8s", "-set", atom, value],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
     except Exception:
         pass
 
 
 def set_window_wm_class(wid, class_name, class_inst=None):
-    """Set WM_CLASS on an X11 window."""
+    """Set a proper two-part WM_CLASS (instance + class) via XSetClassHint / xdotool."""
+    inst = (class_inst or class_name or "chrome").encode("utf-8")
+    cls = (class_name or "chrome").encode("utf-8")
+    try:
+        x11 = ctypes.CDLL("libX11.so.6")
+        x11.XOpenDisplay.restype = ctypes.c_void_p
+        disp_name = os.environ.get("DISPLAY")
+        display = x11.XOpenDisplay(disp_name.encode() if disp_name else None)
+        if display:
+            class XClassHint(ctypes.Structure):
+                _fields_ = [("res_name", ctypes.c_char_p), ("res_class", ctypes.c_char_p)]
+
+            hint = XClassHint(inst, cls)
+            x11.XSetClassHint(display, ctypes.c_ulong(wid), ctypes.byref(hint))
+            x11.XFlush(display)
+            x11.XCloseDisplay(display)
+            return
+    except Exception:
+        pass
     try:
         import subprocess
-        inst = class_inst if class_inst else class_name
         subprocess.run(
-            ["xprop", "-id", hex(wid), "-f", "WM_CLASS", "8s", "-set", "WM_CLASS", inst, class_name],
+            [
+                "xdotool",
+                "set_window",
+                "--classname",
+                inst.decode(),
+                "--class",
+                cls.decode(),
+                str(wid),
+            ],
             check=False,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -484,11 +606,139 @@ def set_window_wm_class(wid, class_name, class_inst=None):
         pass
 
 
+def _find_icontasks_general_section(text: str):
+    """Return the exact [Containments][N][Applets][M][Configuration][General] for Icon Tasks."""
+    for match in re.finditer(
+        r"(?m)^(\[Containments\]\[(\d+)\]\[Applets\]\[(\d+)\])\n",
+        text,
+    ):
+        header, cont, applet = match.group(1), match.group(2), match.group(3)
+        # Read only this applet's top-level keys until the next section.
+        start = match.end()
+        nxt = re.search(r"(?m)^\[", text[start:])
+        block = text[start: start + nxt.start()] if nxt else text[start:]
+        if re.search(r"(?m)^plugin=org\.kde\.plasma\.icontasks\s*$", block):
+            return f"[Containments][{cont}][Applets][{applet}][Configuration][General]"
+    return None
+
+
+def sync_plasma_profile_launchers(home_dir=None, active_slugs=None):
+    """
+    Pin each open Chrome profile as its own Icon Tasks launcher.
+    Plasma groups same-PID Chrome windows under one pin unless each profile
+    has a launcher entry and grouping-by-program is disabled.
+    """
+    home = home_dir or os.path.expanduser("~")
+    cfg = Path(home) / ".config/plasma-org.kde.plasma.desktop-appletsrc"
+    if not cfg.is_file():
+        return False
+    text = cfg.read_text(encoding="utf-8", errors="replace")
+    section = _find_icontasks_general_section(text)
+    if not section:
+        return False
+
+    # Undo accidental writes into other applets from older matcher bugs.
+    polluted_keys = (
+        "launchers",
+        "separateLaunchers",
+        "groupingStrategy",
+        "launchInPlace",
+        "hideActivatedLaunchers",
+    )
+
+    apps_dir = os.path.join(home, ".local/share/applications")
+    launchers = ["applications:google-chrome.desktop"]
+    seen = {"google-chrome", "work", "default"}
+    for slug in active_slugs or []:
+        slug = (slug or "").strip().lower()
+        if not slug or slug in seen:
+            continue
+        desktop = f"chrome-{slug}.desktop"
+        if not os.path.isfile(os.path.join(apps_dir, desktop)):
+            continue
+        launchers.append(f"applications:{desktop}")
+        seen.add(slug)
+
+    updates = {
+        "launchers": ",".join(launchers),
+        "separateLaunchers": "true",
+        "groupingStrategy": "0",
+        "launchInPlace": "true",
+        "hideActivatedLaunchers": "false",
+    }
+
+    parts = re.split(r"(?m)(?=^\[)", text)
+    found = False
+    out = []
+    for part in parts:
+        header = part.split("\n", 1)[0].strip()
+        if header == section:
+            found = True
+            hdr, _, rest = part.partition("\n")
+            lines = []
+            seen_keys = set()
+            for line in rest.splitlines(keepends=True):
+                key = line.split("=", 1)[0].strip() if "=" in line and not line.startswith("[") else None
+                if key in updates:
+                    lines.append(f"{key}={updates[key]}\n")
+                    seen_keys.add(key)
+                else:
+                    lines.append(line)
+            for key, value in updates.items():
+                if key not in seen_keys:
+                    lines.append(f"{key}={value}\n")
+            part = hdr + "\n" + "".join(lines)
+            if not part.endswith("\n"):
+                part += "\n"
+        elif header.endswith("[Configuration][General]") and header != section:
+            # Strip chrome launcher keys wrongly written onto spacers/etc.
+            hdr, _, rest = part.partition("\n")
+            cleaned = []
+            for line in rest.splitlines(keepends=True):
+                key = line.split("=", 1)[0].strip() if "=" in line else None
+                if key in polluted_keys:
+                    continue
+                cleaned.append(line)
+            part = hdr + "\n" + "".join(cleaned)
+            if not part.endswith("\n"):
+                part += "\n"
+        out.append(part)
+    if not found:
+        out.append(section + "\n" + "\n".join(f"{k}={v}" for k, v in updates.items()) + "\n")
+    cfg.write_text("".join(out), encoding="utf-8")
+    return True
+
+
+_LAST_PLASMA_RELOAD = 0.0
+
+
+def reload_plasmashell():
+    """Restart plasmashell so Icon Tasks picks up launcher changes (rate-limited)."""
+    global _LAST_PLASMA_RELOAD
+    now = time.time()
+    if now - _LAST_PLASMA_RELOAD < 45:
+        return False
+    _LAST_PLASMA_RELOAD = now
+    try:
+        import subprocess
+        subprocess.run(
+            ["systemctl", "--user", "reset-failed", "plasma-plasmashell.service"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        subprocess.Popen(
+            ["systemctl", "--user", "restart", "plasma-plasmashell.service"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return True
+    except Exception:
+        return False
+
+
 def set_plasma_chrome_pinned_launcher(visible=True):
-    """
-    Plasma icontasks natively handles hideActivatedLaunchers=true and launchInPlace=true.
-    We do not manipulate launchers dynamically over DBus to protect the user's pinned apps.
-    """
+    """Compatibility stub — profile pins are handled by sync_plasma_profile_launchers."""
     pass
 
 
@@ -754,7 +1004,10 @@ def apply_window_profiles(home_dir=None):
     if not home_dir:
         home_dir = os.path.expanduser("~")
 
-    profiles = get_chrome_profiles(os.path.join(home_dir, ".config/google-chrome"))
+    chrome_dir = os.path.join(home_dir, ".config/google-chrome")
+    details = get_chrome_profile_details(chrome_dir)
+    profiles = {k: v["name"] for k, v in details.items()}
+    name_to_key = {v["name"]: k for k, v in details.items()}
     windows = get_x11_windows()
 
     # Filter for real Chrome browser windows (exclude PWAs like Windows App, Maps, etc.)
@@ -769,8 +1022,18 @@ def apply_window_profiles(home_dir=None):
         if "crx_" in wc or "windows app" in title.lower() or "setting up" in title.lower():
             continue
 
-        # Must be Chrome and have "Google Chrome" in title or be an explicitly launched chrome-* window
-        if ("google-chrome" in wc or "chrome-" in wc) and ("google chrome" in title.lower() or wc.startswith("chrome-")):
+        # Match stock Chrome, DevOS wrapper (.devos-real), and per-profile classes.
+        is_chrome = (
+            "google-chrome" in wc
+            or "chrome-" in wc
+            or "google-chrome.devos-real" in wc
+        )
+        if is_chrome and (
+            "google chrome" in title.lower()
+            or wc.startswith("chrome-")
+            or "gmail" in title.lower()
+            or " - " in title
+        ):
             chrome_wins.append(w)
 
     # Clean up stale window profile cache entries
@@ -779,19 +1042,8 @@ def apply_window_profiles(home_dir=None):
         del WINDOW_PROFILE_CACHE[wid]
 
     if not chrome_wins:
-        stock_icon = get_stock_chrome_icon()
-        if stock_icon:
-            user_icon_48 = os.path.join(home_dir, ".local/share/icons/hicolor/48x48/apps/google-chrome.png")
-            user_icon_128 = os.path.join(home_dir, ".local/share/icons/hicolor/128x128/apps/google-chrome.png")
-            try:
-                if os.path.isfile(stock_icon):
-                    shutil.copyfile(stock_icon, user_icon_48)
-                    shutil.copyfile(stock_icon, user_icon_128)
-            except Exception:
-                pass
         return 0
 
-    chrome_dir = os.path.join(home_dir, ".config/google-chrome")
     prof_session_data = get_profile_session_data(chrome_dir)
 
     icons_dir_48 = os.path.join(home_dir, ".local/share/icons/hicolor/48x48/apps")
@@ -799,41 +1051,50 @@ def apply_window_profiles(home_dir=None):
 
     assigned_profiles = set()
     processed = 0
+    active_slugs = []
+    default_key = "Default" if "Default" in profiles else next(iter(profiles), "Default")
+    default_name = profiles.get(default_key, "Chrome")
+    default_slug = slugify(default_name)
 
-    for idx, w in enumerate(chrome_wins):
+    for w in chrome_wins:
         prof_name = detect_window_profile(w, profiles, home_dir, assigned_profiles, prof_session_data)
         assigned_profiles.add(prof_name)
         slug = slugify(prof_name)
+        if slug not in active_slugs:
+            active_slugs.append(slug)
+        prof_key = name_to_key.get(prof_name)
+        avatar = (details.get(prof_key) or {}).get("avatar") if prof_key else None
 
-        # Ensure badged icon for this profile exists
+        # Ensure avatar-badged icon for this profile exists / stays fresh
         prof_icon_48 = os.path.join(icons_dir_48, f"chrome-{slug}.png")
         prof_icon_128 = os.path.join(icons_dir_128, f"chrome-{slug}.png")
-        if not os.path.isfile(prof_icon_48):
-            generate_badged_icon(prof_name, prof_icon_48, prof_icon_128)
+        generate_badged_icon(prof_name, prof_icon_48, prof_icon_128, avatar_path=avatar)
 
         # Apply _NET_WM_ICON directly to window
         set_window_icon(w["id"], prof_icon_48, prof_icon_128)
 
-        if idx == 0:
-            # Primary window unifies in-place with the pinned google-chrome.desktop launcher
-            set_window_desktop_file(w["id"], "google-chrome.desktop")
-            set_window_wm_class(w["id"], "google-chrome", "Google-chrome")
-
-            # Update user's google-chrome.png to show Window 0's profile badge
-            user_icon_48 = os.path.join(icons_dir_48, "google-chrome.png")
-            user_icon_128 = os.path.join(icons_dir_128, "google-chrome.png")
+        # Every profile gets its own desktop id + WM class (Windows-style split icons).
+        # The pinned Google Chrome launcher uses the default profile's class.
+        class_name = f"chrome-{slug}"
+        set_window_wm_class(w["id"], class_name, class_name)
+        if prof_name == default_name or slug == default_slug:
+            set_window_desktop_file(w["id"], "google-chrome.desktop", home_dir=home_dir)
             try:
-                shutil.copyfile(prof_icon_48, user_icon_48)
-                shutil.copyfile(prof_icon_128, user_icon_128)
+                shutil.copyfile(prof_icon_48, os.path.join(icons_dir_48, "google-chrome.png"))
+                shutil.copyfile(prof_icon_128, os.path.join(icons_dir_128, "google-chrome.png"))
             except Exception:
                 pass
         else:
-            # Subsequent windows: separate ungrouped task items with distinct badged icons and names
-            desktop_slug = f"chrome-{slug}.desktop"
-            set_window_desktop_file(w["id"], desktop_slug)
-            set_window_wm_class(w["id"], f"chrome-{slug}", f"chrome-{slug}")
+            set_window_desktop_file(w["id"], f"chrome-{slug}.desktop", home_dir=home_dir)
 
         processed += 1
+
+    # Teach Plasma Icon Tasks about each open profile so they stop sharing one pin.
+    global _LAST_PLASMA_LAUNCHERS
+    launcher_key = tuple(active_slugs)
+    if sync_plasma_profile_launchers(home_dir, active_slugs) and launcher_key != _LAST_PLASMA_LAUNCHERS:
+        _LAST_PLASMA_LAUNCHERS = launcher_key
+        reload_plasmashell()
 
     return processed
 
