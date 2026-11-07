@@ -622,11 +622,22 @@ def _find_icontasks_general_section(text: str):
     return None
 
 
+def _is_chrome_launcher(entry: str) -> bool:
+    e = (entry or "").strip().lower()
+    return (
+        "google-chrome.desktop" in e
+        or "com.google.chrome.desktop" in e
+        or re.search(r"(^|/)chrome-[a-z0-9-]+\.desktop$", e) is not None
+        or "applications:chrome-" in e
+    )
+
+
 def sync_plasma_profile_launchers(home_dir=None, active_slugs=None):
     """
-    Pin each open Chrome profile as its own Icon Tasks launcher.
-    Plasma groups same-PID Chrome windows under one pin unless each profile
-    has a launcher entry and grouping-by-program is disabled.
+    Pin Chrome like Windows:
+    - No Chrome windows → show the pinned Google Chrome icon.
+    - Any Chrome window open → hide that pin; show only running profile icons.
+    Other pinned apps are preserved.
     """
     home = home_dir or os.path.expanduser("~")
     cfg = Path(home) / ".config/plasma-org.kde.plasma.desktop-appletsrc"
@@ -646,25 +657,46 @@ def sync_plasma_profile_launchers(home_dir=None, active_slugs=None):
         "hideActivatedLaunchers",
     )
 
-    apps_dir = os.path.join(home, ".local/share/applications")
-    launchers = ["applications:google-chrome.desktop"]
-    seen = {"google-chrome", "work", "default"}
-    for slug in active_slugs or []:
-        slug = (slug or "").strip().lower()
-        if not slug or slug in seen:
-            continue
-        desktop = f"chrome-{slug}.desktop"
-        if not os.path.isfile(os.path.join(apps_dir, desktop)):
-            continue
-        launchers.append(f"applications:{desktop}")
-        seen.add(slug)
+    # Keep every non-Chrome pin the user already had.
+    existing = []
+    m = re.search(
+        rf"(?ms)^{re.escape(section)}\n(.*?)(?=^\[|\Z)",
+        text,
+    )
+    if m:
+        for line in m.group(1).splitlines():
+            if line.startswith("launchers="):
+                existing = [x.strip() for x in line.split("=", 1)[1].split(",") if x.strip()]
+                break
+    preserved = [e for e in existing if not _is_chrome_launcher(e)]
 
+    apps_dir = os.path.join(home, ".local/share/applications")
+    active = [(s or "").strip().lower() for s in (active_slugs or []) if (s or "").strip()]
+    chrome_launchers = []
+    if active:
+        # Browser is open → do not show the idle pinned Google Chrome icon.
+        seen = set()
+        for slug in active:
+            if slug in seen or slug in {"default"}:
+                continue
+            desktop = f"chrome-{slug}.desktop"
+            if not os.path.isfile(os.path.join(apps_dir, desktop)):
+                # Work often only has google-chrome.desktop; ensure chrome-work exists via sync.
+                continue
+            chrome_launchers.append(f"applications:{desktop}")
+            seen.add(slug)
+    else:
+        # Nothing open → restore the normal pinned Chrome launcher.
+        chrome_launchers = ["applications:google-chrome.desktop"]
+
+    launchers = preserved + chrome_launchers
     updates = {
-        "launchers": ",".join(launchers),
+        "launchers": ",".join(launchers) if launchers else "applications:google-chrome.desktop",
         "separateLaunchers": "true",
         "groupingStrategy": "0",
         "launchInPlace": "true",
-        "hideActivatedLaunchers": "false",
+        # Hide a pin when its own window is running (profile pins).
+        "hideActivatedLaunchers": "true",
     }
 
     parts = re.split(r"(?m)(?=^\[)", text)
@@ -866,9 +898,80 @@ def get_ranked_active_profiles(chrome_dir, profiles):
     return ranked
 
 
+def _window_pid(wid) -> int:
+    try:
+        import subprocess
+        out = subprocess.check_output(
+            ["xprop", "-id", hex(int(wid)), "_NET_WM_PID"],
+            text=True, stderr=subprocess.DEVNULL,
+        )
+        return int(out.rsplit(None, 1)[-1])
+    except Exception:
+        return 0
+
+
+def _read_proc_cmdline(pid: int) -> str:
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as handle:
+            return handle.read().replace(b"\0", b" ").decode("utf-8", "ignore")
+    except OSError:
+        return ""
+
+
+def _cmdline_looks_guest(raw: str) -> bool:
+    text = f" {(raw or '').lower()} "
+    return (
+        " --guest " in text
+        or text.strip().endswith("--guest")
+        or "guest profile" in text
+        or "/guest profile" in text
+        or "profile-directory=guest" in text
+    )
+
+
+def _cmdline_is_guest(pid: int) -> bool:
+    """True when this Chrome process (or a close parent) is a Guest session."""
+    if not pid:
+        return False
+    seen = set()
+    cur = pid
+    for _ in range(4):
+        if not cur or cur in seen:
+            break
+        seen.add(cur)
+        if _cmdline_looks_guest(_read_proc_cmdline(cur)):
+            return True
+        try:
+            with open(f"/proc/{cur}/status", encoding="utf-8", errors="ignore") as handle:
+                for line in handle:
+                    if line.startswith("PPid:"):
+                        cur = int(line.split()[1])
+                        break
+                else:
+                    break
+        except (OSError, ValueError):
+            break
+    return False
+
+
+def _any_guest_chrome_pid() -> bool:
+    """True if any running Chrome process is a Guest session."""
+    try:
+        for name in os.listdir("/proc"):
+            if not name.isdigit():
+                continue
+            raw = _read_proc_cmdline(int(name))
+            if "chrome" in raw.lower() and _cmdline_looks_guest(raw):
+                return True
+    except OSError:
+        return False
+    return False
+
+
 def detect_window_profile(w, profiles, home_dir=None, assigned_profiles=None, prof_session_data=None):
     """
     Determine profile name from window attributes and session activity:
+    - Guest session (WM_CLASS, title, or --guest cmdline) BEFORE any avatar profile
     - Title containing profile markers like [ProfileName] or (Guest)
     - Tab title and bookmark match from profile Sessions/Session_* and Bookmarks
     - Explicit launch WM_CLASS (e.g. chrome-blog)
@@ -876,7 +979,21 @@ def detect_window_profile(w, profiles, home_dir=None, assigned_profiles=None, pr
     """
     wid = w.get("id") if isinstance(w, dict) else None
     title = w.get("title", "") if isinstance(w, dict) else str(w)
-    wm_class = w.get("wm_class", "") if isinstance(w, dict) else ""
+    wm_class = (w.get("wm_class", "") if isinstance(w, dict) else "").lower()
+
+    # Guest must win before session/title heuristics — Guest tabs are often
+    # titled only "New Tab - Google Chrome" and were wrongly getting Work's face.
+    if "chrome-guest" in wm_class or re.search(r"\bGuest\b", title or "", re.IGNORECASE):
+        if wid:
+            WINDOW_PROFILE_CACHE[wid] = "Guest"
+        return "Guest"
+    if wid and _cmdline_is_guest(_window_pid(wid)):
+        WINDOW_PROFILE_CACHE[wid] = "Guest"
+        return "Guest"
+    # Shared browser process: if a Guest Chrome is running and this window was
+    # already marked Guest, keep it. Do not steal avatars for New Tab titles.
+    if wid and WINDOW_PROFILE_CACHE.get(wid) == "Guest":
+        return "Guest"
 
     # Check for [ProfileName]
     m = re.search(r"\[([^\]]+)\]", title)
@@ -885,12 +1002,6 @@ def detect_window_profile(w, profiles, home_dir=None, assigned_profiles=None, pr
         if wid:
             WINDOW_PROFILE_CACHE[wid] = prof
         return prof
-
-    # Check for (Guest) or Guest
-    if re.search(r"\bGuest\b", title, re.IGNORECASE):
-        if wid:
-            WINDOW_PROFILE_CACHE[wid] = "Guest"
-        return "Guest"
 
     # Check profile names explicitly mentioned in title (e.g. "Work - Google Chrome")
     for p_key, p_name in profiles.items():
@@ -964,14 +1075,18 @@ def detect_window_profile(w, profiles, home_dir=None, assigned_profiles=None, pr
         return WINDOW_PROFILE_CACHE[wid]
 
     # Check wm_class if launched explicitly with --class=chrome-<slug>
+    if "chrome-guest" in wm_class:
+        if wid:
+            WINDOW_PROFILE_CACHE[wid] = "Guest"
+        return "Guest"
     for p_key, p_name in profiles.items():
         slug = slugify(p_name)
-        if f"chrome-{slug}" in wm_class.lower():
+        if f"chrome-{slug}" in wm_class:
             if wid:
                 WINDOW_PROFILE_CACHE[wid] = p_name
             return p_name
 
-    # Unassigned fallback using ranked active profiles
+    # Unassigned fallback using ranked active profiles (never invent Guest → Work)
     ranked_keys = get_ranked_active_profiles(chrome_dir, profiles)
     if assigned_profiles:
         # Pick first active profile not yet assigned to an open window
@@ -1001,6 +1116,7 @@ def apply_window_profiles(home_dir=None):
     When browser windows are open, the pinned launcher is hidden so no blank/unbadged
     icons remain. When all windows close, the pinned launcher is restored.
     """
+    global _LAST_PLASMA_LAUNCHERS
     if not home_dir:
         home_dir = os.path.expanduser("~")
 
@@ -1042,6 +1158,11 @@ def apply_window_profiles(home_dir=None):
         del WINDOW_PROFILE_CACHE[wid]
 
     if not chrome_wins:
+        # Restore the pinned Google Chrome icon when every window is closed.
+        if sync_plasma_profile_launchers(home_dir, []):
+            if _LAST_PLASMA_LAUNCHERS != ():
+                _LAST_PLASMA_LAUNCHERS = ()
+                reload_plasmashell()
         return 0
 
     prof_session_data = get_profile_session_data(chrome_dir)
@@ -1062,8 +1183,10 @@ def apply_window_profiles(home_dir=None):
         slug = slugify(prof_name)
         if slug not in active_slugs:
             active_slugs.append(slug)
-        prof_key = name_to_key.get(prof_name)
-        avatar = (details.get(prof_key) or {}).get("avatar") if prof_key else None
+        is_guest = (prof_name or "").lower() == "guest" or slug == "guest"
+        prof_key = None if is_guest else name_to_key.get(prof_name)
+        # Guest never inherits a signed-in profile photo.
+        avatar = None if is_guest else ((details.get(prof_key) or {}).get("avatar") if prof_key else None)
 
         # Ensure avatar-badged icon for this profile exists / stays fresh
         prof_icon_48 = os.path.join(icons_dir_48, f"chrome-{slug}.png")
@@ -1077,24 +1200,24 @@ def apply_window_profiles(home_dir=None):
         # The pinned Google Chrome launcher uses the default profile's class.
         class_name = f"chrome-{slug}"
         set_window_wm_class(w["id"], class_name, class_name)
-        if prof_name == default_name or slug == default_slug:
-            set_window_desktop_file(w["id"], "google-chrome.desktop", home_dir=home_dir)
+        # Always use the per-profile desktop id so the idle google-chrome pin
+        # can be removed while any Chrome window is open.
+        set_window_desktop_file(w["id"], f"chrome-{slug}.desktop", home_dir=home_dir)
+        if not is_guest and (prof_name == default_name or slug == default_slug):
             try:
                 shutil.copyfile(prof_icon_48, os.path.join(icons_dir_48, "google-chrome.png"))
                 shutil.copyfile(prof_icon_128, os.path.join(icons_dir_128, "google-chrome.png"))
             except Exception:
                 pass
-        else:
-            set_window_desktop_file(w["id"], f"chrome-{slug}.desktop", home_dir=home_dir)
 
         processed += 1
 
-    # Teach Plasma Icon Tasks about each open profile so they stop sharing one pin.
-    global _LAST_PLASMA_LAUNCHERS
+    # Teach Plasma Icon Tasks about each open profile; drop the idle Chrome pin.
     launcher_key = tuple(active_slugs)
-    if sync_plasma_profile_launchers(home_dir, active_slugs) and launcher_key != _LAST_PLASMA_LAUNCHERS:
-        _LAST_PLASMA_LAUNCHERS = launcher_key
-        reload_plasmashell()
+    if sync_plasma_profile_launchers(home_dir, active_slugs):
+        if launcher_key != _LAST_PLASMA_LAUNCHERS:
+            _LAST_PLASMA_LAUNCHERS = launcher_key
+            reload_plasmashell()
 
     return processed
 

@@ -93,7 +93,7 @@ Page {
                 Layout.fillWidth: true; implicitHeight: guidance.implicitHeight+28; radius: 12; color: "#102238"; border.color: "#1e4c71"
                 Text {
                     id: guidance; anchors.fill: parent; anchors.margins: 14; color: "#bae6fd"; font.pixelSize: 14; wrapMode: Text.WordWrap
-                    text: "The installation disk and layouts configured in the Partitions step are handled by that step and will not be erased again here. Use Erase disk there for automatic EFI + ext4 setup, or Manual partitioning for custom OS layouts. Only unmounted, writable data disks can be prepared here."
+                    text: "On Partitions, DevOS defaults to Erase disk — like Windows Setup — so the SSD/HDD you select is wiped (Windows and all partitions on that drive) and reformatted for DevOS. Other disks stay as they are. Use Manual partitioning only for dual-boot. This page is only for optional extra data drives."
                 }
             }
             RowLayout {

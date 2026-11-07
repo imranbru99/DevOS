@@ -1,16 +1,28 @@
 /* DevOS installer theme. Calamares only loads a file named stylesheet.qss;
    the old devos.qss was never read, so the installer showed stock light Qt. */
 
+/* Scenic backdrop behind stock QWidget pages (locale, keyboard, partitions…).
+   Content widgets stay on translucent cards so text remains readable. */
+QMainWindow, QDialog {
+    border-image: url(bg/04.jpg) 0 0 0 0 stretch stretch;
+    background-color: #070a12;
+}
+
 QWidget {
     font-family: "Inter", "Noto Sans", "Liberation Sans", sans-serif;
     font-size: 14px;
     color: #e2e8f0;
-    background-color: #0b0f1a;
+    background-color: transparent;
     selection-background-color: #2563eb;
     selection-color: #ffffff;
 }
 
 QLabel { background: transparent; }
+
+/* Readable panels on top of the photo background */
+QFrame#mainApp, QStackedWidget, QScrollArea > QWidget > QWidget {
+    background-color: #d9080b14;
+}
 
 /* Page titles inside widget-based steps.
    Keep Summary compact so Next/Back stay on-screen on 1366x768 laptops. */
@@ -52,15 +64,16 @@ QComboBox QAbstractItemView {
     outline: none;
 }
 
-/* Lists: keyboard layouts, disks, partitions, summary */
+/* Lists: keyboard layouts, disks, partitions, summary — solid cards over the photo */
 QListView, QTreeView, QTableView {
-    background-color: #0d1322;
-    alternate-background-color: #111a2c;
+    background-color: #e60d1322;
+    alternate-background-color: #e6111a2c;
     border: 1px solid #1e293b;
     border-radius: 12px;
     padding: 4px;
     outline: none;
 }
+
 QListView::item, QTreeView::item { padding: 6px 8px; border-radius: 6px; }
 QListView::item:selected, QTreeView::item:selected {
     background-color: #1d3a63;
@@ -79,7 +92,9 @@ QHeaderView::section {
 QRadioButton, QCheckBox { spacing: 10px; color: #e2e8f0; background: transparent; }
 
 
+/* Partition choice radios (Erase disk / Manual) sit on a frosted card */
 QGroupBox {
+    background-color: #cc0f172a;
     border: 1px solid #1e293b;
     border-radius: 12px;
     margin-top: 10px;
@@ -93,9 +108,9 @@ QScrollArea, QAbstractScrollArea {
     background: transparent;
     border: none;
 }
-QStackedWidget { background: transparent; border: none; }
-QScrollArea > QWidget > QWidget {
-    background: transparent;
+QStackedWidget {
+    background-color: #c2080b14;
+    border: none;
 }
 QScrollBar:vertical { background: transparent; width: 10px; margin: 2px; }
 QScrollBar::handle:vertical { background: #334155; border-radius: 4px; min-height: 30px; }

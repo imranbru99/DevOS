@@ -186,12 +186,48 @@ Presentation {
     }
     function onLeave() { rotator.running = false }
 
-    // Slides keep a 16:9 box in the middle; paint the area around it too,
-    // otherwise the slideshow sat in a white frame.
+    // Animated scenic backdrop behind the marketing cards (not flat text-only).
+    property var photos: ["bg/05.jpg", "bg/04.jpg", "bg/06.jpg", "bg/02.jpg", "bg/03.jpg"]
+    property int photo: 0
+
     Rectangle {
+        id: scenic
         anchors.fill: parent
         z: -1
-        color: "#0b0f1a"
+        color: "#070a12"
+        clip: true
+
+        Repeater {
+            model: presentation.photos.length
+            Image {
+                anchors.fill: parent
+                source: presentation.photos[index]
+                fillMode: Image.PreserveAspectCrop
+                opacity: index === presentation.photo ? 0.38 : 0
+                scale: index === presentation.photo ? 1.1 : 1.0
+                Behavior on opacity { NumberAnimation { duration: 1200 } }
+                SequentialAnimation on scale {
+                    running: index === presentation.photo && presentation.visible
+                    loops: Animation.Infinite
+                    NumberAnimation { from: 1.05; to: 1.14; duration: 14000; easing.type: Easing.InOutSine }
+                    NumberAnimation { to: 1.05; duration: 14000; easing.type: Easing.InOutSine }
+                }
+            }
+        }
+        Timer {
+            interval: 8000
+            running: presentation.visible
+            repeat: true
+            onTriggered: presentation.photo = (presentation.photo + 1) % presentation.photos.length
+        }
+        Rectangle {
+            anchors.fill: parent
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "#cc070a12" }
+                GradientStop { position: 0.45; color: "#88070a12" }
+                GradientStop { position: 1.0; color: "#ee070a12" }
+            }
+        }
     }
 
     Timer {
@@ -223,9 +259,13 @@ Presentation {
             anchors.fill: parent
             clip: true
             radius: 18
+            // Glass card over the animated photo so copy stays premium, not "just text"
+            color: "#b30a1020"
+            border.color: "#334155"
+            border.width: 1
             gradient: Gradient {
-                GradientStop { position: 0.0; color: "#0a1020" }
-                GradientStop { position: 1.0; color: "#120d24" }
+                GradientStop { position: 0.0; color: "#c20a1020" }
+                GradientStop { position: 1.0; color: "#c4120d24" }
             }
 
             // Accent glows that follow the slide colours
