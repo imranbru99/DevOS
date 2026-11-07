@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Service
 Name=DevOS
-Comment=DevOS dark desktop
+Comment=DevOS Desktop
 X-KDE-ServiceTypes=Plasma/LookAndFeel
 X-KDE-PluginInfo-Name=org.devos.desktop
 X-KDE-PluginInfo-Author=DevOS

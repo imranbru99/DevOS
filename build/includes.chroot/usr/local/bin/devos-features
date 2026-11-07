@@ -1,3 +1,4 @@
 #!/bin/bash
-# Add and remove DevOS apps and features. See components/features/features_cli.py.
-exec /usr/bin/python3 /usr/local/share/devos/components/features/features_cli.py "$@"
+# DevOS features launcher — process title is the app id, not python3.
+export DEVOS_DESKTOP_FILE=devos-features
+exec -a "devos-features" /usr/bin/python3 /usr/local/share/devos/components/features/features_gui.py "$@"

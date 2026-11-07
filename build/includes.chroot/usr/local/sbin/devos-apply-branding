@@ -1,107 +1,107 @@
 #!/bin/bash
-# Re-apply the DevOS name on top of the Ubuntu base.
-# Safe to run more than once: image build, apt upgrades, and the installed system.
-set -u
+# Apply DevOS app icons, desktop launchers, and OS branding (no Ubuntu/Plasma leaks).
+set -euo pipefail
 
-ensure_divert() {
-    local f="$1"
-    if ! command -v dpkg-divert >/dev/null 2>&1; then
-        return 0
-    fi
-    if dpkg-divert --list "$f" 2>/dev/null | grep -q "diversion of ${f}"; then
-        return 0
-    fi
-    dpkg-divert --local --rename --divert "${f}.ubuntu" --add "$f" >/dev/null 2>&1 || \
-        dpkg-divert --local --divert "${f}.ubuntu" --add "$f" >/dev/null 2>&1 || true
-}
-
-# Follow Ubuntu's real base version during a release upgrade. The diverted
-# upstream file is updated by base-files; never pin an installed PC to the ISO.
-base_identity=/usr/lib/os-release.ubuntu
-[ -f "$base_identity" ] || base_identity=/etc/os-release
-base_version=$(. "$base_identity" 2>/dev/null; printf '%s' "${VERSION_ID:-26.04}")
-base_codename=$(. "$base_identity" 2>/dev/null; printf '%s' "${UBUNTU_CODENAME:-${VERSION_CODENAME:-resolute}}")
-
-# Keep base-files upgrades from putting the Ubuntu name back.
-ensure_divert /usr/lib/os-release
-ensure_divert /etc/lsb-release
-ensure_divert /etc/issue
-ensure_divert /etc/issue.net
-
-mkdir -p /usr/lib /etc/default/grub.d /usr/share/plymouth/themes/devos /etc/plymouth
-
-cat > /usr/lib/os-release << EOF
-NAME="DevOS"
-VERSION="${base_version} LTS"
-ID=devos
-ID_LIKE="ubuntu debian"
-PRETTY_NAME="DevOS ${base_version} LTS"
-VERSION_ID="${base_version}"
-VERSION_CODENAME=${base_codename}
-UBUNTU_CODENAME=${base_codename}
-HOME_URL="https://github.com/imranbru99/DevOS"
-SUPPORT_URL="https://github.com/imranbru99/DevOS/issues"
-BUG_REPORT_URL="https://github.com/imranbru99/DevOS/issues"
-EOF
-ln -sfn ../usr/lib/os-release /etc/os-release
-
-cat > /etc/lsb-release << EOF
-DISTRIB_ID=DevOS
-DISTRIB_RELEASE=${base_version}
-DISTRIB_CODENAME=${base_codename}
-DISTRIB_DESCRIPTION="DevOS ${base_version} LTS"
-EOF
-
-printf '%s\n' "DevOS ${base_version} LTS \n \l" '' > /etc/issue
-printf '%s\n' "DevOS ${base_version} LTS" > /etc/issue.net
-
-cat > /etc/default/grub.d/devos.cfg << 'EOF'
-# DevOS boot-menu title. This file is read after /etc/default/grub.
-GRUB_DISTRIBUTOR="DevOS"
-GRUB_DISABLE_OS_PROBER=false
-GRUB_TIMEOUT=3
-GRUB_TIMEOUT_STYLE=menu
-GRUB_RECORDFAIL_TIMEOUT=5
-GRUB_CMDLINE_LINUX_DEFAULT="quiet splash plymouth.theme=devos"
-EOF
-
-if [ -f /etc/default/grub ] && grep -q '^GRUB_DISTRIBUTOR=' /etc/default/grub; then
-    sed -i 's|^GRUB_DISTRIBUTOR=.*|GRUB_DISTRIBUTOR="DevOS"|' /etc/default/grub
+if [ "$(id -u)" -ne 0 ]; then
+    echo "Run: sudo devos-apply-branding" >&2
+    exit 1
 fi
 
-# Keep the animated script splash. The text theme is only three dots.
+SRC_ROOT="${DEVOS_SRC:-/home/imran/project/dev-os}"
+CHROOT_APPS="${SRC_ROOT}/build/includes.chroot/usr/share/applications"
+CHROOT_ICONS="${SRC_ROOT}/build/includes.chroot/usr/share/icons/hicolor/scalable/apps"
+CHROOT_BIN="${SRC_ROOT}/build/includes.chroot/usr/local/bin"
+CHROOT_ABOUT="${SRC_ROOT}/build/includes.chroot/etc/xdg/kcm-about-distrorc"
+CHROOT_OS="${SRC_ROOT}/build/includes.chroot/etc/os-release"
 
-cat > /etc/plymouth/plymouthd.conf << 'EOF'
-[Daemon]
-Theme=devos
-ShowDelay=0
-EOF
-ln -sfn devos/devos.plymouth /usr/share/plymouth/themes/default.plymouth || true
-if command -v plymouth-set-default-theme >/dev/null 2>&1; then
-    plymouth-set-default-theme devos >/dev/null 2>&1 || true
+# 1) Icons
+install -d /usr/share/icons/hicolor/scalable/apps
+if [ -d "${CHROOT_ICONS}" ]; then
+    cp -a "${CHROOT_ICONS}"/devos-*.svg /usr/share/icons/hicolor/scalable/apps/ 2>/dev/null || true
 fi
+gtk-update-icon-cache -f /usr/share/icons/hicolor >/dev/null 2>&1 || true
+xdg-icon-resource forceupdate >/dev/null 2>&1 || true
 
-# Brand plasma icon with DevOS logo across icon themes
-if [ -f /usr/share/pixmaps/devos-logo.png ]; then
-    for size in 16 22 24 32 48 64 128 256 512; do
-        apps_dir="/usr/share/icons/hicolor/${size}x${size}/apps"
-        places_dir="/usr/share/icons/hicolor/${size}x${size}/places"
-        mkdir -p "$apps_dir" "$places_dir"
-        cp -f /usr/share/pixmaps/devos-logo.png "${apps_dir}/plasma.png" 2>/dev/null || true
-        cp -f /usr/share/pixmaps/devos-logo.png "${apps_dir}/devos-logo.png" 2>/dev/null || true
-        cp -f /usr/share/pixmaps/devos-logo.png "${places_dir}/start-here-kde.png" 2>/dev/null || true
-        cp -f /usr/share/pixmaps/devos-logo.png "${places_dir}/start-here-kde-symbolic.png" 2>/dev/null || true
-        cp -f /usr/share/pixmaps/devos-logo.png "${places_dir}/start-here.png" 2>/dev/null || true
-        cp -f /usr/share/pixmaps/devos-logo.png "${places_dir}/distributor-logo.png" 2>/dev/null || true
+# 2) Desktop launchers from image tree
+if [ -d "${CHROOT_APPS}" ]; then
+    install -d /usr/share/applications
+    for f in "${CHROOT_APPS}"/devos-*.desktop; do
+        [ -f "$f" ] || continue
+        install -m 644 "$f" "/usr/share/applications/$(basename "$f")"
     done
-    mkdir -p /usr/share/icons/hicolor/scalable/apps /usr/share/icons/hicolor/scalable/places
-    cp -f /usr/share/pixmaps/devos-logo.png /usr/share/icons/hicolor/scalable/apps/plasma.png 2>/dev/null || true
-    cp -f /usr/share/pixmaps/devos-logo.png /usr/share/icons/hicolor/scalable/apps/devos-logo.png 2>/dev/null || true
 fi
 
-# Desktop names: Files, Terminal, Settings, the "DevOS" session.
-if [ -f /usr/local/sbin/devos-debrand-desktop ]; then
-    /bin/bash /usr/local/sbin/devos-debrand-desktop || true
+# 3) Launch helpers
+install -m 755 "${CHROOT_BIN}/devos-run" /usr/local/bin/devos-run
+# Refresh wrappers that still exec python3 without -a
+for w in clipboard emoji features islamic familysafe; do
+    src="${CHROOT_BIN}/devos-${w}"
+    [ -f "$src" ] || continue
+    install -m 755 "$src" "/usr/local/bin/devos-${w}"
+done
+
+# 4) Identity module
+install -d /usr/local/share/devos/components
+install -m 644 "${SRC_ROOT}/components/app_identity.py" /usr/local/share/devos/components/app_identity.py
+
+# 5) About System / os-release branding
+if [ -f "${CHROOT_ABOUT}" ]; then
+    install -d /etc/xdg
+    install -m 644 "${CHROOT_ABOUT}" /etc/xdg/kcm-about-distrorc
+fi
+# Force current version string even if older image file was copied earlier.
+cat > /etc/xdg/kcm-about-distrorc <<'EOF'
+[General]
+Name=DevOS
+LogoPath=/usr/share/pixmaps/devos-logo.png
+Website=https://github.com/imranbru99/DevOS
+Version=26.04 LTS
+Variant=Desktop
+UseOSReleaseVersion=true
+EOF
+
+if [ -f "${CHROOT_OS}" ]; then
+    install -m 644 "${CHROOT_OS}" /etc/os-release
+    install -m 644 "${CHROOT_OS}" /usr/lib/os-release
+fi
+cat > /etc/lsb-release <<'EOF'
+DISTRIB_ID=DevOS
+DISTRIB_RELEASE=26.04
+DISTRIB_CODENAME=resolute
+DISTRIB_DESCRIPTION="DevOS 26.04 LTS"
+EOF
+
+# GRUB distributor
+if [ -f /etc/default/grub ]; then
+    sed -i 's/^GRUB_DISTRIBUTOR=.*/GRUB_DISTRIBUTOR="DevOS"/' /etc/default/grub || true
 fi
 
-exit 0
+# Hide stock Python interpreter from the app menu (devs can still run python3).
+for pydesk in /usr/share/applications/python3*.desktop; do
+    [ -f "$pydesk" ] || continue
+    install -d /usr/local/share/applications
+    cat > "/usr/local/share/applications/$(basename "$pydesk")" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Python
+Exec=python3
+NoDisplay=true
+Hidden=true
+EOF
+done
+
+# Drop stale user overrides that force generic icons / python3 Exec.
+for f in /home/*/.local/share/applications/devos-*.desktop; do
+    [ -f "$f" ] || continue
+    # Keep only intentional user customizations that aren't broken copies.
+    if grep -qE '^Icon=(edit-paste|preferences-|applications-|face-|view-|folder-|tools-|computer|fingerprint|smartphone|security-|audio-|code|backup)' "$f" \
+        || grep -qE '^Exec=(/usr/bin/)?python3 ' "$f"; then
+        rm -f "$f"
+    fi
+done
+
+# Refresh desktop database
+update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
+
+echo "DevOS branding applied: icons, launchers, About System, os-release."
+echo "Log out and back in (or restart plasmashell) to refresh taskbar icons."

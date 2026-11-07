@@ -1,0 +1,252 @@
+#!/usr/bin/env python3
+"""Keep StatusNotifier / tray icons under Plasma Status & Notifications (^).
+
+Open windows stay on the center taskbar. This only manages the system tray.
+
+Do not use plasmashell writeConfig() for hiddenItems — it breaks KConfig
+StringList matching so icons stay on the panel. Write appletsrc only, and
+restart plasmashell only when the hide-set actually gains new Ids.
+"""
+from __future__ import annotations
+
+import os
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+APPLETRC = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / (
+    "plasma-org.kde.plasma.desktop-appletsrc"
+)
+
+ALWAYS_HIDE = (
+    "org.kde.plasma.battery",
+    "org.kde.plasma.bluetooth",
+    "org.kde.plasma.clipboard",
+    "org.kde.plasma.devicenotifier",
+    "org.kde.plasma.keyboardlayout",
+    "org.kde.plasma.manage-inputmethod",
+    "org.kde.plasma.mediacontroller",
+    "org.kde.plasma.networkmanagement",
+    "org.kde.plasma.notifications",
+    "org.kde.plasma.printmanager",
+    "org.kde.plasma.cameraindicator",
+    "DevOS Optimizer",
+    "devos-optimizer",
+    "DevOS Sound",
+    "devos-sound",
+    "Sound",
+)
+
+EXTRA_ITEMS = (
+    "org.kde.plasma.bluetooth",
+    "org.kde.plasma.clipboard",
+    "org.kde.plasma.devicenotifier",
+    "org.kde.plasma.keyboardlayout",
+    "org.kde.plasma.manage-inputmethod",
+    "org.kde.plasma.mediacontroller",
+    "org.kde.plasma.networkmanagement",
+    "org.kde.plasma.notifications",
+    "org.kde.plasma.printmanager",
+    "org.kde.plasma.cameraindicator",
+)
+
+
+def _run(cmd: list[str], timeout: float = 5.0) -> str:
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        if out.returncode == 0:
+            return (out.stdout or "").strip()
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        pass
+    return ""
+
+
+def registered_tray_ids() -> list[str]:
+    ids: list[str] = []
+    bus = _run(["busctl", "--user", "list"])
+    if not bus:
+        return ids
+    for ln in bus.splitlines():
+        if "StatusNotifierItem" not in ln:
+            continue
+        service = ln.split()[0]
+        for iface in ("org.kde.StatusNotifierItem", "org.freedesktop.StatusNotifierItem"):
+            raw = _run(
+                ["busctl", "--user", "get-property", service, "/StatusNotifierItem", iface, "Id"]
+            )
+            if not raw:
+                continue
+            m = re.search(r'"([^"]+)"', raw)
+            if m and m.group(1).strip():
+                ids.append(m.group(1).strip())
+                break
+    return ids
+
+
+def desired_hidden_set() -> set[str]:
+    return set(ALWAYS_HIDE) | set(registered_tray_ids())
+
+
+def parse_list(value: str) -> set[str]:
+    return {x.strip() for x in value.split(",") if x.strip()}
+
+
+def _sections(lines: list[str]) -> list[tuple[str, int, int]]:
+    """Return list of (header, start_idx, end_idx_exclusive)."""
+    headers: list[tuple[str, int]] = []
+    for i, line in enumerate(lines):
+        if line.startswith("[") and line.rstrip().endswith("]"):
+            headers.append((line.strip(), i))
+    out: list[tuple[str, int, int]] = []
+    for i, (hdr, start) in enumerate(headers):
+        end = headers[i + 1][1] if i + 1 < len(headers) else len(lines)
+        out.append((hdr, start, end))
+    return out
+
+
+def find_tray_general(lines: list[str]) -> tuple[int, int] | None:
+    """Return (header_line_index, end_index) for systemtray [General] section."""
+    applet_hdr = None
+    for hdr, start, end in _sections(lines):
+        body = "".join(lines[start:end])
+        if "plugin=org.kde.plasma.systemtray" in body and hdr.count("[") >= 3 and "[Applets]" in hdr and hdr.endswith("]"):
+            # Exact applet section like [Containments][3][Applets][7]
+            if re.fullmatch(r"\[Containments\]\[\d+\]\[Applets\]\[\d+\]", hdr):
+                applet_hdr = hdr
+                break
+    if not applet_hdr:
+        return None
+    general = applet_hdr + "[General]"
+    for hdr, start, end in _sections(lines):
+        if hdr == general:
+            return start, end
+    return None
+
+
+def read_policy(lines: list[str]) -> tuple[set[str], bool, str]:
+    loc = find_tray_general(lines)
+    if not loc:
+        return set(), True, ""
+    start, end = loc
+    hidden: set[str] = set()
+    show_all = False
+    shown = ""
+    for line in lines[start + 1 : end]:
+        if line.startswith("hiddenItems="):
+            hidden = parse_list(line.split("=", 1)[1])
+        elif line.startswith("showAllItems="):
+            show_all = line.split("=", 1)[1].strip().lower() in ("true", "1", "yes")
+        elif line.startswith("shownItems="):
+            shown = line.split("=", 1)[1].strip()
+    return hidden, show_all, shown
+
+
+def write_policy(lines: list[str], hidden: set[str]) -> list[str]:
+    hidden_csv = ",".join(sorted(hidden))
+    extra = ",".join(EXTRA_ITEMS)
+    body = [
+        "showAllItems=false\n",
+        f"extraItems={extra}\n",
+        f"hiddenItems={hidden_csv}\n",
+        f"knownItems={extra}\n",
+        "pin=false\n",
+        "shownItems=\n",
+    ]
+    loc = find_tray_general(lines)
+    if loc:
+        start, end = loc
+        header = lines[start]
+        return lines[:start] + [header if header.endswith("\n") else header + "\n"] + body + lines[end:]
+
+    # Insert General after systemtray applet section
+    for hdr, start, end in _sections(lines):
+        chunk = "".join(lines[start:end])
+        if "plugin=org.kde.plasma.systemtray" in chunk and re.fullmatch(
+            r"\[Containments\]\[\d+\]\[Applets\]\[\d+\]", hdr
+        ):
+            general = hdr + "[General]\n"
+            return lines[:end] + [general] + body + lines[end:]
+    return lines
+
+
+def plasmashell_up() -> bool:
+    return "up" in _run(
+        [
+            "qdbus6",
+            "org.kde.plasmashell",
+            "/PlasmaShell",
+            "org.kde.PlasmaShell.evaluateScript",
+            'print("up")',
+        ]
+    )
+
+
+def restart_plasmashell() -> None:
+    subprocess.run(
+        ["systemctl", "--user", "restart", "plasma-plasmashell.service"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    for _ in range(25):
+        if plasmashell_up():
+            return
+        time.sleep(0.4)
+
+
+def once(restart_if_changed: bool = True) -> int:
+    try:
+        if not APPLETRC.is_file():
+            print("DevOS: no plasma appletsrc yet.")
+            return 0
+        raw = APPLETRC.read_text(encoding="utf-8", errors="replace")
+        lines = raw.splitlines(keepends=True)
+        want = desired_hidden_set()
+        have, show_all, shown = read_policy(lines)
+        if want.issubset(have) and not show_all and not shown:
+            print("DevOS: tray overflow policy already applied.")
+            return 0
+        new_lines = write_policy(lines, have | want)
+        new_raw = "".join(new_lines)
+        if new_raw != raw:
+            APPLETRC.write_text(new_raw, encoding="utf-8")
+        if restart_if_changed and (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+            restart_plasmashell()
+            print("DevOS: tray icons moved under Status & Notifications (^).")
+        else:
+            print("DevOS: tray overflow config updated (restart plasmashell to apply).")
+    except Exception as exc:
+        print(f"DevOS: tray overflow update skipped: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def watch(interval: float = 25.0) -> int:
+    once(restart_if_changed=True)
+    seen = set(registered_tray_ids())
+    while True:
+        try:
+            ids = set(registered_tray_ids())
+            if ids - seen:
+                once(restart_if_changed=True)
+                seen |= ids
+        except Exception as exc:
+            print(f"DevOS: tray overflow watch tick failed: {exc}", file=sys.stderr)
+        time.sleep(interval)
+
+
+def main(argv: list[str] | None = None) -> int:
+    if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        return 0
+    args = list(sys.argv[1:] if argv is None else argv)
+    if args and args[0] == "--watch":
+        return watch()
+    if args and args[0] == "--write-only":
+        return once(restart_if_changed=False)
+    return once(restart_if_changed=True)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -15,7 +15,40 @@ from typing import List, Dict, Any
 from hardware_detector import HardwareDetector
 
 
-MODELS_DIR = os.environ.get("DEVOS_MODELS_DIR", os.path.expanduser("~/.local/share/DevOS/models"))
+def _default_models_dir() -> str:
+    """Prefer a secondary data drive (D:) so C: stays free for the OS."""
+    env = os.environ.get("DEVOS_MODELS_DIR")
+    if env:
+        return env
+    home = os.path.expanduser("~")
+    home_name = os.path.basename(home)
+    try:
+        home_dev = os.stat(home).st_dev
+    except OSError:
+        home_dev = None
+    for base in (os.path.join("/run/media", home_name), os.path.join("/media", home_name)):
+        if not os.path.isdir(base):
+            continue
+        try:
+            names = sorted(os.listdir(base))
+        except OSError:
+            continue
+        for name in names:
+            root = os.path.join(base, name)
+            try:
+                st = os.stat(root)
+            except OSError:
+                continue
+            if home_dev is not None and st.st_dev == home_dev:
+                continue
+            data = os.path.join(root, "data")
+            pick = data if os.path.isdir(data) and os.access(data, os.W_OK) else root
+            if os.access(pick, os.W_OK):
+                return os.path.join(pick, "DevOS", "models")
+    return os.path.join(home, ".local", "share", "DevOS", "models")
+
+
+MODELS_DIR = _default_models_dir()
 
 # Upstream HuggingFace GGUF direct URLs (Quantized 4-bit)
 HF_RESOLVE_BASE = "https://huggingface.co"
@@ -45,6 +78,8 @@ KNOWN_MODELS = {
 
 
 def ensure_models_dir() -> str:
+    global MODELS_DIR
+    MODELS_DIR = _default_models_dir()
     os.makedirs(MODELS_DIR, exist_ok=True)
     return MODELS_DIR
 

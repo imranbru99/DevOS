@@ -1,5 +1,10 @@
 module DevOS
 ApplicationWindow 2.15 ApplicationWindow.qml
 Button 2.15 Button.qml
+ToolButton 2.15 ToolButton.qml
 TextField 2.15 TextField.qml
+Label 2.15 Label.qml
+Control 2.15 Control.qml
+Pane 2.15 Pane.qml
+Frame 2.15 Frame.qml
 import QtQuick.Controls.Basic auto

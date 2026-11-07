@@ -30,6 +30,7 @@ from PyQt5.QtWidgets import (
     QRadioButton,
     QButtonGroup,
     QCheckBox,
+    QComboBox,
     QFrame,
     QFileDialog,
     QMessageBox,
@@ -42,6 +43,19 @@ from editor import VideoEditor
 from media_edit import finalize_capture
 
 SCREENCASTS_DIR = os.path.expanduser("~/Videos/Screencasts")
+
+# Shared mic defaults (workspace + installed component paths)
+for _audio_root in (
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."),
+    "/usr/local/share/devos/components",
+    os.path.expanduser("~/project/dev-os/components"),
+):
+    if _audio_root not in sys.path and os.path.isdir(os.path.join(_audio_root, "audio")):
+        sys.path.insert(0, _audio_root)
+try:
+    from audio import mic_defaults as _mic
+except Exception:  # pragma: no cover - fallback when package missing
+    _mic = None
 
 
 def get_app_icon() -> QIcon:
@@ -84,7 +98,12 @@ def get_default_monitor_sink() -> Optional[str]:
 
 
 def get_default_mic_name() -> str:
-    """Retrieve the human-readable description of the active microphone source."""
+    """Human-readable label for the active / preferred microphone."""
+    if _mic:
+        try:
+            return _mic.get_default_mic_label()
+        except Exception:
+            pass
     try:
         src = subprocess.check_output(["pactl", "get-default-source"], text=True, timeout=2).strip()
         out = subprocess.check_output(["pactl", "list", "sources"], text=True, timeout=2)
@@ -99,6 +118,23 @@ def get_default_mic_name() -> str:
     except Exception:
         pass
     return "Microphone"
+
+
+def get_selected_mic_source(widget=None) -> Optional[str]:
+    """PipeWire source name for the mic the user picked (or system default)."""
+    if widget is not None and hasattr(widget, "mic_combo"):
+        data = widget.mic_combo.currentData()
+        if data:
+            return data
+    if _mic:
+        try:
+            return _mic.get_default_source()
+        except Exception:
+            pass
+    try:
+        return subprocess.check_output(["pactl", "get-default-source"], text=True, timeout=2).strip() or None
+    except Exception:
+        return None
 
 
 def play_chime():
@@ -151,15 +187,43 @@ class MicTestThread(QThread):
     status_signal = pyqtSignal(str, str)
     finished_signal = pyqtSignal()
 
+    def __init__(self, device: Optional[str] = None, parent=None):
+        super().__init__(parent)
+        self.device = device
+
     def run(self):
+        device = self.device
+        if _mic:
+            try:
+                if device:
+                    _mic.prefer_source(device, make_system_default=True)
+                else:
+                    _mic.apply_preferred_source()
+                    device = _mic.get_default_source()
+                _mic.ensure_source_ready(device)
+            except Exception:
+                pass
+
         fd, test_wav = tempfile.mkstemp(prefix="devos-mic-test-", suffix=".wav")
         os.close(fd)
-        self.status_signal.emit("🎙️ Speak now (listening 3s)...", "#f59e0b")
+        label = device or "default"
+        self.status_signal.emit(f"🎙️ Speak now (listening 3s on {label.split('.')[-1]})...", "#f59e0b")
         try:
-            if shutil.which("pw-record"):
-                proc = subprocess.Popen(["pw-record", "--channels=1", "--rate=48000", test_wav])
+            if shutil.which("parecord"):
+                cmd = ["parecord", "--channels=1", "--rate=48000", "--file-format=wav"]
+                if device:
+                    cmd.append("--device=" + device)
+                cmd.append(test_wav)
+            elif shutil.which("pw-record"):
+                cmd = ["pw-record", "--channels=1", "--rate=48000"]
+                if device:
+                    cmd.extend(["--target", device])
+                cmd.append(test_wav)
             else:
-                proc = subprocess.Popen(["parecord", "--channels=1", "--rate=48000", "--file-format=wav", test_wav])
+                self.status_signal.emit("⚠️ No recorder tool (parecord/pw-record) installed", "#ef4444")
+                self.finished_signal.emit()
+                return
+            proc = subprocess.Popen(cmd)
             time.sleep(3.0)
             proc.send_signal(signal.SIGINT)
             proc.wait(timeout=2.0)
@@ -167,6 +231,7 @@ class MicTestThread(QThread):
             pass
 
         has_sound = False
+        peak = 0
         if os.path.isfile(test_wav) and os.path.getsize(test_wav) > 1000:
             try:
                 with wave.open(test_wav, "rb") as wf:
@@ -182,16 +247,24 @@ class MicTestThread(QThread):
             if has_sound:
                 self.status_signal.emit("🔊 Playing back your voice...", "#38bdf8")
                 subprocess.run(["paplay", test_wav], check=False)
-                self.status_signal.emit("✅ Microphone working!", "#4ade80")
+                self.status_signal.emit("✅ Microphone working! Saved as system default for calls & apps.", "#4ade80")
+                if _mic and device:
+                    try:
+                        _mic.prefer_source(device, make_system_default=True)
+                    except Exception:
+                        pass
             else:
-                self.status_signal.emit("⚠️ Pure silence recorded: check physical mic mute button/gain knob", "#ef4444")
+                self.status_signal.emit(
+                    "⚠️ Mic found but silent (peak 0). Unmute the hardware button, then click Fix Mic.",
+                    "#ef4444",
+                )
 
             try:
                 os.remove(test_wav)
             except Exception:
                 pass
         else:
-            self.status_signal.emit("⚠️ No audio detected from input device", "#ef4444")
+            self.status_signal.emit("⚠️ Could not open the input device — pick another mic or click Fix Mic", "#ef4444")
 
         self.finished_signal.emit()
 
@@ -428,8 +501,17 @@ class DevOSRecorder(QWidget):
         self.radio_mute.toggled.connect(self.on_audio_mode_changed)
 
         audio_layout.addWidget(self.radio_mic)
+        self.mic_combo = QComboBox()
+        self.mic_combo.setMinimumHeight(28)
+        self.mic_combo.setStyleSheet(
+            "QComboBox { background:#0f172a; color:#e2e8f0; border:1px solid #334155; "
+            "border-radius:6px; padding:2px 8px; font-size:11px; }"
+        )
+        self.mic_combo.currentIndexChanged.connect(self.on_mic_device_changed)
+        audio_layout.addWidget(self.mic_combo)
         audio_layout.addWidget(self.radio_system)
         audio_layout.addWidget(self.radio_mute)
+        self.refresh_mic_devices()
 
         # Audio Test Row
         test_row = QHBoxLayout()
@@ -459,6 +541,27 @@ class DevOSRecorder(QWidget):
         """)
         self.btn_test_audio.clicked.connect(self.test_audio)
         test_row.addWidget(self.btn_test_audio)
+
+        self.btn_fix_mic = QPushButton("🔧 Fix Mic")
+        self.btn_fix_mic.setCursor(Qt.PointingHandCursor)
+        self.btn_fix_mic.setFixedHeight(28)
+        self.btn_fix_mic.setToolTip(
+            "Unmute, raise gain, set this mic as the system default for calls and all apps"
+        )
+        self.btn_fix_mic.setStyleSheet("""
+            QPushButton {
+                background-color: #1e293b;
+                color: #fbbf24;
+                border: 1px solid #334155;
+                border-radius: 6px;
+                padding: 3px 10px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QPushButton:hover { background-color: #334155; }
+        """)
+        self.btn_fix_mic.clicked.connect(self.fix_microphone)
+        test_row.addWidget(self.btn_fix_mic)
 
         self.lbl_audio_test_status = QLabel("")
         self.lbl_audio_test_status.setStyleSheet("font-size: 11px; color: #94a3b8;")
@@ -601,14 +704,98 @@ class DevOSRecorder(QWidget):
         shortcuts_info.setStyleSheet("color: #475569; font-size: 11px;")
         layout.addWidget(shortcuts_info)
 
+    def refresh_mic_devices(self):
+        """Populate the mic dropdown from PipeWire and restore the saved preference."""
+        if not hasattr(self, "mic_combo"):
+            return
+        current = self.mic_combo.currentData()
+        self.mic_combo.blockSignals(True)
+        self.mic_combo.clear()
+        sources = []
+        preferred = None
+        if _mic:
+            try:
+                sources = _mic.list_input_sources()
+                preferred = (_mic.find_preferred_source(sources) or {}).get("name")
+                if not preferred:
+                    preferred = _mic.get_default_source()
+            except Exception:
+                sources = []
+        if not sources:
+            # Minimal fallback via pactl short list
+            try:
+                out = subprocess.check_output(["pactl", "list", "short", "sources"], text=True, timeout=3)
+                for line in out.splitlines():
+                    parts = line.split("\t")
+                    if len(parts) >= 2 and not parts[1].endswith(".monitor"):
+                        sources.append({"name": parts[1], "description": parts[1], "is_usb": "usb" in parts[1]})
+            except Exception:
+                pass
+        select = preferred or current
+        for src in sources:
+            label = _mic.format_source_choice(src) if _mic else (src.get("description") or src["name"])
+            self.mic_combo.addItem(label, src["name"])
+            if select and src["name"] == select:
+                self.mic_combo.setCurrentIndex(self.mic_combo.count() - 1)
+        if self.mic_combo.count() == 0:
+            self.mic_combo.addItem("No microphone detected", "")
+        self.mic_combo.blockSignals(False)
+        mic_name = self.mic_combo.currentText() or get_default_mic_name()
+        self.radio_mic.setText(f"🎙️  Microphone ({mic_name})")
+
+    def on_mic_device_changed(self, *_args):
+        name = self.mic_combo.currentData()
+        label = self.mic_combo.currentText() or "Microphone"
+        self.radio_mic.setText(f"🎙️  Microphone ({label})")
+        if name and _mic:
+            try:
+                _mic.prefer_source(name, make_system_default=True)
+            except Exception:
+                pass
+        self.refresh_meter()
+
+    def fix_microphone(self):
+        """Heal mute/gain and lock this mic as the system default for every app."""
+        self.refresh_mic_devices()
+        name = get_selected_mic_source(self)
+        if not name:
+            self.update_audio_test_status("⚠️ No microphone available", "#ef4444")
+            return
+        if _mic:
+            try:
+                _mic.prefer_source(name, make_system_default=True)
+                heal = _mic.ensure_source_ready(name)
+                self.update_audio_test_status(
+                    f"✅ Default mic set for all apps · unmute={heal.get('unmuted')} volume={heal.get('volume')}",
+                    "#4ade80",
+                )
+            except Exception as exc:
+                self.update_audio_test_status(f"⚠️ Fix failed: {exc}", "#ef4444")
+                return
+        else:
+            try:
+                subprocess.run(["pactl", "set-default-source", name], check=False, timeout=3)
+                subprocess.run(["pactl", "set-source-mute", name, "0"], check=False, timeout=3)
+                subprocess.run(["pactl", "set-source-volume", name, "100%"], check=False, timeout=3)
+                self.update_audio_test_status("✅ Mic unmuted and set as system default", "#4ade80")
+            except Exception as exc:
+                self.update_audio_test_status(f"⚠️ Fix failed: {exc}", "#ef4444")
+        self.radio_mic.setChecked(True)
+        self.chk_listen.setChecked(True)
+        self.refresh_meter()
+
     def on_audio_mode_changed(self):
-        mic_name = get_default_mic_name()
+        mic_name = self.mic_combo.currentText() if hasattr(self, "mic_combo") else get_default_mic_name()
         has_ffmpeg = shutil.which("ffmpeg") is not None
+        if hasattr(self, "mic_combo"):
+            self.mic_combo.setEnabled(self.radio_mic.isChecked())
+        if hasattr(self, "btn_fix_mic"):
+            self.btn_fix_mic.setEnabled(self.radio_mic.isChecked())
         if self.radio_mic.isChecked():
             self.radio_mic.setText(f"🎙️  Microphone ({mic_name})")
             self.btn_test_audio.setText("🎙️ Test Microphone")
             self.btn_test_audio.setEnabled(True)
-            self.btn_test_audio.setToolTip("Record 2 seconds and play it back to check mic levels")
+            self.btn_test_audio.setToolTip("Record 3 seconds and play it back; saves working mic as system default")
             if not self.chk_listen.isChecked():
                 if not has_ffmpeg:
                     self.lbl_level.setText(f"Detected: {mic_name} • ⚠️ Run 'sudo apt install ffmpeg' to merge audio")
@@ -655,11 +842,14 @@ class DevOSRecorder(QWidget):
             return
         mode = self.get_selected_audio_mode()
         if mode != "mute" and (self.recording or self.chk_listen.isChecked()):
-            device = get_default_monitor_sink() if mode == "system" else None
-            if mode == "system" and not device:
-                self.meter.stop()
-                self.lbl_level.setText("System audio source unavailable")
-                return
+            if mode == "system":
+                device = get_default_monitor_sink()
+                if not device:
+                    self.meter.stop()
+                    self.lbl_level.setText("System audio source unavailable")
+                    return
+            else:
+                device = get_selected_mic_source(self)
             self.meter.start(device)
         else:
             self.meter.stop()
@@ -752,10 +942,19 @@ class DevOSRecorder(QWidget):
     def test_audio(self):
         if self.radio_mic.isChecked():
             self.btn_test_audio.setEnabled(False)
-            self.chk_listen.setChecked(True)
-            self.test_thread = MicTestThread()
+            # Stop the live meter so the test capture owns the device cleanly
+            if hasattr(self, "meter"):
+                self.meter.stop()
+            device = get_selected_mic_source(self)
+            self.test_thread = MicTestThread(device=device)
             self.test_thread.status_signal.connect(self.update_audio_test_status)
-            self.test_thread.finished_signal.connect(lambda: self.btn_test_audio.setEnabled(True))
+
+            def _after():
+                self.btn_test_audio.setEnabled(True)
+                self.chk_listen.setChecked(True)
+                self.refresh_meter()
+
+            self.test_thread.finished_signal.connect(_after)
             self.test_thread.start()
         elif self.radio_system.isChecked():
             self.btn_test_audio.setEnabled(False)
@@ -841,18 +1040,38 @@ class DevOSRecorder(QWidget):
         if audio_mode in ("mic", "system"):
             fd, self.temp_audio_file = tempfile.mkstemp(prefix="devos-audio-", suffix=".wav")
             os.close(fd)
-            if audio_mode == "mic" and shutil.which("pw-record"):
-                cmd = ["pw-record", "--channels=1", "--rate=48000", self.temp_audio_file]
+            if audio_mode == "mic":
+                mic = get_selected_mic_source(self)
+                if _mic and mic:
+                    try:
+                        _mic.prefer_source(mic, make_system_default=True)
+                        _mic.ensure_source_ready(mic)
+                    except Exception:
+                        pass
+                if shutil.which("parecord"):
+                    cmd = ["parecord", "--channels=1", "--rate=48000", "--file-format=wav"]
+                    if mic:
+                        cmd.append("--device=" + mic)
+                    cmd.append(self.temp_audio_file)
+                elif shutil.which("pw-record"):
+                    cmd = ["pw-record", "--channels=1", "--rate=48000"]
+                    if mic:
+                        cmd.extend(["--target", mic])
+                    cmd.append(self.temp_audio_file)
+                else:
+                    os.unlink(self.temp_audio_file)
+                    self.temp_audio_file = None
+                    self.lbl_subtext.setText("No audio recorder available (install pulseaudio-utils).")
+                    return
             else:
                 cmd = ["parecord", "--channels=1", "--rate=48000", "--file-format=wav"]
-                if audio_mode == "system":
-                    monitor = get_default_monitor_sink()
-                    if not monitor:
-                        os.unlink(self.temp_audio_file)
-                        self.temp_audio_file = None
-                        self.lbl_subtext.setText("System audio source unavailable. Choose a working audio source.")
-                        return
-                    cmd.extend(["-d", monitor, "--channels=2"])
+                monitor = get_default_monitor_sink()
+                if not monitor:
+                    os.unlink(self.temp_audio_file)
+                    self.temp_audio_file = None
+                    self.lbl_subtext.setText("System audio source unavailable. Choose a working audio source.")
+                    return
+                cmd.extend(["-d", monitor, "--channels=2"])
                 cmd.append(self.temp_audio_file)
             try:
                 self.audio_proc = subprocess.Popen(cmd)

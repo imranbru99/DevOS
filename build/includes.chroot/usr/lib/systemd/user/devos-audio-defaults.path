@@ -1,0 +1,11 @@
+[Unit]
+Description=DevOS — watch PipeWire runtime for new audio devices
+
+[Path]
+# When PipeWire socket appears / refreshes after plug-in
+PathExists=/run/user/%U/pipewire-0
+PathChanged=/run/user/%U/pipewire-0
+Unit=devos-audio-defaults.service
+
+[Install]
+WantedBy=default.target

@@ -4,7 +4,8 @@ Comment=Universal Installer for Windows, Linux, and Android Applications
 Exec=/usr/local/bin/devos-open-app %f
 Icon=devos-apphub
 Terminal=false
-Type=Application
+Type=ApplicationStartupWMClass=devos-apphub
+
 MimeType=application/vnd.android.package-archive;application/vnd.debian.binary-package;application/vnd.appimage;
 Categories=System;PackageManager;
 StartupNotify=true

@@ -3,7 +3,7 @@ Type=Application
 Name=DevOS Optimizer
 GenericName=Clean up and speed up
 Comment=Free disk space and find apps that are holding memory
-Exec=/usr/bin/python3 /usr/local/share/devos/components/optimizer/optimizer.py --cleanup
+Exec=/usr/local/bin/devos-run --desktop=devos-optimizer --name="DevOS Optimizer" /usr/local/share/devos/components/optimizer/optimizer.py --cleanup
 Icon=devos-optimizer
 Terminal=false
 Categories=System;Utility;

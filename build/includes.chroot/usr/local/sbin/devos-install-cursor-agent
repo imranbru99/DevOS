@@ -1,0 +1,59 @@
+#!/bin/bash
+# Install Cursor Agent CLI system-wide for DevOS (agent / cursor-agent).
+# Uses the official Cursor Lab package; installs under /usr/local so every user
+# can launch it from the AI Pipeline and the Start menu.
+set -euo pipefail
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "Run: sudo devos-install-cursor-agent" >&2
+    exit 1
+fi
+
+if [ -x /usr/local/bin/cursor-agent ]; then
+    echo "Cursor Agent is already installed."
+    /usr/local/bin/cursor-agent --version 2>/dev/null || true
+    exit 0
+fi
+
+OS="$(uname -s)"
+case "${OS}" in
+    Linux*) OS="linux" ;;
+    *) echo "Unsupported OS: ${OS}" >&2; exit 1 ;;
+esac
+
+ARCH="$(uname -m)"
+case "${ARCH}" in
+    x86_64|amd64) ARCH="x64" ;;
+    arm64|aarch64) ARCH="arm64" ;;
+    *) echo "Unsupported architecture: ${ARCH}" >&2; exit 1 ;;
+esac
+
+# Prefer an explicit version pin; fall back to the known Lab channel package.
+VERSION="${DEVOS_CURSOR_AGENT_VERSION:-2026.11.05-86047df}"
+URL="${DEVOS_CURSOR_AGENT_URL:-https://downloads.cursor.com/lab/${VERSION}/${OS}/${ARCH}/agent-cli-package.tar.gz}"
+
+TMP="$(mktemp -d)"
+trap 'rm -rf "${TMP}"' EXIT
+
+echo "Downloading Cursor Agent (${VERSION})..."
+curl -fL --retry 3 -o "${TMP}/agent.tgz" "${URL}"
+
+DEST="/usr/local/share/cursor-agent/versions/${VERSION}"
+rm -rf "${DEST}"
+mkdir -p "${DEST}"
+tar --strip-components=1 -xzf "${TMP}/agent.tgz" -C "${DEST}"
+
+if [ ! -x "${DEST}/cursor-agent" ]; then
+    echo "Package did not contain cursor-agent." >&2
+    exit 1
+fi
+
+ln -sfn "${DEST}/cursor-agent" /usr/local/bin/cursor-agent
+ln -sfn "${DEST}/cursor-agent" /usr/local/bin/agent
+
+# Keep a user-local symlink for tools that expect ~/.local/bin (skel for new users).
+install -d /etc/skel/.local/bin
+ln -sfn /usr/local/bin/cursor-agent /etc/skel/.local/bin/cursor-agent
+ln -sfn /usr/local/bin/agent /etc/skel/.local/bin/agent
+
+echo "Cursor Agent installed: $(/usr/local/bin/cursor-agent --version 2>/dev/null || echo ok)"

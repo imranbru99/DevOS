@@ -78,6 +78,25 @@ def test_devos_cli_help(capsys):
     assert "sound" in captured.out
 
 
+def test_devos_cli_smooth_dispatches_responsiveness():
+    smooth_script = os.path.join(COMPONENTS_DIR, "optimizer", "responsiveness.py")
+    assert os.path.isfile(smooth_script)
+    with patch.object(sys, "argv", ["devos", "smooth", "status"]):
+        with patch("subprocess.run") as run:
+            run.return_value.returncode = 0
+            with pytest.raises(SystemExit) as exc:
+                main()
+            assert exc.value.code == 0
+    run.assert_called_once()
+    assert run.call_args[0][0] == [sys.executable, smooth_script, "status"]
+
+
+def test_command_catalog_includes_smooth():
+    assert "smooth" in COMMAND_CATALOG
+    path = os.path.join(COMPONENTS_DIR, "optimizer", "responsiveness.py")
+    assert os.path.isfile(path)
+
+
 def test_devos_cli_unknown_subsystem(capsys):
     # Non-interactive mode should output suggestions
     with patch.object(sys, "argv", ["devos", "scren"]):

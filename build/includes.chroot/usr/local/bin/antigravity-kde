@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Antigravity Studio (KDE Edition) - 100% Isolated Independent AI Agent Instance
+# Antigravity Studio (KDE Edition) - isolated AI agent instance with shared extensions.
+# Profile/data stay separate; extensions reuse the primary Antigravity install when present
+# (old/shared extensions dir) instead of an empty per-KDE extensions tree.
 set -e
 
 IDE_BIN=""
@@ -24,8 +26,27 @@ export GEMINI_APP_DATA_DIR="antigravity-kde"
 # Bypass host GNOME Keyring in language server to ensure full auth/session segregation
 export SSH_CLIENT="127.0.0.1 0 0"
 
-# Ensure isolated directories exist
-mkdir -p "$HOME/.antigravity-kde/extensions"
+# Prefer the primary Antigravity extensions (shared / "old") when available.
+# Fall back to the KDE-specific dir only when nothing else exists.
+SHARED_EXT=""
+for candidate in \
+    "${HOME}/.antigravity/extensions" \
+    "${HOME}/.config/Antigravity/extensions" \
+    "${HOME}/.vscode/extensions"
+do
+    if [ -d "$candidate" ]; then
+        SHARED_EXT="$candidate"
+        break
+    fi
+done
+
+KDE_EXT="${HOME}/.antigravity-kde/extensions"
+mkdir -p "$KDE_EXT"
+if [ -n "$SHARED_EXT" ]; then
+    EXT_DIR="$SHARED_EXT"
+else
+    EXT_DIR="$KDE_EXT"
+fi
 
 # Remove any stale timeout marker from previous tests
 rm -f "$HOME/.gemini/cache/antigravity-keyring-unavailable"
@@ -35,7 +56,7 @@ exec "$IDE_BIN" \
     --no-sandbox \
     --password-store=basic \
     --user-data-dir="${HOME}/.config/Antigravity-KDE" \
-    --extensions-dir="${HOME}/.antigravity-kde/extensions" \
+    --extensions-dir="${EXT_DIR}" \
     --class=antigravity-ide \
     --name=antigravity-ide \
     "$@"

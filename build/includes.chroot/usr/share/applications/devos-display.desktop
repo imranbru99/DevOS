@@ -3,10 +3,11 @@ Version=1.0
 Name=Display Settings
 GenericName=Screen Resolution & Display
 Comment=Change screen resolution, refresh rate, and layout scaling
-Exec=devos-display
-Icon=preferences-desktop-display
+Exec=/usr/local/bin/devos-display
+Icon=devos-display
 Terminal=false
-Type=Application
+Type=ApplicationStartupWMClass=devos-display
+
 Categories=Settings;HardwareSettings;DesktopSettings;Qt;
 Keywords=display;screen;resolution;monitor;scale;1080p;tv;
 StartupNotify=true

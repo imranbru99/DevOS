@@ -169,12 +169,20 @@ delivery contract. Check `devos features list` on the installed system for state
 
 | Feature ID | Feature | Delivery / requirement |
 |---|---|---|
+| `antigravity` | Google Antigravity AI | `devos-install-antigravity` (+ `/opt/antigravity` or cache tarball); first AI Pipeline slot |
+| `antigravity-kde` | Antigravity KDE (Studio) | `devos-install-antigravity-kde`; second isolated pipeline slot |
+| `cursor` | Cursor AI Code Editor | Download from Flathub (`com.cursor.Cursor`); catalog recommends 4 GB RAM |
+| `cursor-agent` | Cursor Agent | `devos-install-cursor-agent` (official Cursor Lab CLI → `/usr/local/bin/cursor-agent`) |
+| `chatgpt` | ChatGPT Desktop & Coding Agent | Download from Flathub |
+| `claude` | Claude Desktop | Download from Flathub |
+| `codex` | OpenAI Codex CLI | `devos-install-codex` (npm `@openai/codex`) |
 | `vscode` | Visual Studio Code | Build-time vendor download; online helper if absent |
 | `devservers` | Web servers & databases | ISO package/component |
 | `postman` | Postman | Download from Flathub; catalog recommends 6 GB RAM |
 | `dbeaver` | DBeaver | Download from Flathub; catalog recommends 6 GB RAM |
 | `githubdesktop` | GitHub Desktop | Download from Flathub |
 | `androidstudio` | Android Studio | Download from Flathub; catalog recommends 16 GB RAM |
+| `codeagent` | DevOS AI Code Agent (local) | Builtin desktops; needs Medium+ / Coding AI model |
 
 ### Everyday tools
 

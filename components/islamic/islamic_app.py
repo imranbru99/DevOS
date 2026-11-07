@@ -946,6 +946,16 @@ def run_gui(screenshot=None):
     return app.exec_()
 
 
+def _normalize_argv(argv):
+    """Drop a duplicated leading 'gui' (launcher + .desktop both used to pass it)."""
+    if argv is None:
+        return None
+    argv = list(argv)
+    while len(argv) >= 2 and argv[0] == "gui" and argv[1] == "gui":
+        argv.pop(0)
+    return argv
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="devos-islamic", description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(dest="cmd")
@@ -960,7 +970,7 @@ def main(argv=None):
     where = fetch.add_mutually_exclusive_group()
     where.add_argument("--system", action="store_true", help="into %s (needs root)" % content.SYSTEM_DIR)
     where.add_argument("--user", action="store_true", help="into ~/.local/share/DevOS/islamic")
-    args = parser.parse_args(argv)
+    args = parser.parse_args(_normalize_argv(argv))
     if args.cmd in (None, "gui"):
         return run_gui(getattr(args, "screenshot", None))
     return {"enable": cmd_enable, "disable": cmd_disable, "times": cmd_times,

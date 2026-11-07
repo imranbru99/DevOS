@@ -24,8 +24,10 @@ RectangularRegionScreenShot=Meta+Shift+S,none,Capture Rectangular Region
 RecordRegion=Meta+Shift+R\tMeta+R,Meta+Shift+R\tMeta+R,Record Selected Area
 RecordScreen=Meta+Alt+R,Meta+Alt+R,Record Entire Screen
 
-[org.kde.dolphin.desktop]
+[devos-thispc.desktop]
 _launch=Meta+E,none,Open File Manager (Explorer)
+[org.kde.dolphin.desktop]
+_launch=none,none,Open File Manager (Explorer)
 
 [plasmashell]
 activate widget 2=Meta,none,Open Start Menu

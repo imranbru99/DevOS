@@ -24,6 +24,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -77,6 +78,57 @@ def split_prompts(raw_text: str) -> List[str]:
     return [text]
 
 
+def antigravity_launcher(agent: str) -> Optional[Path]:
+    """Return the desktop launcher for Google Antigravity or Antigravity KDE."""
+    ag = (agent or "").lower()
+    if ag in ("antigravity-kde", "antigravity-ide", "antigravity_kde"):
+        for candidate in (
+            Path.home() / ".local/bin/antigravity-kde",
+            Path("/usr/local/bin/antigravity-kde"),
+            Path.home() / ".local/lib/antigravity-ide/antigravity-ide",
+        ):
+            if candidate.is_file():
+                return candidate
+        return None
+    for candidate in (
+        Path("/usr/local/bin/devos-antigravity"),
+        Path("/opt/antigravity/antigravity"),
+        Path.home() / ".local/bin/antigravity",
+    ):
+        if candidate.is_file():
+            return candidate
+    which = shutil.which("antigravity")
+    return Path(which) if which else None
+
+
+def focus_agent_workspace(agent: str, project_path: Optional[str], emit=None) -> bool:
+    """Open/focus the project folder in the target IDE so pipeline work is visible on screen."""
+    if not project_path:
+        return False
+    target = Path(project_path).expanduser()
+    try:
+        target = target.resolve()
+    except OSError:
+        return False
+    if not target.is_dir():
+        return False
+    launcher = antigravity_launcher(agent)
+    if not launcher:
+        return False
+    cmd = [str(launcher), str(target)]
+    clean_env = dict(os.environ)
+    clean_env.pop("ELECTRON_RUN_AS_NODE", None)
+    try:
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=clean_env)
+        if emit:
+            emit(f"Opening project in {agent}: {target}")
+        return True
+    except OSError as exc:
+        if emit:
+            emit(f"Could not open {agent} on {target}: {exc}")
+        return False
+
+
 def is_agent_process_running(agent: str) -> tuple[bool, Optional[int]]:
     """Checks whether the agent's application process is actively running in the OS.
     Returns: (is_running, pid)
@@ -116,6 +168,12 @@ def is_agent_process_running(agent: str) -> tuple[bool, Optional[int]]:
             elif ag == "local":
                 comm = (proc / "comm").read_text(errors="ignore").strip()
                 if "ollama" in comm or "devos-ai-code" in cmdline:
+                    return True, pid
+            elif ag in ("cursor-agent", "cursor_agent", "cursor"):
+                if "cursor-agent" in cmdline or "/cursor-agent/" in cmdline:
+                    return True, pid
+                comm = (proc / "comm").read_text(errors="ignore").strip()
+                if comm in ("cursor-agent", "agent") and "cursor" in cmdline.lower():
                     return True, pid
         except Exception:
             continue
@@ -441,6 +499,33 @@ def discover_agents() -> Dict[str, Dict[str, Any]]:
         "pid": local_pid,
     }
 
+    # 5b. Cursor Agent CLI (agent / cursor-agent)
+    cursor_running, cursor_pid = is_agent_process_running("cursor-agent")
+    cursor_candidates = [
+        shutil.which("cursor-agent"),
+        shutil.which("agent"),
+        Path("/usr/local/bin/cursor-agent"),
+        Path.home() / ".local/bin/cursor-agent",
+    ]
+    cursor_bin = next((str(p) for p in cursor_candidates if p and Path(p).exists()), None)
+    # Prefer the real Cursor Agent binary over a generic `agent` shim name clash.
+    if cursor_bin and Path(cursor_bin).name == "agent":
+        dedicated = next(
+            (str(p) for p in cursor_candidates
+             if p and Path(p).exists() and Path(p).name == "cursor-agent"),
+            None,
+        )
+        if dedicated:
+            cursor_bin = dedicated
+    agents["cursor-agent"] = {
+        "name": "Cursor Agent",
+        "bin": cursor_bin,
+        "color": "#f59e0b",
+        "available": bool(cursor_bin or cursor_running),
+        "running": cursor_running,
+        "pid": cursor_pid,
+    }
+
     # 6. Custom Agents directory: ~/.config/devos/agents/
     if CUSTOM_AGENTS_DIR.exists():
         for script in list(CUSTOM_AGENTS_DIR.glob("*.sh")) + list(CUSTOM_AGENTS_DIR.glob("*.py")):
@@ -672,22 +757,128 @@ def is_agent_working(agent: str) -> bool:
     return False
 
 
+def is_quota_exhausted(text: str) -> bool:
+    """True for Google Antigravity / Gemini quota exhaustion and classic rate-limit banners."""
+    if not text:
+        return False
+    lower = text.lower()
+    markers = (
+        "rate limit",
+        "usage to reset",
+        "resource_exhausted",
+        "individual quota",
+        "quota reached",
+        "quota exceeded",
+        "code 429",
+        "(code 429)",
+        "too many requests",
+    )
+    return any(m in lower for m in markers)
+
+
+def _transcript_event_text(event: dict) -> str:
+    parts = [
+        str(event.get("status") or ""),
+        str(event.get("type") or ""),
+        str(event.get("error") or ""),
+        str(event.get("message") or ""),
+        str(event.get("detail") or ""),
+    ]
+    for key in ("text", "content", "summary"):
+        val = event.get(key)
+        if isinstance(val, str):
+            parts.append(val)
+    # Nested error payloads from language-server / planner responses
+    for key in ("response", "result", "output"):
+        val = event.get(key)
+        if isinstance(val, dict):
+            parts.append(json.dumps(val)[:4000])
+        elif isinstance(val, str):
+            parts.append(val[:4000])
+    return "\n".join(parts)
+
+
+def latest_quota_block(transcript_lines, lookback: int = 8):
+    """Return (reset_at, evidence) only when the *latest* transcript events show a hard quota stop.
+
+    Scanning the whole transcript tail caused false cooldowns: old RESOURCE_EXHAUSTED
+    strings stayed in the 64KB window while the agent had already recovered and kept
+    working in the IDE. Pipeline then paused Antigravity+KDE even though the AI agent
+    was fine.
+    """
+    events = []
+    for line in transcript_lines:
+        line = (line or "").strip()
+        if not (line.startswith("{") and line.endswith("}")):
+            continue
+        try:
+            events.append(json.loads(line))
+        except ValueError:
+            continue
+    if not events:
+        return None, ""
+
+    recent = events[-lookback:]
+    # If the newest event is still actively running tools, the agent is healthy.
+    newest = recent[-1]
+    newest_status = str(newest.get("status") or "").upper()
+    newest_tools = newest.get("tool_calls") or []
+    if newest_status in ("RUNNING", "IN_PROGRESS") or newest_tools:
+        return None, ""
+    # A later successful planner/tool step after a quota error means recovery.
+    for idx in range(len(recent) - 1, -1, -1):
+        event = recent[idx]
+        text = _transcript_event_text(event)
+        if is_quota_exhausted(text):
+            trailing = recent[idx + 1:]
+            if any(
+                str(e.get("status") or "").upper() in ("DONE", "RUNNING", "IN_PROGRESS")
+                and not is_quota_exhausted(_transcript_event_text(e))
+                for e in trailing
+            ):
+                return None, ""
+            return parse_reset_time(text), text[-2000:]
+        status = str(event.get("status") or "").upper()
+        tools = event.get("tool_calls") or []
+        if status in ("DONE", "RUNNING", "IN_PROGRESS") or tools:
+            # Fresh successful/active work — ignore older quota strings further back.
+            return None, ""
+    return None, ""
+
+
 def parse_reset_time(text: str) -> Optional[datetime.datetime]:
     """Extracts rate-limit reset time from messages like:
 
-    'wait for usage to reset on 10:46 AM' or 'try again at 02:15 PM'.
+    'wait for usage to reset on 10:46 AM', 'try again at 02:15 PM',
+    or Antigravity 'Resets in 4h46m1s' / 'Resets in 135h22m38s'.
     Returns target datetime with a 1-minute safety buffer.
     """
+    if not text:
+        return None
+    now = datetime.datetime.now()
+
+    # Google Antigravity: "Resets in 4h50m25s" / "Resets in 22m" / "Resets in 45s"
+    duration = re.search(
+        r"resets?\s+in\s+(?:(\d+)\s*h)?\s*(?:(\d+)\s*m)?\s*(?:(\d+)\s*s)?",
+        text,
+        re.I,
+    )
+    if duration and any(duration.group(i) for i in (1, 2, 3)):
+        hours = int(duration.group(1) or 0)
+        minutes = int(duration.group(2) or 0)
+        seconds = int(duration.group(3) or 0)
+        if hours or minutes or seconds:
+            return now + datetime.timedelta(hours=hours, minutes=minutes, seconds=seconds) + datetime.timedelta(minutes=1)
+
     patterns = [
         r"reset\s+on\s+(\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?)",
         r"try\s+again\s+(?:at|on)\s+(\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?)",
-        r"resets?\s+(?:in|at)\s+(\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?)",
+        r"resets?\s+(?:at)\s+(\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?)",
     ]
     for pat in patterns:
         m = re.search(pat, text, re.I)
         if m:
             time_str = m.group(1).strip()
-            now = datetime.datetime.now()
             # Try 12-hour AM/PM format
             for fmt in ("%I:%M %p", "%I:%M%p", "%H:%M"):
                 try:
@@ -816,6 +1007,18 @@ class TaskPipeline:
             p = Path(stored).expanduser().resolve()
             if p.exists() and p.is_dir():
                 return str(p)
+        env_base = os.environ.get("DEVOS_PIPELINE_BASE_DIR")
+        if env_base:
+            p = Path(env_base).expanduser().resolve()
+            p.mkdir(parents=True, exist_ok=True)
+            return str(p)
+        try:
+            if self.state_file.resolve() != STATE_FILE.resolve():
+                fallback = self.state_file.parent / "projects"
+                fallback.mkdir(parents=True, exist_ok=True)
+                return str(fallback.resolve())
+        except Exception:
+            pass
         candidates = [
             Path.home() / "project",
             Path.home() / "Projects",
@@ -992,6 +1195,99 @@ class TaskPipeline:
                 return
         raise ValueError("Task no longer exists")
 
+    def stop_local_workers(self) -> int:
+        """Kill DevOS coding-engine workers started by this pipeline (not IDE apps)."""
+        killed = 0
+        try:
+            out = subprocess.check_output(
+                ["pgrep", "-af", "code-agent/pipeline_worker.py"],
+                text=True, stderr=subprocess.DEVNULL,
+            )
+        except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+            out = ""
+        for line in out.splitlines():
+            parts = line.strip().split(None, 1)
+            if not parts:
+                continue
+            try:
+                pid = int(parts[0])
+            except ValueError:
+                continue
+            try:
+                os.kill(pid, signal.SIGTERM)
+                killed += 1
+            except OSError:
+                continue
+        # Give them a moment, then SIGKILL stragglers
+        if killed:
+            time.sleep(0.4)
+            try:
+                out2 = subprocess.check_output(
+                    ["pgrep", "-af", "code-agent/pipeline_worker.py"],
+                    text=True, stderr=subprocess.DEVNULL,
+                )
+            except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+                out2 = ""
+            for line in out2.splitlines():
+                parts = line.strip().split(None, 1)
+                if not parts:
+                    continue
+                try:
+                    pid = int(parts[0])
+                    os.kill(pid, signal.SIGKILL)
+                except (ValueError, OSError):
+                    pass
+        return killed
+
+    def stop_dispatch_threads(self, timeout: float = 1.5) -> int:
+        """Drop references to in-flight dispatch threads so the GUI can close.
+
+        Threads that are blocked in a child process unblock after stop_local_workers.
+        """
+        alive = [t for t in getattr(self, "_dispatch_threads", []) if t.is_alive()]
+        deadline = time.time() + max(0.1, timeout)
+        for thread in alive:
+            left = deadline - time.time()
+            if left <= 0:
+                break
+            thread.join(timeout=left)
+        self._dispatch_threads = [t for t in getattr(self, "_dispatch_threads", []) if t.is_alive()]
+        return len(alive)
+
+    @queue_transaction
+    def abort_inflight(self, reason: str = "Aborted by user", task_ids: Optional[List[str]] = None) -> int:
+        """Mark RUNNING/SUBMITTED tasks as FAILED so pause can free agent slots.
+
+        Also stops local coding-engine workers. Does not kill Antigravity/Cursor IDE apps.
+        """
+        wanted = set(task_ids) if task_ids else None
+        aborted = 0
+        for task in self.queue:
+            if wanted is not None and task.get("id") not in wanted:
+                continue
+            if task.get("status") not in ("RUNNING", "SUBMITTED"):
+                continue
+            task["status"] = "FAILED"
+            task["status_message"] = reason
+            task["output"] = (task.get("output") or "") + f"\n[{reason}]"
+            task["retry_at"] = None
+            aborted += 1
+            self.emit_event(f"{task['id']}: {reason}")
+        if aborted:
+            self._save()
+        # Kill outside the status loop so a stuck worker cannot keep the GUI open
+        try:
+            workers = self.stop_local_workers()
+            if workers:
+                self.emit_event(f"Stopped {workers} local coding worker(s).")
+        except Exception:
+            pass
+        try:
+            self.stop_dispatch_threads(timeout=1.0)
+        except Exception:
+            pass
+        return aborted
+
     @queue_transaction
     def clear(self, force: bool = False):
         if not force and any(t["status"] == "RUNNING" for t in self.queue):
@@ -1000,6 +1296,26 @@ class TaskPipeline:
         self._save()
 
     def _complete_task(self, task):
+        # Premium quality gate (Quality mode): verify before marking COMPLETED
+        try:
+            import pipeline_premium as _premium
+            ok_gate, gate_msg = _premium.run_quality_gate(task, self.context)
+            task["quality_gate"] = gate_msg[:1000]
+            if not ok_gate:
+                task["status"] = "FAILED"
+                task["output"] = ((task.get("output") or "") + "\nQuality gate failed: " + gate_msg)[-65536:]
+                task["status_message"] = ("Quality gate failed: " + gate_msg)[:600]
+                _premium.record_completion(self.context, task, success=False)
+                self._save_context()
+                self.emit_event(f"{task['id']}: quality gate failed — {gate_msg[:200]}")
+                notify("Quality Gate Failed", f"[{task.get('project_slug')}] {gate_msg[:80]}", urgency="critical")
+                self._save()
+                return
+            _premium.record_completion(self.context, task, success=True)
+            self._save_context()
+        except Exception:
+            pass
+
         task["status"] = "COMPLETED"
         # Check if GitHub repository creation is requested or proposed
         if task.get("create_repo") or task.get("repo_name") or "@create-repo" in task["prompt"]:
@@ -1076,12 +1392,58 @@ class TaskPipeline:
             try:
                 with path.open('rb') as stream:
                     stream.seek(max(0, path.stat().st_size-65536))
-                    lines = stream.read().decode('utf-8', errors='replace').splitlines()
+                    chunk = stream.read().decode('utf-8', errors='replace')
+                    lines = chunk.splitlines()
+                reset_at, quota_evidence = latest_quota_block(lines)
                 last = next((json.loads(line) for line in reversed(lines) if line.strip().startswith('{') and line.strip().endswith('}')), {})
                 tools = [t.get('name','') for t in last.get('tool_calls', [])]
+                last_status = str(last.get('status') or '').upper()
+                agent_busy = bool(tools) or last_status in ('RUNNING', 'IN_PROGRESS')
+                # Recover false cooldowns: IDE still working, but pipeline paused from stale quota text.
+                if task.get('status') == 'RATE_LIMITED' and agent_busy and not reset_at:
+                    task['status'] = 'RUNNING'
+                    task['retry_at'] = None
+                    task['status_message'] = f"Agent still working · recovered from stale quota pause · event {last.get('step_index', '?')}"
+                    self.emit_event(f"{task['id']}: agent still active in IDE — clearing false RATE_LIMITED pause.")
+                    # Also clear sibling false pauses that have no live conversation proof of quota.
+                    now = datetime.datetime.now()
+                    for sibling in self.queue:
+                        if sibling is task:
+                            continue
+                        if self.quota_family(sibling.get('agent')) != self.quota_family(task.get('agent')):
+                            continue
+                        if sibling.get('status') != 'RATE_LIMITED':
+                            continue
+                        if sibling.get('conversation_id'):
+                            continue
+                        msg = (sibling.get('status_message') or '')
+                        if 'mid-conversation' in msg or 'Shared Google Antigravity quota cooldown' in msg:
+                            sibling['status'] = 'QUEUED'
+                            sibling['retry_at'] = None
+                            sibling['status_message'] = 'Re-queued after false shared-quota pause was cleared'
+                    updated = True
+                    # Fall through to normal activity tracking below.
+                elif reset_at is not None or quota_evidence:
+                    # True tip-of-transcript quota stop only.
+                    if self.agent_slot(task.get('agent')) not in self._cooled_agent_slots():
+                        reset_target = reset_at or (datetime.datetime.now() + datetime.timedelta(hours=1))
+                        self._cooldown_agent_family(
+                            task['agent'],
+                            reset_target,
+                            reason=f"quota exhausted at latest agent step ({task['id']})",
+                            seed_task=task,
+                            seed_output=quota_evidence or chunk[-2000:],
+                        )
+                        updated = True
+                        continue
                 marker = f"{last.get('step_index', '?')}:{last.get('status', '?')}:{last.get('type', '?')}"
                 if task.get('last_agent_event') != marker:
                     task['last_agent_event'] = marker
+                    try:
+                        import pipeline_premium as _premium
+                        _premium.mark_progress(task)
+                    except Exception:
+                        pass
                     task['status_message'] = 'Awaiting your answer in Antigravity' if 'ask_question' in tools else f"Agent event {marker}" + (f" · {', '.join(tools)}" if tools else '')
                     msg = f"{task['id']}: {task['status_message']}"
                     if task.get('last_emitted_event') != msg:
@@ -1120,13 +1482,41 @@ class TaskPipeline:
     @queue_transaction
     def observe_tasks(self) -> bool:
         """Refresh accepted conversations without dispatching queued work."""
-        return self.check_running_tasks()
+        updated = self.check_running_tasks()
+        # Premium stall watchdog — notify once per task when idle past mode threshold
+        try:
+            import pipeline_premium as _premium
+            for stall in _premium.detect_stalls(self.queue, self.context):
+                tid = stall["id"]
+                key = f"stall:{tid}:{stall['idle_minutes'] // max(1, stall['watchdog_minutes'])}"
+                if self.context.get("last_stall_key") == key:
+                    continue
+                self.context["last_stall_key"] = key
+                self._save_context()
+                msg = (
+                    f"{tid}: STALL · {stall['status']} on {stall.get('agent')} "
+                    f"({stall.get('project_slug')}) idle ~{stall['idle_minutes']}m "
+                    f"(watchdog {stall['watchdog_minutes']}m). Check the IDE or Retry."
+                )
+                self.emit_event(msg)
+                notify("Pipeline Stall", msg[:120], urgency="critical")
+                updated = True
+        except Exception:
+            pass
+        return updated
 
     @staticmethod
     def agent_slot(agent):
+        """Execution slot: different agents can run different projects in parallel.
+
+        Google Antigravity and Antigravity KDE are separate slots so one project can
+        run on each app at the same time. Same-slot work stays strictly 1-by-1.
+        """
         ag = (agent or "").lower().strip()
-        if ag in ("antigravity", "antigravity-kde", "antigravity-ide", "google-antigravity"):
+        if ag in ("antigravity", "google-antigravity"):
             return "antigravity"
+        if ag in ("antigravity-kde", "antigravity-ide", "antigravity_kde"):
+            return "antigravity-kde"
         if ag in ("chatgpt", "codex"):
             return "chatgpt"
         if ag in ("claude", "claude-code"):
@@ -1135,7 +1525,79 @@ class TaskPipeline:
             return "aider"
         if ag in ("local", "devos-code", "ollama"):
             return "local"
+        if ag in ("cursor-agent", "cursor_agent", "cursor"):
+            return "cursor-agent"
         return ag
+
+    @staticmethod
+    def quota_family(agent):
+        """Billing/quota family. Antigravity + KDE share one Google consumer OAuth limit."""
+        slot = TaskPipeline.agent_slot(agent)
+        if slot in ("antigravity", "antigravity-kde"):
+            return "google-antigravity"
+        return slot
+
+    def _cooled_agent_slots(self, now=None):
+        """Agent slots that must not receive new work because of an active rate-limit cooldown.
+
+        Execution slots stay separate (Antigravity || KDE), but a Google quota hit on
+        either cools both Antigravity slots so parallel apps cannot keep burning the
+        shared account.
+        """
+        now = now or datetime.datetime.now()
+        cooled = set()
+        families = set()
+        for task in self.queue:
+            if task.get("status") != "RATE_LIMITED":
+                continue
+            retry_at = task.get("retry_at")
+            if retry_at:
+                try:
+                    if now >= datetime.datetime.fromisoformat(retry_at):
+                        continue
+                except ValueError:
+                    pass
+            cooled.add(self.agent_slot(task.get("agent")))
+            families.add(self.quota_family(task.get("agent")))
+        if "google-antigravity" in families:
+            cooled.update({"antigravity", "antigravity-kde"})
+        return cooled
+
+    def _cooldown_agent_family(self, agent, reset_target, reason="", seed_task=None, seed_output=""):
+        """Pause every queued/active task that shares this agent's Google quota family."""
+        family = self.quota_family(agent)
+        retry_at = reset_target.isoformat()
+        reset_str = reset_target.strftime("%I:%M %p")
+        touched = 0
+        for task in self.queue:
+            if self.quota_family(task.get("agent")) != family:
+                continue
+            if task.get("status") in ("COMPLETED", "FAILED"):
+                continue
+            previous = task.get("status")
+            task["status"] = "RATE_LIMITED"
+            task["retry_at"] = retry_at
+            if seed_task is not None and task is seed_task and seed_output:
+                task["output"] = str(seed_output)[-65536:]
+                task["status_message"] = str(seed_output)[:600]
+            elif not task.get("status_message") or previous != "RATE_LIMITED":
+                task["status_message"] = (
+                    f"Shared Google Antigravity quota cooldown until {reset_str}"
+                    + (f" ({reason})" if reason else "")
+                )
+            touched += 1
+        if touched:
+            self.emit_event(
+                f"Quota family '{family}' cooled until {reset_str}: paused {touched} task(s)"
+                + (f" — {reason}" if reason else "")
+            )
+            notify(
+                "Rate Limit Reached",
+                f"Google Antigravity quota paused until {reset_str}. "
+                "Antigravity and Antigravity KDE share this account limit.",
+                urgency="critical",
+            )
+        return touched
 
     def _run_claimed(self, task):
         dispatched = dict(task)
@@ -1161,6 +1623,12 @@ class TaskPipeline:
 
     def execute_parallel_tick(self, limit=4):
         self.observe_tasks()
+        # Premium mode can raise/lower concurrency (Overnight/Speed vs Quality)
+        try:
+            import pipeline_premium as _premium
+            limit = max(1, int(_premium.mode_settings(self.context).get("parallel_limit") or limit))
+        except Exception:
+            pass
         self._dispatch_threads = [t for t in self._dispatch_threads if t.is_alive()]
         started = False
         for _ in range(limit):
@@ -1174,17 +1642,68 @@ class TaskPipeline:
             self._dispatch_threads.append(thread)
             thread.start()
             started = True
+        if not started:
+            self._emit_idle_reason()
         return started
+
+    def _emit_idle_reason(self):
+        """Explain why Run/tick did not dispatch anything visible to the user."""
+        now = datetime.datetime.now()
+        cooled = self._cooled_agent_slots(now)
+        running = [t for t in self.queue if t.get("status") == "RUNNING"]
+        submitted = [t for t in self.queue if t.get("status") == "SUBMITTED"]
+        failed = [t for t in self.queue if t.get("status") == "FAILED"]
+        queued = [t for t in self.queue if t.get("status") == "QUEUED"]
+        if cooled:
+            self.emit_event(
+                "Waiting: shared Google Antigravity quota is in cooldown "
+                f"({', '.join(sorted(cooled))}). No new Antigravity/KDE prompts will be sent yet."
+            )
+            return
+        if running:
+            t = running[0]
+            self.emit_event(
+                f"Waiting: {t['id']} is still RUNNING in {t.get('agent')} "
+                f"({t.get('project_slug') or t.get('project') or 'project'})."
+            )
+            return
+        if submitted and not queued:
+            t = submitted[0]
+            self.emit_event(
+                f"Waiting: confirm or retry SUBMITTED task {t['id']} in "
+                f"{t.get('project_slug') or 'project'} before more work can start."
+            )
+            return
+        if failed and not queued:
+            t = failed[0]
+            self.emit_event(
+                f"Waiting: step {t['id']} FAILED — use Retry step. "
+                f"{(t.get('status_message') or t.get('output') or '')[:180]}"
+            )
+            return
+        if failed and queued:
+            self.emit_event(
+                f"Note: {len(failed)} failed step(s) need Retry; continuing with other eligible projects."
+            )
+            return
+        if not queued and not running and not submitted:
+            self.emit_event("Pipeline idle: no queued steps left.")
 
     @queue_transaction
     def _claim_next(self, parallel=False, limit=4):
         """Finds next eligible task and executes it."""
         self.check_running_tasks()
         now = datetime.datetime.now()
-        active = [t for t in self.queue if t['status'] in ('RUNNING', 'SUBMITTED')]
+        # Only RUNNING occupies the agent slot. SUBMITTED means the agent is idle /
+        # waiting for user verify — keeping it in busy_agents froze the whole
+        # Antigravity family so Run appeared to do nothing on screen.
+        active = [t for t in self.queue if t['status'] == 'RUNNING']
         if parallel and len(active) >= limit:
             return None
         busy_agents = {self.agent_slot(t['agent']) for t in active}
+        # Shared Google quota: do not dispatch more Antigravity work while any
+        # antigravity / antigravity-kde task is in an active RATE_LIMITED cooldown.
+        cooled_agents = self._cooled_agent_slots(now)
         blocked_projects = set()
         for task in self.queue:
             if task["status"] == "COMPLETED":
@@ -1193,11 +1712,13 @@ class TaskPipeline:
             if parallel and project_key in blocked_projects:
                 continue
             blocked_projects.add(project_key)
+            slot = self.agent_slot(task['agent'])
             unavailable = (
                 task['status'] in ('FAILED', 'RUNNING', 'SUBMITTED')
                 or now < datetime.datetime.fromisoformat(task['run_at'])
                 or (task.get('retry_at') and now < datetime.datetime.fromisoformat(task['retry_at']))
-                or (parallel and self.agent_slot(task['agent']) in busy_agents)
+                or (parallel and slot in busy_agents)
+                or slot in cooled_agents
             )
             if unavailable:
                 if parallel:
@@ -1257,6 +1778,13 @@ class TaskPipeline:
                 from pipeline_completion import prepare as prepare_completion
                 resolved_prompt += prepare_completion(task)
 
+            # Premium: inject previous-step handoff memory when mode enables it
+            try:
+                import pipeline_premium as _premium
+                resolved_prompt = _premium.apply_handoff(self.queue, task, resolved_prompt, self.context)
+            except Exception:
+                pass
+
             task["resolved_prompt"] = resolved_prompt
             self.emit_event(f"Project folder ready: {proj_dir}")
 
@@ -1303,30 +1831,50 @@ class TaskPipeline:
             notify("Task submitted", "Waiting for verified agent completion before the next task.")
             return True
 
-        # Check if rate-limited
-        if not success and ("rate limit" in output.lower() or "usage to reset" in output.lower()):
+        # Google Antigravity emits RESOURCE_EXHAUSTED / Individual quota / Resets in Nh…
+        # Classic Codex banners use "rate limit" / "usage to reset".
+        if not success and is_quota_exhausted(output):
+            # Premium Overnight/Speed: bounce this step to another healthy agent immediately
+            try:
+                import pipeline_premium as _premium
+                alt = _premium.overnight_failover_agent(task, self.context, discover_agents())
+                if alt:
+                    task["agent"] = alt
+                    task["status"] = "QUEUED"
+                    task["retry_at"] = None
+                    task["status_message"] = f"Auto-failover to {alt} after quota (premium mode)"
+                    self.emit_event(f"{task['id']}: premium auto-failover → {alt}")
+                    notify("Auto-Failover", f"[{p_slug}] Switched to {alt}")
+                    self._save()
+                    return True
+            except Exception:
+                pass
             reset_target = parse_reset_time(output)
             if not reset_target:
-                # Default 5 min cooldown if time not explicitly specified
-                reset_target = now + datetime.timedelta(minutes=5)
-
-            task["status"] = "RATE_LIMITED"
-            task["retry_at"] = reset_target.isoformat()
-            self._save()
-
-            reset_str = reset_target.strftime("%I:%M %p")
-            notify(
-                "Rate Limit Reached",
-                f"{task['agent'].upper()} is paused. Cooldown expires at {reset_str}. Auto-resuming then!",
-                urgency="critical"
+                # Default longer cooldown for unknown Google quota windows
+                reset_target = now + datetime.timedelta(hours=1)
+            self._cooldown_agent_family(
+                task["agent"],
+                reset_target,
+                reason="dispatch rejected by provider quota",
+                seed_task=task,
+                seed_output=output,
             )
-            print(f"--> Rate limit detected! Scheduled auto-resume for {reset_str}")
+            self._save()
+            reset_str = reset_target.strftime("%I:%M %p")
+            print(f"--> Quota/rate limit detected! Shared agent slot cooled until {reset_str}")
             return True
 
         if success:
             self._complete_task(task)
         else:
             task["status"] = "FAILED"
+            try:
+                import pipeline_premium as _premium
+                _premium.record_completion(self.context, task, success=False)
+                self._save_context()
+            except Exception:
+                pass
             self.emit_event(f"{task['id']}: failed: {output[:1000]}")
             notify("Task Failed", f"[{task['agent'].upper()}] Error: {output[:80]}", urgency="critical")
 
@@ -1352,18 +1900,6 @@ class TaskPipeline:
             if api_bin.exists():
                 title = f"[Pipeline] {task.get('project_slug') or 'Project'}"
                 proj_path = task.get("project")
-                if proj_path:
-                    try:
-                        is_running, _ = is_agent_process_running(agent)
-                        if not is_running:
-                            launcher = (Path.home() / ".local/bin/antigravity-kde") if kde else Path("/opt/antigravity/antigravity")
-                            if launcher.is_file():
-                                cmd = [str(launcher), str(proj_path)]
-                                clean_env = dict(os.environ)
-                                clean_env.pop("ELECTRON_RUN_AS_NODE", None)
-                                subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=clean_env)
-                    except Exception:
-                        pass
                 cmd = [str(api_bin), "new-conversation", f"--title={title}", "--", prompt]
                 try:
                     import importlib
@@ -1372,13 +1908,53 @@ class TaskPipeline:
                     ensure_connection = antigravity_connection.ensure_connection
                     bind_project = antigravity_connection.bind_project
                     connection_environment = antigravity_connection.connection_environment
-                    connection = ensure_connection(task.get("project"), self.emit_event, profile="antigravity-kde") if kde else ensure_connection(task.get("project"), self.emit_event)
+                    wait_until_agent_ready = antigravity_connection.wait_until_agent_ready
+                    is_port_alive = getattr(antigravity_connection, "is_port_alive", lambda _a: True)
+                    profile = "antigravity-kde" if kde else "antigravity"
+                    label = "Antigravity KDE" if kde else "Google Antigravity"
+
+                    # 1) Launch/focus project first so the IDE starts loading the workspace.
+                    was_running, _ = is_agent_process_running(agent)
+                    launched_at = None if was_running else time.monotonic()
+                    focus_agent_workspace(agent, proj_path, emit=self.emit_event)
+
+                    # 2) Ensure hub (may launch KDE/Google Antigravity if needed).
+                    connection = ensure_connection(task.get("project"), self.emit_event, profile=profile, timeout=30)
+                    if not connection or not connection.get("ANTIGRAVITY_LS_ADDRESS"):
+                        other = "Antigravity KDE" if not kde else "Google Antigravity"
+                        return False, (
+                            f"{label} API hub is unavailable. "
+                            f"Open that app (not only {other}), then Retry this step."
+                        )
+
+                    # 3) Wait until hub + workspace UI are ready — never submit on cold open.
+                    connection = wait_until_agent_ready(
+                        profile,
+                        task.get("project"),
+                        emit=self.emit_event,
+                        timeout=45,
+                        launched_at=launched_at,
+                    )
+                    if not is_port_alive(connection.get("ANTIGRAVITY_LS_ADDRESS")):
+                        return False, (
+                            f"{profile} hub at {connection.get('ANTIGRAVITY_LS_ADDRESS')} is not listening. "
+                            "Re-open the matching Antigravity app, then Retry."
+                        )
                     if kde:
                         primary = connection_environment("antigravity")
                         if primary and primary.get('ANTIGRAVITY_LS_ADDRESS') == connection.get('ANTIGRAVITY_LS_ADDRESS'):
                             return False, "Antigravity KDE must use a different API endpoint from Google Antigravity; no prompt was sent."
+                    else:
+                        kde_env = connection_environment("antigravity-kde")
+                        if kde_env and kde_env.get('ANTIGRAVITY_LS_ADDRESS') == connection.get('ANTIGRAVITY_LS_ADDRESS'):
+                            return False, (
+                                "This step targets Google Antigravity, but only the Antigravity KDE hub is available. "
+                                "Open Google Antigravity (or change the step agent to Antigravity KDE), then Retry."
+                            )
                     env = bind_project(connection, task["project"])
-                    self.emit_event("Antigravity API ready; submitting the project prompt…")
+                    self.emit_event(
+                        f"{label} ready ({connection.get('ANTIGRAVITY_LS_ADDRESS')}); submitting prompt…"
+                    )
                     res = subprocess.run(cmd, capture_output=True, text=True, timeout=60, cwd=task.get("project") or None, env=env)
                     if res.returncode == 0:
                         conv_id = None
@@ -1392,12 +1968,23 @@ class TaskPipeline:
                             try:
                                 set_workspace_last_conversation = getattr(antigravity_connection, "set_workspace_last_conversation", None)
                                 if set_workspace_last_conversation and task.get("project"):
-                                    set_workspace_last_conversation(task["project"], conv_id, profile="antigravity-kde" if kde else "antigravity")
+                                    set_workspace_last_conversation(task["project"], conv_id, profile=profile)
                             except Exception:
                                 pass
+                            # Focus again after UI exists so the new conversation is selected.
+                            focus_agent_workspace(agent, proj_path, emit=self.emit_event)
                             return True, f"STARTED:{conv_id}"
                         return False, "SUBMITTED: Antigravity accepted the request without a conversation ID; verify it in the agent before retrying."
-                    return False, res.stderr or res.stdout
+                    err = (res.stderr or res.stdout or "").strip()
+                    low = err.lower()
+                    if "eof" in low or "unavailable" in low or "connection refused" in low:
+                        return False, (
+                            f"Antigravity hub connection dropped while starting the conversation "
+                            f"({connection.get('ANTIGRAVITY_LS_ADDRESS')}). "
+                            "Open the matching app on this project folder, wait until it is fully loaded, then Retry.\n"
+                            f"{err[:1500]}"
+                        )
+                    return False, err
                 except subprocess.TimeoutExpired:
                     return False, "SUBMITTED: Antigravity submission timed out; acceptance is uncertain. Check the agent before retrying."
                 except Exception as e:
@@ -1416,6 +2003,24 @@ class TaskPipeline:
                 return res.returncode == 0, res.stdout or res.stderr
             except Exception as exc:
                 return False, f"Codex CLI error: {exc}"
+
+        elif agent in ("cursor-agent", "cursor_agent", "cursor"):
+            cursor_bin = discover_agents().get("cursor-agent", {}).get("bin")
+            if not cursor_bin:
+                return False, "Cursor Agent is not installed. Choose it in Features or run: sudo devos-install-cursor-agent"
+            try:
+                # Non-interactive print mode so the pipeline can observe completion.
+                res = subprocess.run(
+                    [str(cursor_bin), "--print", "--output-format", "text", prompt],
+                    capture_output=True, text=True, timeout=3600,
+                    cwd=task.get("project") or None,
+                )
+                out = (res.stdout or res.stderr or "").strip()
+                return res.returncode == 0, out or ("Cursor Agent finished." if res.returncode == 0 else "Cursor Agent failed.")
+            except subprocess.TimeoutExpired:
+                return False, "Cursor Agent timed out after 1 hour."
+            except Exception as exc:
+                return False, f"Cursor Agent error: {exc}"
 
         elif agent == "local":
             worker = Path(__file__).resolve().parent.parent / "code-agent/pipeline_worker.py"
@@ -1523,6 +2128,23 @@ def main():
     base_p = sub.add_parser("set-base-dir", help="Configure base directory for project folders")
     base_p.add_argument("directory", help="Absolute path to base directory")
 
+    # Premium controls
+    mode_p = sub.add_parser("mode", help="Get/set premium pipeline mode (balanced|quality|overnight|speed)")
+    mode_p.add_argument("name", nargs="?", help="Mode name to set")
+    sub.add_parser("scorecard", help="Show premium success/failure scorecard")
+    sub.add_parser("blueprints", help="List premium project blueprints")
+    bp = sub.add_parser("blueprint", help="Queue a premium blueprint as a multi-step project")
+    bp.add_argument("id", help="Blueprint id (see `blueprints`)")
+    bp.add_argument("--title", default="", help="Project title")
+    bp.add_argument("--agent", default="antigravity", help="Agent for all steps")
+    bp.add_argument("--create-repo", action="store_true")
+    exp = sub.add_parser("export-recipe", help="Export a project slug as a reusable recipe JSON")
+    exp.add_argument("slug", help="Project slug")
+    exp.add_argument("-o", "--output", default="", help="Output file (default: stdout)")
+    imp = sub.add_parser("import-recipe", help="Import a recipe JSON into the queue")
+    imp.add_argument("path", help="Recipe JSON path")
+    imp.add_argument("--agent", default="", help="Override agent for all steps")
+
     args = parser.parse_args()
     pipeline = TaskPipeline()
 
@@ -1585,6 +2207,62 @@ def main():
     elif args.cmd == "clear":
         pipeline.clear()
         print("Cleared AI Task Pipeline.")
+
+    elif args.cmd == "mode":
+        import pipeline_premium as premium
+        if args.name:
+            settings = premium.set_mode(pipeline.context, args.name)
+            pipeline._save_context()
+            print(f"Premium mode → {args.name}: {settings['hint']}")
+            print(json.dumps(settings, indent=2))
+        else:
+            print(json.dumps({
+                "mode": premium.get_mode(pipeline.context),
+                "settings": premium.mode_settings(pipeline.context),
+                "available": {k: v["label"] + " — " + v["hint"] for k, v in premium.MODES.items()},
+            }, indent=2))
+
+    elif args.cmd == "scorecard":
+        import pipeline_premium as premium
+        print(json.dumps(premium.scorecard_view(pipeline.context, pipeline.list()), indent=2))
+
+    elif args.cmd == "blueprints":
+        import pipeline_premium as premium
+        for bp_item in premium.list_blueprints():
+            print(f"{bp_item['id']:<20} {bp_item['steps']} steps  {bp_item['title']} — {bp_item['summary']}")
+
+    elif args.cmd == "blueprint":
+        import pipeline_premium as premium
+        title = (args.title or premium.BLUEPRINTS[args.id]["title"]).strip()
+        slug = to_slug(title)
+        steps = premium.expand_blueprint(args.id)
+        ids = pipeline.add_commands(
+            steps, agent=args.agent, project_title=title, project_slug=slug,
+            create_repo=args.create_repo, repo_name=slug if args.create_repo else "",
+        )
+        print(f"Queued blueprint '{args.id}' as '{title}' ({len(ids)} steps): {', '.join(ids)}")
+
+    elif args.cmd == "export-recipe":
+        import pipeline_premium as premium
+        recipe = premium.export_recipe(pipeline.list(), args.slug)
+        text = json.dumps(recipe, indent=2)
+        if args.output:
+            Path(args.output).write_text(text + "\n", encoding="utf-8")
+            print(f"Wrote {args.output}")
+        else:
+            print(text)
+
+    elif args.cmd == "import-recipe":
+        import pipeline_premium as premium
+        recipe = json.loads(Path(args.path).read_text(encoding="utf-8"))
+        title, slug, steps = premium.import_recipe(recipe)
+        prompts = [s[0] for s in steps]
+        agent = args.agent or (steps[0][1] if steps else "antigravity")
+        ids = pipeline.add_commands(
+            prompts, agent=agent, project_title=title, project_slug=to_slug(slug),
+            create_repo=bool(steps and steps[0][2]),
+        )
+        print(f"Imported '{title}' with {len(ids)} steps")
 
     else:
         parser.print_help()

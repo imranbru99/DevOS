@@ -1,0 +1,56 @@
+#!/usr/bin/python3
+"""Launch a DevOS Python app with the correct desktop id, name, and process title.
+
+Usage:
+  devos-run --desktop=devos-clipboard [--name=Clipboard] /path/to/script.py [args...]
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import runpy
+import sys
+from pathlib import Path
+
+COMPONENTS = Path("/usr/local/share/devos/components")
+if COMPONENTS.is_dir() and str(COMPONENTS) not in sys.path:
+    sys.path.insert(0, str(COMPONENTS))
+# Prefer the live checkout when developing.
+DEV = Path.home() / "project/dev-os/components"
+if DEV.is_dir() and str(DEV) not in sys.path:
+    sys.path.insert(0, str(DEV))
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="devos-run")
+    parser.add_argument("--desktop", required=True, help="Desktop id without path, e.g. devos-clipboard")
+    parser.add_argument("--name", default="", help="Display name shown in the task manager")
+    parser.add_argument("script", help="Python script to run")
+    parser.add_argument("args", nargs=argparse.REMAINDER)
+    opts = parser.parse_args(argv)
+
+    desktop = opts.desktop.removesuffix(".desktop")
+    script = Path(opts.script)
+    if not script.is_file():
+        print(f"devos-run: script not found: {script}", file=sys.stderr)
+        return 127
+
+    # Process title / argv0 so the task manager is not "python3".
+    sys.argv = [desktop] + list(opts.args or [])
+    os.environ["DEVOS_DESKTOP_FILE"] = desktop
+    if opts.name:
+        os.environ["DEVOS_APP_NAME"] = opts.name
+
+    try:
+        import app_identity
+        app_identity.prepare(desktop)
+    except Exception:
+        pass
+
+    # Make remaining CLI args available to the script as sys.argv[1:].
+    runpy.run_path(str(script), run_name="__main__")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

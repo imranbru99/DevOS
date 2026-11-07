@@ -1,3 +1,8 @@
-#!/bin/sh
-# DevOS Islamic launcher (also what pkexec runs for the system-wide text download).
-exec /usr/bin/python3 /usr/local/share/devos/components/islamic/islamic_app.py "$@"
+#!/bin/bash
+# DevOS islamic launcher — process title is the app id, not python3.
+export DEVOS_DESKTOP_FILE=devos-islamic
+# Default to the window when no subcommand is given (desktop may also pass "gui").
+if [ $# -eq 0 ]; then
+  set -- gui
+fi
+exec -a "devos-islamic" /usr/bin/python3 /usr/local/share/devos/components/islamic/islamic_app.py "$@"

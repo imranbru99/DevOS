@@ -4,7 +4,7 @@ Version=1.0
 Name=Voice Command
 GenericName=DevOS AI voice command
 Comment=Say a command and DevOS AI does it (press Meta+H, speak, done)
-Exec=/usr/bin/python3 /usr/local/share/devos/components/assistant/listen.py --once
+Exec=/usr/local/bin/devos-run --desktop=devos-voice --name="Voice Command" /usr/local/share/devos/components/assistant/listen.py --once
 Icon=devos-voice
 Terminal=false
 NoDisplay=false

@@ -1,0 +1,4 @@
+# DevOS: when a USB audio capture device is plugged in, ask each active user
+# session to re-apply their preferred microphone default (calls + recorder).
+ACTION=="add", SUBSYSTEM=="sound", ENV{ID_BUS}=="usb", TAG+="systemd", \
+  RUN+="/usr/local/libexec/devos-audio-defaults-hotplug"

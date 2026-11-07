@@ -5,7 +5,10 @@ componentName: devos
 welcomeStyleCalamares: false
 welcomeExpandingLogo: true
 
-windowExpanding: fullscreen
+# Use the usable desktop area (not true fullscreen). Fullscreen hid the
+# Cancel/Back/Next bar under laptop bezels, overscan, and Plasma panels.
+windowExpanding: normal
+windowSize: 1120,720
 windowPlacement: center
 
 # Sidebar and the Back/Next bar are drawn by calamares-sidebar.qml and

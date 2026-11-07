@@ -1,0 +1,16 @@
+#!/bin/sh
+# Triggered by udev on USB sound add. Best-effort; never blocks device setup.
+for uid_dir in /run/user/*; do
+  [ -d "$uid_dir" ] || continue
+  uid=$(basename "$uid_dir")
+  case "$uid" in
+    *[!0-9]*) continue ;;
+  esac
+  # systemctl --user needs the session bus; use machinectl/runuser when available
+  if command -v systemctl >/dev/null 2>&1; then
+    XDG_RUNTIME_DIR="$uid_dir" \
+      systemctl --user --machine="${uid}@.host" start devos-audio-defaults.service \
+      >/dev/null 2>&1 &
+  fi
+done
+exit 0

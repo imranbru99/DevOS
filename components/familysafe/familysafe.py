@@ -1063,6 +1063,16 @@ def gui() -> int:
 
 # ---------------------------------------------------------------- CLI
 
+def _normalize_argv(argv):
+    """Drop a duplicated leading 'gui' (launcher + .desktop both used to pass it)."""
+    if argv is None:
+        return None
+    argv = list(argv)
+    while len(argv) >= 2 and argv[0] == "gui" and argv[1] == "gui":
+        argv.pop(0)
+    return argv
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="devos-familysafe", description="DevOS Family Safety")
     sub = parser.add_subparsers(dest="cmd")
@@ -1073,7 +1083,7 @@ def main(argv=None) -> int:
     st.add_argument("--no-check", action="store_true", help="skip the live DNS test")
     sub.add_parser("apply", help="boot: load the firewall table (root)")
     sub.add_parser("gui", help="open the window")
-    args = parser.parse_args(argv)
+    args = parser.parse_args(_normalize_argv(argv))
 
     if args.cmd in (None, "gui"):
         return gui()

@@ -1,0 +1,13 @@
+[Unit]
+Description=DevOS — apply preferred microphone as system default
+Documentation=file:///usr/local/share/devos/components/audio/mic_defaults.py
+After=pipewire.service pipewire-pulse.service wireplumber.service
+Wants=pipewire-pulse.service wireplumber.service
+
+[Service]
+Type=oneshot
+# USB mics often appear a moment after the session audio stack; apply twice.
+ExecStart=/bin/sh -c '/usr/local/bin/devos-audio-defaults apply; sleep 3; /usr/local/bin/devos-audio-defaults apply'
+
+[Install]
+WantedBy=default.target

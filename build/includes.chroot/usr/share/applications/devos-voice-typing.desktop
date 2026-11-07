@@ -4,7 +4,7 @@ Version=1.0
 Name=Voice Typing
 GenericName=Dictate into any app
 Comment=Speak and DevOS types it into the app you are using, offline, in Bangla or English (Meta+Alt+H)
-Exec=/usr/bin/python3 /usr/local/share/devos/components/voicetype/voicetype.py
+Exec=/usr/local/bin/devos-run --desktop=devos-voice-typing --name="Voice Typing" /usr/local/share/devos/components/voicetype/voicetype.py
 Icon=devos-voice-typing
 Terminal=false
 StartupNotify=false

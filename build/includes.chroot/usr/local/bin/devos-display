@@ -14,7 +14,69 @@ import sys
 from typing import Dict, List, Optional, Tuple
 
 
-def get_displays() -> List[Dict]:
+def _kscreen_doctor() -> Optional[str]:
+    return shutil.which("kscreen-doctor")
+
+
+def get_displays_kscreen() -> List[Dict]:
+    """Parse `kscreen-doctor -o` for Wayland/X11 outputs (preferred on Plasma)."""
+    binary = _kscreen_doctor()
+    if not binary:
+        return []
+    try:
+        raw = subprocess.check_output([binary, "-o"], stderr=subprocess.DEVNULL, text=True, timeout=8)
+    except Exception:
+        return []
+    displays: List[Dict] = []
+    current = None
+    for line in raw.splitlines():
+        # Output: 1 eDP-1 enabled connected ...
+        m = re.match(r"^Output:\s+\d+\s+(\S+)\s+(enabled|disabled)\s+(connected|disconnected)", line)
+        if m:
+            name, enabled, conn = m.groups()
+            current = {
+                "name": name,
+                "connected": conn == "connected" and enabled == "enabled",
+                "primary": "primary" in line.lower(),
+                "geometry": "",
+                "modes": [],
+                "scale": 1.0,
+                "backend": "kscreen",
+            }
+            if current["connected"]:
+                displays.append(current)
+            continue
+        if not current:
+            continue
+        # Modes: 1920x1080@60 …
+        mode = re.match(r"^\s+Modes:\s*(.*)$", line)
+        if mode:
+            for token in mode.group(1).split():
+                mm = re.match(r"(\d+x\d+)@([\d.]+)", token)
+                if not mm:
+                    continue
+                res, rate = mm.group(1), mm.group(2)
+                current["modes"].append({
+                    "res": res,
+                    "rates": [rate],
+                    "active": "*" in token or "!" in token,
+                    "preferred": "!" in token or "+" in token,
+                })
+            continue
+        scale = re.match(r"^\s+Scale:\s*([\d.]+)", line)
+        if scale:
+            try:
+                current["scale"] = float(scale.group(1))
+            except ValueError:
+                pass
+            continue
+        geom = re.match(r"^\s+Geometry:\s*(\d+x\d+[^\s]*)", line)
+        if geom:
+            current["geometry"] = geom.group(1)
+    return displays
+
+
+def get_displays_xrandr() -> List[Dict]:
     """Parse xrandr output into structured display info."""
     displays = []
     try:
@@ -34,7 +96,9 @@ def get_displays() -> List[Dict]:
                 "connected": status == "connected",
                 "primary": bool(primary),
                 "geometry": geom or "",
-                "modes": []
+                "modes": [],
+                "scale": 1.0,
+                "backend": "xrandr",
             }
             if current_disp["connected"]:
                 displays.append(current_disp)
@@ -58,6 +122,51 @@ def get_displays() -> List[Dict]:
                     "preferred": is_pref
                 })
     return displays
+
+
+def get_displays() -> List[Dict]:
+    """Prefer KScreen (Wayland HiDPI-aware), fall back to xrandr."""
+    displays = get_displays_kscreen()
+    return displays if displays else get_displays_xrandr()
+
+
+def apply_scale(output: str, percent: int) -> bool:
+    """Apply fractional UI scale via kscreen-doctor (125–200%)."""
+    binary = _kscreen_doctor()
+    if not binary:
+        return False
+    try:
+        scale = max(1.0, min(3.0, float(percent) / 100.0))
+    except (TypeError, ValueError):
+        return False
+    # Plasma accepts values like 1.25
+    cmd = [binary, f"output.{output}.scale.{scale:g}"]
+    try:
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+        return res.returncode == 0
+    except Exception:
+        return False
+
+
+def recommend_scale(disp: Dict) -> int:
+    """Pick a sensible default scale from geometry / reported scale."""
+    current = disp.get("scale") or 1.0
+    if current >= 1.9:
+        return 200
+    if current >= 1.4:
+        return 150
+    if current >= 1.2:
+        return 125
+    geom = disp.get("geometry") or ""
+    m = re.match(r"(\d+)x(\d+)", geom)
+    if m:
+        w, h = int(m.group(1)), int(m.group(2))
+        # HiDPI-ish panels commonly ship 2560+ or 2160p on laptops.
+        if w >= 3000 or h >= 1800:
+            return 150
+        if w >= 2560:
+            return 125
+    return 100
 
 
 def apply_resolution(output: str, mode: str, rate: Optional[str] = None) -> bool:
@@ -93,10 +202,27 @@ def apply_resolution(output: str, mode: str, rate: Optional[str] = None) -> bool
 
 def auto_configure_displays() -> List[str]:
     """
-    Ensure displays use their native preferred resolution.
-    Respects native TV/monitor hardware modes without forcing overscan.
+    Ensure displays use preferred resolution + a sensible HiDPI scale.
+    Uses kscreen-doctor on Plasma/Wayland when available.
     """
-    return []
+    actions: List[str] = []
+    for disp in get_displays():
+        if not disp.get("connected"):
+            continue
+        name = disp["name"]
+        preferred = next((m for m in disp.get("modes", []) if m.get("preferred")), None)
+        active = next((m for m in disp.get("modes", []) if m.get("active")), None)
+        target = preferred or active
+        if target:
+            rate = (target.get("rates") or [None])[0]
+            if not active or active.get("res") != target.get("res"):
+                if apply_resolution(name, target["res"], rate):
+                    actions.append(f"{name}: resolution {target['res']}" + (f"@{rate}" if rate else ""))
+        scale_pct = recommend_scale(disp)
+        if abs((disp.get("scale") or 1.0) - (scale_pct / 100.0)) > 0.05:
+            if apply_scale(name, scale_pct):
+                actions.append(f"{name}: scale {scale_pct}%")
+    return actions
 
 
 def run_gui():
@@ -290,7 +416,14 @@ def run_gui():
 
             self.scale_combo = QComboBox()
             self.scale_combo.setMinimumWidth(220)
-            self.scale_combo.addItems(["100% (Recommended)", "125%", "150%"])
+            for pct, label in (
+                (100, "100%"),
+                (125, "125%"),
+                (150, "150%"),
+                (175, "175%"),
+                (200, "200%"),
+            ):
+                self.scale_combo.addItem(label, pct)
             scale_row.addWidget(self.scale_combo)
             card_layout.addLayout(scale_row)
 
@@ -337,6 +470,17 @@ def run_gui():
 
             self.res_combo.setCurrentIndex(active_idx)
             self._update_rates(active_idx)
+            # Preselect recommended HiDPI scale for this panel.
+            want = recommend_scale(disp)
+            for i in range(self.scale_combo.count()):
+                if self.scale_combo.itemData(i) == want:
+                    self.scale_combo.setCurrentIndex(i)
+                    break
+            # Mark recommended in the combo label.
+            for i in range(self.scale_combo.count()):
+                pct = self.scale_combo.itemData(i)
+                base = f"{pct}%"
+                self.scale_combo.setItemText(i, f"{base} (Recommended)" if pct == want else base)
 
         def _on_res_changed(self, idx):
             self._update_rates(idx)
@@ -370,6 +514,11 @@ def run_gui():
             if not ok:
                 QMessageBox.critical(self, "Error", f"Failed to apply {selected_res} on {disp_name}.")
                 return
+
+            selected_scale = self.scale_combo.currentData()
+            prev_scale = recommend_scale(self.displays[0]) if self.displays else 100
+            if selected_scale and int(selected_scale) != 100:
+                apply_scale(disp_name, int(selected_scale))
 
             # Show Keep Changes countdown dialog (Windows 11 style)
             confirm_dlg = QDialog(self)
@@ -415,6 +564,7 @@ def run_gui():
             if res != QDialog.Accepted and prev_mode:
                 prev_rate = prev_mode["rates"][0] if prev_mode.get("rates") else None
                 apply_resolution(disp_name, prev_mode["res"], prev_rate)
+                apply_scale(disp_name, int(prev_scale))
             else:
                 self.displays = get_displays()
                 geom = self.displays[0].get("geometry", selected_res) if self.displays else selected_res
@@ -444,6 +594,16 @@ def main():
             rate = sys.argv[4] if len(sys.argv) > 4 else None
             ok = apply_resolution(out, mode, rate)
             print(f"Set {out} to {mode}" + (f"@{rate}" if rate else "") + f": {'SUCCESS' if ok else 'FAILED'}")
+            return 0 if ok else 1
+        elif cmd == "scale" and len(sys.argv) >= 4:
+            out = sys.argv[2]
+            try:
+                pct = int(str(sys.argv[3]).rstrip("%"))
+            except ValueError:
+                print("Scale must be an integer percent, e.g. 125")
+                return 1
+            ok = apply_scale(out, pct)
+            print(f"Scale {out} to {pct}%: {'SUCCESS' if ok else 'FAILED'}")
             return 0 if ok else 1
 
     run_gui()

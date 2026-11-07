@@ -44,13 +44,42 @@ def test_failed_project_does_not_block_another_and_aliases_share_slot(tmp_path):
         assert not p._claim_next(parallel=True)
 
 
-def test_kde_missing_api_never_launches_or_borrows_primary_connection():
+def test_kde_ensure_connection_launches_kde_then_waits_for_hub(tmp_path):
+    import antigravity_connection as connection
+    launcher = tmp_path / 'antigravity-kde'
+    launcher.write_text('#!/bin/sh\n')
+    launcher.chmod(0o755)
+    project = tmp_path / 'proj'
+    project.mkdir()
+    ready = {'ANTIGRAVITY_LS_ADDRESS': '127.0.0.1:46463', 'ANTIGRAVITY_CSRF_TOKEN': 'test-kde'}
+    calls = {'n': 0}
+
+    def env_side_effect(profile='antigravity'):
+        calls['n'] += 1
+        # First discovery misses, after launch the hub appears.
+        if calls['n'] < 3:
+            return None
+        return ready
+
+    with patch.object(connection, 'connection_environment', side_effect=env_side_effect), \
+         patch.object(connection, '_launcher_for_profile', return_value=launcher), \
+         patch.object(connection, 'is_port_alive', return_value=True), \
+         patch.object(connection.subprocess, 'Popen') as launch, \
+         patch.object(connection.time, 'sleep'):
+        env = connection.ensure_connection(str(project), lambda _: None, profile='antigravity-kde', timeout=5)
+        assert env['ANTIGRAVITY_LS_ADDRESS'] == '127.0.0.1:46463'
+        launch.assert_called_once()
+        assert str(project) in launch.call_args[0][0]
+
+
+def test_kde_ensure_connection_errors_when_launcher_missing():
     import antigravity_connection as connection
     import pytest
-    with patch.object(connection,'connection_environment',return_value=None) as env, patch.object(connection.subprocess,'Popen') as launch:
-        with pytest.raises(RuntimeError,match='independent prompt API'):
-            connection.ensure_connection('/tmp',lambda _:None,profile='antigravity-kde')
-        env.assert_called_once_with('antigravity-kde')
+    with patch.object(connection, 'connection_environment', return_value=None), \
+         patch.object(connection, '_launcher_for_profile', return_value=None), \
+         patch.object(connection.subprocess, 'Popen') as launch:
+        with pytest.raises(RuntimeError, match='not installed'):
+            connection.ensure_connection('/tmp', lambda _: None, profile='antigravity-kde')
         launch.assert_not_called()
 
 

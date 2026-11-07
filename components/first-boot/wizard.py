@@ -46,6 +46,15 @@ class FirstBootWizard:
             "enable_winlayer": True,
             "enable_waydroid": True,
             "enable_dev_workstation": True,
+            "hidpi_auto": True,
+            "windows_app_tip": True,
+            "backup_tip": True,
+            "tips": [
+                "Display: run `devos-display auto` (or Display Settings) for Wayland HiDPI 125–200%.",
+                "Windows App: open once, install as PWA if prompted — later launches stay in one focused window.",
+                "Backup: prefer Btrfs + Snapper at install time; on ext4 use Timeshift or rsync before big upgrades.",
+                "Smooth under load: `devos smooth apply` then optional `tools/hang-soak.sh --minutes 60`.",
+            ],
             "completed_at": "2026-10-10T12:00:00Z"
         }
 
@@ -63,8 +72,41 @@ class FirstBootWizard:
         except Exception:
             pass
 
+        # Best-effort HiDPI auto-fit on first login (never blocks setup).
+        if default_choices.get("hidpi_auto", True):
+            display = "/usr/local/bin/devos-display"
+            if os.access(display, os.X_OK):
+                try:
+                    import subprocess
+                    subprocess.run([display, "auto"], timeout=20, check=False,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                except Exception:
+                    pass
+
+        # Soft responsiveness policy (CPU/I/O weights) so AI + browser stay snappy.
+        try:
+            import subprocess
+            smooth = "/usr/local/bin/devos"
+            if os.access(smooth, os.X_OK):
+                subprocess.run(
+                    [smooth, "smooth", "apply", "--priority-only"],
+                    timeout=25,
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+        except Exception:
+            pass
+
         with open(self.STATE_FILE, "w") as f:
             json.dump(default_choices, f, indent=2)
+
+        tips_path = os.path.expanduser("~/.config/devos/first_boot_tips.txt")
+        try:
+            with open(tips_path, "w", encoding="utf-8") as tipf:
+                tipf.write("\n".join(default_choices.get("tips", [])) + "\n")
+        except OSError:
+            pass
 
         return default_choices
 

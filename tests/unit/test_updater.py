@@ -172,6 +172,19 @@ class UpdaterTests(unittest.TestCase):
             updater.update(check=True)
             install.assert_not_called()
 
+    def test_pinned_key_requires_sig_asset(self):
+        info = {"tag_name": "v1", "assets": [{"name": name, "browser_download_url": "https://example.com/" + name}
+                                               for name in (updater.ASSET, updater.ASSET + ".sha256")]}
+        digest = "a" * 64
+        payload = b"bundle-bytes"
+        with mock.patch.object(updater, "release", return_value=info), \
+             mock.patch.object(updater, "fetch", side_effect=[f"{digest}  {updater.ASSET}\n".encode(), payload]), \
+             mock.patch.object(updater, "pinned_pubkey", return_value=Path("/tmp/fake.pub")), \
+             mock.patch.object(updater.hashlib, "sha256", return_value=mock.Mock(hexdigest=lambda: digest)), \
+             mock.patch.object(updater.json, "loads", return_value={}):
+            with self.assertRaisesRegex(ValueError, "no detached signature"):
+                updater.update("v1")
+
 
 if __name__ == "__main__":
     unittest.main()

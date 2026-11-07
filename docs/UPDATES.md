@@ -61,8 +61,20 @@ An ISO build does not upgrade the PC running the build.
 ## Publishing updates
 
 Push a stable `v*` tag after testing the release. The `release-update` GitHub
-Actions workflow builds and uploads `devos-update.tar.gz` and its `.sha256`
-file. Existing tags can be selected through the workflow's manual trigger.
+Actions workflow builds and uploads:
+
+- `devos-update.tar.gz`
+- `devos-update.tar.gz.sha256`
+- `devos-update.tar.gz.sig` (OpenSSH detached signature)
+
+Images ship a pinned public key at
+`/usr/local/share/devos/keys/update-pubkey.pub`. When that key is present,
+`devos update` **requires** the `.sig` asset. Set the repository secret
+`DEVOS_UPDATE_SIGN_KEY_B64` to the base64 encoding of the matching private
+OpenSSH ed25519 key (generate with `ssh-keygen -t ed25519 -C devos-update@release`,
+keep the private key out of git under `secrets/`).
+
+Existing tags can be selected through the workflow's manual trigger.
 Published assets are not overwritten. The update bundle includes DevOS
 components, launchers, and the Kids Mode desktop shortcut. It excludes user data,
 AI language-model weights, and APT configuration. Local body-detection assets are
@@ -75,5 +87,6 @@ For a local package check:
 
 ```sh
 python3 -m unittest discover -s tests/unit -p test_updater.py
-python3 tools/package-update.py v26.04.1 --output out/update
+python3 tools/package-update.py v26.04.1 --output out/update \
+  --sign-key secrets/devos-update-ed25519 --require-signature
 ```

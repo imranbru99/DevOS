@@ -1,3 +1,4 @@
 #!/bin/bash
-# Emoji panel. Meta+. opens the window.
-exec /usr/bin/python3 /usr/local/share/devos/components/emoji/emoji.py "$@"
+# DevOS emoji launcher — process title is the app id, not python3.
+export DEVOS_DESKTOP_FILE=devos-emoji
+exec -a "devos-emoji" /usr/bin/python3 /usr/local/share/devos/components/emoji/emoji.py "$@"

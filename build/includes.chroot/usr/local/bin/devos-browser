@@ -104,8 +104,20 @@ cleanup_stale_chrome_lock
 
 # Isolate Chromium from conflicting GTK/Qt desktop modules (such as colorreload-gtk-module)
 # that cause segmentation faults on dynamic theme and palette switches under KDE Plasma.
+# Clear every variant: settings.ini gtk-modules=…, GTK_MODULES, and GTK3_MODULES.
+unset GTK_MODULES GTK3_MODULES LOADED_GTK_MODULES
 export GTK_MODULES=""
+export GTK3_MODULES=""
 export QT_QPA_PLATFORMTHEME=""
+# Belts-and-braces: drop crashy modules from the user GTK settings before launch.
+for gtk_ini in \
+    "${XDG_CONFIG_HOME:-$HOME/.config}/gtk-3.0/settings.ini" \
+    "${XDG_CONFIG_HOME:-$HOME/.config}/gtk-4.0/settings.ini"
+do
+    if [ -f "$gtk_ini" ] && grep -qiE '^gtk-modules=' "$gtk_ini"; then
+        sed -i '/^gtk-modules=/Id;/^gtk-module=/Id' "$gtk_ini" 2>/dev/null || true
+    fi
+done
 
 lang=$(search_language)
 # Under Wayland on KDE Plasma, Chromium native Wayland backend has an upstream bug

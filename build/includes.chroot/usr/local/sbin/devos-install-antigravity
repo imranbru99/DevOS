@@ -1,0 +1,39 @@
+#!/bin/bash
+# Ensure Google Antigravity is available at /opt/antigravity for DevOS.
+# The ISO may already vendor the binary; otherwise place a release tarball at
+# DEVOS_ANTIGRAVITY_TARBALL or /var/cache/devos/antigravity.tar.gz.
+set -euo pipefail
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "Run: sudo devos-install-antigravity" >&2
+    exit 1
+fi
+
+BIN=/opt/antigravity/antigravity
+WRAPPER=/usr/local/bin/devos-antigravity
+
+if [ -x "$BIN" ]; then
+    echo "Antigravity is already installed at $BIN."
+    if [ -x "$WRAPPER" ] && [ ! -e /usr/local/bin/antigravity ]; then
+        ln -sfn "$WRAPPER" /usr/local/bin/antigravity
+    fi
+    exit 0
+fi
+
+CACHE="${DEVOS_ANTIGRAVITY_TARBALL:-/var/cache/devos/antigravity.tar.gz}"
+if [ -f "$CACHE" ]; then
+    echo "Installing Antigravity from $CACHE..."
+    mkdir -p /opt/antigravity
+    tar -xzf "$CACHE" -C /opt/antigravity --strip-components=1 2>/dev/null \
+        || tar -xzf "$CACHE" -C /opt
+    if [ -x "$BIN" ]; then
+        chmod 4755 /opt/antigravity/chrome-sandbox 2>/dev/null || true
+        echo "Antigravity installed."
+        exit 0
+    fi
+fi
+
+echo "Antigravity binary not found." >&2
+echo "Place the vendor build at $BIN, or set DEVOS_ANTIGRAVITY_TARBALL to a tarball," >&2
+echo "then re-run: sudo devos-install-antigravity" >&2
+exit 1

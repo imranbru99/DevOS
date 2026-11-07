@@ -2,7 +2,7 @@
 Type=Application
 Name=DevOS Dashboard
 Comment=Hardware status, disks and PIN setup, in its own DevOS window
-Exec=python3 /usr/local/share/devos/components/dashboard/dashboard_server.py
+Exec=/usr/local/bin/devos-run --desktop=devos-dashboard --name="DevOS Dashboard" /usr/local/share/devos/components/dashboard/dashboard_server.py
 Icon=devos-dashboard
 Terminal=false
 Categories=System;

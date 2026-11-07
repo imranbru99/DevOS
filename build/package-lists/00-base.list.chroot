@@ -32,6 +32,7 @@ net-tools
 # Filesystem & Storage
 btrfs-progs
 snapper
+timeshift
 rsync
 cryptsetup
 e2fsprogs

@@ -430,7 +430,7 @@ var data = {
    "id": "winapp",
    "category": "internet",
    "name": "Windows App (Microsoft)",
-   "about": "Microsoft's own Windows App: Windows 365 cloud PCs, Azure Virtual Desktop, Dev Box and remote apps, in its own window. Connecting a Cloud PC stays in this app. Same app Microsoft offers for every browser; no third-party software.",
+   "about": "Microsoft's own Windows App: Windows 365 cloud PCs, Azure Virtual Desktop, Dev Box and remote apps, in its own window. Connecting a Cloud PC stays in this app. Same app Microsoft offers for every browser. DevOS adds a lightweight local reminder with an Open Windows App notification action.",
    "size_mb": 1,
    "windows": "Windows App",
    "preinstalled": false,
@@ -933,10 +933,25 @@ var data = {
    "id": "antigravity",
    "category": "developer",
    "name": "Google Antigravity AI",
-   "about": "Advanced agentic coding assistant and pair programming IDE by Google DeepMind.",
+   "about": "Advanced agentic coding assistant and pair programming IDE by Google DeepMind. First of two independent Antigravity agent slots in the DevOS AI Pipeline.",
    "size_mb": 500,
    "windows": "Antigravity",
-   "preinstalled": false,
+   "preinstalled": true,
+   "presets": [
+    "developer"
+   ],
+   "eula": "",
+   "min_ram_gb": 4,
+   "optin": false
+  },
+  {
+   "id": "antigravity-kde",
+   "category": "developer",
+   "name": "Antigravity KDE (Studio)",
+   "about": "Second isolated Antigravity agent for Plasma with its own profile, hub, and pipeline slot. Shares the Antigravity binary; keeps a separate GEMINI_APP_DATA_DIR.",
+   "size_mb": 50,
+   "windows": "Antigravity",
+   "preinstalled": true,
    "presets": [
     "developer"
    ],
@@ -952,6 +967,21 @@ var data = {
    "size_mb": 450,
    "windows": "Cursor",
    "preinstalled": false,
+   "presets": [
+    "developer"
+   ],
+   "eula": "",
+   "min_ram_gb": 4,
+   "optin": false
+  },
+  {
+   "id": "cursor-agent",
+   "category": "developer",
+   "name": "Cursor Agent",
+   "about": "Cursor's autonomous coding agent CLI (agent / cursor-agent). Runs in the terminal or from the DevOS AI Pipeline alongside Antigravity and the local DevOS agent.",
+   "size_mb": 80,
+   "windows": "Cursor Agent",
+   "preinstalled": true,
    "presets": [
     "developer"
    ],
@@ -992,9 +1022,9 @@ var data = {
   {
    "id": "codex",
    "category": "developer",
-   "name": "DevOS Codex Agent",
-   "about": "Local autonomous coding agent with full repository indexing, task planner, and shell access.",
-   "size_mb": 250,
+   "name": "OpenAI Codex CLI",
+   "about": "OpenAI Codex coding agent CLI (npm). Autonomous repo edits with shell access.",
+   "size_mb": 80,
    "windows": "Codex",
    "preinstalled": false,
    "presets": [
@@ -1204,7 +1234,7 @@ var data = {
    "id": "explorer",
    "category": "utilities",
    "name": "File Explorer",
-   "about": "Browse your files, drives and USB sticks, like Windows File Explorer. Turning it off only hides it from the menu.",
+   "about": "Browse your files, drives and USB sticks, like Windows File Explorer (DevOS Files / This PC). Turning it off only hides it from the menu.",
    "size_mb": 1,
    "windows": "File Explorer",
    "preinstalled": true,
@@ -1398,10 +1428,10 @@ var data = {
    "id": "timeshift",
    "category": "utilities",
    "name": "System restore points (Timeshift)",
-   "about": "Take a snapshot before changes and roll back in one click, like System Restore. DevOS also keeps btrfs restore points on the default install.",
+   "about": "Take a snapshot before changes and roll back in one click, like System Restore. On the default ext4 install this is the DevOS restore backend; btrfs installs use Snapper.",
    "size_mb": 10,
    "windows": "System Restore",
-   "preinstalled": false,
+   "preinstalled": true,
    "presets": [
     "windows",
     "student",

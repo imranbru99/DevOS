@@ -45,7 +45,8 @@ class AudioMeter(QWidget):
         self.pending = b""
         args = ["--raw", "--format=s16le", "--channels=1", "--rate=16000", "--latency-msec=50"]
         if device:
-            args += ["--device", device]
+            # Pulse/PipeWire accept --device=NAME; spacing form is rejected by some builds
+            args += ["--device=" + device]
         self.process.start("parec", args)
         self.decay.start()
 

@@ -1,0 +1,38 @@
+name: DevOS CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install host test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends shellcheck
+
+      - name: Unit tests (installer, storage, optimizer, updater)
+        run: |
+          python3 -m unittest discover -s tests/unit -p 'test_install*.py'
+          python3 -m unittest discover -s tests/unit -p 'test_storage*.py'
+          python3 -m unittest discover -s tests/unit -p test_disk_manager.py
+          python3 -m unittest discover -s tests/unit -p test_security_updates.py
+          python3 -m unittest discover -s tests/unit -p test_updater.py
+          python3 -m unittest discover -s tests/unit -p 'test_optimizer*.py'
+          python3 -m unittest discover -s tests/unit -p test_package_binaries.py
+          python3 -m pytest tests/unit/test_smooth.py tests/unit/test_devos_cli.py -q
+
+      - name: Lint shell scripts
+        run: |
+          shellcheck build/*.sh build/hooks/*.hook.chroot tests/qemu/*.sh tests/boot/*.sh
+
+      - name: ISO build layout dry checks
+        run: bash tests/boot/verify-iso-build-layout.sh

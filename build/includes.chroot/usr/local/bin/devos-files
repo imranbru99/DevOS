@@ -692,6 +692,72 @@ def format_bytes(num):
     return f"{val:.0f} bytes"
 
 
+_STORAGE_INSIGHT_CACHE = {"ts": 0.0, "report": None}
+_STORAGE_INSIGHT_PATHS = (
+    "/usr/local/share/devos/components/optimizer/storage_insight.py",
+    os.path.expanduser("~/.local/share/devos/components/optimizer/storage_insight.py"),
+    os.path.expanduser("~/project/dev-os/components/optimizer/storage_insight.py"),
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "share", "devos",
+                 "components", "optimizer", "storage_insight.py"),
+)
+
+
+def load_storage_insight():
+    """Import storage_insight from the installed or workspace copy."""
+    import importlib.util
+    for path in _STORAGE_INSIGHT_PATHS:
+        if not os.path.isfile(path):
+            continue
+        try:
+            spec = importlib.util.spec_from_file_location("devos_storage_insight", path)
+            if not spec or not spec.loader:
+                continue
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            return mod
+        except Exception:
+            continue
+    return None
+
+
+def get_storage_insight(mount="/", max_age=90.0):
+    """Cached OS-vs-user storage breakdown for This PC / Properties."""
+    import time
+    now = time.time()
+    cached = _STORAGE_INSIGHT_CACHE.get("report")
+    if cached and (now - _STORAGE_INSIGHT_CACHE.get("ts", 0)) < max_age:
+        return cached
+    mod = load_storage_insight()
+    if not mod:
+        return None
+    try:
+        report = mod.analyze(mount=mount)
+    except Exception:
+        return None
+    _STORAGE_INSIGHT_CACHE["ts"] = now
+    _STORAGE_INSIGHT_CACHE["report"] = report
+    return report
+
+
+def open_devos_optimizer():
+    """Launch Disk Cleanup / Optimizer (safe reclaim of caches)."""
+    home = os.path.expanduser("~")
+    candidates = [
+        ["/usr/local/bin/devos-optimizer"],
+        [os.path.join(home, ".local", "bin", "devos-optimizer")],
+        ["devos-optimizer"],
+        [sys.executable, "/usr/local/share/devos/components/optimizer/optimizer.py"],
+        [sys.executable, os.path.join(home, "project", "dev-os", "components", "optimizer", "optimizer.py")],
+    ]
+    for cmd in candidates:
+        try:
+            subprocess.Popen(cmd)
+            return True
+        except OSError:
+            continue
+    return False
+
+
 def clean_glob_pattern(pat):
     """Normalize regex character classes in globs like *.[pP][dD][fF] to clean *.pdf."""
     if not pat:
@@ -1426,7 +1492,29 @@ class DriveCard(QFrame):
 
         text_layout.addWidget(bar)
         text_layout.addWidget(space)
+
+        # System drive: show OS vs files vs freeable so 70+ GB isn't blamed on DevOS itself
+        self.insight = QLabel("")
+        self.insight.setObjectName("driveInsight")
+        self.insight.setWordWrap(True)
+        self.insight.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        self.insight.hide()
+        text_layout.addWidget(self.insight)
+        if drive.get("is_system") and total > 0 and free is not None:
+            QTimer.singleShot(50, self._load_insight)
+
         row.addLayout(text_layout, 1)
+
+    def _load_insight(self):
+        report = get_storage_insight(mount=self.drive.get("mount") or "/")
+        if not report:
+            return
+        self.insight.setText(report.get("summary") or "")
+        tip = report.get("tip") or ""
+        if tip:
+            self.insight.setToolTip(tip)
+        self.insight.show()
+        self.setMinimumHeight(108)
 
     def keyPressEvent(self, event):
         if event.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space):
@@ -2778,6 +2866,19 @@ class WindowsDrivePropertiesDialog(QDialog):
         mid_row.addStretch(1)
         gen_layout.addLayout(mid_row)
 
+        if drive.get("is_system"):
+            insight_box = QVBoxLayout()
+            insight_box.setSpacing(4)
+            insight_hdr = QLabel("What’s using space")
+            insight_hdr.setFont(QFont("Segoe UI", 10, QFont.Bold))
+            insight_box.addWidget(insight_hdr)
+            self.insight_body = QLabel("Measuring…")
+            self.insight_body.setWordWrap(True)
+            self.insight_body.setStyleSheet("color: #94a3b8; font-size: 12px;")
+            insight_box.addWidget(self.insight_body)
+            gen_layout.addLayout(insight_box)
+            QTimer.singleShot(30, self._fill_storage_insight)
+
         gen_layout.addStretch(1)
         tabs.addTab(gen_tab, "General")
 
@@ -2837,7 +2938,30 @@ class WindowsDrivePropertiesDialog(QDialog):
 
         layout.addLayout(btn_row)
 
+    def _fill_storage_insight(self):
+        report = get_storage_insight(mount=self.drive.get("mount") or "/")
+        if not report or not hasattr(self, "insight_body"):
+            if hasattr(self, "insight_body"):
+                self.insight_body.setText(
+                    "DevOS system is typically ~12–18 GB. Most of the used bar is your files, "
+                    "apps, and caches — use Disk Cleanup to reclaim freeable space."
+                )
+            return
+        lines = []
+        for cat in report.get("categories") or []:
+            size = cat.get("size") or 0
+            if size <= 0 and cat.get("id") == "other":
+                continue
+            lines.append(f"• {cat['label']}: {format_bytes(size)}")
+        tip = report.get("tip") or ""
+        text = "\n".join(lines)
+        if tip:
+            text = f"{text}\n\n{tip}"
+        self.insight_body.setText(text)
+
     def _open_disk_cleanup(self):
+        if open_devos_optimizer():
+            return
         for cmd in [["/usr/local/bin/devos-disk-gui"], ["python3", "/usr/local/share/devos/components/settings/disk_doctor_gui.py"]]:
             try:
                 subprocess.Popen(cmd)
@@ -6277,6 +6401,9 @@ class WindowsFileExplorer(QMainWindow):
         menu.addSeparator()
         act_guard = menu.addAction("Turn on DevOS DiskGuard")
         act_guard.triggered.connect(lambda: QMessageBox.information(self, "DiskGuard", f"DiskGuard is actively monitoring {drive.get('title')}."))
+        act_free = menu.addAction("Free up space…")
+        act_free.triggered.connect(lambda: open_devos_optimizer() or QMessageBox.information(
+            self, "Optimizer", "Open DevOS Optimizer from the Start menu to reclaim caches."))
         menu.addSeparator()
         act_copy = menu.addAction("Copy")
         act_copy.triggered.connect(lambda: self._set_clipboard("copy", [target_path]))

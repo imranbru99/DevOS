@@ -3,7 +3,7 @@ Type=Application
 Name=DevOS Share
 GenericName=Share my local app online
 Comment=Give an app running on this computer a public link, with no domain or router setup
-Exec=/usr/bin/python3 /usr/local/share/devos/components/share/share.py gui
+Exec=/usr/local/bin/devos-run --desktop=devos-share --name="DevOS Share" /usr/local/share/devos/components/share/share.py gui
 Icon=devos-share
 Terminal=false
 Categories=Development;Network;

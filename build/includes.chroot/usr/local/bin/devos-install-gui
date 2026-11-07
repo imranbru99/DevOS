@@ -20,6 +20,9 @@ export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}"
 # reach, e.g. the partition legend; Fusion keeps the tested layout.
 export QT_QPA_PLATFORMTHEME=kde
 export QT_STYLE_OVERRIDE=Fusion
+# Keep the installer inside the usable desktop area so the Next/Back bar is
+# not drawn under a Plasma panel or laptop overscan (branding uses normal expand).
+export QT_SCALE_FACTOR_ROUNDING_POLICY="${QT_SCALE_FACTOR_ROUNDING_POLICY:-RoundPreferFloor}"
 
 if [ -z "${XAUTHORITY:-}" ]; then
     if [ -n "${XDG_RUNTIME_DIR:-}" ] && compgen -G "${XDG_RUNTIME_DIR}/xauth*" >/dev/null 2>&1; then

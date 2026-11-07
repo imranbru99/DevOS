@@ -1,5 +1,28 @@
 # AI workflow verification
 
+## Premium pipeline (DevOS)
+
+The scheduler now includes an opt-in **premium layer** (`pipeline_premium.py`):
+
+| Mode | Behavior |
+| --- | --- |
+| **Balanced** | Handoff memory between steps, stall watchdog (~25m), parallel 4 |
+| **Quality** | Same + **quality gate** (project `quality-gate.sh` or Pest/PHPUnit/npm/pytest) before the next step |
+| **Overnight** | Higher parallel, longer stall patience, **auto-failover** to another agent on quota |
+| **Speed** | Max parallel, lighter gates |
+
+**Blueprints** (one-click multi-phase projects): `saas-laravel`, `api-service`, `landing-dashboard`, `qa-hardening`.
+
+**Handoff memory** appends the previous step’s completion summary into the next prompt so agents do not redo finished work.
+
+**Scorecard** tracks success rate, average step duration, and per-agent stats (GUI KPIs + `devos-ai-pipeline scorecard`).
+
+**Recipes**: `export-recipe` / `import-recipe` share a project’s step list as JSON.
+
+CLI: `mode`, `scorecard`, `blueprints`, `blueprint <id>`, `export-recipe`, `import-recipe`.
+
+---
+
 The pipeline executes queued commands in order. A delayed, busy, rate-limited,
 failed or unverified submitted task blocks dependent commands. Provider calls run
 on a GUI worker thread. Pausing stops subsequent tasks; it does not cancel an
@@ -76,20 +99,27 @@ The queue displays one project per page; Previous/Next changes only the view,
 not execution order. **Clear Logs** clears current and rotated activity history
 without removing projects or their execution state. **Clear Queue** is separate.
 
-Parallel projects (desktop pipeline): the runner now reserves up to two tasks
-from different project directories and different agent sessions. Within each
-project, only its first unfinished prompt can run. A failed, scheduled, or
-unverified prompt blocks that project's successors without blocking unrelated
-projects. Codex/ChatGPT aliases share one slot; Antigravity KDE has its own slot.
+Parallel projects (desktop pipeline): the runner reserves work from different
+project directories and different agent *slots*. Within each project, only its
+first unfinished prompt can run. A failed, scheduled, or unverified prompt
+blocks that project's successors without blocking unrelated projects.
+Codex/ChatGPT aliases share one slot. Google Antigravity and Antigravity KDE
+are **separate execution slots** — one project can run on Antigravity while
+another runs on Antigravity KDE. When an agent finishes, it picks up the next
+queued project assigned to that same agent. They still bill one Google consumer
+OAuth quota (`~/.gemini/jetski-standalone-oauth-token`); a *current*
+`RESOURCE_EXHAUSTED` / Individual quota response cools both Antigravity apps
+until the reported reset time. Stale quota text left in older transcript lines
+must not pause a conversation that is still actively working in the IDE.
 Dispatch runs outside the queue lock and completion merges only the reserved
 task under the lock, so concurrent workers cannot overwrite one another's results.
 Pausing stops new reservations; it does not cancel already submitted agent work.
 Active/unverified tasks cannot be deleted to bypass the reservation.
 
-Antigravity KDE runs as an independent AI agent instance alongside Google Antigravity.
-Its prompt API connection is automatically discovered through its running language server daemon
-(`~/.gemini/antigravity-kde/daemon/hub_*.json`) or live process inspection (`--hub-port` and `--csrf_token`).
-If needed, a custom independent endpoint can also be configured locally in
-`~/.config/devos/antigravity-kde-api.json` with `ANTIGRAVITY_LS_ADDRESS` and `ANTIGRAVITY_CSRF_TOKEN`.
-KDE never inherits or collides with the primary Antigravity connection; both agents run in parallel
-slots with isolated workspace bindings and discrete ports.
+Antigravity KDE is a second local IDE/client (isolated user-data and hub port).
+Its prompt API is discovered through its language server daemon
+(`~/.gemini/antigravity-kde/daemon/hub_*.json`) or live process inspection
+(`--hub-port` and `--csrf_token`). A custom endpoint can be set in
+`~/.config/devos/antigravity-kde-api.json`. Stale cached ports are discarded
+when the hub is not listening. KDE never reuses the primary Antigravity hub
+address.

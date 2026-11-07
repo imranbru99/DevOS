@@ -2,18 +2,20 @@
 """
 DevOS restore points.
 
-Creates a real btrfs snapshot (Snapper when it is configured, otherwise a
-read-only snapshot under /.snapshots) and can copy one back. A JSON file is
-only a cache of successful snapshots. Nothing is reported as created unless
-the snapshot command exits 0.
+btrfs: Snapper when configured, otherwise a read-only subvolume under /.snapshots.
+ext4 (and other non-btrfs): Timeshift rsync snapshots when `timeshift` is installed.
+
+A JSON file is only a cache of successful snapshots. Nothing is reported as
+created unless the snapshot command exits 0.
 """
 
+import argparse
 import os
+import re
+import shutil
+import subprocess
 import sys
 import time
-import shutil
-import argparse
-import subprocess
 from typing import Any, Callable, Dict, List, Optional
 
 
@@ -48,8 +50,31 @@ def parse_snapper_list(text: str) -> List[Dict[str, Any]]:
     return points
 
 
+def parse_timeshift_list(text: str) -> List[Dict[str, Any]]:
+    """Turn `timeshift --list` output into restore-point records."""
+    points: List[Dict[str, Any]] = []
+    for line in (text or "").splitlines():
+        # Typical: "0    >  2024-01-01_12-00-00  O  Manual description"
+        m = re.match(
+            r"^\s*(\d+)\s*[>\*]?\s+(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})\s+\S+\s*(.*)$",
+            line,
+        )
+        if not m:
+            continue
+        num, stamp, desc = m.group(1), m.group(2), (m.group(3) or "").strip()
+        points.append({
+            "id": stamp,
+            "num": int(num),
+            "timestamp": stamp.replace("_", " "),
+            "description": desc or stamp,
+            "backend": "timeshift",
+            "path": stamp,
+        })
+    return points
+
+
 class SnapshotManager:
-    """Creates and rolls back btrfs restore points. Needs root to change the disk."""
+    """Creates and rolls back system restore points (Snapper/btrfs or Timeshift)."""
 
     def __init__(self, runner: Optional[Callable] = None, euid: Optional[int] = None,
                  isdir: Optional[Callable[[str], bool]] = None, fstype: Optional[str] = None,
@@ -93,16 +118,50 @@ class SnapshotManager:
             "command": ["pkexec"] + argv,
         }
 
+    def _create_timeshift(self, description: str) -> Dict[str, Any]:
+        if not self._has("timeshift"):
+            return {
+                "status": "UNAVAILABLE",
+                "backend": None,
+                "message": "This disk is not btrfs. Install Timeshift from DevOS Features "
+                           "to create restore points on ext4.",
+            }
+        if self._euid != 0:
+            return self._needs_root(description, "create")
+        code, out, err = self.runner(
+            ["timeshift", "--create", "--comments", description, "--scripted"])
+        if code != 0:
+            return {
+                "status": "FAILED",
+                "backend": "timeshift",
+                "error": (err or out or "timeshift --create failed").strip(),
+            }
+        points = self._list_timeshift()
+        snap_id = points[-1]["id"] if points else description
+        return {
+            "status": "CREATED",
+            "id": snap_id,
+            "description": description,
+            "backend": "timeshift",
+            "path": str(snap_id),
+            "message": f"Timeshift restore point '{description}' is on the disk.",
+        }
+
+    def _list_timeshift(self) -> List[Dict[str, Any]]:
+        if not self._has("timeshift"):
+            return []
+        code, out, _err = self.runner(["timeshift", "--list", "--scripted"])
+        if code != 0:
+            code, out, _err = self.runner(["timeshift", "--list"])
+        if code != 0:
+            return []
+        return parse_timeshift_list(out)
+
     def create_restore_point(self, description: str = "Manual Restore Point") -> Dict[str, Any]:
         description = " ".join((description or "Manual Restore Point").split())[:80]
         kind = self.filesystem()
         if kind != "btrfs":
-            return {
-                "status": "UNAVAILABLE",
-                "backend": None,
-                "message": "This disk is not btrfs, so a DevOS restore point cannot be created. "
-                           "Timeshift (DevOS Features) can snapshot other disks.",
-            }
+            return self._create_timeshift(description)
         if self._euid != 0:
             return self._needs_root(description, "create")
         if self._has("snapper"):
@@ -125,6 +184,9 @@ class SnapshotManager:
         else:
             snapper_error = ""
         if not self._has("btrfs"):
+            # Fall through to Timeshift if present on a mis-detected system.
+            if self._has("timeshift"):
+                return self._create_timeshift(description)
             return {"status": "FAILED", "error": snapper_error or "btrfs and snapper are not installed."}
         snap_id = int(time.time())
         dest = f"/.snapshots/devos-{snap_id}"
@@ -160,6 +222,8 @@ class SnapshotManager:
 
     def list_restore_points(self) -> List[Dict[str, Any]]:
         points: List[Dict[str, Any]] = []
+        if self.filesystem() != "btrfs" or self._has("timeshift"):
+            points.extend(self._list_timeshift())
         if self._has("snapper"):
             code, out, _err = self.runner(["snapper", "-c", "root", "list"])
             if code == 0:
@@ -187,10 +251,49 @@ class SnapshotManager:
                     })
         return points
 
+    def _rollback_timeshift(self, token: str) -> Dict[str, Any]:
+        if not self._has("timeshift"):
+            return {
+                "status": "UNAVAILABLE",
+                "message": "Install Timeshift from DevOS Features to roll back on this disk.",
+            }
+        if self._euid != 0:
+            return self._needs_root("Before rollback", "rollback", token)
+        safety = self.create_restore_point("Before rollback")
+        if safety.get("status") == "FAILED":
+            return {
+                "status": "FAILED",
+                "error": "Stopped. A safety restore point could not be created, so nothing was changed.",
+                "safety": safety,
+            }
+        # Prefer snapshot folder name (YYYY-MM-DD_HH-MM-SS); resolve list index.
+        snap_name = token
+        if token.isdigit():
+            for point in self._list_timeshift():
+                if str(point.get("num")) == token or str(point.get("id")) == token:
+                    snap_name = str(point["id"])
+                    break
+        argv = ["timeshift", "--restore", "--scripted", "--yes", "--snapshot", snap_name]
+        code, out, err = self.runner(argv)
+        if code != 0:
+            return {
+                "status": "FAILED",
+                "error": (err or out or "timeshift --restore failed").strip(),
+                "safety": safety,
+            }
+        return {
+            "status": "READY_FOR_REBOOT",
+            "snapshot_id": token,
+            "backend": "timeshift",
+            "safety": safety,
+            "message": "Timeshift restored system files. Restart the PC to finish. "
+                       "Home folders were left as they are.",
+        }
+
     def rollback(self, snapshot_id) -> Dict[str, Any]:
         token = str(snapshot_id).strip()
         if self.filesystem() != "btrfs":
-            return {"status": "UNAVAILABLE", "message": "Rollback needs a btrfs system disk."}
+            return self._rollback_timeshift(token)
         if self._euid != 0:
             return self._needs_root("Before rollback", "rollback", token)
         safety = self.create_restore_point("Before rollback")
@@ -210,6 +313,9 @@ class SnapshotManager:
                     "safety": safety,
                     "message": "Snapper will boot this restore point after you restart.",
                 }
+        # Timeshift snapshot names on a btrfs system that also uses Timeshift.
+        if "_" in token and self._has("timeshift"):
+            return self._rollback_timeshift(token)
         path = self._snapshot_path(token)
         if not path:
             return {"status": "FAILED", "error": f"No restore point '{token}' was found on the disk.",

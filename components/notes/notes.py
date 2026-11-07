@@ -2132,12 +2132,17 @@ def main(argv=None) -> int:
     QtCore, QtGui, QtWidgets, QLocalSocket, NotesWindow, StickyWindow, Controller = _load_gui()
     sys.path.insert(0, os.path.join(COMPONENTS, "assistant"))
     import listen
+    try:
+        from app_identity import apply as apply_identity, prepare as prepare_identity
+        prepare_identity("devos-notes")
+    except Exception:
+        apply_identity = None
     app = listen.make_app(argv)
     app.setApplicationName("devos-notes")
     app.setApplicationDisplayName("Notes")
     app.setDesktopFileName("devos-notes")
-    from app_identity import apply as apply_identity
-    apply_identity(app, "devos-notes")
+    if apply_identity is not None:
+        apply_identity(app, "devos-notes")
     if _send_to_running(cmd, QLocalSocket):
         return 0
     store.load()

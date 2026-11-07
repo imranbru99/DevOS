@@ -20,6 +20,14 @@ REPO = "imranbru99/DevOS"
 ASSET = "devos-update.tar.gz"
 STATE = "var/lib/devos-updater"
 MAX_BYTES = 128 * 1024 * 1024
+# Detached signature of the update tarball (minisign or OpenSSH/signify style).
+# When the release publishes ASSET+".sig" and a pinned public key is present,
+# verification is mandatory. SHA-256 from the same channel remains required.
+SIG_ASSET_SUFFIX = ".sig"
+PINNED_PUBKEY_PATHS = (
+    Path("/etc/devos/update-pubkey.pub"),
+    Path("/usr/local/share/devos/keys/update-pubkey.pub"),
+)
 DESKTOP_FILES = {
     "overlay/usr/share/applications/devos-kids-mode.desktop",
     "overlay/etc/xdg/kglobalshortcutsrc",
@@ -27,6 +35,62 @@ DESKTOP_FILES = {
     "overlay/etc/systemd/user/plasma-polkit-agent.service.d/20-devos-style.conf",
 }
 KIDS_PACKAGES = ("python3-gi", "python3-cairo", "python3-gi-cairo", "gir1.2-gtk-3.0", "gir1.2-gtklayershell-0.1")
+
+
+def pinned_pubkey():
+    for path in PINNED_PUBKEY_PATHS:
+        if path.is_file():
+            return path
+    return None
+
+
+def verify_detached_signature(data: bytes, signature: bytes, pubkey: Path) -> None:
+    """Verify ASSET.sig against a pinned public key (minisign or ssh-keygen)."""
+    with tempfile.TemporaryDirectory(prefix="devos-sig-") as tmp:
+        root = Path(tmp)
+        blob = root / "bundle"
+        sig = root / "bundle.sig"
+        blob.write_bytes(data)
+        sig.write_bytes(signature)
+        # Prefer minisign when available (common for release channels).
+        if shutil.which("minisign"):
+            proc = subprocess.run(
+                ["minisign", "-Vm", str(blob), "-x", str(sig), "-p", str(pubkey)],
+                capture_output=True,
+                text=True,
+            )
+            if proc.returncode != 0:
+                raise ValueError("Detached update signature failed minisign verification.")
+            return
+        # OpenSSH signing (ssh-keygen -Y verify) as a portable fallback.
+        if shutil.which("ssh-keygen"):
+            allowed = root / "allowed_signers"
+            # Format: namespaces=file principal key-type key-data
+            key_text = pubkey.read_text(encoding="utf-8").strip()
+            allowed.write_text(f"devos-update {key_text}\n", encoding="utf-8")
+            proc = subprocess.run(
+                [
+                    "ssh-keygen",
+                    "-Y",
+                    "verify",
+                    "-f",
+                    str(allowed),
+                    "-I",
+                    "devos-update",
+                    "-n",
+                    "file",
+                    "-s",
+                    str(sig),
+                ],
+                input=data,
+                capture_output=True,
+            )
+            if proc.returncode != 0:
+                raise ValueError("Detached update signature failed ssh-keygen verification.")
+            return
+        raise ValueError(
+            "A signed update was published, but neither minisign nor ssh-keygen is available to verify it."
+        )
 
 
 def fetch(url, limit=MAX_BYTES):
@@ -253,6 +317,16 @@ def update(version=None, check=False):
     data = fetch(assets[ASSET])
     if not re.fullmatch(r"[a-fA-F0-9]{64}", checksum) or hashlib.sha256(data).hexdigest() != checksum.lower():
         raise ValueError("Release download checksum mismatch.")
+    # Detached signature: required when both the release asset and a pinned key exist.
+    sig_name = ASSET + SIG_ASSET_SUFFIX
+    pubkey = pinned_pubkey()
+    if sig_name in assets and pubkey is not None:
+        signature = fetch(assets[sig_name], 64 * 1024)
+        verify_detached_signature(data, signature, pubkey)
+    elif pubkey is not None and sig_name not in assets:
+        raise ValueError(
+            "This system has a pinned DevOS update key, but the release has no detached signature (.sig)."
+        )
     manifest, files = unpack(data)
     if manifest["version"] != tag:
         raise ValueError("Release tag and bundle version differ.")

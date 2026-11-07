@@ -436,13 +436,27 @@ def build_categories(home=None, uid=None, tmp_roots=("/tmp", "/var/tmp")):
     # Browser Offline Cache & Service Worker Cache (Chrome, Brave, Chromium, Firefox, Edge, Falkon)
     # NOTE: Never include IndexedDB or Local Storage to preserve active sessions (e.g. WhatsApp Web, Telegram)
     cookie_patterns = [
+        os.path.join(home, ".config", "google-chrome", "*", "Cache"),
+        os.path.join(home, ".config", "google-chrome", "*", "Code Cache"),
+        os.path.join(home, ".config", "google-chrome", "*", "GPUCache"),
         os.path.join(home, ".config", "google-chrome", "*", "Service Worker", "CacheStorage"),
+        os.path.join(home, ".config", "google-chrome", "*", "Service Worker", "ScriptCache"),
+        os.path.join(home, ".config", "google-chrome-headless", "*", "Cache"),
+        os.path.join(home, ".config", "google-chrome-headless", "*", "Code Cache"),
         os.path.join(home, ".config", "google-chrome-headless", "*", "Service Worker", "CacheStorage"),
+        os.path.join(home, ".config", "chromium", "*", "Cache"),
+        os.path.join(home, ".config", "chromium", "*", "Code Cache"),
         os.path.join(home, ".config", "chromium", "*", "Service Worker", "CacheStorage"),
+        os.path.join(home, ".config", "BraveSoftware", "Brave-Browser", "*", "Cache"),
+        os.path.join(home, ".config", "BraveSoftware", "Brave-Browser", "*", "Code Cache"),
         os.path.join(home, ".config", "BraveSoftware", "Brave-Browser", "*", "Service Worker", "CacheStorage"),
+        os.path.join(home, ".config", "microsoft-edge", "*", "Cache"),
+        os.path.join(home, ".config", "microsoft-edge", "*", "Code Cache"),
         os.path.join(home, ".config", "microsoft-edge", "*", "Service Worker", "CacheStorage"),
+        os.path.join(home, ".mozilla", "firefox", "*", "cache2"),
         os.path.join(home, ".mozilla", "firefox", "*", "storage", "default", "*", "cache"),
         os.path.join(cache, "falkon"),
+        os.path.join(cache, "mozilla"),
     ]
     cookie_roots = []
     for pattern in cookie_patterns:
@@ -576,6 +590,34 @@ def build_categories(home=None, uid=None, tmp_roots=("/tmp", "/var/tmp")):
         if os.path.isfile(xerr) and not os.path.islink(xerr) and xerr != os.path.join(home, ".xsession-errors"):
             log_targets.append(Target(xerr, uid=uid))
 
+    # Container build/tmp layers (never wipe running container storage roots wholesale)
+    container_patterns = [
+        os.path.join(local_share, "containers", "storage", "tmp"),
+        os.path.join(local_share, "containers", "cache"),
+        os.path.join(home, ".local", "share", "docker", "tmp"),
+        os.path.join(cache, "buildkit"),
+        os.path.join(cache, "podman"),
+    ]
+    container_roots = []
+    for pattern in container_patterns:
+        for match in sorted(glob.glob(pattern)):
+            if os.path.isdir(match) and not os.path.islink(match) and is_within(match, home):
+                container_roots.append(match)
+    container_targets = [Target(r, uid=uid) for r in sorted(set(container_roots))]
+
+    # Flatpak app caches under ~/.var (runtimes themselves stay; caches rebuild)
+    flatpak_patterns = [
+        os.path.join(home, ".var", "app", "*", "cache"),
+        os.path.join(cache, "flatpak"),
+        os.path.join(local_share, "flatpak", ".removed"),
+    ]
+    flatpak_roots = []
+    for pattern in flatpak_patterns:
+        for match in sorted(glob.glob(pattern)):
+            if (os.path.isdir(match) or os.path.isfile(match)) and not os.path.islink(match) and is_within(match, home):
+                flatpak_roots.append(match)
+    flatpak_targets = [Target(r, uid=uid) for r in sorted(set(flatpak_roots))]
+
     return [
         Category("temp", "Temporary files",
                  "Your files in /tmp and /var/tmp older than a day, plus app temp folders.",
@@ -583,9 +625,15 @@ def build_categories(home=None, uid=None, tmp_roots=("/tmp", "/var/tmp")):
         Category("cache", "App caches",
                  "Browser caches, thumbnails, GPU/code cache and app data. Apps rebuild them as needed.",
                  cache_targets),
-        Category("cookies", "Browser web cache storage",
-                 "Service Worker cache storage and offline web cache across Chrome, Brave, Edge & Firefox. Session logins (WhatsApp, Telegram) are preserved.",
-                 cookie_targets, default_checked=False),
+        Category("cookies", "Browser disk cache",
+                 "Chrome/Brave/Edge/Firefox Cache, Code Cache and Service Worker storage. Logins (WhatsApp, Telegram) stay intact.",
+                 cookie_targets, default_checked=True),
+        Category("containers", "Container temp layers",
+                 "Podman/Docker build temp folders. Unused images are not deleted — run `podman system prune` yourself if needed.",
+                 container_targets, default_checked=False),
+        Category("flatpak_cache", "Flatpak app caches",
+                 "Per-app Flatpak caches under ~/.var. Installed apps and runtimes are kept.",
+                 flatpak_targets, default_checked=True),
         Category("dailytasks", "Daily tasks & desktop caches",
                  "KDE Plasma desktop cache, thumbnails database, GStreamer media cache, and Flatpak app caches.",
                  daily_targets, default_checked=True),

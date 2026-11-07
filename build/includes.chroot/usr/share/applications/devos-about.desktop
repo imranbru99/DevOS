@@ -1,5 +1,6 @@
 [Desktop Entry]
-Type=Application
+Type=ApplicationStartupWMClass=devos-about
+
 Name=About this PC
 GenericName=PC properties
 Comment=Processor, memory, graphics, and storage

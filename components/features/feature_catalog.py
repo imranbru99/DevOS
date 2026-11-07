@@ -64,7 +64,8 @@ BUILT_IN_HANDLERS = {
 
 
 def F(id, cat, name, about, size_mb, win="", apt=None, flatpak=None, script=None, preinstalled=False,
-      remove=None, presets=(), roles=None, needs_eula="", services=None, min_ram_gb=0, builtin=None, webapp=None):
+      remove=None, presets=(), roles=None, needs_eula="", services=None, min_ram_gb=0, builtin=None,
+      webapp=None, detect=None):
     if "windows" in presets and "islamic" not in presets:
         presets = tuple(presets) + ("islamic",)
     return {
@@ -82,6 +83,9 @@ def F(id, cat, name, about, size_mb, win="", apt=None, flatpak=None, script=None
         # Vendor web apps installed like Edge/Chrome "Install app": a Start-menu
         # entry that opens the site in its own window. {"url", "icon"}.
         "webapp": webapp,
+        # Absolute paths or PATH command names that prove the feature is installed
+        # (used for script-backed IDEs that apt/flatpak cannot see).
+        "detect": list(detect or []),
         "preinstalled": preinstalled or bool(builtin),
     }
 
@@ -223,20 +227,40 @@ FEATURES: List[Dict] = [
     # ---------------------------------------------------------------- developer
     # AI Coding Assistants & Agentic Pair Programmers
     F("antigravity", "developer", "Google Antigravity AI",
-      "Advanced agentic coding assistant and pair programming IDE by Google DeepMind.", 500,
-      win="Antigravity", presets=("developer",), min_ram_gb=4),
+      "Advanced agentic coding assistant and pair programming IDE by Google DeepMind. "
+      "First of two independent Antigravity agent slots in the DevOS AI Pipeline.", 500,
+      win="Antigravity", presets=("developer",), min_ram_gb=4,
+      script="/usr/local/sbin/devos-install-antigravity",
+      detect=["/opt/antigravity/antigravity", "/usr/local/bin/devos-antigravity"],
+      builtin={"desktop": ["antigravity.desktop"]}),
+    F("antigravity-kde", "developer", "Antigravity KDE (Studio)",
+      "Second isolated Antigravity agent for Plasma with its own profile, hub, and pipeline slot. "
+      "Shares the Antigravity binary; keeps a separate GEMINI_APP_DATA_DIR.", 50,
+      win="Antigravity", presets=("developer",), min_ram_gb=4,
+      script="/usr/local/sbin/devos-install-antigravity-kde",
+      detect=["/usr/local/bin/antigravity-kde"],
+      builtin={"desktop": ["antigravity-kde.desktop", "antigravity-ide.desktop"]}),
     F("cursor", "developer", "Cursor AI Code Editor",
       "AI-first code editor with deep codebase reasoning and interactive autocomplete.", 450,
       win="Cursor", flatpak=["com.cursor.Cursor"], presets=("developer",), min_ram_gb=4),
+    F("cursor-agent", "developer", "Cursor Agent",
+      "Cursor's autonomous coding agent CLI (agent / cursor-agent). Runs in the terminal or "
+      "from the DevOS AI Pipeline alongside Antigravity and the local DevOS agent.", 80,
+      win="Cursor Agent", presets=("developer",), min_ram_gb=4,
+      script="/usr/local/sbin/devos-install-cursor-agent",
+      detect=["/usr/local/bin/cursor-agent", "/usr/local/bin/agent"],
+      builtin={"desktop": ["devos-cursor-agent.desktop"]}),
     F("chatgpt", "developer", "ChatGPT Desktop & Coding Agent",
       "Official OpenAI ChatGPT desktop application and autonomous agent environment.", 350,
       win="ChatGPT", flatpak=["com.openai.chatgpt"], presets=("developer",), min_ram_gb=4),
     F("claude", "developer", "Claude Desktop",
       "Anthropic Claude desktop assistant with Projects, Artifacts, and prompt reasoning.", 300,
       win="Claude", flatpak=["com.anthropic.Claude"], presets=("developer",), min_ram_gb=4),
-    F("codex", "developer", "DevOS Codex Agent",
-      "Local autonomous coding agent with full repository indexing, task planner, and shell access.", 250,
-      win="Codex", presets=("developer",), min_ram_gb=4),
+    F("codex", "developer", "OpenAI Codex CLI",
+      "OpenAI Codex coding agent CLI (npm). Autonomous repo edits with shell access.", 80,
+      win="Codex", presets=("developer",), min_ram_gb=4,
+      script="/usr/local/sbin/devos-install-codex",
+      detect=["/usr/local/bin/codex"]),
     F("putty", "developer", "PuTTY SSH & Telnet Client",
       "Graphical SSH, Telnet, and raw socket terminal client for server and network administration.", 10,
       win="PuTTY", apt=["putty"], presets=("developer", "professional")),
@@ -271,9 +295,10 @@ FEATURES: List[Dict] = [
       "View your pictures, like Windows Photos. Turning it off only hides it from the menu.",
       1, win="Photos", presets=ESSENTIAL, builtin={"desktop": ["org.kde.gwenview.desktop"]}),
     F("explorer", "utilities", "File Explorer",
-      "Browse your files, drives and USB sticks, like Windows File Explorer. Turning it off only hides it "
-      "from the menu.",
-      1, win="File Explorer", presets=ESSENTIAL, builtin={"desktop": ["org.kde.dolphin.desktop"]}),
+      "Browse your files, drives and USB sticks, like Windows File Explorer (DevOS Files / This PC). "
+      "Turning it off only hides it from the menu.",
+      1, win="File Explorer", presets=ESSENTIAL,
+      builtin={"desktop": ["devos-thispc.desktop"]}),
     F("terminal", "utilities", "Terminal",
       "A command window, like Windows Terminal. Turning it off only hides it from the menu.",
       1, win="Terminal", presets=ESSENTIAL, builtin={"desktop": ["org.kde.konsole.desktop"]}),
@@ -306,8 +331,8 @@ FEATURES: List[Dict] = [
       apt=["skanlite"], presets=("windows", "student")),
     F("timeshift", "utilities", "System restore points (Timeshift)",
       "Take a snapshot before changes and roll back in one click, like System Restore. "
-      "DevOS also keeps btrfs restore points on the default install.", 10,
-      win="System Restore", apt=["timeshift"], presets=EVERYONE),
+      "On the default ext4 install this is the DevOS restore backend; btrfs installs use Snapper.",
+      10, win="System Restore", apt=["timeshift"], presets=EVERYONE, preinstalled=True),
     F("access", "utilities", "Accessibility (screen reader, magnifier, on-screen keyboard)",
       "Orca reads the screen aloud, KMag enlarges it, and Onboard types by pointer.",
       80, win="Narrator, Magnifier, Touch keyboard",

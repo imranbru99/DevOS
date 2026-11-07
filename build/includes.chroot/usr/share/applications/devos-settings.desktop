@@ -6,6 +6,7 @@ Comment=Display, network, sound, and account settings
 Exec=systemsettings
 Icon=devos-settings
 Terminal=false
-Type=Application
+Type=ApplicationStartupWMClass=devos-settings
+
 Categories=Settings;DesktopSettings;
 StartupNotify=true

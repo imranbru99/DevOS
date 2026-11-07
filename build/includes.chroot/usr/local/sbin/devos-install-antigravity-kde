@@ -1,0 +1,33 @@
+#!/bin/bash
+# Ensure the Antigravity KDE / Studio wrapper is ready (second pipeline agent slot).
+# Reuses /opt/antigravity/antigravity; no second download required.
+set -euo pipefail
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "Run: sudo devos-install-antigravity-kde" >&2
+    exit 1
+fi
+
+WRAPPER=/usr/local/bin/antigravity-kde
+BIN=/opt/antigravity/antigravity
+
+if [ ! -x "$BIN" ] && [ ! -x /usr/local/share/devos/antigravity-ide/bin/antigravity-ide ]; then
+    if [ -x /usr/local/sbin/devos-install-antigravity ]; then
+        /usr/local/sbin/devos-install-antigravity || true
+    fi
+fi
+
+if [ ! -x "$WRAPPER" ]; then
+    echo "Antigravity KDE wrapper missing at $WRAPPER." >&2
+    exit 1
+fi
+
+if [ ! -x "$BIN" ] \
+    && [ ! -x "${HOME:-/root}/.local/lib/antigravity-ide/antigravity-ide" ] \
+    && [ ! -x /usr/local/share/devos/antigravity-ide/bin/antigravity-ide ]; then
+    echo "Antigravity IDE binary not found. Install Google Antigravity first." >&2
+    exit 1
+fi
+
+echo "Antigravity KDE (Studio) is ready."
+exit 0

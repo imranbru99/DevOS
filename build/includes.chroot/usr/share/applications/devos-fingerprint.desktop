@@ -1,10 +1,11 @@
 [Desktop Entry]
-Type=Application
+Type=ApplicationStartupWMClass=devos-fingerprint
+
 Name=Fingerprint sign-in
 GenericName=Windows Hello-style sign-in
 Comment=Save a fingerprint and use it at the lock screen
-Exec=/usr/bin/python3 /usr/local/share/devos/components/settings/fingerprint.py gui
-Icon=fingerprint
+Exec=/usr/local/bin/devos-run --desktop=devos-fingerprint --name="Fingerprint sign-in" /usr/local/share/devos/components/settings/fingerprint.py gui
+Icon=devos-fingerprint
 Terminal=false
 StartupNotify=true
 Categories=System;Security;

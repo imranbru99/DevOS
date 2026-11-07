@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=ApplicationStartupWMClass=devos-cursor-agent
+
+Version=1.0
+Name=Cursor Agent
+GenericName=AI Coding Agent
+Comment=Cursor autonomous coding agent (CLI)
+Exec=konsole -e cursor-agent
+Icon=devos-cursor-agent
+Terminal=false
+Categories=Development;IDE;TextEditor;
+Keywords=cursor;agent;ai;code;
+StartupNotify=true

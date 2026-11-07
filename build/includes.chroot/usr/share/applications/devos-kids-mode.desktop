@@ -1,9 +1,10 @@
 [Desktop Entry]
-Type=Application
+Type=ApplicationStartupWMClass=devos-kids-mode
+
 Name=Kids Mode
 Comment=Move the mouse to play while apps keep working
-Exec=devos-kids-mode
-Icon=applications-games
+Exec=/usr/local/bin/devos-kids-mode
+Icon=devos-kids-mode
 Terminal=false
 Categories=Game;
 X-KDE-Shortcuts=Meta+K

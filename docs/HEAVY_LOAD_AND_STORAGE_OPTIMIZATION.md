@@ -151,3 +151,24 @@ log out/in. The runtime overrides disappear at user-manager restart.
 
 This is a resource policy, not evidence that all applications run smoothly.
 Validate the actual workload and GPU/driver behavior on the target machine.
+
+## Hang soak harness
+
+On a machine running the target workload (browser, build, video export, or AI),
+sample PSI and kernel hung-task warnings for at least an hour:
+
+```sh
+chmod +x tools/hang-soak.sh
+./tools/hang-soak.sh --minutes 60
+```
+
+Use `--dry-run` for a single sampling cycle (sanity check). Defaults:
+
+- Sample every 10 seconds for 60 minutes (`--minutes`, `--interval`).
+- Fail if `journalctl` reports `hung task` or `Blocked for more than` since soak start.
+- Fail if memory pressure `some avg10` stays at or above **80.0** for **3** consecutive
+  samples (~30s at the default interval). Override with `DEVOS_SOAK_MEM_AVG10_FAIL` and
+  `DEVOS_SOAK_MEM_CONSEC`.
+
+When `devos` is on `PATH`, each cycle also prints `devos smooth status`; from the
+source tree, `python3 components/optimizer/responsiveness.py status` is used instead.

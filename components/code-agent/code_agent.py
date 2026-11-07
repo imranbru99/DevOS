@@ -57,10 +57,10 @@ CODE_MODEL = os.environ.get("DEVOS_AI_MODEL", "devos-ai-code")
 
 IGNORED_DIRS = {".git", "node_modules", "vendor", "__pycache__", ".venv", "venv", "out", "build_work",
                 "dist", ".mypy_cache", ".pytest_cache", ".idea", ".tox", "target", ".next"}
-READ_CAP = 8000          # characters of a file shown to the model per read
-LIST_CAP = 150           # files per listing
-SEARCH_CAP = 60          # matching lines per search
-OUTPUT_CAP = 4000        # characters of command output shown to the model
+READ_CAP = 16000         # characters of a file shown to the model per read
+LIST_CAP = 200           # files per listing
+SEARCH_CAP = 80          # matching lines per search
+OUTPUT_CAP = 6000        # characters of command output shown to the model
 COMMAND_TIMEOUT = 120    # seconds; the model may ask for up to MAX_TIMEOUT
 MAX_TIMEOUT = 600
 LONG_TASK_CHARS = 1500   # a brief longer than this is split into build phases
@@ -79,7 +79,7 @@ NOTES_FILE = os.path.join(".devos", "agent-notes.md")
 
 # ====================================================================== tools
 
-READ_TOOLS = ("list_files", "read_file", "search")
+READ_TOOLS = ("list_files", "read_file", "search", "probe_site")
 EDIT_TOOLS = ("write_file", "apply_patch")
 COMMAND_TOOLS = ("run_command",)
 TOOL_NAMES = READ_TOOLS + EDIT_TOOLS + COMMAND_TOOLS
@@ -97,6 +97,8 @@ TOOL_ALIASES = {
     "run": "run_command", "bash": "run_command", "shell": "run_command", "sh": "run_command",
     "exec": "run_command", "execute": "run_command", "terminal": "run_command", "command": "run_command",
     "run_shell": "run_command", "execute_command": "run_command",
+    "probe": "probe_site", "probe_url": "probe_site", "check_site": "probe_site",
+    "check_url": "probe_site", "inspect_site": "probe_site", "site_probe": "probe_site",
 }
 
 ARG_ALIASES = {
@@ -108,6 +110,7 @@ ARG_ALIASES = {
     "query": "pattern", "regex": "pattern", "term": "pattern", "keyword": "pattern",
     "start": "start_line", "line": "start_line", "from_line": "start_line", "end": "end_line",
     "to_line": "end_line",
+    "uri": "url", "href": "url", "link": "url", "address": "url",
 }
 
 
@@ -292,9 +295,11 @@ class Workspace:
             start_new_session=posix)
 
         if is_server:
-            # Dev servers are persistent daemons and should not be killed with timeout
+            # Dev servers never exit — briefly sample stdout, then detach.
+            # Never fall through to communicate() or Pause/Close will hang forever.
+            text = ""
             try:
-                time.sleep(1.8)
+                time.sleep(1.5)
                 exit_code = proc.poll()
                 if exit_code is None:
                     try:
@@ -307,14 +312,33 @@ class Workspace:
                         text = ""
                     if not text.strip():
                         text = f"Server started and running with `{command}`."
-                    text += f"\n\n[Dev server active and running in background (PID {proc.pid})]"
-                    return {"code": 0, "output": text, "timed_out": False, "seconds": 2}
-                else:
-                    out, _ = proc.communicate(timeout=2)
-                    text = (out or b"").decode("utf-8", errors="replace")
-                    return {"code": exit_code, "output": cap_output(text), "timed_out": False, "seconds": 2}
-            except Exception:
-                pass
+                    text += f"\n\n[Dev server left running in background (PID {proc.pid}). Not waiting for it to exit.]"
+                    # Detach so the agent/pipeline is not blocked by the daemon.
+                    try:
+                        if proc.stdout:
+                            proc.stdout.close()
+                    except Exception:
+                        pass
+                    return {"code": 0, "output": cap_output(text), "timed_out": False, "seconds": 2,
+                            "background_pid": proc.pid}
+                out, _ = proc.communicate(timeout=2)
+                text = (out or b"").decode("utf-8", errors="replace")
+                return {"code": exit_code, "output": cap_output(text), "timed_out": False, "seconds": 2}
+            except Exception as exc:
+                # Still do not wait forever — kill the stuck spawn and report.
+                try:
+                    if posix:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    else:
+                        proc.kill()
+                except OSError:
+                    pass
+                return {
+                    "code": 1,
+                    "output": f"Dev server start failed or hung: {exc}",
+                    "timed_out": True,
+                    "seconds": 2,
+                }
 
         timed_out = False
         stopped = False
@@ -335,7 +359,10 @@ class Workspace:
                             proc.kill()
                     except OSError:
                         pass
-                    out, _ = proc.communicate()
+                    try:
+                        out, _ = proc.communicate(timeout=2)
+                    except Exception:
+                        out = b""
                     break
         if stopped:
             out = (out or b"") + b"\n[stopped by the user]"
@@ -798,6 +825,8 @@ def _parse_body(name: str, body: str) -> Dict[str, Any]:
         args["path"] = _unquote(rest.strip().split("\n")[0].strip())
     elif name == "search" and "pattern" not in args and rest.strip():
         args["pattern"] = rest.strip().split("\n")[0]
+    elif name == "probe_site" and "url" not in args and rest.strip():
+        args["url"] = _unquote(rest.strip().split("\n")[0].strip())
     return args
 
 
@@ -1275,6 +1304,7 @@ Tools:
 - list_files  path: <folder>
 - read_file   path: <file>   (optional start_line: <n>, end_line: <n>)
 - search      pattern: <text or regex>   (optional path: <folder>)
+- probe_site  url: <http(s) preview URL>   (live HTTP + DOM + missing assets + console/network when Chromium is available)
 - write_file  path: <file>, then a line with ---, then the COMPLETE file content
 - apply_patch path: <file>, then a line with ---, then a unified diff (@@ hunks with exact unchanged lines)
 - run_command command: <shell command run in the project folder>
@@ -1283,10 +1313,11 @@ How you work:
 1. Build/implement/fix requests: act in your first reply. Read only the 1-3 files you need, then write real code with write_file (new files, rewrites) or apply_patch (small edits to existing files). Reading alone never completes a task.
 2. Prefer generators over hand-writing: composer require, php artisan make:*, npm/composer scaffolding. A file written by hand takes minutes on this PC. Always write complete, working code. Never use placeholders, TODO stubs for core logic, or "... rest of code". Keep each file under about 250 lines (split into classes/partials/components) so nothing gets cut off.
 3. Follow the project's existing stack and conventions (see the Project Architecture and manifests below). Only use files that exist; create the folders and files you need.
-4. After writing code, verify it: a SYNTAX ERROR or failed command in a result means fix it now. Run tests/build/serve only when asked or when it is the natural check. Never run .md/.txt files; use the detected run command for the app.
-5. Questions ("why is X blank", "how does this work"): inspect the exact suspect files (Laravel: routes/web.php, the view, the controller; JS: index.html, src/App, package.json; Python: main.py/app.py, routes), find the root cause in 1-3 calls, explain it, and apply the fix when one is needed.
-6. If the user rejects a change or command, do not repeat it.
-7. When everything is done, reply with a short final summary (files created/changed, how to run it) and no tool block."""
+4. After writing code, verify it: a SYNTAX ERROR or failed command in a result means fix it now. Prefer `php -l`, `npm test`, or a short smoke command — do NOT run long-lived servers (`php artisan serve`, `npm run dev`, `vite`) unless the user explicitly asked; those stay in the background and must not be treated as a step that "finishes". Never run .md/.txt files.
+5. Questions ("why is X blank", "how does this work", broken/large sites): FIRST call probe_site on the preview URL (or start the app, then probe). Use the Findings list as ground truth — do not guess from truncated source alone. Then open only the cited files with start_line ranges and fix the real cause.
+6. Large projects: map with list_files/search by route or feature; never try to read the whole tree. Continue truncated reads with start_line. Persist important findings in .devos/agent-notes.md.
+7. If the user rejects a change or command, do not repeat it.
+8. When everything is done, reply with a short final summary (files created/changed, how to run it) and no tool block."""
 
 FORMAT_HELP = ("Your tool call could not be read. Write exactly one block like:\n"
                "```tool read_file\npath: README.md\n```\nor, for a new file:\n"
@@ -2508,7 +2539,9 @@ class CodeAgent:
             "make", "build", "create", "implement", "develop", "complete", "add", "fix", "setup", "set up",
             "scaffold", "generate", "code", "write", "landing page", "erp", "project", "application", "app",
             "feature", "module", "system", "phase"])
-        effective_max = min(max_steps, 8) if is_diagnostic else max_steps
+        # Diagnostics need more room once live probes exist; large sites often
+        # need probe → map → targeted reads → fix rather than 8 shallow guesses.
+        effective_max = min(max_steps, 16) if is_diagnostic else max_steps
         label = f"Phase {phase[0]}/{phase[1]} · " if phase else ""
         if phase is not None and not is_diagnostic:
             try:
@@ -2636,7 +2669,13 @@ class CodeAgent:
             for call in calls:
                 if self.cancelled:
                     break
-                tool_target = str(call.args.get("path") or call.args.get("command") or call.args.get("pattern") or "")
+                tool_target = str(
+                    call.args.get("path")
+                    or call.args.get("url")
+                    or call.args.get("command")
+                    or call.args.get("pattern")
+                    or ""
+                )
                 sig = (call.name, tool_target)
                 call_counts[sig] = call_counts.get(sig, 0) + 1
                 seen = call_counts[sig]
@@ -2723,6 +2762,35 @@ class CodeAgent:
 
     def _read(self, call: ToolCall) -> str:
         args = call.args
+        if call.name == "probe_site":
+            url = str(args.get("url") or args.get("path") or "").strip()
+            title = f"Probe {url or 'site'}"
+            self.on_event("step", {"title": title, "kind": "read"})
+            if self.policy.needs_approval(call.name) and not self.approve(
+                Action("read", call.name, title, path=url or ".")
+            ):
+                self.on_event("step_status", "denied")
+                return "The user did not allow this site probe."
+            import site_probe as _site_probe
+            try:
+                report = _site_probe.probe_site(url)
+                out = _site_probe.format_probe_report(report)
+                # Persist findings so later turns survive history truncation.
+                try:
+                    notes_dir = os.path.join(self.ws.root, ".devos")
+                    os.makedirs(notes_dir, exist_ok=True)
+                    notes_path = os.path.join(notes_dir, "agent-notes.md")
+                    with open(notes_path, "a", encoding="utf-8") as handle:
+                        handle.write(f"\n\n## Site probe {time.strftime('%Y-%m-%d %H:%M')}\n\n")
+                        handle.write(out)
+                        handle.write("\n")
+                except OSError:
+                    pass
+            except Exception as exc:
+                out = f"probe_site failed: {type(exc).__name__}: {exc}"
+            self.on_event("step_status", "done")
+            return out
+
         path = str(args.get("path") or ".")
         if call.name == "read_file":
             title = f"Read {path}"

@@ -1,0 +1,4 @@
+#!/bin/bash
+# DevOS audio defaults — process title is the app id, not python3.
+export DEVOS_DESKTOP_FILE=devos-audio-defaults
+exec -a "devos-audio-defaults" /usr/bin/python3 /usr/local/share/devos/components/audio/mic_defaults.py "$@"

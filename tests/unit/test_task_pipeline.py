@@ -18,6 +18,8 @@ sys.path.insert(0, str(ROOT / "components" / "ai-agent"))
 from task_pipeline import (
     TaskPipeline,
     parse_reset_time,
+    is_quota_exhausted,
+    latest_quota_block,
     extract_repo_metadata,
     discover_agents,
     to_slug,
@@ -56,6 +58,23 @@ class TestTaskPipeline(unittest.TestCase):
         self.assertIsNotNone(target)
         self.assertEqual(target.hour, 10)
         self.assertEqual(target.minute, 47)  # 10:46 + 1 min safety buffer
+
+    def test_parse_reset_time_from_antigravity_duration(self):
+        text = "RESOURCE_EXHAUSTED (code 429): Individual quota reached. Resets in 4h50m25s."
+        before = datetime.datetime.now()
+        target = parse_reset_time(text)
+        after = datetime.datetime.now()
+        self.assertIsNotNone(target)
+        # 4h50m25s + 1m safety ≈ 4h51m25s from now
+        low = before + datetime.timedelta(hours=4, minutes=51, seconds=20)
+        high = after + datetime.timedelta(hours=4, minutes=51, seconds=30)
+        self.assertTrue(low <= target <= high)
+
+    def test_is_quota_exhausted_detects_google_and_codex(self):
+        self.assertTrue(is_quota_exhausted("RESOURCE_EXHAUSTED (code 429): Individual quota reached."))
+        self.assertTrue(is_quota_exhausted("wait for usage to reset on 10:46 AM"))
+        self.assertTrue(is_quota_exhausted("You hit a rate limit"))
+        self.assertFalse(is_quota_exhausted("conversation submitted successfully"))
 
     def test_extract_repo_metadata(self):
         sample = "Project built successfully!\nrepo: devos-quantum-cache\ndescription: Ultra-fast kernel caching library\n"
@@ -478,66 +497,189 @@ class TestTaskPipeline(unittest.TestCase):
         worker.run()
         mock_pipeline.execute_parallel_tick.assert_called_once_with(limit=4)
 
-    def test_agent_slot_unifies_antigravity_variants(self):
+    def test_agent_slots_keep_antigravity_and_kde_separate(self):
         self.assertEqual(TaskPipeline.agent_slot("antigravity"), "antigravity")
-        self.assertEqual(TaskPipeline.agent_slot("antigravity-kde"), "antigravity")
-        self.assertEqual(TaskPipeline.agent_slot("antigravity-ide"), "antigravity")
+        self.assertEqual(TaskPipeline.agent_slot("antigravity-kde"), "antigravity-kde")
+        self.assertEqual(TaskPipeline.agent_slot("antigravity-ide"), "antigravity-kde")
         self.assertEqual(TaskPipeline.agent_slot("google-antigravity"), "antigravity")
+        self.assertEqual(TaskPipeline.quota_family("antigravity"), "google-antigravity")
+        self.assertEqual(TaskPipeline.quota_family("antigravity-kde"), "google-antigravity")
         self.assertEqual(TaskPipeline.agent_slot("chatgpt"), "chatgpt")
         self.assertEqual(TaskPipeline.agent_slot("codex"), "chatgpt")
         self.assertEqual(TaskPipeline.agent_slot("claude"), "claude")
         self.assertEqual(TaskPipeline.agent_slot("local"), "local")
 
-    def test_distinct_agents_run_concurrently_while_same_agent_runs_sequentially(self):
+    def test_latest_quota_block_ignores_stale_quota_when_agent_still_working(self):
+        lines = [
+            json.dumps({"step_index": 1, "status": "DONE", "error": "RESOURCE_EXHAUSTED (code 429): Individual quota reached. Resets in 4h50m25s."}),
+            json.dumps({"step_index": 2, "status": "RUNNING", "type": "GENERIC", "tool_calls": [{"name": "run_command"}]}),
+        ]
+        reset_at, evidence = latest_quota_block(lines)
+        self.assertIsNone(reset_at)
+        self.assertEqual(evidence, "")
+
+    def test_latest_quota_block_detects_tip_quota_failure(self):
+        lines = [
+            json.dumps({"step_index": 1, "status": "DONE", "type": "GENERIC"}),
+            json.dumps({"step_index": 2, "status": "DONE", "error": "RESOURCE_EXHAUSTED (code 429): Individual quota reached. Resets in 1h5m0s."}),
+        ]
+        reset_at, evidence = latest_quota_block(lines)
+        self.assertTrue(evidence)
+        self.assertIsNotNone(reset_at)
+
+    def test_antigravity_quota_cools_shared_family_across_kde_and_projects(self):
+        """A real dispatch 429 must pause both Antigravity apps' queued work."""
+        p = self.pipeline
+        t1 = p.add("burn 1", agent="antigravity", project_slug="proj1")
+        t2 = p.add("burn 2", agent="antigravity-kde", project_slug="proj2")
+        t3 = p.add("other", agent="claude", project_slug="proj3")
+        with patch("task_pipeline.notify"), patch("task_pipeline.is_agent_working", return_value=False):
+            claimed = p._claim_next(parallel=True, limit=4)
+            self.assertEqual(claimed["id"], t1)
+            exhausted = (
+                "RESOURCE_EXHAUSTED (code 429): Individual quota reached. "
+                "Please upgrade your subscription to increase your limits. Resets in 4h50m25s."
+            )
+            p._finish_dispatch(claimed, False, exhausted)
+            tasks = {t["id"]: t for t in p.list()}
+            self.assertEqual(tasks[t1]["status"], "RATE_LIMITED")
+            self.assertEqual(tasks[t2]["status"], "RATE_LIMITED")
+            self.assertEqual(tasks[t3]["status"], "QUEUED")
+            cooled = p._cooled_agent_slots()
+            self.assertIn("antigravity", cooled)
+            self.assertIn("antigravity-kde", cooled)
+            claimed_claude = p._claim_next(parallel=True, limit=4)
+            self.assertIsNotNone(claimed_claude)
+            self.assertEqual(claimed_claude["id"], t3)
+            self.assertIsNone(p._claim_next(parallel=True, limit=4))
+
+    def test_antigravity_and_kde_run_different_projects_in_parallel(self):
         p = self.pipeline
         t1 = p.add("Antigravity Proj 1", agent="antigravity", project_slug="proj1")
-        t2 = p.add("Claude Proj 2", agent="claude", project_slug="proj2")
-        t3 = p.add("Antigravity Proj 3", agent="antigravity-kde", project_slug="proj3")
-        t4 = p.add("Claude Proj 4", agent="claude", project_slug="proj4")
+        t2 = p.add("KDE Proj 2", agent="antigravity-kde", project_slug="proj2")
+        t3 = p.add("Antigravity Proj 3", agent="antigravity", project_slug="proj3")
+        t4 = p.add("KDE Proj 4", agent="antigravity-kde", project_slug="proj4")
 
         with patch("task_pipeline.is_agent_working", return_value=False), patch("task_pipeline.notify"):
             claimed_1 = p._claim_next(parallel=True, limit=4)
-            self.assertIsNotNone(claimed_1)
             self.assertEqual(claimed_1["id"], t1)
 
+            # Different agent → can start immediately on another project
             claimed_2 = p._claim_next(parallel=True, limit=4)
-            self.assertIsNotNone(claimed_2)
             self.assertEqual(claimed_2["id"], t2)
 
-            # Neither t3 (same antigravity agent) nor t4 (same claude agent) should be claimed yet
-            claimed_3 = p._claim_next(parallel=True, limit=4)
-            self.assertIsNone(claimed_3)
+            # Same agents still busy → no more Antigravity/KDE claims yet
+            self.assertIsNone(p._claim_next(parallel=True, limit=4))
 
-            # Once t1 finishes, antigravity slot frees up and t3 can be claimed
+            # When Antigravity finishes, its next project starts (not KDE's)
             p.update_task(t1, {"status": "COMPLETED"})
             claimed_t3 = p._claim_next(parallel=True, limit=4)
-            self.assertIsNotNone(claimed_t3)
             self.assertEqual(claimed_t3["id"], t3)
 
-            # Once t2 finishes, claude slot frees up and t4 can be claimed
             p.update_task(t2, {"status": "COMPLETED"})
             claimed_t4 = p._claim_next(parallel=True, limit=4)
-            self.assertIsNotNone(claimed_t4)
             self.assertEqual(claimed_t4["id"], t4)
 
-    def test_dispatch_does_not_spawn_new_window_when_agent_running(self):
+    def test_dispatch_opens_project_workspace_even_when_agent_running(self):
         result = types.SimpleNamespace(returncode=0, stdout=json.dumps({"response": {"newConversation": {"conversationId": "conv-test"}}}), stderr="")
+        fake_env = {"ANTIGRAVITY_LS_ADDRESS": "127.0.0.1:1000", "ANTIGRAVITY_CSRF_TOKEN": "test-token"}
+        order = []
+
+        def fake_reload(module):
+            return module
+
+        def fake_ensure(*a, **k):
+            order.append("ensure")
+            return fake_env
+
+        def fake_wait(*a, **k):
+            order.append("wait")
+            return fake_env
+
+        def fake_run(*a, **k):
+            order.append("submit")
+            return result
+
         with patch("task_pipeline.is_agent_process_running", return_value=(True, 4242)), \
              patch("task_pipeline.AGENTAPI_BIN", Path("/mock/agentapi")), \
              patch.object(Path, "exists", autospec=True, side_effect=lambda p: True if "/mock/agentapi" in str(p) else os.path.exists(str(p))), \
-             patch("antigravity_connection.ensure_connection", return_value={"ANTIGRAVITY_LS_ADDRESS": "127.0.0.1:1000"}), \
-             patch("antigravity_connection.bind_project", return_value={}), \
+             patch("importlib.reload", side_effect=fake_reload), \
+             patch("antigravity_connection.ensure_connection", side_effect=fake_ensure), \
+             patch("antigravity_connection.wait_until_agent_ready", side_effect=fake_wait), \
+             patch("antigravity_connection.bind_project", side_effect=lambda env, project: dict(env, ANTIGRAVITY_PROJECT_ID="p1")), \
+             patch("antigravity_connection.connection_environment", return_value=None), \
+             patch("antigravity_connection.is_port_alive", return_value=True), \
+             patch("antigravity_connection.set_workspace_last_conversation", return_value=True), \
+             patch("task_pipeline.focus_agent_workspace", return_value=True) as mock_focus, \
              patch("subprocess.Popen") as mock_popen, \
-             patch("subprocess.run", return_value=result) as mock_run:
+             patch("subprocess.run", side_effect=fake_run) as mock_run:
             ok, output = self.pipeline._dispatch({
                 "agent": "antigravity",
                 "prompt": "write feature",
                 "project": self.test_dir,
                 "project_slug": "test-project"
             })
-            self.assertTrue(ok)
+            self.assertTrue(ok, output)
+            self.assertTrue(str(output).startswith("STARTED:"))
+            self.assertGreaterEqual(mock_focus.call_count, 1)
             mock_popen.assert_not_called()
             mock_run.assert_called_once()
+            self.assertEqual(order, ["ensure", "wait", "submit"])
+
+    def test_dispatch_waits_for_ready_before_submitting_on_cold_kde_start(self):
+        result = types.SimpleNamespace(returncode=0, stdout=json.dumps({"response": {"newConversation": {"conversationId": "conv-kde"}}}), stderr="")
+        fake_env = {"ANTIGRAVITY_LS_ADDRESS": "127.0.0.1:46463", "ANTIGRAVITY_CSRF_TOKEN": "test-token"}
+        order = []
+
+        def fake_reload(module):
+            return module
+
+        def fake_wait(profile, project, emit=None, timeout=45, launched_at=None):
+            order.append(("wait", profile, launched_at is not None))
+            if emit:
+                emit("Waiting for Antigravity KDE prompt UI to finish loading…")
+            return fake_env
+
+        with patch("task_pipeline.is_agent_process_running", return_value=(False, None)), \
+             patch("task_pipeline.AGENTAPI_BIN", Path("/mock/agentapi")), \
+             patch.object(Path, "exists", autospec=True, side_effect=lambda p: True if "/mock/agentapi" in str(p) or "antigravity-kde" in str(p) else os.path.exists(str(p))), \
+             patch("importlib.reload", side_effect=fake_reload), \
+             patch("antigravity_connection.ensure_connection", return_value=fake_env), \
+             patch("antigravity_connection.wait_until_agent_ready", side_effect=fake_wait), \
+             patch("antigravity_connection.bind_project", side_effect=lambda env, project: dict(env, ANTIGRAVITY_PROJECT_ID="p1")), \
+             patch("antigravity_connection.connection_environment", return_value=None), \
+             patch("antigravity_connection.is_port_alive", return_value=True), \
+             patch("antigravity_connection.set_workspace_last_conversation", return_value=True), \
+             patch("task_pipeline.focus_agent_workspace", return_value=True), \
+             patch("subprocess.run", return_value=result) as mock_run:
+            # Force kde api bin path to exist via AGENTAPI style: patch Path.exists already covers antigravity-kde
+            with patch("task_pipeline.Path.home", return_value=Path(self.test_dir)):
+                kde_api = Path(self.test_dir) / ".gemini/antigravity-kde/bin/agentapi"
+                kde_api.parent.mkdir(parents=True, exist_ok=True)
+                kde_api.write_text("#!/bin/sh\n")
+                kde_api.chmod(0o755)
+                ok, output = self.pipeline._dispatch({
+                    "agent": "antigravity-kde",
+                    "prompt": "build camera app",
+                    "project": self.test_dir,
+                    "project_slug": "ai-camera",
+                })
+            self.assertTrue(ok, output)
+            self.assertTrue(str(output).startswith("STARTED:"))
+            self.assertEqual(order[0][0], "wait")
+            self.assertEqual(order[0][1], "antigravity-kde")
+            self.assertTrue(order[0][2], "cold start must pass launched_at")
+            mock_run.assert_called_once()
+
+    def test_submitted_idle_task_does_not_block_other_antigravity_projects(self):
+        p = self.pipeline
+        stuck = p.add("old submitted", agent="antigravity-kde", project_slug="old-proj")
+        nxt = p.add("next work", agent="antigravity", project_slug="new-proj")
+        p.update_task(stuck, {"status": "SUBMITTED", "status_message": "No recent agent activity"})
+        with patch("task_pipeline.is_agent_working", return_value=False), patch("task_pipeline.notify"):
+            claimed = p._claim_next(parallel=True, limit=4)
+            self.assertIsNotNone(claimed)
+            self.assertEqual(claimed["id"], nxt)
 
 
 if __name__ == "__main__":

@@ -7,6 +7,10 @@ separate persistent user-data directory under
 browser process and profile. It does not eliminate system memory pressure, GPU
 driver failures, network failures, or remote Cloud PC problems.
 
+When the isolated profile (or a desktop shortcut) already has a PWA install for
+the portal, launches use `--app-id=…` and focus the existing window instead of
+opening another tab-like `--app=` chrome. Set `DEVOS_WINDOWS_APP_ID` to pin an id.
+
 The first launch of the isolated profile requires signing in. Existing browser
 profiles and active Cloud PC sessions are left intact; no cookies or credentials
 are copied. Browser startup errors are written to

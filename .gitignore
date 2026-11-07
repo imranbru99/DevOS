@@ -19,3 +19,4 @@ pipeline_steps_25.md
 antigravity-api.json
 *.events.jsonl
 *.events.previous.jsonl
+secrets/

@@ -1,0 +1,34 @@
+#!/bin/bash
+# Install OpenAI Codex CLI system-wide for the DevOS AI Pipeline.
+set -euo pipefail
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "Run: sudo devos-install-codex" >&2
+    exit 1
+fi
+
+if command -v codex >/dev/null 2>&1; then
+    echo "Codex CLI is already installed: $(command -v codex)"
+    exit 0
+fi
+
+if ! command -v npm >/dev/null 2>&1; then
+    echo "npm is required to install Codex. Install Node.js first." >&2
+    exit 1
+fi
+
+echo "Installing @openai/codex globally..."
+npm install -g @openai/codex
+
+# Ensure /usr/local/bin sees the npm global bin when npm uses a custom prefix.
+NPM_BIN="$(npm bin -g 2>/dev/null || true)"
+if [ -n "${NPM_BIN}" ] && [ -x "${NPM_BIN}/codex" ] && [ ! -e /usr/local/bin/codex ]; then
+    ln -sfn "${NPM_BIN}/codex" /usr/local/bin/codex
+fi
+
+if ! command -v codex >/dev/null 2>&1; then
+    echo "Codex install finished but 'codex' is not on PATH." >&2
+    exit 1
+fi
+
+echo "Codex CLI installed."

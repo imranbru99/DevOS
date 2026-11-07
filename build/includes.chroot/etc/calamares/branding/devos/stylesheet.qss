@@ -12,11 +12,13 @@ QWidget {
 
 QLabel { background: transparent; }
 
-/* Page titles inside widget-based steps */
+/* Page titles inside widget-based steps.
+   Keep Summary compact so Next/Back stay on-screen on 1366x768 laptops. */
 QLabel#viewTitle, QLabel#pageTitle {
-    font-size: 28px;
+    font-size: 22px;
     font-weight: 700;
     color: #f8fafc;
+    margin-bottom: 4px;
 }
 
 /* Buttons that live inside pages (Change..., partition actions) */
@@ -79,13 +81,22 @@ QRadioButton, QCheckBox { spacing: 10px; color: #e2e8f0; background: transparent
 
 QGroupBox {
     border: 1px solid #1e293b;
-    border-radius: 14px;
-    margin-top: 16px;
-    padding: 14px;
+    border-radius: 12px;
+    margin-top: 10px;
+    padding: 10px;
     font-weight: 600;
 }
 
-QScrollArea, QAbstractScrollArea, QStackedWidget { background: transparent; border: none; }
+/* Summary and other tall widget pages must scroll inside the content pane
+   instead of expanding until they clip the QML navigation bar. */
+QScrollArea, QAbstractScrollArea {
+    background: transparent;
+    border: none;
+}
+QStackedWidget { background: transparent; border: none; }
+QScrollArea > QWidget > QWidget {
+    background: transparent;
+}
 QScrollBar:vertical { background: transparent; width: 10px; margin: 2px; }
 QScrollBar::handle:vertical { background: #334155; border-radius: 4px; min-height: 30px; }
 QScrollBar::add-line, QScrollBar::sub-line { height: 0; }

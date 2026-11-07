@@ -72,8 +72,10 @@ class ThemeSwitcher:
             "name": "DevOS Light",
             "kdeglobals_scheme": "DevOS-Light",
             "fallback_scheme": "BreezeLight",
+            # Keep the DevOS look-and-feel package so light mode does not wipe the
+            # DevOS panel/branding (org.kde.breeze.desktop was resetting the desktop).
             "plasma_desktoptheme": "breeze-light",
-            "lookandfeel": "org.kde.breeze.desktop",
+            "lookandfeel": "org.devos.desktop",
             "fallback_lookandfeel": "org.kde.breeze.desktop",
             "gtk_theme": "Breeze",
             "gtk_icon_theme": "Papirus",
@@ -194,8 +196,9 @@ class ThemeSwitcher:
         if not cp.has_section(section):
             cp.add_section(section)
         # Purge problematic GTK modules that trigger SIGSEGV crashes in Chromium/Electron
-        if cp.has_option(section, "gtk-modules"):
-            cp.remove_option(section, "gtk-modules")
+        for doomed in ("gtk-modules", "gtk-module"):
+            if cp.has_option(section, doomed):
+                cp.remove_option(section, doomed)
         for k, v in values.items():
             cp.set(section, k, v)
         try:
@@ -203,6 +206,99 @@ class ThemeSwitcher:
                 cp.write(f)
         except Exception:
             pass
+
+    @classmethod
+    def _strip_crashy_gtk_modules(cls) -> None:
+        """Remove colorreload/window-decorations GTK modules that SIGSEGV Chromium/Electron.
+
+        Plasma's gtkconfig often re-injects `colorreload-gtk-module` when the palette
+        changes. That module reloads GTK chrome inside Chrome/Edge/Antigravity and
+        kills the process. We strip it from settings and never broadcast a GTK reload.
+        """
+        for path in (GTK3_FILE, GTK4_FILE):
+            if not os.path.exists(path):
+                continue
+            try:
+                text = open(path, encoding="utf-8", errors="replace").read()
+                lines = [
+                    ln for ln in text.splitlines(True)
+                    if not ln.lower().startswith("gtk-modules=")
+                    and not ln.lower().startswith("gtk-module=")
+                ]
+                open(path, "w", encoding="utf-8").writelines(lines)
+            except OSError:
+                pass
+
+    @classmethod
+    def _write_gtk_settings(cls, spec: Dict[str, str]) -> None:
+        """Write GTK 3/4 settings without asking GtkConfig to hot-reload (crashes Chrome)."""
+        prefer = spec["gtk_prefer_dark"]
+        gtk_vals = {
+            "gtk-theme-name": spec["gtk_theme"],
+            "gtk-icon-theme-name": spec["gtk_icon_theme"],
+            "gtk-application-prefer-dark-theme": prefer,
+        }
+        cls._update_ini_file(GTK3_FILE, "Settings", gtk_vals)
+        cls._update_ini_file(GTK4_FILE, "Settings", gtk_vals)
+        cls._strip_crashy_gtk_modules()
+        # Do NOT call org.kde.GtkConfig.setGtkTheme — it reloads GTK in every
+        # running Chromium/Electron process and commonly segfaults them.
+
+    @classmethod
+    def _reload_desktop(cls, spec: Dict[str, str]) -> None:
+        """Push live Plasma / KWin / Kvantum refresh without resetting the shell layout."""
+        if shutil.which("plasma-apply-colorscheme"):
+            # If already on the target scheme, briefly flip to fallback so Plasma
+            # does not no-op and leave a stale palette in memory.
+            try:
+                current = ""
+                if os.path.exists(KDEGLOBALS_FILE):
+                    cp = configparser.ConfigParser()
+                    cp.read(KDEGLOBALS_FILE)
+                    current = cp.get("General", "ColorScheme", fallback="")
+                if current == spec["kdeglobals_scheme"] and spec.get("fallback_scheme"):
+                    _run_cmd(["plasma-apply-colorscheme", spec["fallback_scheme"]])
+                    cls._strip_crashy_gtk_modules()
+            except Exception:
+                pass
+            if not _run_cmd(["plasma-apply-colorscheme", spec["kdeglobals_scheme"]]):
+                _run_cmd(["plasma-apply-colorscheme", spec["fallback_scheme"]])
+            cls._strip_crashy_gtk_modules()
+        if shutil.which("plasma-apply-desktoptheme"):
+            _run_cmd(["plasma-apply-desktoptheme", spec["plasma_desktoptheme"]])
+        if shutil.which("kvantummanager"):
+            _run_cmd(["kvantummanager", "--set", spec["kvantum_theme"]])
+        qdbus = shutil.which("qdbus6") or shutil.which("qdbus")
+        if qdbus:
+            _run_cmd([qdbus, "org.kde.KWin", "/KWin", "reconfigure"])
+            # Intentionally skip KGlobalSettings.notifyChange(Palette): that signal
+            # triggers colorreload-gtk-module inside Chrome / Edge / Antigravity and
+            # they exit with Segmentation fault. Plasma still picks up kdeglobals.
+        # Stock KDE apps (Dolphin, etc.) cache the old palette when we skip the
+        # global notify — restart them so they match DevOS dark/light.
+        cls._refresh_stock_kde_apps()
+        # gtkconfig may rewrite settings.ini a moment after colorscheme apply.
+        cls._strip_crashy_gtk_modules()
+        try:
+            import threading
+
+            for delay in (0.8, 2.0):
+                threading.Timer(delay, cls._strip_crashy_gtk_modules).start()
+        except Exception:
+            pass
+
+    @classmethod
+    def _refresh_stock_kde_apps(cls) -> None:
+        """Restart palette-caching KDE apps without a global palette notify.
+
+        DevOS Files paints its own stylesheet from settings.json, so it tracks
+        dark/light on its own. Dolphin uses the Plasma ColorScheme and keeps a
+        stale light/dark paint until restarted when notifyChange is skipped.
+        """
+        # Close Dolphin windows + daemon; next open (or --daemon) gets new colors.
+        if shutil.which("killall"):
+            _run_cmd(["killall", "dolphin"])
+        # Prefer the DevOS file manager for folders; leave mimeapps alone here.
 
     @classmethod
     def _update_code_settings(cls, path: str, theme_name: str):
@@ -253,18 +349,14 @@ class ThemeSwitcher:
         except Exception:
             pass
 
-        if shutil.which("lookandfeeltool"):
+        # lookandfeeltool resets panel layout and can fight color apply. Only use it
+        # for macOS WhiteSur packs; dark/light stay on org.devos.desktop.
+        if mode in ("mac", "mac-light") and shutil.which("lookandfeeltool"):
             if not _run_cmd(["lookandfeeltool", "-a", spec["lookandfeel"]]):
                 _run_cmd(["lookandfeeltool", "-a", spec["fallback_lookandfeel"]])
 
-        # 2. Update GTK 3 & GTK 4
-        gtk_vals = {
-            "gtk-theme-name": spec["gtk_theme"],
-            "gtk-icon-theme-name": spec["gtk_icon_theme"],
-            "gtk-application-prefer-dark-theme": spec["gtk_prefer_dark"],
-        }
-        cls._update_ini_file(GTK3_FILE, "Settings", gtk_vals)
-        cls._update_ini_file(GTK4_FILE, "Settings", gtk_vals)
+        # 2. Update GTK 3 & GTK 4 (after any LNF so we win the final write)
+        cls._write_gtk_settings(spec)
 
         # 3. Update XDG / GNOME desktop interface portal via gsettings
         _run_cmd(["gsettings", "set", "org.gnome.desktop.interface", "color-scheme", spec["gsettings_color_scheme"]])
@@ -291,11 +383,15 @@ class ThemeSwitcher:
         # 6. Update KDE Plasma Configuration Files
         kwrite_bin = shutil.which("kwriteconfig6") or shutil.which("kwriteconfig5")
         if kwrite_bin:
-            # Do not pre-write the desired name: the apply tool may then
-            # consider it already active and leave the old color palette intact.
+            # Do not pre-write ColorScheme when plasma-apply-colorscheme exists —
+            # pre-writing can make the apply tool no-op with a stale palette.
             if not shutil.which("plasma-apply-colorscheme"):
                 _run_cmd([kwrite_bin, "--file", "kdeglobals", "--group", "General", "--key", "ColorScheme", spec["kdeglobals_scheme"]])
             _run_cmd([kwrite_bin, "--file", "kdeglobals", "--group", "Icons", "--key", "Theme", spec["gtk_icon_theme"]])
+            _run_cmd([kwrite_bin, "--file", "kdeglobals", "--group", "KDE", "--key", "widgetStyle", "kvantum"])
+            # Keep DevOS look-and-feel for dark/light so branding/panel stay put.
+            if mode in ("dark", "light"):
+                _run_cmd([kwrite_bin, "--file", "kdeglobals", "--group", "KDE", "--key", "LookAndFeelPackage", "org.devos.desktop"])
             _run_cmd([kwrite_bin, "--file", "plasmarc", "--group", "Theme", "--key", "name", spec["plasma_desktoptheme"]])
             _run_cmd([kwrite_bin, "--file", "kwinrc", "--group", "org.kde.kdecoration2", "--key", "ButtonsOnLeft", spec.get("buttons_left", "M")])
             _run_cmd([kwrite_bin, "--file", "kwinrc", "--group", "org.kde.kdecoration2", "--key", "ButtonsOnRight", spec.get("buttons_right", "IAX")])
@@ -313,17 +409,10 @@ class ThemeSwitcher:
                 kwin_vals["theme"] = spec["kdecoration_theme"]
             cls._update_ini_file(KWINRC_FILE, "org.kde.kdecoration2", kwin_vals)
 
-        # 7. Apply live Plasma 6 runtime hooks if active session exists
-        if shutil.which("plasma-apply-colorscheme"):
-            if not _run_cmd(["plasma-apply-colorscheme", spec["kdeglobals_scheme"]]):
-                _run_cmd(["plasma-apply-colorscheme", spec["fallback_scheme"]])
-
-        if shutil.which("plasma-apply-desktoptheme"):
-            _run_cmd(["plasma-apply-desktoptheme", spec["plasma_desktoptheme"]])
-
-        qdbus_bin = shutil.which("qdbus6") or shutil.which("qdbus")
-        if qdbus_bin:
-            _run_cmd([qdbus_bin, "org.kde.KWin", "/KWin", "reconfigure"])
+        # 7. Live refresh (colors, plasma theme, kvantum, kwin) — no full LNF reset.
+        cls._reload_desktop(spec)
+        # GTK last again so portal/LNF helpers cannot leave crashy gtk-modules behind.
+        cls._write_gtk_settings(spec)
 
         cls.apply_wallpaper(mode)
         return True

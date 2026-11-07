@@ -14,7 +14,8 @@ def test_persistent_separate_profile_and_no_forced_theme(tmp_path,monkeypatch):
         cmd=launch_command()
     assert '--user-data-dir='+str(tmp_path/'devos/windows-app/chrome') in cmd
     assert '--profile-directory=Default' in cmd
-    assert '--app=https://windows.cloud.microsoft/' in cmd
+    assert ('--app=https://windows.cloud.microsoft/' in cmd) or any(a.startswith('--app-id=') for a in cmd)
+    assert '--class=chrome-windows.cloud.microsoft__-Default' in cmd
     assert not any('force-dark' in arg or 'no-sandbox' in arg for arg in cmd)
     assert (tmp_path/'devos/windows-app/chrome').stat().st_mode & 0o777 == 0o700
 

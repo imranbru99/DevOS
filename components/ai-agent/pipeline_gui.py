@@ -40,6 +40,10 @@ from task_pipeline import (
     detect_current_project,
     list_existing_projects,
 )
+try:
+    import pipeline_premium as premium
+except Exception:  # pragma: no cover
+    premium = None
 
 
 def get_app_icon():
@@ -597,7 +601,7 @@ class StepRow(QtWidgets.QFrame):
             btn_failover = QtWidgets.QPushButton("Switch to Antigravity")
             btn_failover.setObjectName("accent_warning")
             btn_failover.setStyleSheet("padding: 4px 8px; font-size: 11px;")
-            btn_failover.setToolTip("Skip rate-limit cooldown and execute via Antigravity immediately")
+            btn_failover.setToolTip("Skip cooldown and run via another agent (local if Antigravity quota is already exhausted)")
             btn_failover.clicked.connect(lambda: self.on_failover(self.task["id"]))
             layout.addWidget(btn_failover)
 
@@ -947,7 +951,7 @@ class TaskCard(QtWidgets.QFrame):
         if status == "RATE_LIMITED" and self.on_failover:
             btn_failover = QtWidgets.QPushButton("Switch to Antigravity")
             btn_failover.setObjectName("accent_warning")
-            btn_failover.setToolTip("Skip rate-limit cooldown and execute via Antigravity immediately")
+            btn_failover.setToolTip("Skip cooldown and run via another agent (local if Antigravity quota is already exhausted)")
             btn_failover.clicked.connect(lambda: self.on_failover(self.task["id"]))
             layout.addWidget(btn_failover)
 
@@ -1451,7 +1455,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
         header_vbox.setSpacing(2)
         title = QtWidgets.QLabel("DevOS AI Command Pipeline")
         title.setObjectName("title")
-        subtitle = QtWidgets.QLabel("Multi-agent parallel execution · Strictly 1 by 1 sequential per agent · Single workspace")
+        subtitle = QtWidgets.QLabel("Parallel agents · 1-by-1 per agent · Real 429 pauses shared Google quota")
         subtitle.setObjectName("subtitle")
         header_vbox.addWidget(title)
         header_vbox.addWidget(subtitle)
@@ -1510,6 +1514,46 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
         self.banner_frame.hide()
         main_layout.addWidget(self.banner_frame)
+
+        # Premium control strip — modes, blueprints, scorecard
+        premium_bar = QtWidgets.QFrame()
+        premium_bar.setObjectName("banner_strip")
+        premium_row = QtWidgets.QHBoxLayout(premium_bar)
+        premium_row.setContentsMargins(12, 6, 12, 6)
+        premium_row.setSpacing(8)
+        prem_tag = QtWidgets.QLabel("PREMIUM")
+        prem_tag.setObjectName("tag_label")
+        premium_row.addWidget(prem_tag)
+        premium_row.addWidget(QtWidgets.QLabel("Mode"))
+        self.mode_combo = QComboBox()
+        self.mode_combo.setMinimumWidth(140)
+        if premium:
+            for key, meta in premium.MODES.items():
+                self.mode_combo.addItem(meta["label"], key)
+            cur = premium.get_mode(self.pipeline.context)
+            idx = self.mode_combo.findData(cur)
+            if idx >= 0:
+                self.mode_combo.setCurrentIndex(idx)
+        self.mode_combo.currentIndexChanged.connect(self.on_premium_mode_changed)
+        self.mode_combo.setToolTip("Balanced · Quality (gates) · Overnight (auto-failover) · Speed")
+        premium_row.addWidget(self.mode_combo)
+        premium_row.addWidget(QtWidgets.QLabel("Blueprint"))
+        self.blueprint_combo = QComboBox()
+        self.blueprint_combo.setMinimumWidth(200)
+        self.blueprint_combo.addItem("Choose a blueprint…", "")
+        if premium:
+            for bp in premium.list_blueprints():
+                self.blueprint_combo.addItem(f"{bp['title']} ({bp['steps']} steps)", bp["id"])
+        premium_row.addWidget(self.blueprint_combo)
+        btn_bp = QtWidgets.QPushButton("Queue Blueprint")
+        btn_bp.setObjectName("accent_action")
+        btn_bp.setToolTip("Add a curated multi-phase project (SaaS, API, Landing, QA) in one click")
+        btn_bp.clicked.connect(self.queue_premium_blueprint)
+        premium_row.addWidget(btn_bp)
+        self.scorecard_lbl = QtWidgets.QLabel("Scorecard —")
+        self.scorecard_lbl.setStyleSheet("color:#94a3b8; font-size:11px; font-weight:600;")
+        premium_row.addWidget(self.scorecard_lbl, stretch=1)
+        main_layout.addWidget(premium_bar)
 
         # =====================================================================
         # CONTENT SPLITTER: Left (Project Builder) | Right (Queue & KPI)
@@ -1953,10 +1997,14 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.card_tasks, self.kpi_tasks_val = make_kpi("TOTAL STEPS", "0")
         self.card_completed, self.kpi_completed_val = make_kpi("COMPLETED", "0 (0%)")
         self.card_status, self.kpi_status_val = make_kpi("PIPELINE STATUS", "IDLE")
+        self.card_success, self.kpi_success_val = make_kpi("SUCCESS RATE", "—")
+        self.card_avg, self.kpi_avg_val = make_kpi("AVG STEP", "—")
 
         stats_layout.addWidget(self.card_projects)
         stats_layout.addWidget(self.card_tasks)
         stats_layout.addWidget(self.card_completed)
+        stats_layout.addWidget(self.card_success)
+        stats_layout.addWidget(self.card_avg)
         stats_layout.addWidget(self.card_status)
         right_layout.addWidget(self.stats_bar)
 
@@ -2603,6 +2651,60 @@ class PipelineWindow(QtWidgets.QMainWindow):
                 self.scroll.verticalScrollBar().maximum()
             ))
 
+    def on_premium_mode_changed(self, *_args):
+        if not premium or not hasattr(self, "mode_combo"):
+            return
+        mode = self.mode_combo.currentData()
+        if not mode:
+            return
+        try:
+            settings = premium.set_mode(self.pipeline.context, mode)
+            self.pipeline._save_context()
+            self.log_box.append(
+                f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Premium mode → {settings['label']}: {settings['hint']}"
+            )
+            notify("Pipeline Mode", f"{settings['label']}: {settings['hint'][:80]}")
+            self.refresh_queue()
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(self, "Mode", str(exc))
+
+    def queue_premium_blueprint(self):
+        if not premium:
+            QtWidgets.QMessageBox.warning(self, "Blueprint", "Premium module unavailable.")
+            return
+        bp_id = self.blueprint_combo.currentData() if hasattr(self, "blueprint_combo") else ""
+        if not bp_id:
+            QtWidgets.QMessageBox.information(self, "Blueprint", "Choose a blueprint first.")
+            return
+        meta = premium.BLUEPRINTS[bp_id]
+        title, ok = QtWidgets.QInputDialog.getText(
+            self, "Queue Blueprint", "Project title:", text=meta["title"]
+        )
+        if not ok or not title.strip():
+            return
+        agent = self.agent_combo.currentData() if hasattr(self, "agent_combo") else "antigravity"
+        agent = agent or "antigravity"
+        if agent == "multi":
+            agent = "antigravity"
+        slug = to_slug(title)
+        steps = premium.expand_blueprint(bp_id)
+        ids = self.pipeline.add_commands(
+            steps, agent=agent, project_title=title.strip(), project_slug=slug, notify_desktop=True
+        )
+        self.log_box.append(
+            f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Queued blueprint '{bp_id}' "
+            f"as '{title.strip()}' ({len(ids)} premium phases) on {agent}"
+        )
+        if hasattr(self, "toast_banner"):
+            self.toast_banner.setText(f"✔ Premium blueprint queued · {len(ids)} phases · {title.strip()}")
+            self.toast_banner.setStyleSheet(
+                "background-color: #064e3b; color: #34d399; font-weight: 700; font-size: 13px; "
+                "padding: 10px 16px; border-radius: 8px; border: 1px solid #059669;"
+            )
+            self.toast_banner.show()
+            QtCore.QTimer.singleShot(4000, self.toast_banner.hide)
+        self.refresh_queue()
+
     def refresh_queue(self):
         tasks = self.pipeline.list()
 
@@ -2647,6 +2749,26 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
         self.kpi_projects_val.setText(f"{total_projects}")
         self.kpi_tasks_val.setText(f"{total_tasks}")
+        if premium and hasattr(self, "kpi_success_val"):
+            try:
+                sc = premium.scorecard_view(self.pipeline.context, tasks)
+                self.kpi_success_val.setText(f"{sc['success_rate']}%")
+                avg = sc.get("avg_seconds") or 0
+                if avg >= 3600:
+                    self.kpi_avg_val.setText(f"{avg/3600:.1f}h")
+                elif avg >= 60:
+                    self.kpi_avg_val.setText(f"{avg/60:.0f}m")
+                else:
+                    self.kpi_avg_val.setText(f"{avg:.0f}s" if avg else "—")
+                mode_label = sc.get("mode_label") or "Balanced"
+                live = sc.get("live") or {}
+                self.scorecard_lbl.setText(
+                    f"Scorecard · {mode_label} · "
+                    f"{sc['completed']} ok / {sc['failed']} fail · "
+                    f"live R{live.get('running',0)} S{live.get('submitted',0)} Q{live.get('queued',0)}"
+                )
+            except Exception:
+                pass
         pct = int((completed_tasks / total_tasks * 100)) if total_tasks > 0 else 0
         self.kpi_completed_val.setText(f"{completed_tasks}/{total_tasks} ({pct}%)")
 
@@ -2800,6 +2922,35 @@ class PipelineWindow(QtWidgets.QMainWindow):
             self.btn_run.setStyleSheet("")
             self.runner_timer.stop()
             self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Pipeline paused by user.")
+            # Default: stop new work AND abort in-flight local/queued agent steps so
+            # Pause actually frees the UI (Close must not hang on artisan serve etc.).
+            inflight = [t for t in self.pipeline.list() if t.get("status") in ("RUNNING", "SUBMITTED")]
+            if inflight:
+                answer = QtWidgets.QMessageBox.question(
+                    self,
+                    "Stop current work?",
+                    "Pause already stops the next task.\n\n"
+                    "Also stop work that is still running now?\n\n"
+                    "Yes = abort in-flight steps + stop local coding workers "
+                    "(recommended — lets you close this window).\n"
+                    "No = only pause the queue; current step keeps going.",
+                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                    QtWidgets.QMessageBox.Yes,
+                )
+                if answer == QtWidgets.QMessageBox.Yes:
+                    aborted = self.pipeline.abort_inflight(
+                        reason="Aborted by user pause",
+                        task_ids=[t["id"] for t in inflight],
+                    )
+                    self.log_box.append(
+                        f"[{datetime.datetime.now().strftime('%H:%M:%S')}] "
+                        f"Aborted {aborted} in-flight task(s) and stopped local workers."
+                    )
+                    # Stop GUI worker thread observing/dispatching
+                    if self.worker is not None and self.worker.isRunning():
+                        self.worker.requestInterruption()
+                        self.worker.wait(1500)
+                    self.refresh_queue()
 
     def busy(self):
         return self.is_running and self.worker is not None and self.worker.isRunning() and not getattr(self.worker, 'observe_only', False)
@@ -2879,11 +3030,55 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.refresh_queue()
 
     def closeEvent(self, event):
-        if self.busy() or any(t.is_alive() for t in self.pipeline._dispatch_threads):
-            self.log_box.append("Pause stops the next task; wait for the current command to finish before closing.")
-            event.ignore()
-        else:
+        dispatch_alive = any(t.is_alive() for t in getattr(self.pipeline, "_dispatch_threads", []))
+        worker_busy = self.worker is not None and self.worker.isRunning()
+        if self.busy() or dispatch_alive or (worker_busy and self.is_running):
+            answer = QtWidgets.QMessageBox.question(
+                self,
+                "Close Pipeline?",
+                "Work is still running in the background.\n\n"
+                "Yes = pause, abort in-flight steps, stop local workers, then close.\n"
+                "No = keep this window open.",
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.Yes,
+            )
+            if answer != QtWidgets.QMessageBox.Yes:
+                self.log_box.append(
+                    "Close cancelled — pause first or wait for the current step, "
+                    "or choose Yes to force-stop."
+                )
+                event.ignore()
+                return
+            self.is_running = False
+            self.runner_timer.stop()
+            self.btn_run.setText("Run Pipeline")
+            self.btn_run.setObjectName("primary")
+            self.btn_run.setStyleSheet("")
+            try:
+                self.pipeline.abort_inflight(reason="Aborted because Pipeline window was closed")
+            except Exception as exc:
+                self.log_box.append(f"Abort during close: {exc}")
+            if self.worker is not None and self.worker.isRunning():
+                self.worker.requestInterruption()
+                self.worker.wait(1500)
             event.accept()
+            return
+        # Paused with leftover dispatch threads: still allow close after a soft stop
+        if dispatch_alive and not self.is_running:
+            try:
+                self.pipeline.stop_local_workers()
+                self.pipeline.stop_dispatch_threads(timeout=0.8)
+            except Exception:
+                pass
+        event.accept()
+
+    def _failover_target_agent(self, task_agent: str) -> str:
+        """Pick a failover agent that does not re-hit an already cooled Google Antigravity quota."""
+        slot = self.pipeline.agent_slot(task_agent)
+        cooled = self.pipeline._cooled_agent_slots()
+        if slot == "antigravity" or "antigravity" in cooled:
+            return "local"
+        return "antigravity"
 
     @queue_error_to_log
     def failover_single_task(self, task_id: str):
@@ -2892,8 +3087,12 @@ class PipelineWindow(QtWidgets.QMainWindow):
             return
         for t in self.pipeline.queue:
             if t["id"] == task_id:
-                self.pipeline.update_task(task_id, {"agent": "antigravity", "status": "QUEUED", "retry_at": None})
-                self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Task {task_id} switched to Antigravity!")
+                target = self._failover_target_agent(t.get("agent", ""))
+                self.pipeline.update_task(task_id, {"agent": target, "status": "QUEUED", "retry_at": None})
+                self.log_box.append(
+                    f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Task {task_id} switched to {target} "
+                    f"(Antigravity/KDE share one Google quota)."
+                )
                 self.refresh_queue()
                 break
 
@@ -2902,10 +3101,17 @@ class PipelineWindow(QtWidgets.QMainWindow):
         if self.busy():
             self.log_box.append("Wait for the current task to finish before changing the queue.")
             return
+        switched = []
         for t in self.pipeline.queue:
             if t["status"] == "RATE_LIMITED":
-                self.pipeline.update_task(t["id"], {"agent": "antigravity", "status": "QUEUED", "retry_at": None})
-        self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] All rate-limited tasks switched to Antigravity!")
+                target = self._failover_target_agent(t.get("agent", ""))
+                self.pipeline.update_task(t["id"], {"agent": target, "status": "QUEUED", "retry_at": None})
+                switched.append(f"{t['id']}→{target}")
+        self.log_box.append(
+            f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Rate-limited tasks switched: "
+            + (", ".join(switched) if switched else "none")
+            + ". Antigravity and Antigravity KDE share one Google account limit."
+        )
         self.refresh_queue()
 
     @queue_error_to_log

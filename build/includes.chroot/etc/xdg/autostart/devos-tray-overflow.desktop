@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=DevOS Tray Overflow
+Comment=Keep application status icons under Status & Notifications
+Exec=/usr/local/bin/devos-tray-overflow --watch
+Icon=preferences-system-windows
+Terminal=false
+NoDisplay=true
+X-KDE-autostart-phase=2
+X-GNOME-Autostart-Delay=5
+OnlyShowIn=KDE;

@@ -1,9 +1,10 @@
 [Desktop Entry]
-Type=Application
+Type=ApplicationStartupWMClass=devos-windows
+
 Name=Windows
 Comment=Show open windows
 Exec=/bin/bash /usr/local/bin/devos-show-windows
-Icon=preferences-system-windows
+Icon=devos-windows
 Terminal=false
 Categories=System;
 StartupNotify=false

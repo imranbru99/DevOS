@@ -1,3 +1,4 @@
 #!/bin/bash
-# Clipboard history. Meta+V opens the window.
-exec /usr/bin/python3 /usr/local/share/devos/components/clipboard/clipboard.py "$@"
+# DevOS clipboard launcher — process title is the app id, not python3.
+export DEVOS_DESKTOP_FILE=devos-clipboard
+exec -a "devos-clipboard" /usr/bin/python3 /usr/local/share/devos/components/clipboard/clipboard.py "$@"

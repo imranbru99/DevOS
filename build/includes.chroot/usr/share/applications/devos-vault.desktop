@@ -1,9 +1,10 @@
 [Desktop Entry]
-Type=Application
+Type=ApplicationStartupWMClass=devos-vault
+
 Name=DevOS Vault
 GenericName=Encrypted folder
 Comment=Encrypt a folder with a password after install
-Exec=/usr/bin/python3 /usr/local/share/devos/components/settings/vault.py gui
+Exec=/usr/local/bin/devos-run --desktop=devos-vault --name="DevOS Vault" /usr/local/share/devos/components/settings/vault.py gui
 Icon=devos-vault
 Terminal=false
 StartupNotify=true

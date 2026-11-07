@@ -1,0 +1,49 @@
+name: Publish DevOS update bundle
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing stable release tag
+        required: true
+permissions:
+  contents: write
+jobs:
+  update-bundle:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+      - name: Test updater
+        run: python3 -m unittest discover -s tests/unit -p test_updater.py
+      - name: Package and sign release
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+          # Private OpenSSH ed25519 key matching keys/update-pubkey.pub
+          DEVOS_UPDATE_SIGN_KEY_B64: ${{ secrets.DEVOS_UPDATE_SIGN_KEY_B64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DEVOS_UPDATE_SIGN_KEY_B64:-}" ]; then
+            echo "::error::DEVOS_UPDATE_SIGN_KEY_B64 secret is required (base64 of the OpenSSH private key)."
+            exit 1
+          fi
+          KEY_FILE="$(mktemp)"
+          trap 'rm -f "$KEY_FILE"' EXIT
+          printf '%s' "$DEVOS_UPDATE_SIGN_KEY_B64" | base64 -d > "$KEY_FILE"
+          chmod 600 "$KEY_FILE"
+          python3 tools/package-update.py "$RELEASE_TAG" --sign-key "$KEY_FILE" --require-signature
+          test -f out/update/devos-update.tar.gz
+          test -f out/update/devos-update.tar.gz.sha256
+          test -f out/update/devos-update.tar.gz.sig
+      - name: Upload stable release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          gh release view "$RELEASE_TAG" || gh release create "$RELEASE_TAG" --verify-tag --generate-notes
+          gh release upload "$RELEASE_TAG" \
+            out/update/devos-update.tar.gz \
+            out/update/devos-update.tar.gz.sha256 \
+            out/update/devos-update.tar.gz.sig

@@ -107,6 +107,12 @@ if [ ! -f "${stamp}" ] || [ "${1:-}" = "--force" ]; then
     touch "${stamp}"
 fi
 
+# Keep StatusNotifier / tray icons under Status & Notifications (^), not on the bar.
+# Open windows still use the center taskbar; this only manages tray status icons.
+if [ -x /usr/local/bin/devos-tray-overflow ]; then
+    /usr/local/bin/devos-tray-overflow >/dev/null 2>&1 || true
+fi
+
 # Hide duplicate Chrome secondary-profile PWA launchers (Profile 1, Profile 2...)
 for prof in "${HOME}/.local/share/applications"/chrome-*-Profile_*.desktop; do
     if [ -f "$prof" ] && ! grep -q '^NoDisplay=' "$prof"; then

@@ -27,8 +27,9 @@ menu.writeConfig("icon", "devos-logo")
 var tasks = panel.addWidget("org.kde.plasma.icontasks")
 tasks.currentConfigGroup = ["General"]
 tasks.writeConfig("launchers", "applications:devos-search.desktop,applications:devos-taskman.desktop,applications:devos-windows.desktop,applications:google-chrome.desktop,applications:devos-thispc.desktop,applications:devos-chat.desktop,applications:devos-code.desktop,applications:systemsettings.desktop")
-// Windows-style ungrouped footer display: each browser profile and open window has its own item.
-tasks.writeConfig("groupingStrategy", 0)
+// Group by application so Antigravity/Chrome do not spam one icon per window.
+// Status icons belong under system tray (^), not as duplicate taskbar entries.
+tasks.writeConfig("groupingStrategy", 1)
 tasks.writeConfig("groupInline", false)
 tasks.writeConfig("iconSpacing", 1)
 tasks.writeConfig("groupPopups", true)

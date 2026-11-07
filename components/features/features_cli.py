@@ -19,6 +19,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -247,10 +248,26 @@ def write_webapp_policy(path: str = CHROME_POLICY) -> None:
     os.chmod(path, 0o644)
 
 
+def detect_hit(spec: str) -> bool:
+    """True when a catalog detect entry exists as a path or on PATH."""
+    if not spec:
+        return False
+    if os.path.isabs(spec) or "/" in spec:
+        return os.path.exists(os.path.expanduser(spec))
+    return shutil.which(spec) is not None
+
+
 def is_installed(feature: dict) -> bool:
     if feature.get("webapp"):
         return os.path.exists(webapp_path(feature))
-    if feature.get("builtin"):
+    detect = feature.get("detect") or []
+    if detect and any(detect_hit(p) for p in detect):
+        if feature.get("builtin") and not builtin_on(feature):
+            return False
+        return True
+    if feature.get("builtin") and not (
+        feature.get("apt") or feature.get("flatpak") or feature.get("script") or detect
+    ):
         return builtin_on(feature)
     probes = feature["apt"] or ([] if feature["flatpak"] else feature["remove"][:1])
     if probes and not all(deb_installed(p) for p in probes):
@@ -297,7 +314,10 @@ def apt_update() -> bool:
 
 def add_feature(feature: dict) -> bool:
     log(f"Installing {feature['name']}…")
-    if feature.get("builtin"):
+    # Builtin-only features (no download): just show menu entries.
+    if feature.get("builtin") and not (
+        feature.get("apt") or feature.get("flatpak") or feature.get("script") or feature.get("webapp")
+    ):
         return set_builtin(feature, True)
     if feature.get("webapp"):
         os.makedirs(OVERRIDE_DIR, exist_ok=True)
@@ -317,6 +337,8 @@ def add_feature(feature: dict) -> bool:
         ok = run(["flatpak", "install", "--system", "-y", "--noninteractive", "flathub"] + feature["flatpak"]) == 0
     if ok and feature["script"]:
         ok = run(["/bin/bash", feature["script"]]) == 0
+    if ok and feature.get("builtin"):
+        ok = set_builtin(feature, True)
     if ok:
         after_install(feature)
     return ok
@@ -324,7 +346,9 @@ def add_feature(feature: dict) -> bool:
 
 def remove_feature(feature: dict, no_triggers: bool = False) -> bool:
     log(f"Removing {feature['name']}…")
-    if feature.get("builtin"):
+    if feature.get("builtin") and not (
+        feature.get("apt") or feature.get("flatpak") or feature.get("script") or feature.get("webapp")
+    ):
         return set_builtin(feature, False)
     if feature.get("webapp"):
         try:
@@ -350,6 +374,8 @@ def remove_feature(feature: dict, no_triggers: bool = False) -> bool:
     for app in feature["flatpak"]:
         if flatpak_installed(app):
             run(["flatpak", "uninstall", "--system", "-y", "--noninteractive", app])
+    if feature.get("builtin"):
+        set_builtin(feature, False)
     after_remove(feature)
     return True
 

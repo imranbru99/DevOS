@@ -101,3 +101,33 @@ remaining space in readable text. Disk model/serial/capacity facts stay in a
 root-owned scan snapshot and are compared with fresh hardware facts before any
 additional drive is modified. Installer retries refresh this scan. Missing or
 changed facts stop the operation rather than silently choosing another disk.
+
+## Keeping C: lean (vs Windows-looking usage)
+
+This PC shows one Used bar like Windows. That bar is **not** “OS size.” On a
+typical DevOS desktop:
+
+| Slice | Typical size | Notes |
+| --- | --- | --- |
+| DevOS system (`/usr`, boot) | ~12–18 GB | Already leaner than Windows 11 |
+| Your files (projects, Downloads) | varies | Move large projects to **D:** |
+| Apps & containers (Flatpak, Podman) | varies | Prune unused images/runtimes |
+| AI models | 1–10+ GB | Prefer **D:/data/DevOS/models** |
+| Freeable caches | often several GB | Optimizer / Disk Cleanup |
+
+Actions shipped with DevOS:
+
+1. **This PC → drive Properties → What’s using space** — OS vs files vs freeable.
+2. **Right-click drive → Free up space…** — opens Optimizer (browser caches, Trash, temp).
+3. **Btrfs root** uses `compress=zstd:3`. Data disks remount with the same via udisks.
+4. **Snapper** keeps fewer restore points by default (`NUMBER_LIMIT=8`) so snapshots do not inflate C:.
+5. **AI model downloads** prefer a mounted secondary drive when one is available.
+
+Do not wipe `~/.config` browsers or running container storage roots — reclaim caches
+and unused images instead.
+
+## Recovery on ext4
+
+If the root filesystem is **ext4** (installer default), Snapper/Btrfs snapshots are unavailable.
+Use **Timeshift** (rsync mode) or a scheduled `rsync` backup before major upgrades.
+Prefer **Btrfs + Snapper** at install time when you want one-click restore points.

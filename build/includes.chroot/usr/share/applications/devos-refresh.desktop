@@ -1,10 +1,11 @@
 [Desktop Entry]
-Type=Application
+Type=ApplicationStartupWMClass=devos-refresh
+
 Name=Refresh Desktop
 Name[bn]=রিফ্রেশ
 Comment=Refresh desktop icons and sync memory
 Exec=/bin/bash -c "devos-refresh 2>/dev/null || ~/.local/bin/devos-refresh 2>/dev/null || /usr/local/bin/devos-refresh 2>/dev/null"
-Icon=view-refresh
+Icon=devos-refresh
 Terminal=false
 Categories=System;Utility;
 NoDisplay=true

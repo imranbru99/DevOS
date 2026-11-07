@@ -1,9 +1,10 @@
 [Desktop Entry]
-Type=Application
+Type=ApplicationStartupWMClass=devos-restore
+
 Name=Restore points
 GenericName=System restore
 Comment=Create a restore point or roll the system back
-Exec=/usr/bin/python3 /usr/local/share/devos/components/settings/snapshot_manager.py gui
+Exec=/usr/local/bin/devos-run --desktop=devos-restore --name="Restore points" /usr/local/share/devos/components/settings/snapshot_manager.py gui
 Icon=devos-restore
 Terminal=false
 StartupNotify=true

@@ -2,18 +2,36 @@
 # Style KDE's real authentication agent; keep its Polkit/PAM implementation.
 set -eu
 agent=
-for candidate in /usr/lib/x86_64-linux-gnu/libexec/polkit-kde-authentication-agent-1 /usr/lib/polkit-kde-authentication-agent-1 /usr/libexec/polkit-kde-authentication-agent-1; do
+for candidate in \
+    /usr/lib/x86_64-linux-gnu/libexec/polkit-kde-authentication-agent-1 \
+    /usr/lib/polkit-kde-authentication-agent-1 \
+    /usr/libexec/polkit-kde-authentication-agent-1
+do
     if [ -x "$candidate" ]; then agent=$candidate; break; fi
 done
 [ -n "$agent" ] || { echo 'KDE authentication agent is missing.' >&2; exit 1; }
+
 style_root=/usr/local/share/devos/components/ui/qtquick
+# Prefer repo checkout during development.
+if [ -r "$HOME/project/dev-os/components/ui/qtquick/DevOS/qmldir" ]; then
+    style_root="$HOME/project/dev-os/components/ui/qtquick"
+fi
+
 version=$(dpkg-query -W -f='${Version}' polkit-kde-agent-1 2>/dev/null || true)
 case "$version" in
     *:6.*|6.*)
-        if [ -r "$style_root/DevOS/qmldir" ] && [ -r "$style_root/DevOS/Button.qml" ] && [ -r "$style_root/DevOS/TextField.qml" ] && [ -r "$style_root/DevOS/ApplicationWindow.qml" ]; then
+        if [ -r "$style_root/DevOS/qmldir" ] \
+            && [ -r "$style_root/DevOS/Button.qml" ] \
+            && [ -r "$style_root/DevOS/TextField.qml" ]
+        then
             export QML_IMPORT_PATH="$style_root${QML_IMPORT_PATH:+:$QML_IMPORT_PATH}"
+            export QML2_IMPORT_PATH="$style_root${QML2_IMPORT_PATH:+:$QML2_IMPORT_PATH}"
             export QT_QUICK_CONTROLS_STYLE=DevOS
             export QT_QUICK_CONTROLS_FALLBACK_STYLE=Basic
+            # Keep dialogs on the DevOS color scheme so Kirigami surfaces match.
+            export KDE_COLOR_SCHEME="${KDE_COLOR_SCHEME:-DevOS}"
+            mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}"
+            printf 'style=%s\n' "$QT_QUICK_CONTROLS_STYLE" > "${XDG_CACHE_HOME:-$HOME/.cache}/devos-auth-style.stamp"
         fi
         ;;
 esac

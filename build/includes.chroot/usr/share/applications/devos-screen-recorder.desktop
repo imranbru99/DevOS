@@ -2,7 +2,7 @@
 Name=Screen Recorder
 GenericName=Screen Recording Tool
 Comment=1-Click high quality screen recording for DevOS
-Exec=devos-recorder
+Exec=/usr/local/bin/devos-recorder
 Icon=devos-recorder
 Type=Application
 Categories=AudioVideo;Recorder;Video;Utility;

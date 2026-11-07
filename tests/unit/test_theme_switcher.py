@@ -135,3 +135,19 @@ def test_legacy_wallpaper_fallback(monkeypatch):
     monkeypatch.setattr(module, '_run_cmd', lambda args: scripts.append(args[-1]) or True)
     assert ThemeSwitcher.apply_wallpaper('light')
     assert 'file:///usr/share/wallpapers/DevOS-Daylight/contents/images/daylight.svg' in scripts[0]
+
+
+def test_theme_apply_does_not_broadcast_palette_reload(monkeypatch):
+    """Palette notify / GtkConfig.setGtkTheme segfault Chromium; must stay unused."""
+    import theme_switcher as module
+    calls = []
+    monkeypatch.setattr(module, '_run_cmd', lambda cmd: calls.append(list(cmd)) or True)
+    monkeypatch.setattr(module.shutil, 'which', lambda name: '/usr/bin/' + name if name in (
+        'plasma-apply-colorscheme','plasma-apply-desktoptheme','kvantummanager','qdbus6','gsettings','kwriteconfig6','killall'
+    ) else None)
+    assert module.ThemeSwitcher.apply_theme('light') is True
+    flat = [' '.join(c) for c in calls]
+    assert not any('notifyChange' in s for s in flat)
+    assert not any('setGtkTheme' in s for s in flat)
+    assert any('plasma-apply-colorscheme' in s for s in flat)
+    assert any(c == ['killall', 'dolphin'] for c in calls)

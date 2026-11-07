@@ -4,7 +4,7 @@ Version=1.0
 Name=Notes
 GenericName=Notes and sticky notes
 Comment=Notebooks, sticky notes on the desktop, voice notes and DevOS AI summaries; saved in Documents
-Exec=/usr/bin/python3 /usr/local/share/devos/components/notes/notes.py
+Exec=/usr/local/bin/devos-run --desktop=devos-notes --name=Notes /usr/local/share/devos/components/notes/notes.py
 Icon=devos-notes
 Terminal=false
 StartupNotify=true
@@ -15,8 +15,8 @@ Actions=NewNote;NewSticky;
 
 [Desktop Action NewNote]
 Name=New note
-Exec=/usr/bin/python3 /usr/local/share/devos/components/notes/notes.py --new
+Exec=/usr/local/bin/devos-run --desktop=devos-notes --name=Notes /usr/local/share/devos/components/notes/notes.py --new
 
 [Desktop Action NewSticky]
 Name=New sticky note
-Exec=/usr/bin/python3 /usr/local/share/devos/components/notes/notes.py --new-sticky
+Exec=/usr/local/bin/devos-run --desktop=devos-notes --name=Notes /usr/local/share/devos/components/notes/notes.py --new-sticky
