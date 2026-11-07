@@ -15,9 +15,11 @@ from typing import Dict, Any
 class HardwareDetector:
     """Detects system hardware to configure the appropriate offline AI tier."""
 
-    TIER_LITE = "Lite"          # <= 8 GB RAM, CPU or basic GPU -> Qwen2.5 1.5B/3B Q4
-    TIER_STANDARD = "Standard"  # 16 GB RAM or 6-8 GB VRAM -> Qwen2.5 7B Q4_K_M
-    TIER_PRO = "Pro"            # 32 GB+ RAM or 12-24 GB VRAM -> Qwen2.5 14B-32B Q4
+    # Tiers describe the PC, not "always run the biggest model". On CPU / iGPU
+    # we keep chat at 1.5B–3B so replies stay fast even with 32 GB RAM.
+    TIER_LITE = "Lite"          # <= 8 GB RAM -> Qwen2.5 1.5B Q4
+    TIER_STANDARD = "Standard"  # 16 GB RAM / modest GPU -> Qwen2.5 3B Q4 (7B only with CUDA/ROCm)
+    TIER_PRO = "Pro"            # 32 GB+ RAM or strong GPU -> still 3B on CPU; 7B+ when VRAM allows
 
     MODEL_CATALOG = {
         "Lite": {
@@ -32,27 +34,40 @@ class HardwareDetector:
             "max_ram_mb": 2500,
         },
         "Standard": {
-            "chat_model": "Qwen/Qwen2.5-7B-Instruct-GGUF",
-            "chat_file": "qwen2.5-7b-instruct-q4_k_m.gguf",
-            "code_model": "Qwen/Qwen2.5-Coder-7B-Instruct-GGUF",
-            "code_file": "qwen2.5-coder-7b-instruct-q4_k_m.gguf",
+            "chat_model": "Qwen/Qwen2.5-3B-Instruct-GGUF",
+            "chat_file": "qwen2.5-3b-instruct-q4_k_m.gguf",
+            "code_model": "Qwen/Qwen2.5-Coder-3B-Instruct-GGUF",
+            "code_file": "qwen2.5-coder-3b-instruct-q4_k_m.gguf",
             "embed_model": "nomic-ai/nomic-embed-text-v1.5-GGUF",
             "embed_file": "nomic-embed-text-v1.5.Q4_K_M.gguf",
             "context_window": 8192,
-            "gpu_layers": 33,
-            "max_ram_mb": 6500,
+            "gpu_layers": 0,
+            "max_ram_mb": 4500,
         },
         "Pro": {
-            "chat_model": "Qwen/Qwen2.5-14B-Instruct-GGUF",
-            "chat_file": "qwen2.5-14b-instruct-q4_k_m.gguf",
-            "code_model": "Qwen/Qwen2.5-Coder-14B-Instruct-GGUF",
-            "code_file": "qwen2.5-coder-14b-instruct-q4_k_m.gguf",
-            "embed_model": "BAAI/bge-m3-GGUF",
-            "embed_file": "bge-m3-q4_k_m.gguf",
-            "context_window": 16384,
-            "gpu_layers": 48,
-            "max_ram_mb": 14000,
+            "chat_model": "Qwen/Qwen2.5-3B-Instruct-GGUF",
+            "chat_file": "qwen2.5-3b-instruct-q4_k_m.gguf",
+            "code_model": "Qwen/Qwen2.5-Coder-3B-Instruct-GGUF",
+            "code_file": "qwen2.5-coder-3b-instruct-q4_k_m.gguf",
+            "embed_model": "nomic-ai/nomic-embed-text-v1.5-GGUF",
+            "embed_file": "nomic-embed-text-v1.5.Q4_K_M.gguf",
+            "context_window": 8192,
+            "gpu_layers": 0,
+            "max_ram_mb": 4500,
         },
+    }
+
+    # When a discrete GPU has enough VRAM, upgrade the Pro catalog in place.
+    MODEL_CATALOG_GPU = {
+        "chat_model": "Qwen/Qwen2.5-7B-Instruct-GGUF",
+        "chat_file": "qwen2.5-7b-instruct-q4_k_m.gguf",
+        "code_model": "Qwen/Qwen2.5-Coder-7B-Instruct-GGUF",
+        "code_file": "qwen2.5-coder-7b-instruct-q4_k_m.gguf",
+        "embed_model": "nomic-ai/nomic-embed-text-v1.5-GGUF",
+        "embed_file": "nomic-embed-text-v1.5.Q4_K_M.gguf",
+        "context_window": 8192,
+        "gpu_layers": 33,
+        "max_ram_mb": 6500,
     }
 
     @staticmethod
@@ -179,7 +194,19 @@ class HardwareDetector:
         else:
             assigned_tier = cls.TIER_LITE
 
-        catalog = cls.MODEL_CATALOG[assigned_tier]
+        catalog = dict(cls.MODEL_CATALOG[assigned_tier])
+        backend = (gpu.get("backend") or "cpu").lower()
+        # Only offload layers when a real discrete GPU has usable VRAM.
+        # Intel/AMD iGPU "vulkan" with 0 GB VRAM must stay on CPU (gpu_layers=0)
+        # or replies become much slower than a pure CPU 3B run.
+        if backend in ("cuda", "rocm") and vram_gb >= 6.0:
+            catalog = dict(cls.MODEL_CATALOG_GPU)
+            catalog["gpu_layers"] = 33 if vram_gb < 12 else 48
+        elif backend == "vulkan" and vram_gb >= 8.0:
+            catalog = dict(cls.MODEL_CATALOG_GPU)
+            catalog["gpu_layers"] = 24
+        else:
+            catalog["gpu_layers"] = 0
 
         # Scan for dedicated NPU silicon (Intel / AMD XDNA / Qualcomm Hexagon)
         npu_info = {"npu_detected": False, "vendor": "none", "device_model": "None (Using CPU/GPU)"}
@@ -198,6 +225,7 @@ class HardwareDetector:
             "npu": npu_info,
             "scheduling": scheduling_info,
             "models": catalog,
+            "recommend_prefer": "speed",
             "storage_dir": os.environ.get("DEVOS_MODELS_DIR", "/var/lib/DevOS/models"),
             "api_endpoint": "http://127.0.0.1:11434/v1",
         }

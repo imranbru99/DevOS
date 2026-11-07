@@ -1,0 +1,238 @@
+"""
+DevOS Local AI Core (ai-core)
+Hardware Tier Detector & Engine Configuration
+Detects system RAM, CPU capabilities, and GPU VRAM (NVIDIA CUDA, AMD ROCm, Intel Vulkan)
+to assign the optimal local AI model tier. Zero external dependencies required.
+"""
+
+import os
+import sys
+import shutil
+import subprocess
+from typing import Dict, Any
+
+
+class HardwareDetector:
+    """Detects system hardware to configure the appropriate offline AI tier."""
+
+    # Tiers describe the PC, not "always run the biggest model". On CPU / iGPU
+    # we keep chat at 1.5B–3B so replies stay fast even with 32 GB RAM.
+    TIER_LITE = "Lite"          # <= 8 GB RAM -> Qwen2.5 1.5B Q4
+    TIER_STANDARD = "Standard"  # 16 GB RAM / modest GPU -> Qwen2.5 3B Q4 (7B only with CUDA/ROCm)
+    TIER_PRO = "Pro"            # 32 GB+ RAM or strong GPU -> still 3B on CPU; 7B+ when VRAM allows
+
+    MODEL_CATALOG = {
+        "Lite": {
+            "chat_model": "Qwen/Qwen2.5-1.5B-Instruct-GGUF",
+            "chat_file": "qwen2.5-1.5b-instruct-q4_k_m.gguf",
+            "code_model": "Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF",
+            "code_file": "qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
+            "embed_model": "nomic-ai/nomic-embed-text-v1.5-GGUF",
+            "embed_file": "nomic-embed-text-v1.5.Q4_K_M.gguf",
+            "context_window": 4096,
+            "gpu_layers": 0,
+            "max_ram_mb": 2500,
+        },
+        "Standard": {
+            "chat_model": "Qwen/Qwen2.5-3B-Instruct-GGUF",
+            "chat_file": "qwen2.5-3b-instruct-q4_k_m.gguf",
+            "code_model": "Qwen/Qwen2.5-Coder-3B-Instruct-GGUF",
+            "code_file": "qwen2.5-coder-3b-instruct-q4_k_m.gguf",
+            "embed_model": "nomic-ai/nomic-embed-text-v1.5-GGUF",
+            "embed_file": "nomic-embed-text-v1.5.Q4_K_M.gguf",
+            "context_window": 8192,
+            "gpu_layers": 0,
+            "max_ram_mb": 4500,
+        },
+        "Pro": {
+            "chat_model": "Qwen/Qwen2.5-3B-Instruct-GGUF",
+            "chat_file": "qwen2.5-3b-instruct-q4_k_m.gguf",
+            "code_model": "Qwen/Qwen2.5-Coder-3B-Instruct-GGUF",
+            "code_file": "qwen2.5-coder-3b-instruct-q4_k_m.gguf",
+            "embed_model": "nomic-ai/nomic-embed-text-v1.5-GGUF",
+            "embed_file": "nomic-embed-text-v1.5.Q4_K_M.gguf",
+            "context_window": 8192,
+            "gpu_layers": 0,
+            "max_ram_mb": 4500,
+        },
+    }
+
+    # When a discrete GPU has enough VRAM, upgrade the Pro catalog in place.
+    MODEL_CATALOG_GPU = {
+        "chat_model": "Qwen/Qwen2.5-7B-Instruct-GGUF",
+        "chat_file": "qwen2.5-7b-instruct-q4_k_m.gguf",
+        "code_model": "Qwen/Qwen2.5-Coder-7B-Instruct-GGUF",
+        "code_file": "qwen2.5-coder-7b-instruct-q4_k_m.gguf",
+        "embed_model": "nomic-ai/nomic-embed-text-v1.5-GGUF",
+        "embed_file": "nomic-embed-text-v1.5.Q4_K_M.gguf",
+        "context_window": 8192,
+        "gpu_layers": 33,
+        "max_ram_mb": 6500,
+    }
+
+    @staticmethod
+    def get_system_ram_gb() -> float:
+        """Returns total physical RAM in Gigabytes using OS-native methods."""
+        readings = []
+        # 1. Linux /proc/meminfo
+        if os.path.exists("/proc/meminfo"):
+            try:
+                with open("/proc/meminfo", "r") as f:
+                    for line in f:
+                        if line.startswith("MemTotal:"):
+                            parts = line.split()
+                            kb = float(parts[1])
+                            readings.append(round(kb / (1024 * 1024), 2))
+                            break
+            except Exception:
+                pass
+
+        # 2. Windows ctypes GlobalMemoryStatusEx
+        if sys.platform == "win32":
+            try:
+                import ctypes
+
+                class MEMORYSTATUSEX(ctypes.Structure):
+                    _fields_ = [
+                        ("dwLength", ctypes.c_ulong),
+                        ("dwMemoryLoad", ctypes.c_ulong),
+                        ("ullTotalPhys", ctypes.c_ulonglong),
+                        ("ullAvailPhys", ctypes.c_ulonglong),
+                        ("ullTotalPageFile", ctypes.c_ulonglong),
+                        ("ullAvailPageFile", ctypes.c_ulonglong),
+                        ("ullTotalVirtual", ctypes.c_ulonglong),
+                        ("ullAvailVirtual", ctypes.c_ulonglong),
+                        ("sullAvailExtendedVirtual", ctypes.c_ulonglong),
+                    ]
+
+                stat = MEMORYSTATUSEX()
+                stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+                ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat))
+                readings.append(round(stat.ullTotalPhys / (1024 ** 3), 2))
+            except Exception:
+                pass
+
+        # 3. Fallback to os.sysconf
+        try:
+            pages = os.sysconf("SC_PHYS_PAGES")
+            page_size = os.sysconf("SC_PAGE_SIZE")
+            if pages > 0 and page_size > 0:
+                readings.append(round((pages * page_size) / (1024 ** 3), 2))
+        except Exception:
+            pass
+
+        positive = [value for value in readings if value > 0]
+        if positive:
+            return max(positive)
+        return 8.0
+
+    @staticmethod
+    def detect_gpu() -> Dict[str, Any]:
+        """Detects presence of NVIDIA (CUDA), AMD (ROCm), or Intel (Vulkan/SYCL) GPU."""
+        gpu_info = {
+            "vendor": "none",
+            "vram_gb": 0.0,
+            "device_name": "CPU fallback",
+            "backend": "cpu"
+        }
+
+        # 1. Check NVIDIA via nvidia-smi
+        if shutil.which("nvidia-smi"):
+            try:
+                cmd = ["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"]
+                output = subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL).strip()
+                if output:
+                    name, mem = output.splitlines()[0].split(",")
+                    gpu_info["vendor"] = "nvidia"
+                    gpu_info["device_name"] = name.strip()
+                    gpu_info["vram_gb"] = round(float(mem.strip()) / 1024, 2)
+                    gpu_info["backend"] = "cuda"
+                    return gpu_info
+            except Exception:
+                pass
+
+        # 2. Check AMD ROCm / Vulkan
+        if shutil.which("rocm-smi"):
+            try:
+                gpu_info["vendor"] = "amd"
+                gpu_info["device_name"] = "AMD Radeon GPU (ROCm)"
+                gpu_info["backend"] = "rocm"
+                return gpu_info
+            except Exception:
+                pass
+
+        # 3. Check lspci for Linux environments
+        if shutil.which("lspci"):
+            try:
+                lspci_out = subprocess.check_output(["lspci"], text=True, stderr=subprocess.DEVNULL)
+                if "NVIDIA" in lspci_out:
+                    gpu_info["vendor"] = "nvidia"
+                    gpu_info["backend"] = "cuda"
+                elif "AMD" in lspci_out or "Radeon" in lspci_out:
+                    gpu_info["vendor"] = "amd"
+                    gpu_info["backend"] = "vulkan"
+                elif "Intel" in lspci_out and "Graphics" in lspci_out:
+                    gpu_info["vendor"] = "intel"
+                    gpu_info["backend"] = "vulkan"
+            except Exception:
+                pass
+
+        return gpu_info
+
+    @classmethod
+    def evaluate_tier(cls) -> Dict[str, Any]:
+        """Evaluates hardware specs and assigns model tier with full configuration."""
+        ram_gb = cls.get_system_ram_gb()
+        gpu = cls.detect_gpu()
+        vram_gb = gpu.get("vram_gb", 0.0)
+
+        # Tier decision logic
+        if ram_gb >= 30.0 or vram_gb >= 12.0:
+            assigned_tier = cls.TIER_PRO
+        elif ram_gb >= 14.0 or vram_gb >= 6.0:
+            assigned_tier = cls.TIER_STANDARD
+        else:
+            assigned_tier = cls.TIER_LITE
+
+        catalog = dict(cls.MODEL_CATALOG[assigned_tier])
+        backend = (gpu.get("backend") or "cpu").lower()
+        # Only offload layers when a real discrete GPU has usable VRAM.
+        # Intel/AMD iGPU "vulkan" with 0 GB VRAM must stay on CPU (gpu_layers=0)
+        # or replies become much slower than a pure CPU 3B run.
+        if backend in ("cuda", "rocm") and vram_gb >= 6.0:
+            catalog = dict(cls.MODEL_CATALOG_GPU)
+            catalog["gpu_layers"] = 33 if vram_gb < 12 else 48
+        elif backend == "vulkan" and vram_gb >= 8.0:
+            catalog = dict(cls.MODEL_CATALOG_GPU)
+            catalog["gpu_layers"] = 24
+        else:
+            catalog["gpu_layers"] = 0
+
+        # Scan for dedicated NPU silicon (Intel / AMD XDNA / Qualcomm Hexagon)
+        npu_info = {"npu_detected": False, "vendor": "none", "device_model": "None (Using CPU/GPU)"}
+        scheduling_info = {"ambient_chat_target": "GPU / CPU Fallback"}
+        try:
+            from npu_accelerator import NPUAccelerator
+            npu_info = NPUAccelerator.detect_npu()
+            scheduling_info = NPUAccelerator.get_scheduling_recommendation()
+        except Exception:
+            pass
+
+        return {
+            "tier": assigned_tier,
+            "ram_gb": ram_gb,
+            "gpu": gpu,
+            "npu": npu_info,
+            "scheduling": scheduling_info,
+            "models": catalog,
+            "recommend_prefer": "speed",
+            "storage_dir": os.environ.get("DEVOS_MODELS_DIR", "/var/lib/DevOS/models"),
+            "api_endpoint": "http://127.0.0.1:11434/v1",
+        }
+
+
+if __name__ == "__main__":
+    result = HardwareDetector.evaluate_tier()
+    print("DevOS Hardware AI Tier Evaluation:")
+    for k, v in result.items():
+        print(f"  {k}: {v}")

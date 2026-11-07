@@ -54,7 +54,9 @@ CHAT_MODELS: List[Dict] = [
         "size_mb": 2100,
         "min_ram_gb": 8,
         "min_threads": 4,
-        "about": "Writes, explains code and reads long PDFs well.",
+        # Sweet spot for snappy local replies on CPU / iGPU PCs, even with 32 GB RAM.
+        "speed_default": True,
+        "about": "Fast replies with strong writing and code help. Best default on most PCs.",
     },
     {
         "id": "large",
@@ -65,7 +67,7 @@ CHAT_MODELS: List[Dict] = [
         "size_mb": 4680,
         "min_ram_gb": 16,
         "min_threads": 6,
-        "about": "Near cloud-assistant quality. Needs a strong PC.",
+        "about": "Higher quality, but slower on CPU. Prefer when you have a strong GPU.",
     },
     {
         "id": "xl",
@@ -79,7 +81,7 @@ CHAT_MODELS: List[Dict] = [
         # DevOS runs models on the processor; 14B answers at reading speed
         # only on fast desktops, so it is offered but never pre-selected.
         "never_recommend": True,
-        "about": "Best quality, slow on most PCs. For workstations.",
+        "about": "Best quality, slow on most PCs. For workstations with a GPU.",
     },
 ]
 
@@ -149,15 +151,76 @@ def fits(model: Dict, ram_gb: float, threads: int, disk_free_gb: Optional[float]
     return True
 
 
-def recommend(ram_gb: float, threads: int, disk_free_gb: Optional[float] = None) -> str:
-    """Largest model that fits and still answers quickly on this processor."""
-    best = "tiny"
+def _has_fast_gpu(gpu_vram_gb: float = 0.0, gpu_backend: str = "") -> bool:
+    """True when a discrete GPU can run larger models without crawling."""
+    backend = (gpu_backend or "").lower()
+    vram = float(gpu_vram_gb or 0.0)
+    if backend in ("cuda", "rocm") and vram >= 6.0:
+        return True
+    if backend == "vulkan" and vram >= 8.0:
+        return True
+    return False
+
+
+def recommend(
+    ram_gb: float,
+    threads: int,
+    disk_free_gb: Optional[float] = None,
+    *,
+    prefer: str = "speed",
+    gpu_vram_gb: float = 0.0,
+    gpu_backend: str = "",
+) -> str:
+    """Pick the chat model DevOS should suggest.
+
+    prefer=\"speed\" (default): more RAM must not force a slower 7B/14B model.
+    On CPU / weak iGPU we cap at Medium (3B) — the snappy sweet spot. Larger
+    models are only auto-suggested when a real GPU can run them quickly.
+    prefer=\"quality\": classic largest-that-fits (still skips never_recommend).
+    """
+    prefer = (prefer or "speed").lower().strip()
+    candidates = []
     for model in CHAT_MODELS:
         if model.get("never_recommend"):
             continue
         if fits(model, ram_gb, threads, disk_free_gb) and threads >= model["min_threads"]:
-            best = model["id"]
-    return best
+            candidates.append(model)
+    if not candidates:
+        return "tiny"
+
+    if prefer == "quality" or _has_fast_gpu(gpu_vram_gb, gpu_backend):
+        # With a strong GPU (or an explicit quality preference), the largest
+        # fitting model is fine — tokens stay interactive.
+        return candidates[-1]["id"]
+
+    # CPU / iGPU: stop at the speed sweet spot (3B Medium) even on 32–64 GB RAM.
+    capped = [m for m in candidates if m["id"] in ("tiny", "small", "medium")]
+    if not capped:
+        return candidates[0]["id"]
+    for model in reversed(capped):
+        if model.get("speed_default") or model["id"] == "medium":
+            return model["id"]
+    return capped[-1]["id"]
+
+
+def recommend_reason(
+    model_id: str,
+    ram_gb: float,
+    *,
+    gpu_vram_gb: float = 0.0,
+    gpu_backend: str = "",
+) -> str:
+    """Short UI sentence explaining why this model is recommended."""
+    model = chat_model(model_id) or {}
+    params = model.get("params", model_id)
+    if _has_fast_gpu(gpu_vram_gb, gpu_backend):
+        return f"Recommended · {params} uses your GPU for quality without much wait."
+    if model_id in ("medium", "small", "tiny"):
+        return (
+            f"Recommended for faster replies · {params} stays quick on this CPU "
+            f"(extra RAM does not make 7B faster)."
+        )
+    return f"Recommended · {params}"
 
 
 def recommend_extras(ram_gb: float) -> List[str]:

@@ -57,13 +57,21 @@ class ModelsWindow(QtWidgets.QWidget):
         facts.setObjectName("muted")
         facts.setWordWrap(True)
         layout.addWidget(facts)
+        tip = QtWidgets.QLabel(
+            self.info.get("recommended_reason")
+            or "DevOS prefers a faster model by default — more RAM does not make a larger model quicker on the CPU."
+        )
+        tip.setObjectName("muted")
+        tip.setWordWrap(True)
+        tip.setStyleSheet("color: #38bdf8;")
+        layout.addWidget(tip)
 
         self.group = QtWidgets.QButtonGroup(self)
         for model in self.info["models"]:
             have = model.get("built_in") or catalog.installed_file(model["file"])
             text = f"{model['name']} · {model['params']} — {model['about']}"
             if model["id"] == self.info["recommended"]:
-                text += "  (recommended)"
+                text += "  (recommended for faster replies)"
             size = "Included" if model.get("built_in") else f"{model['size_mb'] / 1024:.1f} GB"
             radio = QtWidgets.QRadioButton(f"{text}\n{size}{' · downloaded' if have else ''}"
                                            f"{'' if model['fits'] else ' · needs ' + str(model['min_ram_gb']) + ' GB RAM'}")

@@ -609,17 +609,31 @@ class DevOSAIEngine:
                 return max(0, int(os.environ["DEVOS_GPU_LAYERS"]))
             except ValueError:
                 return 0
-        backend = (self.tier_info.get("gpu") or {}).get("backend")
-        if backend in ("cuda", "rocm", "vulkan"):
-            try:
-                return max(0, int((self.tier_info.get("models") or {}).get("gpu_layers") or 0))
-            except (TypeError, ValueError):
-                return 0
-        return 0
+        gpu = self.tier_info.get("gpu") or {}
+        backend = (gpu.get("backend") or "").lower()
+        vram = float(gpu.get("vram_gb") or 0.0)
+        # Skip iGPU vulkan with unknown/0 VRAM — offloading there slows chat.
+        if backend in ("cuda", "rocm") and vram >= 4.0:
+            pass
+        elif backend == "vulkan" and vram >= 8.0:
+            pass
+        else:
+            return 0
+        try:
+            return max(0, int((self.tier_info.get("models") or {}).get("gpu_layers") or 0))
+        except (TypeError, ValueError):
+            return 0
 
     def speed_kwargs(self, kind: str = "chat") -> Dict[str, Any]:
         ram = float(self.tier_info.get("ram_gb") or 4)
-        return llama_speed_kwargs(kind, ram, self.parallel, self._gpu_layers())
+        layers = self._gpu_layers()
+        kw = llama_speed_kwargs(kind, ram, self.parallel, layers)
+        # On CPU, a huge context (16k) from "Pro RAM" makes even 3B feel slow.
+        # Keep chat interactive unless a real GPU is carrying the load.
+        if kind == "chat" and layers <= 0 and int(kw.get("n_ctx") or 0) > 8192:
+            kw["n_ctx"] = 8192
+            kw["n_batch"] = min(int(kw.get("n_batch") or 512), 8192)
+        return kw
 
     def speed_info(self) -> Dict[str, Any]:
         """What this PC will use. Safe to call before a model file is loaded."""
@@ -821,7 +835,8 @@ class DevOSAIEngine:
         chosen = model_catalog.chat_model(choice["chat"])
         names = [chosen["file"]] if chosen else []
         ram = float(self.tier_info.get("ram_gb") or 0) or 64.0
-        for model in reversed(model_catalog.CHAT_MODELS):
+        # Prefer smaller installed models next (faster on CPU) over jumping to 7B/14B.
+        for model in model_catalog.CHAT_MODELS:
             if model["file"] not in names and ram + 0.5 >= model["min_ram_gb"]:
                 names.append(model["file"])
         names.append(self.tier_info["models"].get("chat_file", ""))

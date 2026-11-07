@@ -105,13 +105,29 @@ def hardware(installer: bool = False) -> dict:
 def hardware_info(ram: float, threads: int, cpu: str, gpu: str, disk: float, installer: bool) -> dict:
     # Leave room for DevOS itself (~12 GB) on an empty target disk.
     disk_for_models = max(disk - 12, 0) if installer else disk
+    gpu_backend = ""
+    gpu_vram = 0.0
+    try:
+        from hardware_detector import HardwareDetector
+        gpu_info = HardwareDetector.detect_gpu()
+        gpu_backend = gpu_info.get("backend") or ""
+        gpu_vram = float(gpu_info.get("vram_gb") or 0.0)
+    except Exception:
+        pass
+    recommended = catalog.recommend(
+        ram, threads, disk_for_models or None,
+        prefer="speed", gpu_vram_gb=gpu_vram, gpu_backend=gpu_backend,
+    )
     return {
         "ram_gb": ram,
         "threads": threads,
         "cpu": cpu,
         "gpu": gpu,
         "disk_gb": disk,
-        "recommended": catalog.recommend(ram, threads, disk_for_models or None),
+        "recommended": recommended,
+        "recommended_reason": catalog.recommend_reason(
+            recommended, ram, gpu_vram_gb=gpu_vram, gpu_backend=gpu_backend,
+        ),
         "recommended_extras": catalog.recommend_extras(ram),
         "models": [dict(m, fits=catalog.fits(m, ram, threads, disk_for_models or None))
                    for m in catalog.CHAT_MODELS],
