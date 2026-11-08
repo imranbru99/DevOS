@@ -1,0 +1,22 @@
+# Offline everyday apps shipped in the ISO (apt debs — no Flatpak/network needed).
+# Complements Flathub downloads for heavier optional titles.
+libreoffice-writer
+libreoffice-calc
+libreoffice-impress
+libreoffice-kf6
+libreoffice-style-breeze
+libreoffice-gnome
+pdfarranger
+xournalpp
+gimp
+inkscape
+timeshift
+filezilla
+remmina
+remmina-plugin-rdp
+remmina-plugin-vnc
+korganizer
+kalarm
+thunderbird
+fonts-liberation
+fonts-noto-core

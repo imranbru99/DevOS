@@ -123,8 +123,20 @@ COMMAND_CATALOG = {
         "tags": ["upgrade", "github", "os-upgrade", "release", "version"],
     },
     "kids": {
-        "desc": "Mouse-play overlay; apps keep running (Win+K)",
+        "desc": "Mouse-play overlay; apps keep running (Win+K). Parent PIN: devos parental set-pin",
         "tags": ["child", "lock", "toddler", "play"],
+    },
+    "parental": {
+        "desc": "Parent PIN for Kids Mode exit (set-pin / clear-pin / status)",
+        "tags": ["pin", "child", "family", "kids", "lock"],
+    },
+    "heal": {
+        "desc": "Smart Shell: diagnose a failed command and suggest a fix",
+        "tags": ["shell", "terminal", "error", "fix", "heal"],
+    },
+    "qualify": {
+        "desc": "Hardware / Secure Boot / GPU qualification report for this PC",
+        "tags": ["hardware", "gpu", "secureboot", "qualify", "driver"],
     },
     "task": {
         "desc": "Task Manager: processes, performance, startup apps",
@@ -459,6 +471,9 @@ def main():
     dispatch_map = {
         "smooth": os.path.join(COMPONENTS_DIR, "optimizer", "responsiveness.py"),
         "kids": os.path.join(COMPONENTS_DIR, "kids", "kids_mode.py"),
+        "parental": os.path.join(COMPONENTS_DIR, "kids", "parental.py"),
+        "heal": os.path.join(COMPONENTS_DIR, "ai-agent", "smart_shell.py"),
+        "qualify": os.path.join(COMPONENTS_DIR, "settings", "hw_qualify.py"),
         "dashboard": dashboard_script,
         "setup": dashboard_script,
         "app": os.path.join(COMPONENTS_DIR, "apphub", "hub.py"),

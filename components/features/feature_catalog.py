@@ -101,10 +101,10 @@ FEATURES: List[Dict] = [
       650, win="Microsoft Office", flatpak=["org.onlyoffice.desktopeditors"], presets=EVERYONE,
       roles={r: "org.onlyoffice.desktopeditors.desktop" for r in ("documents", "spreadsheets", "presentations")}, min_ram_gb=3),
     F("libreoffice", "office", "LibreOffice Writer, Calc, Impress",
-      "The classic free office suite; best for .odt/.ods files and complex macros.",
+      "Offline office suite on the ISO (Writer, Calc, Impress). Best for .odt/.ods and complex macros.",
       380, win="Microsoft Office", apt=["libreoffice-writer", "libreoffice-calc", "libreoffice-impress",
                                          "libreoffice-kf6", "libreoffice-style-breeze"],
-      presets=("student",),
+      preinstalled=True, presets=ESSENTIAL,
       roles={"documents": "libreoffice-writer.desktop", "spreadsheets": "libreoffice-calc.desktop",
              "presentations": "libreoffice-impress.desktop"}, min_ram_gb=3),
     F("wps", "office", "WPS Office",
@@ -118,8 +118,8 @@ FEATURES: List[Dict] = [
       12, win="Windows fonts", apt=["ttf-mscorefonts-installer"], presets=("windows", "student"),
       needs_eula="ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true"),
     F("pdftools", "office", "PDF tools: merge, split, sign, annotate",
-      "PDF Arranger (merge, split, rotate pages) and Xournal++ (write, highlight and sign on PDFs).",
-      15, win="Adobe Acrobat", apt=["pdfarranger", "xournalpp"], presets=EVERYONE),
+      "PDF Arranger and Xournal++ — shipped offline on the ISO.",
+      15, win="Adobe Acrobat", apt=["pdfarranger", "xournalpp"], preinstalled=True, presets=ESSENTIAL),
     F("notes", "office", "Joplin notes",
       "Notes and to-dos with sync to OneDrive/Dropbox, like OneNote.",
       300, win="OneNote", flatpak=["net.cozic.joplin_desktop"], presets=("student",), min_ram_gb=4),
@@ -139,9 +139,10 @@ FEATURES: List[Dict] = [
     F("brave", "internet", "Brave", "Browser with built-in ad blocking.", 350, flatpak=["com.brave.Browser"],
       roles={"browser": "com.brave.Browser.desktop"}, min_ram_gb=4),
     F("thunderbird", "internet", "Thunderbird email",
-      "Email and calendar for Gmail, Outlook.com and work accounts.", 300, win="Outlook / Mail",
-      flatpak=["org.mozilla.Thunderbird"], presets=("windows", "student"),
-      roles={"email": "org.mozilla.Thunderbird.desktop"}),
+      "Email and calendar for Gmail, Outlook.com and work accounts — apt package on the ISO.",
+      300, win="Outlook / Mail",
+      apt=["thunderbird"], preinstalled=True, presets=ESSENTIAL,
+      roles={"email": "thunderbird.desktop"}),
     F("winapp", "internet", "Windows App (Microsoft)",
       "Microsoft's own Windows App: Windows 365 cloud PCs, Azure Virtual Desktop, Dev Box and remote apps, "
       "in its own window. Connecting a Cloud PC stays in this app. Same app Microsoft offers for every "
@@ -195,12 +196,12 @@ FEATURES: List[Dict] = [
       "Official Adobe Photoshop Web app in a dedicated window. Works with Adobe ID and Creative Cloud.", 1,
       win="Adobe Photoshop", presets=("creator",),
       webapp={"url": "https://photoshop.adobe.com", "icon": "applications-graphics", "names": ["Adobe Photoshop", "Photoshop"]}),
-    F("gimp", "creative", "GIMP", "Photo editing, like Photoshop.", 400, win="Photoshop",
-      flatpak=["org.gimp.GIMP"], presets=("creator",), min_ram_gb=4),
+    F("gimp", "creative", "GIMP", "Photo editing, like Photoshop — offline on the ISO.", 400, win="Photoshop",
+      apt=["gimp"], preinstalled=True, presets=("creator", "normal", "student"), min_ram_gb=4),
     F("krita", "creative", "Krita", "Digital painting and illustration.", 450, flatpak=["org.kde.krita"],
       presets=("creator",), min_ram_gb=6),
-    F("inkscape", "creative", "Inkscape", "Vector graphics, like Illustrator.", 350, win="Illustrator",
-      flatpak=["org.inkscape.Inkscape"], presets=("creator",), min_ram_gb=4),
+    F("inkscape", "creative", "Inkscape", "Vector graphics, like Illustrator — offline on the ISO.", 350,
+      win="Illustrator", apt=["inkscape"], preinstalled=True, presets=("creator", "normal"), min_ram_gb=4),
     F("kdenlive", "creative", "Kdenlive video editor", "Video editing, like Clipchamp or Premiere.", 500,
       win="Clipchamp", flatpak=["org.kde.kdenlive"], presets=("creator",), min_ram_gb=8),
     F("obs", "creative", "OBS Studio", "Screen recording and live streaming.", 400, win="Xbox Game Bar recording",
@@ -324,9 +325,10 @@ FEATURES: List[Dict] = [
       "Help or get help on another PC.", 200, win="Quick Assist / AnyDesk",
       flatpak=["com.anydesk.Anydesk", "com.rustdesk.RustDesk"], presets=("windows",), min_ram_gb=4),
     F("remmina", "utilities", "Remote Desktop (Remmina)",
-      "Connect to Windows PCs, Windows 365 and Azure Virtual Desktop over RDP, like Microsoft's Windows App. "
-      "Cloud PCs also open in the browser at windows.cloud.microsoft.", 15, win="Windows App / Remote Desktop",
-      apt=["remmina", "remmina-plugin-rdp"], presets=("windows", "developer", "student")),
+      "Connect to Windows PCs, Windows 365 and Azure Virtual Desktop over RDP — offline on the ISO.",
+      15, win="Windows App / Remote Desktop",
+      apt=["remmina", "remmina-plugin-rdp", "remmina-plugin-vnc"], preinstalled=True,
+      presets=("windows", "developer", "student", "normal")),
     F("scanner", "utilities", "Scanner app", "Scan documents to PDF.", 10, win="Windows Scan",
       apt=["skanlite"], presets=("windows", "student")),
     F("timeshift", "utilities", "System restore points (Timeshift)",
@@ -438,6 +440,11 @@ FEATURES += [
                "enable": [[DEVOS + "devos-islamic", "fetch-content", "--system"],
                           ["systemctl", "--global", "enable", "devos-islamic.service"]],
                "disable": [["systemctl", "--global", "disable", "devos-islamic.service"]]}),
+    F("kids", "family", "Kids Mode (parent PIN exit)",
+      "Full-screen cosmos play overlay. Set a parent PIN so children cannot leave with the exit chord alone "
+      "(devos parental set-pin). Background apps keep running.",
+      1, win="Microsoft Family Safety", presets=("family", "islamic"),
+      builtin={"desktop": ["devos-kids-mode.desktop"]}),
     F("familysafe", "family", "Family Safety: block adult content",
       "Blocks adult sites for every app, forces SafeSearch and YouTube Restricted mode, turns off private "
       "browsing. Set a password so children can't switch it off.", 1, presets=("islamic", "family"),
@@ -568,7 +575,8 @@ def recommended_ids(ram_gb: float, disk_gb: float) -> List[str]:
     # Every PC gets an office suite: the lighter LibreOffice when ONLYOFFICE
     # was left out for this PC.
     if "onlyoffice" not in ids:
-        ids.insert(0, "libreoffice")
+        if "libreoffice" not in ids:
+            ids.insert(0, "libreoffice")
     return ids
 
 

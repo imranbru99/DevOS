@@ -261,12 +261,21 @@ delivery contract. Check `devos features list` on the installed system for state
 | `familysafe` | Family Safety: block adult content | Bundled controls; opt in (content may download) |
 | `modesty` | Modesty filter: blur adult women body regions | Bundled controls; opt in (content may download); catalog recommends 4 GB RAM |
 
+## Closing the “best for everything” gaps (November 8, 2026)
+
+| Gap | What DevOS does now |
+|---|---|
+| Offline apps | ISO package list `18-offline-essentials` ships LibreOffice, Thunderbird, GIMP, Inkscape, PDF tools, Remmina, Timeshift, etc. Heavy Flatpaks (Steam, ONLYOFFICE, …) still download when selected. |
+| Windows / Android | Wine + doctor + native Flatpak/web first; Waydroid image still downloads once (~850 MB). Not a full Windows/Android replacement. |
+| Hardware certification | `devos qualify` / `devos-hw-qualify` reports Secure Boot, GPU, RAM, audio/network for **this PC**. Not a claim that every GPU is certified. |
+| 2027 OS pieces | NPU detect + preference file (`~/.config/devos/npu-schedule.json`); Smart Shell via `devos heal` (+ optional bash hook); Vault remains folder LUKS (not full-disk). |
+| Kids / parental | Kids Mode exit chord + optional **parent PIN** (`devos parental set-pin`); Family Safety GUI can set the PIN. Still not a separate locked child account by itself. |
+
 ## Experimental components and release evidence
 
-NPU detection/recommendations, smart-shell diagnostics and semantic-memory search
-exist in source but have narrower capabilities than a complete hardware scheduler,
-automatic repair shell or secure document vault. See the
-[architecture status](MODERN_2027_OS_ARCHITECTURE.md).
+Semantic-memory search and vendor NPU runtimes (OpenVINO/XDNA) remain optional follow-ons.
+`devos heal` and NPU preference files are usable today; full auto-apply of shell fixes stays opt-in via the hook.
+See the [architecture status](MODERN_2027_OS_ARCHITECTURE.md).
 
 A release should publish its ISO SHA-256 and test results separately. Unit tests,
 QML previews, boot-layout inspection, a live VM boot and a completed disk installation

@@ -78,22 +78,48 @@ class NPUAccelerator:
             return {
                 "ambient_chat_target": f"NPU ({npu['device_model']})",
                 "heavy_code_target": "Discrete GPU (CUDA/ROCm) or CPU",
-                "power_savings": "Up to 85% battery savings compared to GPU inference",
+                "power_savings": "Prefer NPU for always-on / low-watt ambient tasks",
                 "ambient_always_on": True,
+                "runtime": "preference-file",  # OpenVINO/XDNA runtime optional when installed
             }
         return {
             "ambient_chat_target": "GPU / CPU Fallback",
             "heavy_code_target": "GPU / CPU Fallback",
             "power_savings": "Standard battery profile",
             "ambient_always_on": False,
+            "runtime": "cpu-gpu",
         }
+
+    @classmethod
+    def write_preference(cls) -> str:
+        """Persist scheduling preference for ai-core / assistant to read."""
+        npu = cls.detect_npu()
+        sched = cls.get_scheduling_recommendation()
+        path = os.path.join(os.path.expanduser("~"), ".config", "devos", "npu-schedule.json")
+        os.makedirs(os.path.dirname(path), mode=0o755, exist_ok=True)
+        payload = {
+            "npu": npu,
+            "scheduling": sched,
+            "policy": {
+                "ambient_prefer": "npu" if npu.get("npu_detected") else "cpu",
+                "heavy_prefer": "gpu_or_cpu",
+                "note": "Preference only until a vendor NPU runtime is installed.",
+            },
+        }
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=2)
+            fh.write("\n")
+        os.replace(tmp, path)
+        return path
 
 
 def main():
     npu = NPUAccelerator.detect_npu()
     sched = NPUAccelerator.get_scheduling_recommendation()
-    print("DevOS 2027 NPU Silicon Status:")
-    print(json.dumps({"npu": npu, "scheduling": sched}, indent=2))
+    path = NPUAccelerator.write_preference()
+    print("DevOS NPU Silicon Status:")
+    print(json.dumps({"npu": npu, "scheduling": sched, "preference_file": path}, indent=2))
 
 
 if __name__ == "__main__":

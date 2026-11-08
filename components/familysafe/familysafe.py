@@ -937,14 +937,18 @@ def gui() -> int:
 
             kids = QtWidgets.QLabel(
                 "Tip: give children their own standard (not administrator) account, and make sure "
-                "every administrator account has a password. Then nobody else can turn this off.")
+                "every administrator account has a password. Set a Kids Mode exit PIN so the "
+                "Ctrl+Shift+K chord alone cannot leave the play overlay.")
             kids.setObjectName("muted")
             kids.setWordWrap(True)
             layout.addWidget(kids)
             add_child = QtWidgets.QPushButton("Add a child account…")
             add_child.clicked.connect(self.open_accounts)
+            set_pin = QtWidgets.QPushButton("Set Kids Mode PIN…")
+            set_pin.clicked.connect(self.set_kids_pin)
             row2 = QtWidgets.QHBoxLayout()
             row2.addWidget(add_child)
+            row2.addWidget(set_pin)
             row2.addStretch(1)
             layout.addLayout(row2)
 
@@ -1041,6 +1045,33 @@ def gui() -> int:
 
         def open_accounts(self):
             QtCore.QProcess.startDetached("kcmshell5", ["kcm_users"])
+
+        def set_kids_pin(self):
+            pin, ok = QtWidgets.QInputDialog.getText(
+                self, "Kids Mode PIN",
+                "Choose a 4–12 digit parent PIN.\nChildren need this PIN to leave Kids Mode.",
+                QtWidgets.QLineEdit.EchoMode.Password if hasattr(QtWidgets.QLineEdit, "EchoMode")
+                else QtWidgets.QLineEdit.Password,
+            )
+            if not ok:
+                return
+            confirm, ok2 = QtWidgets.QInputDialog.getText(
+                self, "Confirm PIN", "Repeat the PIN:",
+                QtWidgets.QLineEdit.EchoMode.Password if hasattr(QtWidgets.QLineEdit, "EchoMode")
+                else QtWidgets.QLineEdit.Password,
+            )
+            if not ok2 or pin != confirm:
+                self.message.setText("PINs did not match — nothing saved.")
+                return
+            try:
+                kids_dir = os.path.join(os.path.dirname(__file__), "..", "kids")
+                if kids_dir not in sys.path:
+                    sys.path.insert(0, os.path.abspath(kids_dir))
+                from parental import set_pin
+                set_pin(pin.strip())
+                self.message.setText("Kids Mode exit PIN saved.")
+            except Exception as exc:
+                self.message.setText(f"Could not save PIN: {exc}")
 
     # Keep confirmation and input dialogs consistent across DevOS apps.
     import sys as _dialog_sys

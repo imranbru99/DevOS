@@ -209,12 +209,18 @@ var data = {
    "id": "libreoffice",
    "category": "office",
    "name": "LibreOffice Writer, Calc, Impress",
-   "about": "The classic free office suite; best for .odt/.ods files and complex macros.",
+   "about": "Offline office suite on the ISO (Writer, Calc, Impress). Best for .odt/.ods and complex macros.",
    "size_mb": 380,
    "windows": "Microsoft Office",
-   "preinstalled": false,
+   "preinstalled": true,
    "presets": [
-    "student"
+    "windows",
+    "student",
+    "developer",
+    "creator",
+    "gamer",
+    "minimal",
+    "islamic"
    ],
    "eula": "",
    "min_ram_gb": 3,
@@ -275,16 +281,17 @@ var data = {
    "id": "pdftools",
    "category": "office",
    "name": "PDF tools: merge, split, sign, annotate",
-   "about": "PDF Arranger (merge, split, rotate pages) and Xournal++ (write, highlight and sign on PDFs).",
+   "about": "PDF Arranger and Xournal++ — shipped offline on the ISO.",
    "size_mb": 15,
    "windows": "Adobe Acrobat",
-   "preinstalled": false,
+   "preinstalled": true,
    "presets": [
     "windows",
     "student",
     "developer",
     "creator",
     "gamer",
+    "minimal",
     "islamic"
    ],
    "eula": "",
@@ -413,13 +420,17 @@ var data = {
    "id": "thunderbird",
    "category": "internet",
    "name": "Thunderbird email",
-   "about": "Email and calendar for Gmail, Outlook.com and work accounts.",
+   "about": "Email and calendar for Gmail, Outlook.com and work accounts — apt package on the ISO.",
    "size_mb": 300,
    "windows": "Outlook / Mail",
-   "preinstalled": false,
+   "preinstalled": true,
    "presets": [
     "windows",
     "student",
+    "developer",
+    "creator",
+    "gamer",
+    "minimal",
     "islamic"
    ],
    "eula": "",
@@ -741,12 +752,14 @@ var data = {
    "id": "gimp",
    "category": "creative",
    "name": "GIMP",
-   "about": "Photo editing, like Photoshop.",
+   "about": "Photo editing, like Photoshop — offline on the ISO.",
    "size_mb": 400,
    "windows": "Photoshop",
-   "preinstalled": false,
+   "preinstalled": true,
    "presets": [
-    "creator"
+    "creator",
+    "normal",
+    "student"
    ],
    "eula": "",
    "min_ram_gb": 4,
@@ -771,12 +784,13 @@ var data = {
    "id": "inkscape",
    "category": "creative",
    "name": "Inkscape",
-   "about": "Vector graphics, like Illustrator.",
+   "about": "Vector graphics, like Illustrator — offline on the ISO.",
    "size_mb": 350,
    "windows": "Illustrator",
-   "preinstalled": false,
+   "preinstalled": true,
    "presets": [
-    "creator"
+    "creator",
+    "normal"
    ],
    "eula": "",
    "min_ram_gb": 4,
@@ -1393,14 +1407,15 @@ var data = {
    "id": "remmina",
    "category": "utilities",
    "name": "Remote Desktop (Remmina)",
-   "about": "Connect to Windows PCs, Windows 365 and Azure Virtual Desktop over RDP, like Microsoft's Windows App. Cloud PCs also open in the browser at windows.cloud.microsoft.",
+   "about": "Connect to Windows PCs, Windows 365 and Azure Virtual Desktop over RDP — offline on the ISO.",
    "size_mb": 15,
    "windows": "Windows App / Remote Desktop",
-   "preinstalled": false,
+   "preinstalled": true,
    "presets": [
     "windows",
     "developer",
     "student",
+    "normal",
     "islamic"
    ],
    "eula": "",
@@ -1717,6 +1732,27 @@ var data = {
    "optin": false
   },
   {
+   "id": "netusage",
+   "category": "devos",
+   "name": "Network Usage",
+   "about": "Network interfaces, last 30 days per day (graph), and monthly totals. Keeps 12 months of data only.",
+   "size_mb": 1,
+   "windows": "Data usage",
+   "preinstalled": true,
+   "presets": [
+    "windows",
+    "student",
+    "developer",
+    "creator",
+    "gamer",
+    "minimal",
+    "islamic"
+   ],
+   "eula": "",
+   "min_ram_gb": 0,
+   "optin": false
+  },
+  {
    "id": "security",
    "category": "devos",
    "name": "DevOS Security",
@@ -1761,8 +1797,8 @@ var data = {
   {
    "id": "voicetype",
    "category": "devos",
-   "name": "Voice typing (Win+Alt+H)",
-   "about": "Speak instead of typing in any app, in Bangla or English, fully offline.",
+   "name": "Voice Typing (Win+Alt+A / H)",
+   "about": "Click any text box (WhatsApp, Chrome, Cursor, mail, Notepad…), press Win+Alt+A or Win+Alt+H — green mic types at the caret; click anywhere to stop; Bangla or English offline.",
    "size_mb": 1,
    "windows": "Voice typing (Win+H)",
    "preinstalled": true,
@@ -1782,8 +1818,8 @@ var data = {
   {
    "id": "aiactions",
    "category": "devos",
-   "name": "AI on any text (Win+Alt+A)",
-   "about": "Select text anywhere to rewrite, fix, shorten, translate or summarize it with DevOS AI.",
+   "name": "AI on selected text (Win+Alt+Shift+A)",
+   "about": "Select text to rewrite, fix grammar, shorten, translate or summarize with DevOS AI (optional; daily typing uses Voice Typing).",
    "size_mb": 1,
    "windows": "Copilot",
    "preinstalled": true,
@@ -1978,6 +2014,22 @@ var data = {
    "optin": true
   },
   {
+   "id": "kids",
+   "category": "family",
+   "name": "Kids Mode (parent PIN exit)",
+   "about": "Full-screen cosmos play overlay. Set a parent PIN so children cannot leave with the exit chord alone (devos parental set-pin). Background apps keep running.",
+   "size_mb": 1,
+   "windows": "Microsoft Family Safety",
+   "preinstalled": true,
+   "presets": [
+    "family",
+    "islamic"
+   ],
+   "eula": "",
+   "min_ram_gb": 0,
+   "optin": false
+  },
+  {
    "id": "familysafe",
    "category": "family",
    "name": "Family Safety: block adult content",
@@ -2011,6 +2063,7 @@ var data = {
  ],
  "defaults": [
   "onlyoffice",
+  "libreoffice",
   "officefonts",
   "msfonts",
   "pdftools",
@@ -2057,6 +2110,7 @@ var data = {
   "winvm",
   "android",
   "taskman",
+  "netusage",
   "security",
   "devosnotes",
   "voicetype",

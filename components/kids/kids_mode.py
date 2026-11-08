@@ -13,10 +13,28 @@ def exit_chord(key, shift, control, super_key, alt=False):
     return key.lower() == "k" and shift and (control or super_key) and not alt
 
 
+def _parental_pin_required():
+    try:
+        from parental import pin_is_set, prompt_gtk_pin
+    except ImportError:
+        here = os.path.dirname(os.path.abspath(__file__))
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        try:
+            from parental import pin_is_set, prompt_gtk_pin
+        except ImportError:
+            return False, None
+    return pin_is_set(), prompt_gtk_pin
+
+
 def main():
     if '--help' in sys.argv:
-        print('Kids mode: Win+K to start; Ctrl+Shift+K or Win+Shift+K to exit. Apps keep running.')
+        print('Kids mode: Win+K to start; Ctrl+Shift+K or Win+Shift+K to exit (parent PIN if set).')
+        print('Set a parent PIN:  devos parental set-pin')
         return 0
+    if len(sys.argv) > 1 and sys.argv[1] in ('set-pin', 'clear-pin', 'status'):
+        from parental import main as parental_main
+        return parental_main(sys.argv[1:])
     runtime = os.environ.get('XDG_RUNTIME_DIR')
     if not runtime:
         print('Kids mode needs a desktop session.', file=sys.stderr)
@@ -78,8 +96,21 @@ def main():
     # Gentle background floating jelly-wisps/stardust bubbles
     ambient_orbs = [(rng.random(), rng.random(), rng.uniform(18, 38), rng.uniform(0.15, 0.4), rng.uniform(0, math.tau)) for _ in range(16)]
 
+    pin_required, ask_pin = _parental_pin_required()
+
     def stop(*_):
         nonlocal grabbed
+        if pin_required and ask_pin is not None:
+            # Temporarily release grab so the PIN dialog can take input.
+            if grabbed:
+                seat.ungrab()
+                grabbed = False
+            parent = windows[0] if windows else None
+            if not ask_pin(parent):
+                if not wayland and windows:
+                    seat.grab(windows[0].get_window(), Gdk.SeatCapabilities.ALL, False, None, None, None, None)
+                    grabbed = True
+                return False
         if grabbed:
             seat.ungrab()
             grabbed = False
@@ -404,7 +435,10 @@ def main():
 
             cr.set_font_size(13)
             cr.set_source_rgba(0.88, 0.93, 1.0, 0.85)
-            foot_txt = '🛡️ Kids mode active • Safe clicks locked • To exit: Ctrl+Shift+K or Win+Shift+K'
+            foot_txt = (
+                '🛡️ Kids mode • Exit: Ctrl+Shift+K / Win+Shift+K'
+                + (' + parent PIN' if pin_required else ' • Set PIN: devos parental set-pin')
+            )
             fext = cr.text_extents(foot_txt)
             cr.move_to((width - fext.width) / 2, fy + 24)
             cr.show_text(foot_txt)

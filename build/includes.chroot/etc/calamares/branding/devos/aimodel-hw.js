@@ -7,6 +7,7 @@ var hw = {
  "gpu": "",
  "disk_gb": 0.0,
  "recommended": "small",
+ "recommended_reason": "Recommended for faster replies \u00b7 1.5B stays quick on this CPU (extra RAM does not make 7B faster).",
  "recommended_extras": [
   "vision"
  ],
@@ -45,7 +46,8 @@ var hw = {
    "size_mb": 2100,
    "min_ram_gb": 8,
    "min_threads": 4,
-   "about": "Writes, explains code and reads long PDFs well.",
+   "speed_default": true,
+   "about": "Fast replies with strong writing and code help. Best default on most PCs.",
    "fits": false
   },
   {
@@ -57,7 +59,7 @@ var hw = {
    "size_mb": 4680,
    "min_ram_gb": 16,
    "min_threads": 6,
-   "about": "Near cloud-assistant quality. Needs a strong PC.",
+   "about": "Higher quality, but slower on CPU. Prefer when you have a strong GPU.",
    "fits": false
   },
   {
@@ -70,7 +72,7 @@ var hw = {
    "min_ram_gb": 32,
    "min_threads": 8,
    "never_recommend": true,
-   "about": "Best quality, slow on most PCs. For workstations.",
+   "about": "Best quality, slow on most PCs. For workstations with a GPU.",
    "fits": false
   }
  ],
