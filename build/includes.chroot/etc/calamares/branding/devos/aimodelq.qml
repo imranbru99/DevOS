@@ -50,19 +50,12 @@ Page {
             width: Math.min(aiPage.width - 80, 720)
             spacing: 8
 
-            Text {
-                text: "Choose your DevOS AI"
-                color: "#f8fafc"
-                font.pixelSize: 32
-                font.weight: Font.Bold
-            }
-            Text {
+            PageIntro {
                 Layout.fillWidth: true
-                wrapMode: Text.WordWrap
-                text: "DevOS AI runs privately on this PC. Bigger models answer better but need more memory. "
+                eyebrow: "LOCAL AI"
+                title: "Choose your DevOS AI"
+                subtitle: "DevOS AI runs privately on this PC. Bigger models answer better but need more memory. "
                     + "We picked the best one for this computer."
-                color: "#94a3b8"
-                font.pixelSize: 15
             }
             Text {
                 Layout.fillWidth: true

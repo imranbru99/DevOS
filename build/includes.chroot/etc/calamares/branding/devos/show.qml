@@ -124,7 +124,7 @@ Presentation {
           points: ["Like Cursor, fully local", "Accept or reject each change", "Works inside VS Code too"] },
         { tag: "WRITE FASTER", icon: "✎", a: "#f472b6", b: "#fb923c",
           title: "Notes, voice typing and AI on any text",
-          body: "Sticky notes and notebooks with AI summaries, speak instead of typing with Win+Alt+H, and select any text then press Win+Alt+A to rewrite or translate it.",
+          body: "Sticky notes and notebooks with AI summaries, speak into any text box with Win+Alt+A, and select text then press Win+Alt+Shift+A to rewrite or translate it.",
           points: ["Bangla + English dictation", "Rewrite · Translate · Summarize", "Notes backed up with your files"] },
         { tag: "ISLAMIC DEVOS", icon: "☪", a: "#34d399", b: "#0d9488",
           title: "Prayer times, Quran and Hadith",

@@ -58,18 +58,11 @@ Page {
             width: Math.min(page.width - 80, 720)
             spacing: 10
 
-            Text {
-                text: "Voice & Mira"
-                color: "#f8fafc"
-                font.pixelSize: 32
-                font.weight: Font.Bold
-            }
-            Text {
+            PageIntro {
                 Layout.fillWidth: true
-                wrapMode: Text.WordWrap
-                color: "#94a3b8"
-                font.pixelSize: 15
-                text: "Choose how DevOS AI sounds, and whether saying a name like Mira starts listening without tapping the microphone. Replies follow the language you speak."
+                eyebrow: "VOICE"
+                title: "Voice & Mira"
+                subtitle: "Choose how DevOS AI sounds, and whether saying a name like Mira starts listening without tapping the microphone. After install, Win+Alt+A types into any text box."
             }
 
             Rectangle {

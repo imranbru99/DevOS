@@ -81,9 +81,10 @@ class TestInstalledSystemBoot(unittest.TestCase):
         self.assertIn("bootloaderEntryName: DevOS", branding)
         self.assertIn('slideshow: "show.qml"', branding)
         self.assertIn("images:", branding)
-        self.assertIn("windowExpanding: normal", branding)
-        self.assertIn("windowSize: 1120,720", branding)
+        self.assertIn("windowExpanding: noexpand", branding)
+        self.assertIn("windowSize: 1000px,640px", branding)
         self.assertNotIn("windowExpanding: fullscreen", branding)
+        self.assertNotIn("windowExpanding: normal", branding)
         self.assertIn('productIcon: "logo.png"', branding)
         self.assertIn("sidebar: qml", branding)
         # Bottom Next/Back must be height-pinned so Summary cannot clip it on laptops.
@@ -92,7 +93,7 @@ class TestInstalledSystemBoot(unittest.TestCase):
         self.assertIn("readonly property bool compact:", navigation)
         self.assertIn("ViewManager.nextLabel", navigation)
         stylesheet = read("build/includes.chroot/etc/calamares/branding/devos/stylesheet.qss")
-        self.assertIn("font-size: 22px;", stylesheet)
+        self.assertIn("font-size: 20px;", stylesheet)
         self.assertNotIn("welcome.png", branding)
         self.assertIn('PRETTY_NAME="DevOS ${base_version} LTS"', script)
         self.assertIn('/usr/lib/os-release.ubuntu', script)
@@ -108,7 +109,7 @@ class TestInstalledSystemBoot(unittest.TestCase):
         win = read("build/includes.chroot/usr/share/applications/devos-winlayer.desktop")
         apk = read("build/includes.chroot/usr/share/applications/devos-apphub.desktop")
 
-        self.assertIn("initialPartitioningChoice: manual", partition)
+        self.assertIn("initialPartitioningChoice: erase", partition)
         self.assertIn("allowManualPartitioning: true", partition)
         self.assertIn("alwaysShowPartitionLabels: true", partition)
         show = read("build/includes.chroot/etc/calamares/settings.conf").split("- exec:")[0]

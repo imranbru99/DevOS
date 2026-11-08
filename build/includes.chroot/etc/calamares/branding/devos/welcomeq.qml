@@ -66,35 +66,17 @@ Page {
                 MotionLogo {
                     source: "file:/" + Branding.imagePath(Branding.ProductLogo)
                     animated: welcome.visible && InstallerAppearance.motionEnabled
-                    Layout.preferredWidth: 72
-                    Layout.preferredHeight: 72
-                    Layout.bottomMargin: 20
+                    Layout.preferredWidth: 80
+                    Layout.preferredHeight: 80
+                    Layout.bottomMargin: 22
                 }
 
-                Text {
-                    text: "WELCOME"
-                    color: "#38bdf8"
-                    font.pixelSize: 13
-                    font.weight: Font.DemiBold
-                    font.letterSpacing: 3
-                }
-                Text {
-                    Layout.topMargin: 10
+                PageIntro {
                     Layout.fillWidth: true
-                    text: Branding.string(Branding.ProductName) + " " + Branding.string(Branding.Version)
-                    color: "#f8fafc"
-                    font.pixelSize: 46
-                    font.weight: Font.Bold
-                    wrapMode: Text.WordWrap
-                }
-                Text {
-                    Layout.topMargin: 12
-                    Layout.fillWidth: true
-                    text: "One fast desktop for your Linux, Windows and Android apps, with a private AI assistant built in."
-                    color: "#cbd5e1"
-                    font.pixelSize: 18
-                    wrapMode: Text.WordWrap
-                    lineHeight: 1.25
+                    eyebrow: "WELCOME"
+                    title: Branding.string(Branding.ProductName) + " " + Branding.string(Branding.Version)
+                    titleSize: InstallerAppearance.tiny ? 28 : (InstallerAppearance.compact ? 34 : 44)
+                    subtitle: "One fast desktop for Linux, Windows and Android apps, with a private AI assistant built in."
                 }
 
                 Flow {
@@ -102,18 +84,25 @@ Page {
                     Layout.fillWidth: true
                     spacing: 10
                     Repeater {
-                        model: ["Windows apps", "Android apps", "Local AI", "Developer tools", "Built-in Optimizer"]
+                        model: ["Erase & format disk", "Windows apps", "Android apps", "Local AI", "Voice Typing", "Developer tools"]
                         Rectangle {
                             height: 34
                             width: chip.implicitWidth + 28
                             radius: 17
                             color: "#1a0f172a"
-                            border.color: "#334a6e"
+                            border.color: index === 0 ? "#38bdf8" : "#334a6e"
+                            opacity: InstallerAppearance.motionEnabled ? 0 : 1
+                            SequentialAnimation on opacity {
+                                running: welcome.visible && InstallerAppearance.motionEnabled
+                                loops: 1
+                                PauseAnimation { duration: 90 * index }
+                                NumberAnimation { from: 0; to: 1; duration: 420; easing.type: Easing.OutCubic }
+                            }
                             Text {
                                 id: chip
                                 anchors.centerIn: parent
                                 text: modelData
-                                color: "#e2e8f0"
+                                color: index === 0 ? "#7dd3fc" : "#e2e8f0"
                                 font.pixelSize: 14
                             }
                         }

@@ -32,19 +32,12 @@ Page {
             width: Math.min(kindPage.width - 56, 920)
             spacing: 8
 
-            Text {
-                text: "How will you use this PC?"
-                color: "#f8fafc"
-                font.pixelSize: 32
-                font.weight: Font.Bold
-            }
-            Text {
+            PageIntro {
                 Layout.fillWidth: true
                 Layout.bottomMargin: 8
-                wrapMode: Text.WordWrap
-                color: "#94a3b8"
-                font.pixelSize: 15
-                text: "Pick the closest one, the way Windows offers Home, Pro and the rest. "
+                eyebrow: "PC TYPE"
+                title: "How will you use this PC?"
+                subtitle: "Pick the closest one, the way Windows offers Home, Pro and the rest. "
                     + "The next page ticks those apps, and you can still turn any of them on or off."
             }
 

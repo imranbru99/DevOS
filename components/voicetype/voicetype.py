@@ -441,7 +441,13 @@ def atspi_paste() -> bool:
 
 
 def dismiss_desktop_notifications(max_age_probe: bool = True) -> None:
-    """Close freedesktop/Plasma notification bubbles (expire stuck toasts)."""
+    """Close freedesktop/Plasma notification bubbles (expire stuck toasts).
+
+    Only affects org.freedesktop.Notifications popups (Plasma banners).
+    Cursor's in-chat Approve / Run cards are Electron UI inside Cursor — they are
+    not notification ids, so CloseNotification cannot remove them. Cursor also
+    leaves its own system notifications until the user dismisses them.
+    """
     try:
         subprocess.run(
             [

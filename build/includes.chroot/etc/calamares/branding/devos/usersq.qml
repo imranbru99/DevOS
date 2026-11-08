@@ -46,21 +46,13 @@ Page {
             width: Math.min(usersPage.width - 80, 620)
             spacing: 6
 
-            Text {
-                text: "Your account"
-                color: "#f8fafc"
-                font.pixelSize: 32
-                font.weight: Font.Bold
-            }
-            Text {
+            PageIntro {
                 Layout.fillWidth: true
-                wrapMode: Text.WordWrap
-                text: "Optional. Everything is filled in already, so you can just press Next. "
-                    + "Add a password to protect your files, or leave it empty and DevOS starts without asking."
-                color: "#94a3b8"
-                font.pixelSize: 15
-                lineHeight: 1.2
                 Layout.bottomMargin: 10
+                eyebrow: "ACCOUNT"
+                title: "Your account"
+                subtitle: "Optional. Everything is filled in already, so you can just press Next. "
+                    + "Add a password to protect your files, or leave it empty and DevOS starts without asking."
             }
 
             Caption { text: "Your name" }

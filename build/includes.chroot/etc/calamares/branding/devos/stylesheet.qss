@@ -27,10 +27,19 @@ QFrame#mainApp, QStackedWidget, QScrollArea > QWidget > QWidget {
 /* Page titles inside widget-based steps.
    Keep Summary compact so Next/Back stay on-screen on 1366x768 laptops. */
 QLabel#viewTitle, QLabel#pageTitle {
-    font-size: 22px;
+    font-size: 20px;
     font-weight: 700;
     color: #f8fafc;
-    margin-bottom: 4px;
+    margin-bottom: 2px;
+    max-height: 36px;
+}
+
+/* Content panes must scroll; never grow the shell past the nav bar. */
+QMainWindow > QWidget#mainApp {
+    max-height: 16777215;
+}
+QWidget#mainApp QScrollArea {
+    min-height: 120px;
 }
 
 /* Buttons that live inside pages (Change..., partition actions) */

@@ -67,8 +67,8 @@ Rectangle {
         radius: width / 2
         x: -width * 0.2
         y: scene.height * 0.55
-        color: "#8b5cf6"
-        opacity: 0.12
+        color: "#0ea5e9"
+        opacity: 0.10
         SequentialAnimation on x {
             running: scene.visible && scene.motionOn
             loops: Animation.Infinite

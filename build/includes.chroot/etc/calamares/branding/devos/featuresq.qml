@@ -138,20 +138,12 @@ Page {
             width: Math.min(flick.width - 64, 780)
             spacing: 8
 
-            Text {
-                text: "Choose your apps"
-                color: "#f8fafc"
-                font.pixelSize: 32
-                font.weight: Font.Bold
-            }
-            Text {
+            PageIntro {
                 Layout.fillWidth: true
-                wrapMode: Text.WordWrap
-                color: "#94a3b8"
-                font.pixelSize: 15
-                text: "These apps follow the kind of PC you just chose. Turn any of them off, or pick another category. "
-                    + "After install you can still add or remove apps in DevOS Features, or ask DevOS AI, "
-                    + "for example “install Zoom” or “uninstall Spotify”."
+                eyebrow: "APPS & FEATURES"
+                title: "Choose your apps"
+                subtitle: "These apps follow the kind of PC you just chose. Turn any of them off, or pick another category. "
+                    + "After install you can still add or remove apps in DevOS Features, or ask DevOS AI."
             }
 
             // ---- this PC
@@ -359,7 +351,7 @@ Page {
     Rectangle {
         id: footer
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-        height: 58
+        height: InstallerAppearance.tiny ? 48 : 58
         color: "#0d1424"
         Rectangle { anchors { left: parent.left; right: parent.right; top: parent.top } height: 1; color: "#1e293b" }
         RowLayout {

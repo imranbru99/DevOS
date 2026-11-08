@@ -1,3 +1,4 @@
 singleton InstallerAppearance 1.0 InstallerAppearance.qml
 MotionLogo 1.0 MotionLogo.qml
 InstallerBackground 1.0 InstallerBackground.qml
+PageIntro 1.0 PageIntro.qml

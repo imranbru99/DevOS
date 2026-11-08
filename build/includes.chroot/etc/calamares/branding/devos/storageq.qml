@@ -84,16 +84,23 @@ Page {
             x: 32; y: 32
             width: Math.max(240, page.width-64)
             spacing: 14
-            Text { text: "Make room for everything"; color: "#f8fafc"; font.pixelSize: 30; font.bold: true; Layout.fillWidth: true; wrapMode: Text.WordWrap }
-            Text {
-                Layout.fillWidth: true; wrapMode: Text.WordWrap; color: "#94a3b8"; font.pixelSize: 15
-                text: "Keep other drives as they are, or explicitly choose additional SSDs and hard disks to erase and prepare as ext4 storage. Nothing is selected by default."
+            PageIntro {
+                Layout.fillWidth: true
+                eyebrow: "STORAGE"
+                title: "Make room for everything"
+                titleSize: 30
+                subtitle: "Keep other drives as they are, or choose additional SSDs/HDDs to erase and format as ext4. Nothing is selected by default."
             }
             Rectangle {
-                Layout.fillWidth: true; implicitHeight: guidance.implicitHeight+28; radius: 12; color: "#102238"; border.color: "#1e4c71"
+                Layout.fillWidth: true; implicitHeight: guidance.implicitHeight+28; radius: 14
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: "#102238" }
+                    GradientStop { position: 1.0; color: "#0c1a2e" }
+                }
+                border.color: "#1e4c71"
                 Text {
                     id: guidance; anchors.fill: parent; anchors.margins: 14; color: "#bae6fd"; font.pixelSize: 14; wrapMode: Text.WordWrap
-                    text: "On Partitions, DevOS defaults to Erase disk — like Windows Setup — so the SSD/HDD you select is wiped (Windows and all partitions on that drive) and reformatted for DevOS. Other disks stay as they are. Use Manual partitioning only for dual-boot. This page is only for optional extra data drives."
+                    text: "Yes — you can format disks during install. On Partitions, DevOS defaults to Erase disk (like Windows Setup): the SSD/HDD you select is wiped and reformatted for DevOS. Other disks stay untouched. Use Manual partitioning for dual-boot. This page is only for optional extra data drives (A/B/C volumes)."
                 }
             }
             RowLayout {

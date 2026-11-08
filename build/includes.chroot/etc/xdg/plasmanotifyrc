@@ -24,7 +24,15 @@ ShowBadges=false
 [Services][libnotificationmanager]
 ShowInHistory=false
 
-# DevOS: normal toasts auto-hide (Windows-style banners)
+# Cursor agent "Approve" UI is an in-app Electron card, not a Plasma toast —
+# it cannot be auto-closed via org.freedesktop.Notifications. Cursor's own
+# system notifications are also fire-and-forget (Cursor does not CloseNotification
+# after you act). Only real desktop toasts respect the timeout below.
+[Applications][cursor]
+ShowInHistory=false
+ShowPopups=true
+
+# DevOS: normal Plasma toasts auto-hide quickly (Windows-style banners)
 [Notifications]
 ShowPopupTimeout=true
-PopupTimeout=5000
+PopupTimeout=1000

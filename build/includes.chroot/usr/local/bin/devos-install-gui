@@ -21,8 +21,11 @@ export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}"
 export QT_QPA_PLATFORMTHEME=kde
 export QT_STYLE_OVERRIDE=Fusion
 # Keep the installer inside the usable desktop area so the Next/Back bar is
-# not drawn under a Plasma panel or laptop overscan (branding uses normal expand).
+# not drawn under a Plasma panel or laptop overscan (branding uses noexpand).
 export QT_SCALE_FACTOR_ROUNDING_POLICY="${QT_SCALE_FACTOR_ROUNDING_POLICY:-RoundPreferFloor}"
+# Avoid fractional scaling that pushes the nav bar off short 1366x768 panels.
+export QT_AUTO_SCREEN_SCALE_FACTOR="${QT_AUTO_SCREEN_SCALE_FACTOR:-0}"
+export QT_ENABLE_HIGHDPI_SCALING="${QT_ENABLE_HIGHDPI_SCALING:-0}"
 
 if [ -z "${XAUTHORITY:-}" ]; then
     if [ -n "${XDG_RUNTIME_DIR:-}" ] && compgen -G "${XDG_RUNTIME_DIR}/xauth*" >/dev/null 2>&1; then
@@ -47,6 +50,44 @@ xhost +si:localuser:root >/dev/null 2>&1 || true
 xhost +local: >/dev/null 2>&1 || true
 xhost + >/dev/null 2>&1 || true
 
+# If the window still opens taller than the usable desktop (old configs,
+# HiDPI, panels), shrink and center it so Next/Back stay visible.
+clamp_installer_window() {
+    command -v xdotool >/dev/null 2>&1 || return 0
+    command -v xprop >/dev/null 2>&1 || return 0
+    local tries=0 wid wa wx wy ww wh maxw maxh nw nh nx ny
+    while [ "$tries" -lt 50 ]; do
+        tries=$((tries + 1))
+        sleep 0.2
+        wid=$(xdotool search --onlyvisible --class calamares 2>/dev/null | head -n 1)
+        [ -n "$wid" ] || continue
+        wa=$(xprop -root _NET_WORKAREA 2>/dev/null | sed -n 's/.*= //p' | head -n 1 | tr -d ',')
+        set -- $wa
+        wx=${1:-0}; wy=${2:-0}; ww=${3:-0}; wh=${4:-0}
+        if [ "${ww:-0}" -lt 640 ] || [ "${wh:-0}" -lt 480 ]; then
+            # Fallback: full screen minus a modest panel/decoration margin.
+            set -- $(xdpyinfo 2>/dev/null | awk '/dimensions/{print $2}' | tr 'x' ' ')
+            ww=${1:-1280}; wh=${2:-720}; wx=0; wy=0
+            wh=$((wh - 56))
+        fi
+        maxw=$((ww - 24))
+        maxh=$((wh - 24))
+        [ "$maxw" -gt 720 ] || maxw=$ww
+        [ "$maxh" -gt 480 ] || maxh=$wh
+        # Prefer a comfortable size, but never exceed the work area.
+        nw=1000; nh=640
+        [ "$nw" -le "$maxw" ] || nw=$maxw
+        [ "$nh" -le "$maxh" ] || nh=$maxh
+        nx=$((wx + (ww - nw) / 2))
+        ny=$((wy + (wh - nh) / 2))
+        [ "$nx" -ge "$wx" ] || nx=$wx
+        [ "$ny" -ge "$wy" ] || ny=$wy
+        xdotool windowsize "$wid" "$nw" "$nh" 2>/dev/null || true
+        xdotool windowmove "$wid" "$nx" "$ny" 2>/dev/null || true
+        return 0
+    done
+}
+
 run_calamares() {
     # Refresh hardware facts without formatting or mounting any drive.
     if [ "$(id -u)" -eq 0 ]; then
@@ -55,9 +96,14 @@ run_calamares() {
         sudo -n /usr/local/sbin/devos-storage-probe || true
     fi
 
+    clamp_installer_window &
+    local clamp_pid=$!
+
     if [ "$(id -u)" -eq 0 ]; then
         calamares "$@"
-        return $?
+        local rc=$?
+        kill "$clamp_pid" 2>/dev/null || true
+        return $rc
     fi
     sudo -E -n \
         DISPLAY="${DISPLAY:-:0}" \
@@ -66,7 +112,13 @@ run_calamares() {
         QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}" \
         QT_QPA_PLATFORMTHEME=kde \
         QT_STYLE_OVERRIDE=Fusion \
+        QT_AUTO_SCREEN_SCALE_FACTOR="${QT_AUTO_SCREEN_SCALE_FACTOR:-0}" \
+        QT_ENABLE_HIGHDPI_SCALING="${QT_ENABLE_HIGHDPI_SCALING:-0}" \
+        QT_SCALE_FACTOR_ROUNDING_POLICY="${QT_SCALE_FACTOR_ROUNDING_POLICY:-RoundPreferFloor}" \
         calamares "$@"
+    local rc=$?
+    kill "$clamp_pid" 2>/dev/null || true
+    return $rc
 }
 
 log=/tmp/devos-calamares.log

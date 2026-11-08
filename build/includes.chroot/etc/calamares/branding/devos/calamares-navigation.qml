@@ -1,24 +1,20 @@
-/* DevOS installer bottom bar: Cancel on the left, Back / Next on the right.
-   Must stay visible on short laptop screens — never rely only on implicitHeight. */
+/* DevOS installer bottom bar: Cancel / Back / Next — always height-pinned so
+   Summary and tall pages cannot push Next under laptop bezels or panels. */
 import io.calamares.ui 1.0
 import io.calamares.core 1.0
 
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.3
-import QtQuick.Window 2.15
 
 Rectangle {
     id: navigationBar
 
-    // Compact bar on short displays so Next is never pushed under the bezel.
-    readonly property bool compact: Screen.height > 0 && Screen.height < 850
-    readonly property int barHeight: compact ? 60 : 76
-    readonly property int buttonHeight: compact ? 36 : 44
-    readonly property int sideMargin: compact ? 16 : 28
+    readonly property int barHeight: InstallerAppearance.navBarHeight
+    readonly property int buttonHeight: InstallerAppearance.navButtonHeight
+    readonly property int sideMargin: InstallerAppearance.tiny ? 12 : (InstallerAppearance.compact ? 16 : 28)
+    readonly property bool compact: InstallerAppearance.compact
 
-    // Pin height for the Calamares QQuickWidget host so the Summary page
-    // cannot steal this space on 1366x768 / HiDPI laptops.
     height: barHeight
     implicitHeight: barHeight
     Layout.preferredHeight: barHeight
@@ -26,7 +22,7 @@ Rectangle {
     Layout.maximumHeight: barHeight
     Layout.fillWidth: true
     color: "#0b0f1a"
-    z: 10
+    z: 100
     clip: false
 
     Rectangle {
@@ -41,10 +37,11 @@ Rectangle {
         property bool primary: false
         text: label.replace(/&/g, "")
         Accessible.name: text
-        implicitWidth: Math.max(navigationBar.compact ? 96 : 120, caption.implicitWidth + (navigationBar.compact ? 28 : 44))
+        implicitWidth: Math.max(navigationBar.compact ? 88 : 120, caption.implicitWidth + (navigationBar.compact ? 24 : 44))
         implicitHeight: navigationBar.buttonHeight
         Layout.preferredHeight: navigationBar.buttonHeight
         Layout.minimumHeight: navigationBar.buttonHeight
+        Layout.maximumHeight: navigationBar.buttonHeight
         opacity: enabled ? 1.0 : 0.35
         hoverEnabled: true
         focusPolicy: Qt.StrongFocus
@@ -65,8 +62,9 @@ Rectangle {
             verticalAlignment: Text.AlignVCenter
             text: btn.text
             color: btn.primary ? "#04121f" : "#e2e8f0"
-            font.pixelSize: navigationBar.compact ? 13 : 15
+            font.pixelSize: InstallerAppearance.tiny ? 12 : (navigationBar.compact ? 13 : 15)
             font.weight: Font.DemiBold
+            elide: Text.ElideRight
         }
     }
 
@@ -74,8 +72,8 @@ Rectangle {
         anchors.fill: parent
         anchors.leftMargin: navigationBar.sideMargin
         anchors.rightMargin: navigationBar.sideMargin
-        anchors.topMargin: navigationBar.compact ? 8 : 14
-        anchors.bottomMargin: navigationBar.compact ? 8 : 14
+        anchors.topMargin: InstallerAppearance.tiny ? 6 : (navigationBar.compact ? 8 : 12)
+        anchors.bottomMargin: InstallerAppearance.tiny ? 6 : (navigationBar.compact ? 8 : 12)
         spacing: navigationBar.compact ? 8 : 12
 
         NavButton {
