@@ -100,6 +100,42 @@ def mkfs_command(device, filesystem, label):
     return shlex.join([tool, *flags, label, device])
 
 
+def wait_for_partition(disk, partition, attempts=40):
+    """Wait until the kernel exposes a new partition node after parted/partprobe."""
+    disk_q = shlex.quote(disk)
+    part_q = shlex.quote(partition)
+    return (
+        f"for _wait in $(seq 1 {int(attempts)}); do\n"
+        f"  if test -b {part_q}; then break; fi\n"
+        f"  partprobe {disk_q} 2>/dev/null || true\n"
+        f"  udevadm settle || sleep 0.2\n"
+        f"  sleep 0.25\n"
+        f"done\n"
+        f"if ! test -b {part_q}; then echo 'Partition {partition} did not appear after repartition' >&2; exit 1; fi"
+    )
+
+
+def resilient_mkfs(disk, partition, filesystem, label):
+    """Run mkfs with retries; races right after parted often crash mkfs.ext4 on slow disks."""
+    cmd = mkfs_command(partition, filesystem, label)
+    part_q = shlex.quote(partition)
+    disk_q = shlex.quote(disk)
+    return (
+        f"{wait_for_partition(disk, partition)}\n"
+        f"mkfs_ok=0\n"
+        f"for _try in 1 2 3; do\n"
+        f"  if {cmd}; then mkfs_ok=1; break; fi\n"
+        f"  status=$?\n"
+        f"  echo \"mkfs attempt $_try for {partition} failed (exit $status); retrying…\" >&2\n"
+        f"  wipefs -a {part_q} 2>/dev/null || true\n"
+        f"  partprobe {disk_q} 2>/dev/null || true\n"
+        f"  udevadm settle || true\n"
+        f"  sleep 1\n"
+        f"done\n"
+        f'test "$mkfs_ok" = 1 || {{ echo "Formatting {partition} failed after retries" >&2; exit 1; }}'
+    )
+
+
 def layout_script(device, planned, owner):
     """Build a validated whole-disk data layout; caller supplies safety checks."""
     dev = shlex.quote(device)
@@ -109,10 +145,10 @@ def layout_script(device, planned, owner):
         parted_fs = {"exfat": "ntfs", "vfat": "fat32"}.get(fs, fs)
         commands.append(shlex.join(["parted", device, "--script", "mkpart", part["label"], parted_fs,
                                     f"{part['start_mib']}MiB", f"{part['end_mib']}MiB"]))
-    commands += [f"partprobe {dev}", "udevadm settle"]
+    commands += [f"partprobe {dev} || true", "udevadm settle || sleep 1", "sleep 1"]
     for number, part in enumerate(planned, 1):
         target = partition_device(device, number)
-        commands += [mkfs_command(target, part["filesystem"], part["label"]),
+        commands += [resilient_mkfs(device, target, part["filesystem"], part["label"]),
                      ownership_script(target, part["filesystem"], owner)]
     return "\n".join(commands) + "\n"
 

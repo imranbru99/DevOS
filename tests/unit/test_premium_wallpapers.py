@@ -26,7 +26,7 @@ def test_packager_uses_actual_dimensions_and_keeps_old_direct_links(tmp_path, mo
     spec.loader.exec_module(module)
     image = tmp_path/'source.png'
     Image.new('RGB', (64, 36), '#b56c22').save(image)
-    (tmp_path/'manifest.json').write_text(json.dumps([{'id':'16','name':'Solar Veil','package':'TestWallpaper','source':'source.png'}]))
+    (tmp_path/'manifest.json').write_text(json.dumps([{'id':'16','name':'Quiet Mesh','package':'TestWallpaper','source':'source.png'}]))
     monkeypatch.setattr(module, 'ROOT', tmp_path)
     monkeypatch.setattr(module, 'HERE', tmp_path)
     monkeypatch.setattr(module, 'DEST', tmp_path/'packages')
@@ -42,6 +42,8 @@ def test_installer_refreshes_failed_selection_then_uses_package_url(tmp_path, mo
     spec = importlib.util.spec_from_file_location('premium_install', COLLECTION/'install.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    manifest = json.loads((COLLECTION/'manifest.json').read_text())
+    selected = next(item for item in manifest if item['id'] == '16')
     monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path))
     monkeypatch.setattr('sys.argv', ['install.py', '--select', '16'])
     monkeypatch.setattr(module.shutil, 'copytree', lambda *a, **kw: None)
@@ -51,6 +53,7 @@ def test_installer_refreshes_failed_selection_then_uses_package_url(tmp_path, mo
     monkeypatch.setattr(module.subprocess, 'run', lambda args, **kwargs: calls.append(args))
     module.main()
     assert len(calls) == 2
-    assert '1672x941.png' in calls[0][-1]
-    target = (tmp_path/'wallpapers/DevOS-Premium-16-SolarVeil').as_uri() + '/'
+    sized = f"{selected['width']}x{selected['height']}.png"
+    assert sized in calls[0][-1]
+    target = (tmp_path/'wallpapers'/selected['package']).as_uri() + '/'
     assert f'd.writeConfig("Image",{json.dumps(target)})' in calls[1][-1]

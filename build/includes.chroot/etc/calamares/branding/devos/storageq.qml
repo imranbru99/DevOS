@@ -11,7 +11,9 @@ Page {
     background: InstallerBackground {}
     property var selected: []
     property bool confirmed: false
+    property bool restoring: false
     readonly property var eligible: Storage.disks.filter(function(d) { return !d.is_live_media && !d.read_only && !d.in_use && d.size_bytes >= 1073741824; })
+    readonly property string planKey: "devos_storage_selected_json"
 
     function choice(device) {
         for (var i = 0; i < selected.length; i++) if (selected[i].device === device) return selected[i];
@@ -25,6 +27,20 @@ Page {
         var next = selected.filter(function(p) { return p.device !== d.device; });
         if (on) next.push(defaultChoice(d));
         selected = next;
+    }
+    function formatDisk(d) {
+        // One-click wipe plan for this extra drive (runs after Install confirm).
+        var next = selected.filter(function(p) { return p.device !== d.device; });
+        next.push(defaultChoice(d));
+        selected = next;
+        confirmed = true;
+        save();
+    }
+    function clearFormat(d) {
+        selected = selected.filter(function(p) { return p.device !== d.device; });
+        if (selected.length === 0)
+            confirmed = false;
+        save();
     }
     function countVolumes(d, count) {
         var next = JSON.parse(JSON.stringify(selected));
@@ -59,26 +75,62 @@ Page {
     function save() {
         if (!confirmed || !valid() || selected.length === 0) {
             config.packageChoice = "Preserve all additional drives";
-            return;
-        }
-        var lines = selected.map(function(d) {
-            var volumes = d.volumes.map(function(v, i) {
-                return v.label.trim() + " " + (i === d.volumes.length-1 ? "remaining" : String(Number(v.size_gib)) + " GiB");
+        } else {
+            var lines = selected.map(function(d) {
+                var volumes = d.volumes.map(function(v, i) {
+                    return v.label.trim() + " " + (i === d.volumes.length-1 ? "remaining" : String(Number(v.size_gib)) + " GiB");
+                });
+                return d.device + " → " + volumes.join(" · ");
             });
-            return d.device + " → " + volumes.join(" · ");
-        });
-        config.packageChoice = "Erase selected additional drives (ext4):<br/>" + lines.join("<br/>") + "<br/>OS and manually configured disks are excluded.";
+            config.packageChoice = "Erase selected additional drives (ext4):<br/>" + lines.join("<br/>") + "<br/>OS and manually configured disks are excluded.";
+        }
+        try {
+            Core.Global.insert(planKey, JSON.stringify({ confirmed: confirmed, selected: selected }));
+        } catch (e) {}
     }
-    onSelectedChanged: { confirmed = false; save(); }
-    onConfirmedChanged: save()
-    Component.onCompleted: save()
+    function loadSavedPlan() {
+        if (!Core.Global.contains(planKey))
+            return false;
+        try {
+            var raw = Core.Global.value(planKey);
+            var text = (raw === undefined || raw === null) ? "" : String(raw);
+            if (!text.length)
+                return false;
+            var obj = JSON.parse(text);
+            if (!obj || !obj.selected || !obj.selected.length)
+                return false;
+            selected = obj.selected;
+            confirmed = !!obj.confirmed;
+            return true;
+        } catch (e) {
+            return false;
+        }
+    }
+    onSelectedChanged: {
+        if (restoring)
+            return;
+        confirmed = false;
+        save();
+    }
+    onConfirmedChanged: {
+        if (restoring)
+            return;
+        save();
+    }
+    Component.onCompleted: {
+        // Keep Format-disk picks when the user presses Back, then Next again.
+        restoring = true;
+        loadSavedPlan();
+        restoring = false;
+        save();
+    }
 
     Flickable {
         anchors.fill: parent
         contentHeight: form.implicitHeight + 64
         clip: true
         boundsBehavior: Flickable.StopAtBounds
-        ScrollBar.vertical: ScrollBar {}
+        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
         ColumnLayout {
             id: form
             x: 32; y: 32
@@ -88,8 +140,8 @@ Page {
                 Layout.fillWidth: true
                 eyebrow: "STORAGE"
                 title: "Make room for everything"
-                titleSize: 30
-                subtitle: "Keep other drives as they are, or choose additional SSDs/HDDs to erase and format as ext4. Nothing is selected by default."
+                titleSize: InstallerAppearance.pageTitleSize
+                subtitle: "Tap Format disk on any extra SSD/HDD to wipe it as ext4 data storage. Nothing is selected by default."
             }
             Rectangle {
                 Layout.fillWidth: true; implicitHeight: guidance.implicitHeight+28; radius: 14
@@ -100,7 +152,7 @@ Page {
                 border.color: "#1e4c71"
                 Text {
                     id: guidance; anchors.fill: parent; anchors.margins: 14; color: "#bae6fd"; font.pixelSize: 14; wrapMode: Text.WordWrap
-                    text: "Yes — you can format disks during install. On Partitions, DevOS defaults to Erase disk (like Windows Setup): the SSD/HDD you select is wiped and reformatted for DevOS. Other disks stay untouched. Use Manual partitioning for dual-boot. This page is only for optional extra data drives (A/B/C volumes)."
+                    text: "Use Format disk below for optional extra drives (A/B/C volumes). The DevOS system disk is still chosen on Partitions — Erase disk is the default there, like Windows Setup. Manual partitioning remains available for dual-boot. Formatting here runs only after you confirm Install."
                 }
             }
             RowLayout {
@@ -127,6 +179,29 @@ Page {
                             checked: !!card.chosen
                             onToggled: page.toggle(card.disk, checked)
                             contentItem: Text { text: parent.text; leftPadding: parent.indicator.width+parent.spacing; color: "#f8fafc"; font.pixelSize: 14; wrapMode: Text.WordWrap; verticalAlignment: Text.AlignVCenter }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 10
+                            Button {
+                                padding: 12
+                                font.pixelSize: 14
+                                font.bold: true
+                                text: card.chosen && page.confirmed ? "Format disk (selected)" : "Format disk"
+                                palette.button: card.chosen && page.confirmed ? "#0e7490" : "#dc2626"
+                                palette.buttonText: "#ffffff"
+                                onClicked: page.formatDisk(card.disk)
+                            }
+                            Button {
+                                visible: !!card.chosen
+                                padding: 12
+                                font.pixelSize: 14
+                                text: "Don't format"
+                                palette.button: "#14243a"
+                                palette.buttonText: "#f8fafc"
+                                onClicked: page.clearFormat(card.disk)
+                            }
+                            Item { Layout.fillWidth: true }
                         }
                         RowLayout {
                             visible: !!card.chosen

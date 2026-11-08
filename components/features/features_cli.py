@@ -526,8 +526,12 @@ def selection_from_gs(path: str):
 
 
 def installer_plan(path: str) -> int:
-    """Inside the new system, during install: remove unticked built-ins now,
-    leave downloads for the first online boot."""
+    """During Calamares: record the app choice only — never apt-purge here.
+
+    Purging unticked packages used to freeze the installer near 89%
+    ("Running shell process") for many minutes. Removals and downloads run
+    on first boot via devos-features.service instead.
+    """
     try:
         selected = selection_from_gs(path)
     except (OSError, ValueError):
@@ -551,12 +555,18 @@ def installer_plan(path: str) -> int:
     write_choice(selected)
     have = installed_ids()
     todo = catalog.plan(selected, have)
-    for fid in todo["remove"]:
-        remove_feature(catalog.feature(fid), no_triggers=True)
-    run(["apt-get", "-o", "Dpkg::Options::=--no-triggers", "autoremove", "-y"])
-    write_state(running=False, pending=todo["add"], removing=[], failed={}, current="")
-    if todo["add"]:
+    write_state(
+        running=False,
+        pending=todo["add"],
+        removing=todo["remove"],
+        failed={},
+        current="",
+    )
+    if todo["add"] or todo["remove"]:
         enable_service()
+    if todo["remove"]:
+        log("Will trim unticked apps after first boot: " + ", ".join(todo["remove"]))
+    if todo["add"]:
         log("To download after install: " + ", ".join(todo["add"]))
     return 0
 
@@ -627,8 +637,10 @@ def main(argv=None) -> int:
         selected = read_choice()
         if selected is None:
             return 0
-        # At boot only add: removals happen when the person asks for them.
-        return 0 if apply(selected, remove_unselected=False) else 1
+        # First boot after install: also remove unticked apps queued by
+        # installer-plan. Later boots (pending downloads only) skip removals.
+        queued_remove = bool(read_state().get("removing"))
+        return 0 if apply(selected, remove_unselected=queued_remove) else 1
 
     if args.cmd == "installer-plan":
         return installer_plan(args.file)

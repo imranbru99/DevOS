@@ -1,0 +1,106 @@
+#!/bin/bash
+# Force-free a target disk so Calamares sfdisk --wipe=always can create GPT.
+# Called from the devosprepare Calamares job immediately before partition.
+# Usage: devos-prepare-install-disk /dev/nvme0n1
+set +e
+
+disk="${1:-}"
+if [ -z "$disk" ] || [ ! -b "$disk" ]; then
+    echo "devos-prepare-install-disk: not a block device: ${disk:-<empty>}" >&2
+    exit 1
+fi
+
+# Never touch the live USB.
+if findmnt -n -o SOURCE /cdrom 2>/dev/null | grep -q .; then
+    live_src="$(findmnt -n -o SOURCE /cdrom 2>/dev/null | head -n1)"
+    live_disk="$(lsblk -no PKNAME "$live_src" 2>/dev/null | head -n1)"
+    [ -n "$live_disk" ] && live_disk="/dev/$live_disk"
+    if [ "$disk" = "$live_disk" ] || [ "$disk" = "$live_src" ]; then
+        echo "Refusing to wipe the live installer USB ($disk)" >&2
+        exit 1
+    fi
+fi
+
+echo "==> Preparing $disk for erase-install (swapoff, unmount, wipe signatures)"
+
+swapoff -a 2>/dev/null || true
+
+# Stop automounters from racing us while we clear the disk.
+systemctl stop udisks2.service 2>/dev/null || true
+
+# Close LUKS / device-mapper holders on this disk.
+if command -v lsblk >/dev/null 2>&1; then
+    while read -r name type; do
+        [ "$type" = "crypt" ] || [ "$type" = "lvm" ] || [ "$type" = "dm" ] || continue
+        mapper="/dev/mapper/$name"
+        [ -e "$mapper" ] || mapper="/dev/$name"
+        umount -lf "$mapper" 2>/dev/null || true
+        cryptsetup close "$name" 2>/dev/null || true
+        dmsetup remove -f "$name" 2>/dev/null || true
+    done < <(lsblk -lnpo NAME,TYPE "$disk" 2>/dev/null | awk 'NR>1{print $1,$2}')
+fi
+
+# Lazy-unmount every partition child, then the disk itself if mounted.
+children="$(lsblk -lnpo NAME "$disk" 2>/dev/null | tail -n +2)"
+for part in $children "$disk"; do
+    [ -b "$part" ] || continue
+    # Kill processes holding the mount (Windows leftover mounts, file managers).
+    fuser -k -m "$part" 2>/dev/null || true
+    swapoff "$part" 2>/dev/null || true
+    umount -lf "$part" 2>/dev/null || true
+done
+
+# Clear automount points that udisks may have left.
+for m in /media/* /run/media/*/*; do
+    [ -d "$m" ] || continue
+    src="$(findmnt -n -o SOURCE --target "$m" 2>/dev/null || true)"
+    case "$src" in
+        "$disk"|"$disk"p*|"$disk"[0-9]*) umount -lf "$m" 2>/dev/null || true ;;
+    esac
+done
+
+sync
+udevadm settle 2>/dev/null || true
+sleep 1
+
+# Wipe filesystem/RAID/LVM signatures so sfdisk is not blocked by "busy" metadata.
+for part in $children; do
+    [ -b "$part" ] || continue
+    wipefs -af "$part" >/dev/null 2>&1 || true
+done
+wipefs -af "$disk" >/dev/null 2>&1 || true
+
+# Zap GPT/MBR completely (sgdisk is more reliable than sfdisk alone on reinstall).
+if command -v sgdisk >/dev/null 2>&1; then
+    sgdisk --zap-all "$disk" >/dev/null 2>&1 || true
+    sgdisk -o "$disk" >/dev/null 2>&1 || true
+fi
+
+# Tell the kernel to drop the old table.
+blockdev --rereadpt "$disk" >/dev/null 2>&1 || true
+partprobe "$disk" >/dev/null 2>&1 || true
+udevadm settle 2>/dev/null || true
+sleep 1
+
+# Final busy check — list anything still mounted from this disk.
+busy="$(lsblk -lnpo NAME,MOUNTPOINT "$disk" 2>/dev/null | awk 'NF>1{print}')"
+if [ -n "$busy" ]; then
+    echo "Disk still has mounts after prepare:" >&2
+    echo "$busy" >&2
+    # One more force pass
+    while read -r name mp; do
+        [ -n "$mp" ] || continue
+        fuser -k -9 -m "$mp" 2>/dev/null || true
+        umount -lf "$mp" 2>/dev/null || true
+    done < <(lsblk -lnpo NAME,MOUNTPOINT "$disk" 2>/dev/null)
+    udevadm settle 2>/dev/null || true
+    sleep 1
+    busy="$(lsblk -lnpo NAME,MOUNTPOINT "$disk" 2>/dev/null | awk 'NF>1{print}')"
+    if [ -n "$busy" ]; then
+        echo "$busy" >&2
+        exit 2
+    fi
+fi
+
+echo "==> $disk is clear for GPT recreate"
+exit 0

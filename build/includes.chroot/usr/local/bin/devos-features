@@ -1,4 +1,22 @@
 #!/bin/bash
-# DevOS features launcher — process title is the app id, not python3.
+# CLI commands (apply, installer-plan, set, …) must never open the GUI —
+# Calamares used to hang near 89% ("Running shell process") when this wrapper
+# launched PyQt inside the target chroot.
 export DEVOS_DESKTOP_FILE=devos-features
-exec -a "devos-features" /usr/bin/python3 /usr/local/share/devos/components/features/features_gui.py "$@"
+CLI="/usr/local/share/devos/components/features/features_cli.py"
+GUI="/usr/local/share/devos/components/features/features_gui.py"
+case "${1:-}" in
+    ""|--gui)
+        exec -a "devos-features" /usr/bin/python3 "$GUI" "$@"
+        ;;
+    list|status|set|apply|installer-plan|catalog)
+        exec -a "devos-features" /usr/bin/python3 "$CLI" "$@"
+        ;;
+    *)
+        # Unknown flag: prefer CLI help over a GUI popup during scripts.
+        if [ -t 1 ]; then
+            exec -a "devos-features" /usr/bin/python3 "$GUI" "$@"
+        fi
+        exec -a "devos-features" /usr/bin/python3 "$CLI" "$@"
+        ;;
+esac

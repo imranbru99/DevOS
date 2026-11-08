@@ -187,6 +187,18 @@ if [ -d /usr/share/sddm/themes/devos ]; then
     chmod 755 /usr/share/sddm/themes/devos
     chmod 644 /usr/share/sddm/themes/devos/* 2>/dev/null || true
 fi
+# Installer Restart / Shut down helper (QML nav bar → localhost powerd).
+if [ -f /usr/local/bin/devos-installer-powerd ]; then
+    chmod 755 /usr/local/bin/devos-installer-powerd
+fi
+# Premium GRUB theme for the installed system menu (when it is shown).
+if [ -d /usr/share/grub/themes/devos ]; then
+    chmod 755 /usr/share/grub/themes/devos
+    chmod 644 /usr/share/grub/themes/devos/* 2>/dev/null || true
+    if [ -f /etc/default/grub ] && ! grep -q '^GRUB_THEME=' /etc/default/grub; then
+        printf '\nGRUB_THEME="/usr/share/grub/themes/devos/theme.txt"\nGRUB_GFXMODE=auto\n' >> /etc/default/grub
+    fi
+fi
 python3 - << 'PY'
 import re
 from pathlib import Path

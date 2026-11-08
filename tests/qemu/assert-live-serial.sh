@@ -64,7 +64,7 @@ if [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ]; then
     exit "$rc"
 fi
 
-if grep -qE "Try or Install DevOS|DevOS \\(Safe Graphics\\)|GNU GRUB|boot:|casper" "${LOG}"; then
+if grep -qE "Try DevOS / Install|Try or Install DevOS|DevOS · Safe Graphics|DevOS \\(Safe Graphics\\)|GNU GRUB|boot:|casper" "${LOG}"; then
     echo "==> Live ${MODE} serial boot assert PASSED"
     exit 0
 fi

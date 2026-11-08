@@ -2,7 +2,7 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 
-// Keep the greeter independent of effects modules and GPU compositing.
+// Keep the greeter independent of effects modules; motion uses plain transforms.
 Pane {
     id: root
     width: 1366
@@ -25,17 +25,137 @@ Pane {
     readonly property string displayName: users.currentIndex >= 0 ? users.displayText : qsTr("Welcome back")
 
     background: Rectangle { color: "#080f1d" }
-    Image {
+
+    Item {
+        id: scenic
         anchors.fill: parent
-        source: config.background || "background.png"
-        fillMode: Image.PreserveAspectCrop
-        asynchronous: true
-    }
-    Rectangle {
-        anchors.fill: parent
-        gradient: Gradient {
-            GradientStop { position: 0; color: "#99080f1d" }
-            GradientStop { position: 1; color: "#ed080f1d" }
+        clip: true
+        z: 0
+
+        Image {
+            id: backdrop
+            width: parent.width * 1.18
+            height: parent.height * 1.18
+            // Centered manually so Ken Burns x/y motion is not fighting anchors.
+            x: (parent.width - width) / 2
+            y: (parent.height - height) / 2
+            source: config.background || "background.png"
+            fillMode: Image.PreserveAspectCrop
+            asynchronous: true
+            opacity: 0.92
+            transformOrigin: Item.Center
+
+            SequentialAnimation on scale {
+                loops: Animation.Infinite
+                NumberAnimation { from: 1.0; to: 1.08; duration: 18000; easing.type: Easing.InOutSine }
+                NumberAnimation { to: 1.0; duration: 18000; easing.type: Easing.InOutSine }
+            }
+            SequentialAnimation on x {
+                loops: Animation.Infinite
+                NumberAnimation {
+                    from: (scenic.width - backdrop.width) / 2 - scenic.width * 0.04
+                    to: (scenic.width - backdrop.width) / 2 + scenic.width * 0.04
+                    duration: 22000
+                    easing.type: Easing.InOutSine
+                }
+                NumberAnimation {
+                    to: (scenic.width - backdrop.width) / 2 - scenic.width * 0.04
+                    duration: 22000
+                    easing.type: Easing.InOutSine
+                }
+            }
+            SequentialAnimation on y {
+                loops: Animation.Infinite
+                NumberAnimation {
+                    from: (scenic.height - backdrop.height) / 2 + scenic.height * 0.02
+                    to: (scenic.height - backdrop.height) / 2 - scenic.height * 0.03
+                    duration: 26000
+                    easing.type: Easing.InOutSine
+                }
+                NumberAnimation {
+                    to: (scenic.height - backdrop.height) / 2 + scenic.height * 0.02
+                    duration: 26000
+                    easing.type: Easing.InOutSine
+                }
+            }
+        }
+
+        // Soft drifting color washes (no GraphicalEffects dependency).
+        Rectangle {
+            id: glowCyan
+            width: Math.max(root.width, root.height) * 0.55
+            height: width
+            radius: width / 2
+            color: "#3322d3ee"
+            x: root.width * 0.55
+            y: root.height * -0.12
+            SequentialAnimation on x {
+                loops: Animation.Infinite
+                NumberAnimation { to: root.width * 0.42; duration: 16000; easing.type: Easing.InOutSine }
+                NumberAnimation { to: root.width * 0.62; duration: 16000; easing.type: Easing.InOutSine }
+            }
+            SequentialAnimation on y {
+                loops: Animation.Infinite
+                NumberAnimation { to: root.height * 0.08; duration: 14000; easing.type: Easing.InOutSine }
+                NumberAnimation { to: root.height * -0.16; duration: 14000; easing.type: Easing.InOutSine }
+            }
+            SequentialAnimation on opacity {
+                loops: Animation.Infinite
+                NumberAnimation { from: 0.35; to: 0.7; duration: 9000; easing.type: Easing.InOutSine }
+                NumberAnimation { to: 0.35; duration: 9000; easing.type: Easing.InOutSine }
+            }
+        }
+        Rectangle {
+            id: glowViolet
+            width: Math.max(root.width, root.height) * 0.48
+            height: width
+            radius: width / 2
+            color: "#338b5cf6"
+            x: root.width * -0.18
+            y: root.height * 0.45
+            SequentialAnimation on x {
+                loops: Animation.Infinite
+                NumberAnimation { to: root.width * 0.05; duration: 19000; easing.type: Easing.InOutSine }
+                NumberAnimation { to: root.width * -0.2; duration: 19000; easing.type: Easing.InOutSine }
+            }
+            SequentialAnimation on y {
+                loops: Animation.Infinite
+                NumberAnimation { to: root.height * 0.28; duration: 17000; easing.type: Easing.InOutSine }
+                NumberAnimation { to: root.height * 0.55; duration: 17000; easing.type: Easing.InOutSine }
+            }
+            SequentialAnimation on opacity {
+                loops: Animation.Infinite
+                NumberAnimation { from: 0.28; to: 0.62; duration: 11000; easing.type: Easing.InOutSine }
+                NumberAnimation { to: 0.28; duration: 11000; easing.type: Easing.InOutSine }
+            }
+        }
+        Rectangle {
+            id: glowBlue
+            width: Math.max(root.width, root.height) * 0.36
+            height: width
+            radius: width / 2
+            color: "#334facfe"
+            x: root.width * 0.28
+            y: root.height * 0.62
+            SequentialAnimation on x {
+                loops: Animation.Infinite
+                NumberAnimation { to: root.width * 0.4; duration: 15000; easing.type: Easing.InOutSine }
+                NumberAnimation { to: root.width * 0.2; duration: 15000; easing.type: Easing.InOutSine }
+            }
+            SequentialAnimation on opacity {
+                loops: Animation.Infinite
+                NumberAnimation { from: 0.22; to: 0.55; duration: 10000; easing.type: Easing.InOutSine }
+                NumberAnimation { to: 0.22; duration: 10000; easing.type: Easing.InOutSine }
+            }
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            gradient: Gradient {
+                GradientStop { position: 0; color: "#99080f1d" }
+                GradientStop { position: 0.45; color: "#66080f1d" }
+                GradientStop { position: 1; color: "#ed080f1d" }
+            }
         }
     }
     Timer {

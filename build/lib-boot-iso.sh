@@ -51,7 +51,7 @@ _devos_grub_tool() {
     _devos_die "grub tool '$tool' not found on host or in chroot"
 }
 
-# Copy a Unicode font into the stage so GRUB's gfxterm works on real GPUs.
+# Copy Unicode + DejaVu fonts so the premium GRUB theme can render titles.
 devos_grub_font() {
     local stage="$1" chroot="${2:-}"
     mkdir -p "${stage}/boot/grub/fonts"
@@ -65,18 +65,42 @@ devos_grub_font() {
         if [ -f "$f" ]; then
             cp -f "$f" "${stage}/boot/grub/font.pf2"
             cp -f "$f" "${stage}/boot/grub/fonts/unicode.pf2"
-            return 0
+            break
         fi
     done
-    # Build a minimal font from DejaVu; fallback is thin but usable.
     local ttf=""
     for d in /usr/share/fonts/truetype/dejavu /usr/share/fonts/TTF "${chroot}/usr/share/fonts/truetype/dejavu"; do
         [ -f "${d}/DejaVuSans.ttf" ] && ttf="${d}/DejaVuSans.ttf" && break
     done
     if [ -n "$ttf" ] && command -v grub-mkfont >/dev/null 2>&1; then
-        grub-mkfont -s 14 -o "${stage}/boot/grub/font.pf2" "$ttf" >/dev/null 2>&1 || true
-        grub-mkfont -s 14 -o "${stage}/boot/grub/fonts/unicode.pf2" "$ttf" >/dev/null 2>&1 || true
+        grub-mkfont -n "DejaVu Sans" -s 14 -o "${stage}/boot/grub/fonts/dejavu14.pf2" "$ttf" >/dev/null 2>&1 || true
+        grub-mkfont -n "DejaVu Sans" -s 16 -o "${stage}/boot/grub/fonts/dejavu16.pf2" "$ttf" >/dev/null 2>&1 || true
+        grub-mkfont -n "DejaVu Sans" -s 32 -o "${stage}/boot/grub/fonts/dejavu32.pf2" "$ttf" >/dev/null 2>&1 || true
+        if [ ! -f "${stage}/boot/grub/font.pf2" ]; then
+            cp -f "${stage}/boot/grub/fonts/dejavu16.pf2" "${stage}/boot/grub/font.pf2" 2>/dev/null || true
+            cp -f "${stage}/boot/grub/fonts/dejavu16.pf2" "${stage}/boot/grub/fonts/unicode.pf2" 2>/dev/null || true
+        fi
     fi
+}
+
+# Premium graphical GRUB theme (static image — GRUB cannot play video; Plymouth continues motion).
+devos_grub_theme() {
+    local stage="$1" chroot="${2:-}"
+    local src=""
+    local candidates=(
+        "${DEVOS_LIB_DIR}/branding/grub"
+        "${DEVOS_LIB_DIR}/../build/branding/grub"
+        "${chroot}/usr/share/grub/themes/devos"
+    )
+    for d in "${candidates[@]}"; do
+        if [ -f "${d}/theme.txt" ] && [ -f "${d}/background.png" ]; then
+            src="$d"
+            break
+        fi
+    done
+    [ -n "$src" ] || return 0
+    mkdir -p "${stage}/boot/grub/themes/devos"
+    cp -a "${src}/." "${stage}/boot/grub/themes/devos/"
 }
 
 # Copy the module directories needed for BIOS and UEFI GRUB into the ISO.
@@ -106,17 +130,18 @@ devos_grub_cfg() {
     local out="${stage}/boot/grub/grub.cfg"
     mkdir -p "$(dirname "$out")"
     cat > "$out" << 'GRUBEOF'
-# DevOS hardware-safe boot menu. Keep it short; real PCs ship with awful screens.
+# DevOS premium boot menu — graphical theme when the GPU allows it.
 set default="0"
 set timeout_style=menu
 set timeout=8
 
-# Serial console is harmless and lets QEMU/headless hardware show the menu.
 serial --unit=0 --speed=115200 --word=8 --parity=no --stop=1
 terminal_input console serial
-terminal_output console serial
 
-# Modern GPUs sometimes blank during gfxterm; keep it optional.
+insmod all_video
+insmod gfxterm
+insmod png
+insmod jpeg
 insmod part_gpt
 insmod part_msdos
 insmod iso9660
@@ -124,49 +149,73 @@ insmod fat
 insmod ext2
 insmod ntfs
 
-set menu_color_normal=white/black
-set menu_color_highlight=black/light-gray
+set menu_color_normal=light-cyan/black
+set menu_color_highlight=black/light-cyan
+set color_normal=light-gray/black
+set color_highlight=black/white
+
+# Prefer the premium theme; fall back to console+serial on broken GPUs.
+if loadfont $prefix/fonts/dejavu16.pf2 ; then
+    loadfont $prefix/fonts/dejavu14.pf2
+    loadfont $prefix/fonts/dejavu32.pf2
+fi
+if loadfont $prefix/fonts/unicode.pf2 ; then
+    true
+elif loadfont $prefix/font.pf2 ; then
+    true
+fi
+set gfxmode=auto
+set gfxpayload=keep
+if terminal_output gfxterm ; then
+    if [ -f $prefix/themes/devos/theme.txt ]; then
+        set theme=$prefix/themes/devos/theme.txt
+        export theme
+    fi
+else
+    terminal_output console serial
+fi
+# Keep serial readable even when gfxterm is active.
+terminal_output --append serial
 
 function devos_root {
     search --no-floppy --set=root --file /casper/vmlinuz
     if [ -f /casper/vmlinuz ]; then
         return
     fi
-    # Remastered/Ventoy fallbacks: find by label or scan everything.
     search --no-floppy --set=root --label DEVOS_2604
 }
 
 set bootargs="boot=casper username=devos hostname=devos ignore_uuid nopersistent fsck.mode=skip"
 
-menuentry "Try or Install DevOS" {
+menuentry "Try DevOS / Install" {
     set gfxpayload=keep
     devos_root
     linux /casper/vmlinuz ${bootargs} quiet splash plymouth.theme=devos ---
     initrd /casper/initrd
 }
 
-menuentry "DevOS (Safe Graphics)" {
+menuentry "DevOS · Safe Graphics" {
     set gfxpayload=text
     devos_root
-    linux /casper/vmlinuz ${bootargs} nomodeset quiet splash plymouth.theme=devos ---
+    linux /casper/vmlinuz ${bootargs} nomodeset quiet plymouth.enable=0 ---
     initrd /casper/initrd
 }
 
-menuentry "DevOS (Safe Graphics, no splash)" {
+menuentry "DevOS · Safe Graphics (no splash)" {
     set gfxpayload=text
     devos_root
     linux /casper/vmlinuz ${bootargs} nomodeset plymouth.enable=0 ---
     initrd /casper/initrd
 }
 
-menuentry "DevOS (Serial debug)" {
+menuentry "DevOS · Serial debug" {
     set gfxpayload=text
     devos_root
     linux /casper/vmlinuz ${bootargs} nomodeset plymouth.enable=0 console=ttyS0,115200n8 ---
     initrd /casper/initrd
 }
 
-menuentry "Check Disc for Defects" {
+menuentry "Check disc for defects" {
     devos_root
     linux /casper/vmlinuz ${bootargs} integrity-check quiet splash plymouth.theme=devos ---
     initrd /casper/initrd
@@ -347,6 +396,7 @@ devos_prepare_boot_tree() {
 
     devos_grub_cfg "$stage"
     devos_grub_font "$stage" "$chroot"
+    devos_grub_theme "$stage" "$chroot"
     devos_grub_modules "$stage" "$chroot"
     devos_eltorito_img "$stage" "$chroot" "$tmp"
     devos_efi_files "$stage" "$chroot"

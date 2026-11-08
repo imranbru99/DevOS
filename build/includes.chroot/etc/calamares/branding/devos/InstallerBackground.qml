@@ -22,30 +22,42 @@ Rectangle {
             anchors.fill: parent
             source: scene.slides[index]
             fillMode: Image.PreserveAspectCrop
-            opacity: index === scene.current ? 0.42 : 0
+            opacity: index === scene.current ? 0.72 : 0
             z: index === scene.current ? 1 : 0
-            scale: index === scene.current ? 1.08 : 1.0
+            scale: index === scene.current ? 1.14 : 1.0
             Behavior on opacity {
                 enabled: scene.motionOn
-                NumberAnimation { duration: 1400; easing.type: Easing.InOutCubic }
+                NumberAnimation { duration: 800; easing.type: Easing.InOutCubic }
             }
             SequentialAnimation on scale {
                 running: scene.visible && scene.motionOn && index === scene.current
                 loops: Animation.Infinite
-                NumberAnimation { from: 1.04; to: 1.12; duration: 16000; easing.type: Easing.InOutSine }
-                NumberAnimation { to: 1.04; duration: 16000; easing.type: Easing.InOutSine }
+                NumberAnimation { from: 1.08; to: 1.22; duration: 6200; easing.type: Easing.InOutSine }
+                NumberAnimation { to: 1.08; duration: 6200; easing.type: Easing.InOutSine }
+            }
+            SequentialAnimation on x {
+                running: scene.visible && scene.motionOn && index === scene.current
+                loops: Animation.Infinite
+                NumberAnimation { from: -28; to: 28; duration: 4800; easing.type: Easing.InOutSine }
+                NumberAnimation { to: -28; duration: 4800; easing.type: Easing.InOutSine }
+            }
+            SequentialAnimation on y {
+                running: scene.visible && scene.motionOn && index === scene.current
+                loops: Animation.Infinite
+                NumberAnimation { from: -12; to: 12; duration: 5600; easing.type: Easing.InOutSine }
+                NumberAnimation { to: -12; duration: 5600; easing.type: Easing.InOutSine }
             }
         }
     }
 
     Timer {
-        interval: 9000
+        interval: 4500
         running: scene.visible && scene.motionOn && scene.slides.length > 1
         repeat: true
         onTriggered: scene.current = (scene.current + 1) % scene.slides.length
     }
 
-    // Aurora orbs
+    // Aurora orbs — stronger drift so motion is obvious on camera
     Rectangle {
         width: Math.min(scene.width * 0.55, 560)
         height: width
@@ -53,12 +65,12 @@ Rectangle {
         x: scene.width * 0.58
         y: -height * 0.25
         color: "#0ea5e9"
-        opacity: 0.14
+        opacity: 0.22
         SequentialAnimation on y {
             running: scene.visible && scene.motionOn
             loops: Animation.Infinite
-            NumberAnimation { from: -height * 0.28; to: scene.height * 0.05; duration: 15000; easing.type: Easing.InOutSine }
-            NumberAnimation { to: -height * 0.28; duration: 15000; easing.type: Easing.InOutSine }
+            NumberAnimation { from: -height * 0.28; to: scene.height * 0.12; duration: 7000; easing.type: Easing.InOutSine }
+            NumberAnimation { to: -height * 0.28; duration: 7000; easing.type: Easing.InOutSine }
         }
     }
     Rectangle {
@@ -68,12 +80,12 @@ Rectangle {
         x: -width * 0.2
         y: scene.height * 0.55
         color: "#0ea5e9"
-        opacity: 0.10
+        opacity: 0.18
         SequentialAnimation on x {
             running: scene.visible && scene.motionOn
             loops: Animation.Infinite
-            NumberAnimation { from: -width * 0.25; to: scene.width * 0.08; duration: 18000; easing.type: Easing.InOutSine }
-            NumberAnimation { to: -width * 0.25; duration: 18000; easing.type: Easing.InOutSine }
+            NumberAnimation { from: -width * 0.25; to: scene.width * 0.15; duration: 8000; easing.type: Easing.InOutSine }
+            NumberAnimation { to: -width * 0.25; duration: 8000; easing.type: Easing.InOutSine }
         }
     }
     Rectangle {
@@ -83,12 +95,12 @@ Rectangle {
         x: scene.width * 0.35
         y: scene.height * 0.7
         color: "#22d3ee"
-        opacity: 0.08
+        opacity: 0.14
         SequentialAnimation on opacity {
             running: scene.visible && scene.motionOn
             loops: Animation.Infinite
-            NumberAnimation { from: 0.05; to: 0.12; duration: 7000; easing.type: Easing.InOutSine }
-            NumberAnimation { to: 0.05; duration: 7000; easing.type: Easing.InOutSine }
+            NumberAnimation { from: 0.08; to: 0.22; duration: 3500; easing.type: Easing.InOutSine }
+            NumberAnimation { to: 0.08; duration: 3500; easing.type: Easing.InOutSine }
         }
     }
 

@@ -2,9 +2,13 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+.pytest_cache/
 .venv/
 build_work/
 out/
+# Accidental copies of build/ helpers at the repo root
+/grub.cfg
+/lib-boot-iso.sh
 tests/qemu/*.qcow2
 tests/docker-vm/storage/
 tests/docker-vm/test-account.txt

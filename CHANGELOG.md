@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Premium Calamares Summary (motion backdrop) with Restart/Shut down on the installer footer and a restyled Install confirmation dialog.
+- Graphical GRUB theme for the live USB menu and an animated Plymouth splash after boot entry selection.
+- `devosumount` job that releases busy `/tmp/calamares-root-*` mounts so a finished install is not reported as failed at ~97%.
 - Dedicated native authentication style for KDE/Polkit: larger rounded password field and buttons, cyan keyboard focus and dark blue surfaces; retains PAM, identity switching, errors, Cancel and password visibility controls.
 - Shared DevOS confirmation/input dialog styling, explicit Optimizer delete action with safe Cancel default, and Qt 6 native theme support for system authentication dialogs.
 - README operating guide for current storage, recorder, optimizer, pipeline, Islamic reminders, live browser blur controls, and safe component updates.
@@ -18,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Desktop-user home/settings write checks during installation and at login, with distinct permission, read-only, full-disk, quota and I/O error reporting.
 
 ### Fixed
+- Stop apt-purging unticked apps during Calamares (~89% “Running shell process” hang); record choices with `installer-plan` and apply on first boot.
+- Mark install completion on the live `/run` (`dontChroot`) so the session watchdog does not relaunch Calamares after Finished.
 - Update new-account dialog fonts and migrate only exact old DevOS font defaults on login; preserve custom fonts and sizes.
 - Stop editing compiled KDE branding strings; repair damaged cached native packages and gate ISO builds on ELF checksums and critical disk-tool execution.
 - Preserve Modesty Filter locked state and private-window policy during updates; install missing Qt theme dependencies.

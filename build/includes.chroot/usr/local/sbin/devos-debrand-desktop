@@ -50,9 +50,11 @@ RENAME = {
 }
 # Duplicates and tools that only confuse: DevOS has its own entry for these.
 HIDE = [
-    # Stock Dolphin stays as a backend helper; DevOS Files (This PC) is the only
-    # folder UI users should see in the menu / Win+E / MIME defaults.
+    # Stock Dolphin/Kate/Konsole stay as backends; Start menu should show
+    # DevOS File Explorer, Notepad, and (when needed) Terminal via DevOS names.
     "org.kde.dolphin",
+    "org.kde.kate",
+    "org.kde.konsole",
     "org.kde.kwrite", "org.kde.falkon", "org.kde.kinfocenter", "kdesystemsettings",
     "org.kde.kcolorschemeeditor", "org.kde.knetattach", "org.kde.keditfiletype",
     "org.kde.kwin_rules_dialog", "org.kde.kmenuedit", "org.kde.khelpcenter",

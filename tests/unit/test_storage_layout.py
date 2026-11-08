@@ -54,6 +54,8 @@ class StorageLayoutTests(unittest.TestCase):
         script = layout_script('/dev/nvme0n1', plan, (1000, 1000))
         self.assertIn("mkpart 'Shared Data' ntfs", script)
         self.assertIn("mkfs.exfat -n 'Shared Data' /dev/nvme0n1p1", script)
+        self.assertIn('test -b /dev/nvme0n1p1', script)
+        self.assertIn('for _try in 1 2 3', script)
         self.assertEqual(subprocess.run(['bash', '-n'], input=script, text=True, capture_output=True).returncode, 0)
 
     def test_unknown_readonly_and_mounted_targets_never_spawn_commands(self):

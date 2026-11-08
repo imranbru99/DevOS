@@ -130,8 +130,14 @@ for f in /home/*/.local/share/applications/devos-*.desktop; do
     fi
 done
 
+# Hide / rename stock KDE menu entries (Dolphin, Kate, Konsole, …).
+if [ -x /usr/local/sbin/devos-debrand-desktop ]; then
+    /bin/bash /usr/local/sbin/devos-debrand-desktop || true
+fi
+
 # Refresh desktop database
 update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
+update-desktop-database /usr/local/share/applications >/dev/null 2>&1 || true
 
 echo "DevOS branding applied: icons, launchers, About System, os-release."
 echo "Log out and back in (or restart plasmashell) to refresh taskbar icons."

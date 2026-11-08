@@ -12,8 +12,8 @@ import time
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     selection = parser.add_mutually_exclusive_group()
-    selection.add_argument('--select', choices=[f'{i:02d}' for i in range(1, 21)], help='Apply a specific collection entry, such as 16 for Solar Veil')
-    selection.add_argument('--apply', choices=['light', 'dark'], help='Apply Pearl Fold or Sapphire Bloom to all Plasma desktops')
+    selection.add_argument('--select', choices=[f'{i:02d}' for i in range(1, 21)], help='Apply a specific collection entry, such as 20 for Home Bloom')
+    selection.add_argument('--apply', choices=['light', 'dark'], help='Apply Pearl Dawn (light) or Cyan Orbit (dark) to all Plasma desktops')
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[3]
     manifest = json.loads(Path(__file__).with_name('manifest.json').read_text())
@@ -31,7 +31,12 @@ def main():
         qdbus = shutil.which('qdbus6') or shutil.which('qdbus')
         if not qdbus:
             parser.error('Wallpapers installed. Open Desktop Settings to choose one; qdbus is unavailable.')
-        selected = next(item for item in manifest if item['id'] == args.select) if args.select else manifest[0 if args.apply == 'light' else 1]
+        if args.select:
+            selected = next(item for item in manifest if item['id'] == args.select)
+        else:
+            # light = Pearl Dawn (08), dark = Cyan Orbit (01)
+            want = '08' if args.apply == 'light' else '01'
+            selected = next(item for item in manifest if item['id'] == want)
         # Use the same package URL as Plasma's picker, not a direct-image bypass.
         image = (destination / selected['package']).as_uri() + '/'
         script = '''var screens=desktops(); for(var i=0;i<screens.length;i++) {

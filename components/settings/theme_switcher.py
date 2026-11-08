@@ -419,18 +419,33 @@ class ThemeSwitcher:
 
     @classmethod
     def apply_wallpaper(cls, mode):
-        """Pair DevOS-owned wallpapers; keep a user's custom wallpaper unchanged."""
+        """Pair DevOS-owned wallpapers; keep a user's custom wallpaper unchanged.
+
+        Light → Pearl Dawn (fallback Daylight). Dark restores the previous
+        DevOS wallpaper, or Cyan Orbit when no previous pair was saved.
+        Other manually chosen Premium designs are left alone.
+        """
         qdbus = shutil.which("qdbus6") or shutil.which("qdbus")
-        candidates = [os.path.expanduser("~/.local/share/wallpapers/DevOS-Premium-01-PearlFold/contents/images/wallpaper.png"),
-                      "/usr/share/wallpapers/DevOS-Premium-01-PearlFold/contents/images/wallpaper.png",
-                      os.path.expanduser("~/.local/share/wallpapers/DevOS-Daylight/contents/images/daylight.svg"),
-                      "/usr/share/wallpapers/DevOS-Daylight/contents/images/daylight.svg"]
-        image = next((p for p in candidates if os.path.isfile(p)), None)
-        if not qdbus or not image:
+        light_candidates = [
+            os.path.expanduser("~/.local/share/wallpapers/DevOS-Premium-08-PearlDawn/contents/images/wallpaper.png"),
+            "/usr/share/wallpapers/DevOS-Premium-08-PearlDawn/contents/images/wallpaper.png",
+            os.path.expanduser("~/.local/share/wallpapers/DevOS-Daylight/contents/images/daylight.svg"),
+            "/usr/share/wallpapers/DevOS-Daylight/contents/images/daylight.svg",
+        ]
+        dark_candidates = [
+            os.path.expanduser("~/.local/share/wallpapers/DevOS-Premium-01-CyanOrbit/contents/images/wallpaper.png"),
+            "/usr/share/wallpapers/DevOS-Premium-01-CyanOrbit/contents/images/wallpaper.png",
+            os.path.expanduser("~/.local/share/wallpapers/DevOS/contents/images/DevOS-Default.png"),
+            "/usr/share/wallpapers/DevOS/DevOS-Default.png",
+        ]
+        light_image = next((p for p in light_candidates if os.path.isfile(p)), None)
+        dark_image = next((p for p in dark_candidates if os.path.isfile(p)), None)
+        if not qdbus or not light_image:
             return False
         script = """
 var light = LIGHT_MODE;
 var target = LIGHT_IMAGE;
+var darkTarget = DARK_IMAGE;
 var screens = desktops();
 for (var i=0; i<screens.length; i++) {
     var d=screens[i];
@@ -439,7 +454,7 @@ for (var i=0; i<screens.length; i++) {
     var current=d.readConfig("Image", "");
     var paths=d.readConfig("SlidePaths", []);
     var premium=String(current).indexOf("/DevOS-Premium-")>=0;
-    var paired=String(current).indexOf("/DevOS-Premium-02-SapphireBloom/")>=0;
+    var paired=String(current).indexOf("/DevOS-Premium-01-CyanOrbit/")>=0;
     var owned=(!premium || paired) && (String(current).indexOf("/DevOS-")>=0 || String(current).indexOf("/DevOS/")>=0 || String(paths).indexOf("/DevOS-")>=0);
     if(light && owned && current!==target) {
         d.currentConfigGroup=["DevOSAppearance"];
@@ -448,18 +463,23 @@ for (var i=0; i<screens.length; i++) {
         d.wallpaperPlugin="org.kde.image";
         d.currentConfigGroup=["Wallpaper","org.kde.image","General"];
         d.writeConfig("Image",target);
+        d.writeConfig("FillMode",2);
     } else if(!light && current===target) {
         d.currentConfigGroup=["DevOSAppearance"];
         var oldPlugin=d.readConfig("PreviousWallpaperPlugin","org.kde.image");
         var oldImage=d.readConfig("PreviousWallpaperImage","");
-        if(oldImage) {
-            d.wallpaperPlugin=oldPlugin;
-            d.currentConfigGroup=["Wallpaper",oldPlugin,"General"];
-            d.writeConfig("Image",oldImage);
+        var restore = oldImage || darkTarget;
+        if(restore) {
+            d.wallpaperPlugin=oldImage ? oldPlugin : "org.kde.image";
+            d.currentConfigGroup=["Wallpaper", d.wallpaperPlugin, "General"];
+            d.writeConfig("Image",restore);
+            d.writeConfig("FillMode",2);
         }
     }
 }
-""".replace("LIGHT_MODE", "true" if mode in ("light", "mac-light") else "false").replace("LIGHT_IMAGE", json.dumps("file://" + image))
+""".replace("LIGHT_MODE", "true" if mode in ("light", "mac-light") else "false") \
+   .replace("LIGHT_IMAGE", json.dumps("file://" + light_image)) \
+   .replace("DARK_IMAGE", json.dumps("file://" + dark_image if dark_image else ""))
         return _run_cmd([qdbus, "org.kde.plasmashell", "/PlasmaShell", "org.kde.PlasmaShell.evaluateScript", script])
 
     @classmethod

@@ -18,7 +18,7 @@ mkdir -p "${dest_dir}" /tmp/devos-llm
 # 1.1 GB one from older builds, which would silently stay in the image.
 rm -f "${dest_dir}/qwen2.5-1.5b-instruct-q4_k_m.gguf"
 wheel="/tmp/devos-llm/llama_cpp_python-0.3.36-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl"
-curl -fL --retry 3 --retry-delay 2 -o "${wheel}" "${wheel_url}"
+curl -fL --retry 8 --retry-all-errors --retry-delay 5 -o "${wheel}" "${wheel_url}"
 # Skip pip when the same version is already there (rebuilds of a reused
 # tree): pip itself crashed on exit once after reporting "already installed".
 if ! python3 -c "import llama_cpp, sys; sys.exit(0 if llama_cpp.__version__ == \"0.3.36\" else 1)" 2>/dev/null; then
@@ -34,7 +34,7 @@ python3 -c "import pywhispercpp.model"
 voice_dir="/usr/share/devos/ai/voice"
 mkdir -p "${voice_dir}"
 if [ ! -s "${voice_dir}/ggml-base-q5_1.bin" ]; then
-    curl -fL --retry 3 --retry-delay 2 -o "${voice_dir}/ggml-base-q5_1.bin.partial" \
+    curl -fL --retry 8 --retry-all-errors --retry-delay 5 -o "${voice_dir}/ggml-base-q5_1.bin.partial" \
         "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q5_1.bin"
     mv "${voice_dir}/ggml-base-q5_1.bin.partial" "${voice_dir}/ggml-base-q5_1.bin"
 fi
@@ -43,7 +43,7 @@ chmod 644 "${voice_dir}/ggml-base-q5_1.bin"
 
 
 if [ ! -s "${dest}" ]; then
-    curl -fL --retry 3 --retry-delay 2 -o "${dest}.partial" "${model_url}"
+    curl -fL --retry 8 --retry-all-errors --retry-delay 5 -o "${dest}.partial" "${model_url}"
     mv "${dest}.partial" "${dest}"
 fi
 

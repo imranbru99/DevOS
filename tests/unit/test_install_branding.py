@@ -30,12 +30,31 @@ class TestInstalledSystemBoot(unittest.TestCase):
         self.assertIn("initramfs", steps)
         self.assertIn("bootloader", steps)
         self.assertIn("shellprocess@firmware", steps)
+        self.assertIn("devosprepare", steps)
+        self.assertLess(steps.index("devosprepare"), steps.index("partition"))
         self.assertLess(steps.index("usersq"), steps.index("shellprocess@finalize"))
         self.assertLess(steps.index("shellprocess@finalize"), steps.index("initramfs"))
         self.assertLess(steps.index("initramfs"), steps.index("bootloader"))
         self.assertLess(steps.index("bootloader"), steps.index("shellprocess@firmware"))
+        # Optional data/AI/apps steps must run only after GRUB is installed.
+        self.assertLess(steps.index("bootloader"), steps.index("devosstorage"))
+        self.assertLess(steps.index("bootloader"), steps.index("contextualprocess@aimodel-apply"))
+        self.assertLess(steps.index("bootloader"), steps.index("shellprocess@features-shell"))
         self.assertNotIn("packages", steps)
+        # Final unmount must not use stock umount (busy root → false "Installation Failed").
+        self.assertIn("devosumount", steps)
+        self.assertNotIn("umount", steps)
+        self.assertTrue(os.path.isfile(os.path.join(
+            ROOT, "build/includes.chroot/usr/lib/x86_64-linux-gnu/calamares/modules/devosumount/main.py")))
+        self.assertIn('["umount", "-l"', read(
+            "build/includes.chroot/usr/lib/x86_64-linux-gnu/calamares/modules/devosumount/main.py"))
         self.assertIn("- finished", settings)
+        prepare = read("build/includes.chroot/usr/local/sbin/devos-prepare-install-disk")
+        self.assertIn("sgdisk --zap-all", prepare)
+        self.assertIn("wipefs -af", prepare)
+        finished = read("build/includes.chroot/etc/calamares/modules/finished.conf")
+        self.assertIn("devos-set-boot-order", finished)
+        self.assertIn("reboot --force", finished)
 
     def test_live_installer_has_only_an_x11_session(self):
         self.assertTrue(os.path.isfile(os.path.join(ROOT, "build/includes.chroot/usr/share/xsessions/devos-install.desktop")))
@@ -82,7 +101,7 @@ class TestInstalledSystemBoot(unittest.TestCase):
         self.assertIn('slideshow: "show.qml"', branding)
         self.assertIn("images:", branding)
         self.assertIn("windowExpanding: noexpand", branding)
-        self.assertIn("windowSize: 1000px,640px", branding)
+        self.assertIn("windowSize: 960px,580px", branding)
         self.assertNotIn("windowExpanding: fullscreen", branding)
         self.assertNotIn("windowExpanding: normal", branding)
         self.assertIn('productIcon: "logo.png"', branding)
@@ -92,8 +111,25 @@ class TestInstalledSystemBoot(unittest.TestCase):
         self.assertIn("Layout.minimumHeight: barHeight", navigation)
         self.assertIn("readonly property bool compact:", navigation)
         self.assertIn("ViewManager.nextLabel", navigation)
+        self.assertIn("Shut down", navigation)
+        self.assertIn("Restart", navigation)
+        self.assertIn("127.0.0.1:41777", navigation)
         stylesheet = read("build/includes.chroot/etc/calamares/branding/devos/stylesheet.qss")
-        self.assertIn("font-size: 20px;", stylesheet)
+        self.assertIn("font-size: 22px;", stylesheet)
+        self.assertIn("QMessageBox", stylesheet)
+        self.assertIn("Install Now", stylesheet)
+        summary = read("build/includes.chroot/etc/calamares/branding/devos/summaryq.qml")
+        self.assertIn("InstallerBackground", summary)
+        self.assertIn("INSTALL PREVIEW", summary)
+        self.assertIn("packagechooserq@summaryreview", read("build/includes.chroot/etc/calamares/settings.conf"))
+        self.assertTrue(os.path.isfile(os.path.join(
+            ROOT, "build/includes.chroot/usr/local/bin/devos-installer-powerd")))
+        self.assertIn("start_powerd", read("build/includes.chroot/usr/local/bin/devos-install-gui"))
+        self.assertIn("themes/devos/theme.txt", read("build/lib-boot-iso.sh"))
+        self.assertTrue(os.path.isfile(os.path.join(
+            ROOT, "build/branding/grub/background.png")))
+        self.assertTrue(os.path.isfile(os.path.join(
+            ROOT, "build/includes.chroot/usr/share/grub/themes/devos/theme.txt")))
         self.assertNotIn("welcome.png", branding)
         self.assertIn('PRETTY_NAME="DevOS ${base_version} LTS"', script)
         self.assertIn('/usr/lib/os-release.ubuntu', script)
@@ -124,8 +160,22 @@ class TestInstalledSystemBoot(unittest.TestCase):
         self.assertIn("extraMounts:", mount)
         self.assertIn("btrfsSubvolumes:", mount)
         self.assertIn("grub2-common", installer)
-        self.assertIn("efibootmgr -o", read("build/includes.chroot/usr/local/sbin/devos-set-boot-order"))
+        boot_order = read("build/includes.chroot/usr/local/sbin/devos-set-boot-order")
+        self.assertIn("efibootmgr -o", boot_order)
+        # Must match Boot####DevOS even when the live USB holds the * marker.
+        self.assertIn("pick_entry", boot_order)
+        self.assertIn(r"\*\?", boot_order)
         self.assertIn("dontChroot: true", read("build/includes.chroot/etc/calamares/modules/shellprocess_firmware.conf"))
+        install_done = read("build/includes.chroot/etc/calamares/modules/shellprocess_install_done.conf")
+        self.assertIn("dontChroot: true", install_done)
+        self.assertIn("/run/devos-install-completed", install_done)
+        self.assertNotIn("chroot: false", install_done)
+        features_shell = read("build/includes.chroot/etc/calamares/modules/shellprocess_features.conf")
+        self.assertIn("installer-plan", features_shell)
+        self.assertNotIn("apt-get purge", features_shell)
+        self.assertNotIn("apt purge", features_shell)
+        self.assertIn("never apt-purge", read(
+            "build/includes.chroot/usr/local/share/devos/components/features/features_cli.py"))
         self.assertIn("SequentialAnimation", slideshow)
         # The slideshow cannot see install progress, so it must not draw a
         # step list or bar of its own (it used to cycle out of sync).
@@ -174,12 +224,70 @@ class TestInstalledSystemBoot(unittest.TestCase):
         self.assertIn("splash plymouth.theme=devos", iso)
         # Safe-graphics menu entries intentionally disable plymouth; the default entry must not.
         self.assertNotIn("plymouth.enable=0", iso.split("menuentry", 2)[1])
+        safe_block = iso.split('menuentry "DevOS · Safe Graphics"', 1)[1].split("menuentry", 1)[0]
+        self.assertIn("plymouth.enable=0", safe_block)
+        self.assertIn("xdotool", read("build/package-lists/20-installer.list.chroot"))
         plymouth_theme = read("build/includes.chroot/usr/share/plymouth/themes/devos/devos.plymouth")
         self.assertIn("ModuleName=script", plymouth_theme)
         self.assertIn("devos.script", plymouth_theme)
-        self.assertIn("Starting DevOS", read("build/includes.chroot/usr/share/plymouth/themes/devos/devos.script"))
+        plymouth_script = read("build/includes.chroot/usr/share/plymouth/themes/devos/devos.script")
+        self.assertIn("Starting DevOS", plymouth_script)
+        self.assertIn("SetRefreshFunction", plymouth_script)
+        self.assertIn("orb_cyan.png", plymouth_script)
+        self.assertIn("WELCOME", plymouth_script)
+        self.assertTrue(os.path.isfile(os.path.join(
+            ROOT, "build/includes.chroot/usr/share/plymouth/themes/devos/track.png")))
+        self.assertGreater(os.path.getsize(os.path.join(
+            ROOT, "build/includes.chroot/usr/share/plymouth/themes/devos/track.png")), 100)
+        self.assertTrue(os.path.isfile(os.path.join(
+            ROOT, "build/includes.chroot/usr/share/plymouth/themes/devos/thumb.png")))
+        self.assertGreater(os.path.getsize(os.path.join(
+            ROOT, "build/includes.chroot/usr/share/plymouth/themes/devos/thumb.png")), 200)
+
         self.assertNotIn("ModuleName=text", read("build/includes.chroot/usr/local/sbin/devos-apply-branding"))
         self.assertIn("boot_ui.py", live)
+        boot_ui = read("build/includes.chroot/usr/local/share/devos/boot_ui.py")
+        self.assertIn("Try DevOS", boot_ui)
+        self.assertIn("Safe Graphics", boot_ui)
+        self.assertIn("Premium Setup", boot_ui)
+        self.assertIn("devos-preferred-usertype", boot_ui)
+        # First screen must share Calamares welcome look (photo plates + WELCOME intro).
+        self.assertIn("InstallerBackground", boot_ui)  # docstring / comment intent
+        self.assertIn("/etc/calamares/branding/devos", boot_ui)
+        self.assertIn("WELCOME", boot_ui)
+        self.assertIn("load_backgrounds", boot_ui)
+        # Overlay must get out of the way once Calamares is running.
+        self.assertIn("calamares_running", boot_ui)
+        self.assertIn("release_overlay", boot_ui)
+        self.assertIn("force_power", boot_ui)
+        self.assertIn("header_wrap", boot_ui)
+        self.assertIn("root.addStretch(1)", boot_ui)
+        self.assertIn("QScrollArea", boot_ui)
+        plymouth_script = read(
+            "build/includes.chroot/usr/share/plymouth/themes/devos/devos.script")
+        self.assertIn("backdrop_0.png", plymouth_script)
+        self.assertIn("frame_image", plymouth_script)
+        self.assertTrue(os.path.isfile(os.path.join(
+            ROOT, "build/includes.chroot/usr/share/plymouth/themes/devos/backdrop_0.png")))
+        self.assertTrue(os.path.isfile(os.path.join(
+            ROOT, "build/includes.chroot/usr/share/plymouth/themes/devos/backdrop_7.png")))
+        gui = read("build/includes.chroot/usr/local/bin/devos-install-gui")
+        self.assertIn("flock -w 45", gui)
+        usertype_qml = read("build/includes.chroot/etc/calamares/branding/devos/usertypeq.qml")
+        self.assertIn("preferred-usertype.js", usertype_qml)
+        self.assertIn("loadSavedKind", usertype_qml)
+        features_qml = read("build/includes.chroot/etc/calamares/branding/devos/featuresq.qml")
+        self.assertIn("loadSavedPicks", features_qml)
+        self.assertIn("rememberedFeaturesKind", features_qml)
+        # Custom ticks must survive Back/Next; do not re-preset when kind is unchanged.
+        self.assertIn("if (kind === appliedKind)", features_qml)
+        storage_qml = read("build/includes.chroot/etc/calamares/branding/devos/storageq.qml")
+        self.assertIn("loadSavedPlan", storage_qml)
+        self.assertIn("devos_storage_selected_json", storage_qml)
+        self.assertIn("apply_preferred_usertype", read(
+            "build/includes.chroot/usr/local/bin/devos-install-gui"))
+        self.assertIn("Try DevOS / Install", iso)
+        self.assertIn("DevOS · Safe Graphics", iso)
         self.assertIn("libxcb-cursor0", desktop)
         self.assertIn("x11-utils", desktop)
         branding_hook = read("build/hooks/04-branding.hook.chroot")
@@ -285,7 +393,7 @@ class TestInstalledSystemBoot(unittest.TestCase):
         self.assertIn("kate", code)
         self.assertIn("Color Theme=DevOS", read("build/includes.chroot/etc/skel/.config/katepartrc"))
         self.assertIn("Default Dark Modern", read("build/includes.chroot/etc/skel/.config/Code/User/settings.json"))
-        self.assertIn("Icon=code", read("build/includes.chroot/usr/share/applications/devos-code.desktop"))
+        self.assertIn("Icon=devos-code", read("build/includes.chroot/usr/share/applications/devos-code.desktop"))
         self.assertIn("fonts-jetbrains-mono", read("build/package-lists/30-developer.list.chroot"))
         self.assertIn("11434", code)
         # .exe opens through the same friendly opener as .apk (it runs Wine itself).

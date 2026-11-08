@@ -75,15 +75,17 @@ class InstallerStorageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'partition map'):
             storage.prepare(selection([disk()]), [disk()], [])
 
-    def test_failure_stops_before_touching_the_next_disk(self):
+    def test_failure_on_one_disk_is_collected_and_next_disk_still_runs(self):
         d1,d2=disk('/dev/sdb'),disk('/dev/sdc')
         with patch.object(storage.shutil,'which',return_value='/tool'), \
              patch.object(storage.DiskManager,'get_storage_info',return_value=[d1,d2]), \
              patch.object(storage,'installed_owner',return_value=(1000,1000)), \
              patch.object(storage.DiskManager,'apply_solution',return_value={'success':False,'error':'I/O failure'}) as mutate:
-            with self.assertRaisesRegex(RuntimeError,'not rolled back'):
-                storage.apply(selection([d1,d2]),'/fake-root',OS_PARTITIONS)
-            mutate.assert_called_once()
+            failures = storage.apply(selection([d1,d2]),'/fake-root',OS_PARTITIONS)
+            self.assertEqual(len(failures), 2)
+            self.assertIn('not rolled back', failures[0])
+            # Optional storage must not raise — install/bootloader keep going.
+            self.assertEqual(mutate.call_count, 2)
 
     def test_calamares_job_forwards_root_and_partition_map(self):
         import importlib.util
@@ -91,22 +93,29 @@ class InstallerStorageTests(unittest.TestCase):
         choice='Erase selected additional drives (ext4):<br/>/dev/sdb → A remaining<br/>OS and manually configured disks are excluded.'
         raw=storage.parse_choice(choice,[disk()])
         values={'packagechooser_storage':choice,'rootMountPoint':'/tmp/example-target','partitions':OS_PARTITIONS}
-        lib=SimpleNamespace(globalstorage=SimpleNamespace(value=lambda key: values.get(key)))
+        lib=SimpleNamespace(
+            globalstorage=SimpleNamespace(value=lambda key: values.get(key)),
+            utils=SimpleNamespace(warning=lambda *_a, **_k: None),
+        )
         path=ROOT/'build/includes.chroot/usr/lib/x86_64-linux-gnu/calamares/modules/devosstorage/main.py'
         with patch.dict(sys.modules,{'libcalamares':lib}):
             spec=importlib.util.spec_from_file_location('devosstorage_job_test',path)
             job=importlib.util.module_from_spec(spec);spec.loader.exec_module(job)
-            with patch.object(job.Path,'read_text',return_value=json.dumps([disk()])), patch.object(storage,'apply') as apply:
+            with patch.object(job.Path,'read_text',return_value=json.dumps([disk()])), patch.object(storage,'apply',return_value=[]) as apply:
                 self.assertIsNone(job.run())
                 apply.assert_called_once_with(raw,values['rootMountPoint'],OS_PARTITIONS)
+            with patch.object(job.Path,'read_text',return_value=json.dumps([disk()])), patch.object(storage,'apply',return_value=['/dev/sda: mkfs segfault']):
+                # Optional data-drive failures must not abort bootloader/finalize.
+                self.assertIsNone(job.run())
             with patch.object(job.Path,'read_text',return_value=json.dumps([disk()])), patch.object(storage,'apply',side_effect=ValueError('drive changed')):
-                self.assertIn('drive changed',job.run()[1])
+                self.assertIsNone(job.run())
 
     def test_data_drive_job_runs_after_user_creation_before_finalize(self):
         text=(ROOT/'build/includes.chroot/etc/calamares/settings.conf').read_text()
         sequence=text.split('- exec:')[1].split('- show:')[0]
-        self.assertLess(sequence.index('- usersq'),sequence.index('- devosstorage'))
-        self.assertLess(sequence.index('- devosstorage'),sequence.index('- shellprocess@finalize'))
+        self.assertLess(sequence.index('- usersq'),sequence.index('- shellprocess@finalize'))
+        self.assertLess(sequence.index('- bootloader'),sequence.index('- devosstorage'))
+        self.assertLess(sequence.index('- bootloader'),sequence.index('- shellprocess@features-shell'))
 
     def test_human_review_round_trips_abc_layout_and_scanned_identity(self):
         choice='Erase selected additional drives (ext4):<br/>/dev/sdb → Work A 100 GiB · B 150.5 GiB · C remaining<br/>OS and manually configured disks are excluded.'

@@ -1,0 +1,14 @@
+{
+    "KPlugin":  {
+                    "Website":  "https://imrandev.bd",
+                    "Name":  "DevOS Premium · Cyan Orbit",
+                    "Id":  "DevOS-Premium-01-CyanOrbit",
+                    "Authors":  [
+                                    {
+                                        "Email":  "me@imrandev.bd",
+                                        "Name":  "Imran Ahmed"
+                                    }
+                                ],
+                    "Description":  "Original DevOS homepage-ready premium wallpaper. Scales across common desktop sizes."
+                }
+}

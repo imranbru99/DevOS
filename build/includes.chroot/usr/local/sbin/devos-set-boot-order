@@ -13,9 +13,19 @@ fi
 # QEMU and some firmware block forever on EFI variables. A hang here is
 # reported as "External command failed to finish."
 boot="$(timeout -k 5 15 efibootmgr 2>/dev/null)" || boot=""
-first="$(printf '%s\n' "$boot" | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*[[:space:]]*DevOS.*/\1/p' | head -n 1)"
+
+# Match Boot#### whether or not it is the current (*) entry. From the live USB
+# the asterisk sits on the USB entry, not on DevOS — requiring * skipped DevOS
+# and left Windows first after reboot.
+pick_entry() {
+    local label="$1"
+    # BRE: optional literal '*', then spaces, then the EFI description.
+    printf '%s\n' "$boot" | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\?[[:space:]]*'"${label}"'.*/\1/p' | head -n 1
+}
+
+first="$(pick_entry 'DevOS')"
 if [ -z "$first" ]; then
-    first="$(printf '%s\n' "$boot" | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*[[:space:]]*ubuntu.*/\1/p' | head -n 1)"
+    first="$(pick_entry 'ubuntu')"
 fi
 if [ -z "$first" ]; then
     exit 0
@@ -34,6 +44,13 @@ for id in $order; do
 done
 IFS="$old_ifs"
 
+# Put DevOS first and set BootNext so the immediate reboot skips Windows.
 timeout -k 5 15 efibootmgr -o "$new" >/dev/null 2>&1 || true
 timeout -k 5 15 efibootmgr -n "$first" >/dev/null 2>&1 || true
+# Some firmware ignores BootOrder until Windows Boot Manager is deactivated.
+win="$(pick_entry 'Windows Boot Manager')"
+if [ -n "$win" ] && [ "$win" != "$first" ]; then
+    timeout -k 5 15 efibootmgr -A -b "$win" >/dev/null 2>&1 || true
+fi
+timeout -k 5 15 efibootmgr -a -b "$first" >/dev/null 2>&1 || true
 exit 0

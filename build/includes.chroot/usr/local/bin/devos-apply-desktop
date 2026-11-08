@@ -72,8 +72,63 @@ if [ -n "${kw_bin}" ]; then
     "${kw_bin}" --file kglobalshortcutsrc --group devos-kids-mode.desktop --key _launch "Meta+K,Meta+K,Kids Mode"
 fi
 
+# Always keep Start favorites on DevOS apps and drop dead Install pins, even
+# when a panel already exists from skel (apply-ui used to skip that case).
+python3 - << 'PY' || true
+from pathlib import Path
+import os, re
+
+home = Path(os.path.expanduser("~"))
+cfg = home / ".config" / "plasma-org.kde.plasma.desktop-appletsrc"
+if cfg.is_file():
+    launchers = (
+        "applications:devos-search.desktop,applications:devos-taskman.desktop,"
+        "applications:devos-windows.desktop,applications:google-chrome.desktop,"
+        "applications:devos-thispc.desktop,applications:devos-chat.desktop,"
+        "applications:devos-code.desktop,applications:systemsettings.desktop"
+    )
+    favorites = (
+        "applications:google-chrome.desktop,applications:devos-thispc.desktop,"
+        "applications:devos-notepad.desktop,applications:devos-code.desktop,"
+        "applications:devos-chat.desktop,applications:devos-dashboard.desktop,"
+        "applications:devos-apps.desktop,applications:systemsettings.desktop"
+    )
+    dead = (
+        "devos-install.desktop",
+        "org.kde.dolphin.desktop",
+        "org.kde.kate.desktop",
+        "org.kde.konsole.desktop",
+        "preferred://filemanager",
+    )
+    text = cfg.read_text(encoding="utf-8", errors="replace")
+    original = text
+
+    def scrub(value: str) -> str:
+        keep = [p.strip() for p in value.split(",") if p.strip() and not any(d in p for d in dead)]
+        return ",".join(keep) if keep else launchers
+
+    text = re.sub(r"(?m)^(launchers=).*$", lambda m: m.group(1) + scrub(m.group(0).split("=", 1)[1]), text)
+    if "favorites=" in text:
+        text = re.sub(r"(?m)^(favorites=).*$", r"\1" + favorites, text)
+        text = re.sub(r"(?m)^(favoritesPortedToKAstats=).*$", r"\1false", text)
+    elif "icon=devos-logo" in text:
+        text = text.replace(
+            "icon=devos-logo",
+            "icon=devos-logo\n"
+            f"favorites={favorites}\n"
+            "favoritesDisplay=0\n"
+            "favoritesPortedToKAstats=false\n"
+            "systemFavorites=hibernate,reboot,shutdown",
+            1,
+        )
+    if text != original:
+        cfg.write_text(text, encoding="utf-8")
+PY
+
 stamp="${HOME}/.config/devos-ui.stamp"
-if [ ! -f "${stamp}" ] || [ "${1:-}" = "--force" ]; then
+# v2: favorites rewrite + scrub install pin (older stamp must re-run apply-ui).
+fav_stamp="${HOME}/.config/devos-ui-favorites-v2.stamp"
+if [ ! -f "${stamp}" ] || [ ! -f "${fav_stamp}" ] || [ "${1:-}" = "--force" ]; then
     ready=0
     for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
         if [ -n "${qdbus_bin}" ] && "${qdbus_bin}" org.kde.plasmashell >/dev/null 2>&1; then
@@ -104,7 +159,7 @@ if [ ! -f "${stamp}" ] || [ "${1:-}" = "--force" ]; then
         "${qdbus_bin}" org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript \
             "$(cat "$script")" >/dev/null 2>&1 || true
     fi
-    touch "${stamp}"
+    touch "${stamp}" "${fav_stamp}"
 fi
 
 # Keep StatusNotifier / tray icons under Status & Notifications (^), not on the bar.

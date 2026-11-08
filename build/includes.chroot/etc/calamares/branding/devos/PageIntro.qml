@@ -31,12 +31,12 @@ ColumnLayout {
         visible: intro.eyebrow.length > 0
         text: intro.eyebrow
         color: "#38bdf8"
-        font.pixelSize: 12
+        font.pixelSize: InstallerAppearance.tiny ? 11 : 12
         font.weight: Font.DemiBold
         font.letterSpacing: 2.4
     }
     Text {
-        Layout.topMargin: intro.eyebrow.length ? 8 : 0
+        Layout.topMargin: intro.eyebrow.length ? (InstallerAppearance.tiny ? 4 : 8) : 0
         Layout.fillWidth: true
         text: intro.title
         color: "#f8fafc"
@@ -46,12 +46,12 @@ ColumnLayout {
     }
     Text {
         visible: intro.subtitle.length > 0
-        Layout.topMargin: 10
+        Layout.topMargin: InstallerAppearance.tiny ? 6 : 10
         Layout.fillWidth: true
         Layout.bottomMargin: 6
         text: intro.subtitle
         color: "#94a3b8"
-        font.pixelSize: 15
+        font.pixelSize: InstallerAppearance.tiny ? 13 : 15
         wrapMode: Text.WordWrap
         lineHeight: 1.25
     }

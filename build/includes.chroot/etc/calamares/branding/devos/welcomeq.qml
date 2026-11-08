@@ -42,11 +42,11 @@ Page {
         contentWidth: width
         contentHeight: Math.max(height, welcomeContent.implicitHeight + 64)
         boundsBehavior: Flickable.StopAtBounds
-        ScrollBar.vertical: ScrollBar {}
+        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
         Item {
             width: welcomeScroll.width
-            height: welcomeScroll.contentHeight
+            height: Math.max(welcomeScroll.height, welcomeContent.implicitHeight + 64)
 
             ColumnLayout {
                 id: welcomeContent
@@ -57,18 +57,20 @@ Page {
                     enabled: InstallerAppearance.motionEnabled
                     NumberAnimation { duration: 650; easing.type: Easing.OutCubic }
                 }
+                // Top-anchored so short screens can scroll; verticalCenter clipped the bottom.
                 anchors.left: parent.left
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.leftMargin: Math.max(24, parent.width * 0.07)
-                width: Math.min(parent.width - anchors.leftMargin - 24, 640)
+                anchors.top: parent.top
+                anchors.topMargin: InstallerAppearance.tiny ? 16 : (InstallerAppearance.compact ? 24 : 40)
+                anchors.leftMargin: Math.max(20, parent.width * 0.05)
+                width: Math.min(parent.width - anchors.leftMargin - 20, 640)
                 spacing: 0
 
                 MotionLogo {
                     source: "file:/" + Branding.imagePath(Branding.ProductLogo)
                     animated: welcome.visible && InstallerAppearance.motionEnabled
-                    Layout.preferredWidth: 80
-                    Layout.preferredHeight: 80
-                    Layout.bottomMargin: 22
+                    Layout.preferredWidth: InstallerAppearance.tiny ? 56 : 80
+                    Layout.preferredHeight: InstallerAppearance.tiny ? 56 : 80
+                    Layout.bottomMargin: InstallerAppearance.tiny ? 12 : 22
                 }
 
                 PageIntro {

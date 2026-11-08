@@ -25,8 +25,10 @@ Page {
 
     readonly property real ramGb: HW.hw.ram_gb
     readonly property real diskGb: HW.hw.disk_gb
-    property var picked: Cat.recommended(ramGb, diskGb)
-    property string preset: "recommended"
+    // Start empty; applyUserType() fills from saved picks or the PC-type defaults.
+    // Do not seed with recommended() here — that overwrote Global storage on revisit.
+    property var picked: []
+    property string preset: ""
     property string appliedKind: ""
 
     readonly property var icons: ({
@@ -87,13 +89,51 @@ Page {
             if (Cat.data.userTypes[k].id === text) return text;
         return "normal";
     }
+    function loadSavedPicks() {
+        var keys = ["packagechooser_features", "features"];
+        for (var i = 0; i < keys.length; i++) {
+            if (!Core.Global.contains(keys[i]))
+                continue;
+            var raw = Core.Global.value(keys[i]);
+            var text = (raw === undefined || raw === null) ? "" : String(raw).replace(/^\s+|\s+$/g, "");
+            if (text.length === 0)
+                continue;
+            return text.split(",").filter(function (x) { return x.length > 0; });
+        }
+        return null;
+    }
+    function featuresKindKey() { return "devos_features_usertype"; }
+    function rememberFeaturesKind(kind) {
+        try { Core.Global.insert(featuresKindKey(), kind); } catch (e) {}
+    }
+    function rememberedFeaturesKind() {
+        try {
+            if (Core.Global.contains(featuresKindKey()))
+                return String(Core.Global.value(featuresKindKey()) || "");
+        } catch (e) {}
+        return "";
+    }
     function applyUserType() {
         var kind = userKind();
         var chip = kind === "normal" ? "recommended" : kind;
-        if (kind === appliedKind && preset === chip)
+
+        // Same PC type on this page instance: never wipe custom ticks on Back/Next.
+        if (kind === appliedKind)
             return;
+
+        var saved = loadSavedPicks();
+        var savedFor = rememberedFeaturesKind();
+
+        // Page was recreated after Back: restore the exact apps left for this PC type.
+        if (saved !== null && saved.length > 0 && savedFor === kind) {
+            picked = saved;
+            appliedKind = kind;
+            return;
+        }
+
         usePreset(chip);
         appliedKind = kind;
+        rememberFeaturesKind(kind);
     }
     function onActivate() { applyUserType(); }
     function inCategory(cat) {
@@ -118,7 +158,11 @@ Page {
     // ~14 GB for DevOS itself; unknown disk (0) hides the estimate.
     function freeAfterGb() { return diskGb > 0 ? diskGb - 14 - downloadMb() / 1024 : -1; }
     function human(mb) { return mb >= 1000 ? (mb / 1024).toFixed(1) + " GB" : mb + " MB"; }
-    function save() { config.packageChoice = picked.join(","); }
+    function save() {
+        config.packageChoice = picked.join(",");
+        if (appliedKind)
+            rememberFeaturesKind(appliedKind);
+    }
 
     onPickedChanged: save()
     Component.onCompleted: applyUserType()
@@ -126,7 +170,7 @@ Page {
     Flickable {
         id: flick
         anchors { left: parent.left; right: parent.right; top: parent.top; bottom: footer.top }
-        contentHeight: form.implicitHeight + 40
+        contentHeight: form.implicitHeight + 64
         clip: true
         boundsBehavior: Flickable.StopAtBounds
         ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
@@ -351,34 +395,37 @@ Page {
     Rectangle {
         id: footer
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-        height: InstallerAppearance.tiny ? 48 : 58
+        // Grow with wrapped summary text on narrow / short screens.
+        height: Math.max(InstallerAppearance.tiny ? 48 : 58, footerFlow.implicitHeight + 16)
         color: "#0d1424"
         Rectangle { anchors { left: parent.left; right: parent.right; top: parent.top } height: 1; color: "#1e293b" }
-        RowLayout {
-            anchors.fill: parent
-            anchors.leftMargin: 32
-            anchors.rightMargin: 32
-            spacing: 22
+        Flow {
+            id: footerFlow
+            anchors {
+                left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter
+                leftMargin: InstallerAppearance.narrow ? 16 : 32
+                rightMargin: InstallerAppearance.narrow ? 16 : 32
+            }
+            spacing: 14
             Text {
                 text: page.picked.length + " apps & features"
-                color: "#f8fafc"; font.pixelSize: 14; font.weight: Font.DemiBold
+                color: "#f8fafc"; font.pixelSize: 13; font.weight: Font.DemiBold
             }
             Text {
                 text: "Download after install: " + (page.downloadMb() > 0 ? page.human(page.downloadMb()) : "nothing")
-                color: "#cbd5e1"; font.pixelSize: 13
+                color: "#cbd5e1"; font.pixelSize: 12
             }
             Text {
                 visible: page.freeAfterGb() >= 0
                 text: "≈ " + Math.max(0, Math.round(page.freeAfterGb())) + " GB free afterwards"
                 color: page.freeAfterGb() < 10 ? "#fbbf24" : "#86efac"
-                font.pixelSize: 13
+                font.pixelSize: 12
             }
             Text {
                 visible: page.removedCount() > 0
                 text: page.removedCount() + " built-in left out"
-                color: "#fca5a5"; font.pixelSize: 13
+                color: "#fca5a5"; font.pixelSize: 12
             }
-            Item { Layout.fillWidth: true }
         }
     }
 }

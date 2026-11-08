@@ -181,6 +181,10 @@ for listfile in $(ls -1 "${ROOT_DIR}/build/package-lists/"*.list.chroot 2>/dev/n
                         || echo "  WARNING: skipped ${pkg_one}"
                 done
             fi
+            # Free downloaded .debs between lists so Docker/WSL builds do not
+            # OOM or fill the VM disk during large Plasma/firmware batches.
+            chroot "${CHROOT_DIR}" env DEBIAN_FRONTEND=noninteractive apt-get clean || true
+            rm -rf "${CHROOT_DIR}/var/cache/apt/archives/"*.deb 2>/dev/null || true
         fi
     fi
 done
@@ -211,6 +215,8 @@ if [ -d "${ROOT_DIR}/build/includes.chroot" ]; then
 fi
 # Plasma shows desktop shortcuts that are not executable as untrusted (⚠).
 chmod 755 "${CHROOT_DIR}"/etc/skel/Desktop/*.desktop 2>/dev/null || true
+chmod 755 "${CHROOT_DIR}"/usr/local/sbin/* 2>/dev/null || true
+chmod 755 "${CHROOT_DIR}"/usr/local/bin/* 2>/dev/null || true
 chmod 750 "${CHROOT_DIR}/etc/sudoers.d"
 chmod 440 "${CHROOT_DIR}"/etc/sudoers.d/* 2>/dev/null || true
 chmod 600 "${CHROOT_DIR}"/etc/NetworkManager/system-connections/* 2>/dev/null || true
@@ -229,7 +235,11 @@ fi
 
 if [ -f "${CHROOT_DIR}/usr/local/sbin/devos-install-llm" ]; then
     echo "==> Installing the local chat model..."
-    chroot "${CHROOT_DIR}" /bin/bash /usr/local/sbin/devos-install-llm
+    # HuggingFace / CDN 504s must never abort the ISO. The assistant can
+    # download the model later; a missing GGUF is not a boot blocker.
+    if ! chroot "${CHROOT_DIR}" /bin/bash /usr/local/sbin/devos-install-llm; then
+        echo "  WARNING: local chat model download failed; continuing without bundling it."
+    fi
 fi
 
 # Install DevOS components into chroot

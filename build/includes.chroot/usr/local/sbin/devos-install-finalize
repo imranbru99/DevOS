@@ -56,6 +56,101 @@ rm -f \
 
 rm -f /home/*/Desktop/calamares.desktop /root/Desktop/calamares.desktop 2>/dev/null || true
 
+echo "==> Pinning DevOS Start favorites and scrubbing dead taskbar pins"
+# Kickoff otherwise keeps Plasma defaults (Dolphin/Kate/Konsole). The Install
+# pin is deleted above, so leaving it in appletsrc leaves blank taskbar icons.
+python3 - << 'PY'
+from pathlib import Path
+import re
+
+LAUNCHERS = (
+    "applications:devos-search.desktop,applications:devos-taskman.desktop,"
+    "applications:devos-windows.desktop,applications:google-chrome.desktop,"
+    "applications:devos-thispc.desktop,applications:devos-chat.desktop,"
+    "applications:devos-code.desktop,applications:systemsettings.desktop"
+)
+FAVORITES = (
+    "applications:google-chrome.desktop,applications:devos-thispc.desktop,"
+    "applications:devos-notepad.desktop,applications:devos-code.desktop,"
+    "applications:devos-chat.desktop,applications:devos-dashboard.desktop,"
+    "applications:devos-apps.desktop,applications:systemsettings.desktop"
+)
+DEAD = (
+    "devos-install.desktop",
+    "org.kde.dolphin.desktop",
+    "org.kde.kate.desktop",
+    "org.kde.konsole.desktop",
+    "preferred://filemanager",
+)
+
+def scrub_launchers(value: str) -> str:
+    keep = []
+    for part in value.split(","):
+        entry = part.strip()
+        if not entry:
+            continue
+        if any(dead in entry for dead in DEAD):
+            continue
+        keep.append(entry)
+    return ",".join(keep) if keep else LAUNCHERS
+
+def patch(path: Path) -> None:
+    if not path.is_file():
+        return
+    text = path.read_text(encoding="utf-8", errors="replace")
+    original = text
+    text = re.sub(
+        r"(?m)^(launchers=).*$",
+        lambda m: m.group(1) + scrub_launchers(m.group(0).split("=", 1)[1]),
+        text,
+    )
+    if re.search(r"(?m)^plugin=org\.kde\.plasma\.kickoff$", text):
+        if re.search(r"(?ms)\[Containments\]\[\d+\]\[Applets\]\[\d+\]\[Configuration\]\[General\]\n(?:.*\n)*?icon=devos-logo", text):
+            if "favorites=" not in text:
+                text = text.replace(
+                    "icon=devos-logo",
+                    "icon=devos-logo\n"
+                    f"favorites={FAVORITES}\n"
+                    "favoritesDisplay=0\n"
+                    "favoritesPortedToKAstats=false\n"
+                    "systemFavorites=hibernate,reboot,shutdown",
+                    1,
+                )
+            else:
+                text = re.sub(r"(?m)^(favorites=).*$", r"\1" + FAVORITES, text)
+                if "favoritesPortedToKAstats=" not in text:
+                    text = re.sub(
+                        r"(?m)^(favorites=.*)$",
+                        r"\1\nfavoritesDisplay=0\nfavoritesPortedToKAstats=false",
+                        text,
+                        count=1,
+                    )
+                else:
+                    text = re.sub(
+                        r"(?m)^(favoritesPortedToKAstats=).*$",
+                        r"\1false",
+                        text,
+                    )
+    if text != original:
+        path.write_text(text, encoding="utf-8")
+
+homes = [Path("/etc/skel")]
+homes.extend(sorted(Path("/home").glob("*")))
+homes.append(Path("/root"))
+for home in homes:
+    patch(home / ".config" / "plasma-org.kde.plasma.desktop-appletsrc")
+    # Force first-login UI script to rewrite Kickoff even if an older stamp exists.
+    stamp = home / ".config" / "devos-ui.stamp"
+    stamp.unlink(missing_ok=True)
+    for dead in (
+        home / "Desktop" / "calamares.desktop",
+        home / "Desktop" / "org.kde.dolphin.desktop",
+        home / "Desktop" / "org.kde.konsole.desktop",
+        home / "Desktop" / "org.kde.kate.desktop",
+    ):
+        dead.unlink(missing_ok=True)
+PY
+
 echo "==> Removing the installer login session"
 # SDDM lists sessions by name and "Install DevOS" sorts before Plasma, so a
 # first login after the reboot would reopen the installer instead of the desktop.
@@ -166,6 +261,8 @@ fi
 echo "==> Applying the DevOS system name"
 if [ -f /usr/local/sbin/devos-apply-branding ]; then
     /bin/bash /usr/local/sbin/devos-apply-branding || true
+elif [ -x /usr/local/sbin/devos-debrand-desktop ]; then
+    /bin/bash /usr/local/sbin/devos-debrand-desktop || true
 fi
 
 # Match the daily DevOS layout: zram ≈ 50% of RAM (fast compressed swap) plus

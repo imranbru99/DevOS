@@ -42,6 +42,8 @@ Page {
         anchors.fill: parent
         contentHeight: form.implicitHeight + 80
         clip: true
+        boundsBehavior: Flickable.StopAtBounds
+        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
         ColumnLayout {
             id: form

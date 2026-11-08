@@ -106,11 +106,26 @@ def installed_owner(root_mount):
 
 
 def apply(raw, root_mount, partitions):
+    """Format optional extra data disks.
+
+    Returns a list of per-disk error strings. An empty list means every chosen
+    disk succeeded (or nothing was selected). Callers must treat a non-empty
+    list as a warning only — never as a reason to abort OS install / bootloader.
+    """
     ready = prepare(raw, DiskManager.get_storage_info(), partitions)
     if not ready:
-        return
+        return []
     owner = installed_owner(root_mount)
+    failures = []
     for device, volumes, identity in ready:
-        result = DiskManager.apply_solution(device, 'partition_storage', volumes=volumes, owner=owner, expected_identity=identity)
+        try:
+            result = DiskManager.apply_solution(
+                device, 'partition_storage', volumes=volumes, owner=owner, expected_identity=identity)
+        except Exception as exc:
+            failures.append(f'{device}: {exc}. Earlier completed disk changes are not rolled back.')
+            continue
         if not result.get('success'):
-            raise RuntimeError(f"{device}: {result.get('error', 'storage operation failed')}. Earlier completed disk changes are not rolled back.")
+            failures.append(
+                f"{device}: {result.get('error', 'storage operation failed')}. "
+                'Earlier completed disk changes are not rolled back.')
+    return failures

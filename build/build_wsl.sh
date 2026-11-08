@@ -196,24 +196,24 @@ if loadfont /boot/grub/font.pf2 ; then
     terminal_output gfxterm
 fi
 
-set menu_color_normal=white/black
-set menu_color_highlight=black/light-gray
+set menu_color_normal=light-cyan/black
+set menu_color_highlight=black/light-cyan
 
-menuentry "Try or Install DevOS (26.04 LTS)" {
+menuentry "Try DevOS / Install (26.04 LTS)" {
     set gfxpayload=keep
     search --no-floppy --set=root --file /casper/vmlinuz
     linux /casper/vmlinuz boot=casper quiet splash plymouth.theme=devos fsck.mode=skip ---
     initrd /casper/initrd
 }
 
-menuentry "DevOS (Safe Graphics)" {
-    set gfxpayload=keep
+menuentry "DevOS · Safe Graphics" {
+    set gfxpayload=text
     search --no-floppy --set=root --file /casper/vmlinuz
-    linux /casper/vmlinuz boot=casper nomodeset quiet splash plymouth.theme=devos ---
+    linux /casper/vmlinuz boot=casper nomodeset quiet plymouth.enable=0 ---
     initrd /casper/initrd
 }
 
-menuentry "Check Disc for Defects" {
+menuentry "Check disc for defects" {
     search --no-floppy --set=root --file /casper/vmlinuz
     linux /casper/vmlinuz boot=casper integrity-check quiet splash plymouth.theme=devos ---
     initrd /casper/initrd

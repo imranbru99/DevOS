@@ -70,7 +70,7 @@ timeout 30 qemu-system-x86_64 "${QEMU_ARGS[@]}" < /dev/null > "${LOG}" 2>&1 || t
 echo "==> Captured boot log (last 40 lines):"
 tail -n 40 "${LOG}" || true
 
-if grep -qE "Try or Install DevOS|DevOS \(Safe Graphics\)|GNU GRUB" "${LOG}"; then
+if grep -qE "Try DevOS / Install|Try or Install DevOS|DevOS · Safe Graphics|DevOS \(Safe Graphics\)|GNU GRUB" "${LOG}"; then
     echo "==> USB ${MODE} boot test PASSED: GRUB menu reached on a dd-written USB stick"
     exit 0
 else

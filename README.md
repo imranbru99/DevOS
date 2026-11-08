@@ -37,32 +37,34 @@ See the [long-term maintenance guide](docs/LONG_TERM_MAINTENANCE.md) for recover
 storage, update coverage, and release-validation requirements.
 The Google Drive link is for previously published images; source screenshots and
 features below do not certify that an older download contains the latest changes.
-The current release build uses `out/devos-26.04-amd64-final.iso` and its `.sha256` file. The default source-build filename is `out/devos-26.04-amd64.iso`. Verify the checksum and release validation notes before installing; file size alone does not establish readiness.
+The default source-build filename is `out/devos-26.04-amd64.iso` (with matching `.sha256`).
+Verify the checksum and release validation notes before installing; file size alone does
+not establish readiness. Flash with Rufus in **DD** image mode for real hardware.
+
+**Author:** [Imran Ahmed (Imran Dev)](https://imrandev.bd/) · GitHub [@imranbru99](https://github.com/imranbru99) · `me@imrandev.bd`
 
 **Recently added and improved**
 
+- **Installer completes cleanly:** app choices are recorded during install (no long apt purge
+  near ~89%); the final unmount step force-releases a busy target so a successful install is
+  not shown as “Installation Failed”; Restart / Shut down sit on the installer footer.
+- **Premium install preview:** motion backdrop Summary page with clearer disk/AI/voice/apps
+  cards, and a modern confirm dialog for Install Now.
+- **Graphical GRUB + motion splash:** themed live-USB boot menu, then animated Plymouth
+  “Just a moment…” splash (Safe Graphics still disables splash when needed).
+- **Screen-fit installer:** centered Try DevOS / Premium first screen, scrollable short
+  displays, and Next/Back kept on-screen on 1366×768 laptops.
 - **Voice Typing (Win+Alt+A / Win+Alt+H):** WhatsApp-style green mic for any text box
-  (WhatsApp, Chrome, Cursor, mail, Notepad…). Remembers the mouse position, types on
-  Plasma Wayland via KWin fake-input (`kwtypr`), supports Bangla and English offline,
-  keeps listening across pauses, and stops on **mouse click** or the hotkey again.
-- **Notepad ↔ Voice Typing:** Wayland-safe insert over a local socket so dictation lands
-  at the caret without stealing focus from the editor.
-- **AI on selected text:** moved to **Win+Alt+Shift+A** (rewrite / grammar / translate);
-  daily dictate uses Voice Typing, not the rewrite grid.
+  (WhatsApp, Chrome, Cursor, mail, Notepad…). Offline Bangla and English; stops on mouse
+  click or the hotkey again.
 - **Sign-in screen:** centered dark card, readable password field, show-password control,
   account/session selection, clock/date, login feedback and restart/shutdown controls.
 - **Broadband Connection:** connect or disconnect a direct ONU/modem with ISP PPPoE
   credentials; NetworkManager configuration prevents duplicate automatic wired profiles.
 - **Files and storage:** Windows-style This PC, tabs, properties, new file/folder dialogs,
   ZIP/7z context menus, unformatted drive discovery and partition formatting in Storage Doctor.
-- **Display and Power & sleep:** resolution/refresh controls, display scaling, separate
-  battery/plugged-in timeouts and power profiles. Available controls depend on the session
-  and hardware; native Plasma settings remain useful for Wayland-specific controls.
-- **AI Code Agent:** prompt queue, cancellation, retry/rerun, project runner and preview,
-  persistent development servers, repository context, and optional cloud providers.
-- **Desktop polish:** DevOS Start-menu branding, compact fonts/taskbar, Sapphire Waves
-  and additional wallpapers, dashboard onboarding, improved application names in Optimizer,
-  and an emoji panel that stays closed until requested.
+- **Desktop polish:** DevOS Start branding, compact taskbar, refreshed premium wallpapers,
+  dashboard onboarding, and Optimizer naming improvements.
 
 <p align="center">
   <img src="docs/images/devos_login_preview.png" alt="Rendered preview of the DevOS dark sign-in screen" width="900">

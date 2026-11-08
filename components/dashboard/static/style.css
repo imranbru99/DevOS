@@ -272,6 +272,59 @@ body.luxury-dark {
   min-width: 0;
 }
 
+.hero-banner.hero-premium {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  min-height: clamp(280px, 42vw, 420px);
+  background:
+    linear-gradient(105deg, rgba(6, 9, 18, 0.92) 0%, rgba(6, 9, 18, 0.72) 48%, rgba(6, 9, 18, 0.35) 100%),
+    #070910;
+}
+
+.hero-banner.hero-premium > .hero-content,
+.hero-banner.hero-premium > .hero-metrics {
+  position: relative;
+  z-index: 1;
+}
+
+.hero-banner.hero-premium .hero-media {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background-image: url("premium/home-bloom.jpg");
+  background-size: cover;
+  background-position: 68% center;
+  background-repeat: no-repeat;
+  transform: scale(1.04);
+  animation: hero-drift 18s ease-in-out infinite alternate;
+}
+
+@keyframes hero-drift {
+  from { transform: scale(1.04) translate3d(0, 0, 0); }
+  to { transform: scale(1.08) translate3d(-1.5%, 1%, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-banner.hero-premium .hero-media { animation: none; transform: none; }
+}
+
+@media (max-width: 720px) {
+  .hero-banner.hero-premium {
+    min-height: clamp(320px, 78vh, 560px);
+  }
+  .hero-banner.hero-premium .hero-media {
+    background-image: url("premium/home-bloom-portrait.jpg");
+    background-position: center 42%;
+  }
+}
+
+@media (min-width: 1600px) {
+  .hero-banner.hero-premium .hero-media {
+    background-position: 72% center;
+  }
+}
+
 .hero-content h1 {
   font-size: 32px;
   font-weight: 700;

@@ -11,7 +11,8 @@ contain these changes.
 - KDE Plasma with DevOS branding, Windows-style keyboard shortcuts, compact taskbar,
   Sapphire Waves wallpaper and the bundled wallpaper collection.
 - SDDM dark sign-in theme: centered account card, date/time, password visibility,
-  login failure feedback, account and session selection, restart and shutdown.
+  login failure feedback, account and session selection, restart and shutdown,
+  animated wallpaper Ken Burns pan/zoom with soft drifting color washes.
 - Calamares pages: welcome, location, keyboard, partitions, local account, AI model,
   user type, app selection, summary, progress and finish. An online account is not required.
 - Btrfs or ext4 installation, optional LUKS encryption, EFI partition setup,

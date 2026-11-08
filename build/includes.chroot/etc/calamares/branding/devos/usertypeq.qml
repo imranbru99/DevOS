@@ -9,21 +9,62 @@ import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.3
 
 import "features-catalog.js" as Cat
+import "preferred-usertype.js" as Pref
 
 Page {
     id: kindPage
     background: InstallerBackground {}
 
     property string kind: "normal"
+    property bool kindReady: false
+
+    function preferredKind() {
+        // boot_ui Premium / Premium+Safe writes preferred-usertype.js via install-gui.
+        var text = (Pref.preferred || "").replace(/^\s+|\s+$/g, "")
+        if (!text) return "normal"
+        for (var j = 0; j < Cat.data.userTypes.length; j++) {
+            if (Cat.data.userTypes[j].id === text)
+                return text
+        }
+        return "normal"
+    }
+
+    function loadSavedKind() {
+        var keys = ["packagechooser_usertype", "usertype"]
+        for (var i = 0; i < keys.length; i++) {
+            if (!Global.contains(keys[i]))
+                continue
+            var raw = Global.value(keys[i])
+            var text = (raw === undefined || raw === null) ? "" : String(raw).replace(/^\s+|\s+$/g, "")
+            for (var k = 0; k < Cat.data.userTypes.length; k++) {
+                if (Cat.data.userTypes[k].id === text)
+                    return text
+            }
+        }
+        return ""
+    }
 
     function save() { config.packageChoice = kind; }
-    onKindChanged: save()
-    Component.onCompleted: save()
+    onKindChanged: {
+        save()
+        // Only when the user picks a different PC type — not when this page restores itself.
+        if (kindReady) {
+            try { Global.insert("devos_features_usertype", ""); } catch (e) {}
+        }
+    }
+    Component.onCompleted: {
+        // Keep the user's PC-type pick when they press Back, then Next again.
+        kind = loadSavedKind() || preferredKind()
+        save()
+        kindReady = true
+    }
 
     Flickable {
         anchors.fill: parent
         contentHeight: form.implicitHeight + 48
         clip: true
+        boundsBehavior: Flickable.StopAtBounds
+        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
         ColumnLayout {
             id: form

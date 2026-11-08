@@ -41,8 +41,16 @@ if ! grep -q 'branding: devos' /etc/calamares/settings.conf 2>/dev/null; then
 fi
 
 exec 9>/tmp/devos-installer.lock
-if ! flock -n 9; then
-    exit 0
+# Wait briefly for a previous launcher to release the lock (boot_ui safe-retry
+# kills and relaunches quickly). Exit non-zero if still busy so the starter
+# does not treat "already running" as a successful silent exit.
+if ! flock -w 45 9; then
+    echo "==> Another installer instance still holds the lock" >>/tmp/devos-calamares.log
+    # If Calamares is already up, that is success for the live session.
+    if pgrep -x calamares >/dev/null 2>&1; then
+        exit 0
+    fi
+    exit 75
 fi
 
 sleep 1
@@ -75,7 +83,7 @@ clamp_installer_window() {
         [ "$maxw" -gt 720 ] || maxw=$ww
         [ "$maxh" -gt 480 ] || maxh=$wh
         # Prefer a comfortable size, but never exceed the work area.
-        nw=1000; nh=640
+        nw=960; nh=580
         [ "$nw" -le "$maxw" ] || nw=$maxw
         [ "$nh" -le "$maxh" ] || nh=$maxh
         nx=$((wx + (ww - nw) / 2))
@@ -88,6 +96,48 @@ clamp_installer_window() {
     done
 }
 
+apply_preferred_usertype() {
+    # boot_ui Premium options write /run or /tmp; ship that into Calamares QML.
+    local kind="" dest="/etc/calamares/branding/devos/preferred-usertype.js" src=""
+    for src in /run/devos-preferred-usertype /tmp/devos-preferred-usertype; do
+        if [ -f "$src" ]; then
+            kind=$(tr -d '[:space:]' <"$src" | head -c 64)
+            break
+        fi
+    done
+    case "$kind" in
+        normal|professional|student|developer|creator|gamer|business|family|islamic|premium) ;;
+        *) kind="" ;;
+    esac
+    local body=".pragma library"$'\n'"var preferred = \"$kind\";"
+    if [ "$(id -u)" -eq 0 ]; then
+        printf '%s\n' "$body" >"$dest" || true
+    else
+        printf '%s\n' "$body" | sudo -n tee "$dest" >/dev/null || true
+    fi
+}
+
+start_powerd() {
+    # Localhost helper for Restart / Shut down buttons in the QML nav bar.
+    if [ "$(id -u)" -eq 0 ]; then
+        pkill -f '/usr/local/bin/devos-installer-powerd' >/dev/null 2>&1 || true
+        /usr/local/bin/devos-installer-powerd >/tmp/devos-installer-powerd.log 2>&1 &
+    else
+        sudo -n pkill -f '/usr/local/bin/devos-installer-powerd' >/dev/null 2>&1 || true
+        sudo -n /usr/local/bin/devos-installer-powerd >/tmp/devos-installer-powerd.log 2>&1 &
+    fi
+}
+
+stop_powerd() {
+    if [ "$(id -u)" -eq 0 ]; then
+        /usr/local/bin/devos-installer-powerd stop >/dev/null 2>&1 || true
+        pkill -f '/usr/local/bin/devos-installer-powerd' >/dev/null 2>&1 || true
+    else
+        sudo -n /usr/local/bin/devos-installer-powerd stop >/dev/null 2>&1 || true
+        sudo -n pkill -f '/usr/local/bin/devos-installer-powerd' >/dev/null 2>&1 || true
+    fi
+}
+
 run_calamares() {
     # Refresh hardware facts without formatting or mounting any drive.
     if [ "$(id -u)" -eq 0 ]; then
@@ -95,6 +145,8 @@ run_calamares() {
     else
         sudo -n /usr/local/sbin/devos-storage-probe || true
     fi
+    apply_preferred_usertype
+    start_powerd
 
     clamp_installer_window &
     local clamp_pid=$!
@@ -103,6 +155,7 @@ run_calamares() {
         calamares "$@"
         local rc=$?
         kill "$clamp_pid" 2>/dev/null || true
+        stop_powerd
         return $rc
     fi
     sudo -E -n \
@@ -118,6 +171,7 @@ run_calamares() {
         calamares "$@"
     local rc=$?
     kill "$clamp_pid" 2>/dev/null || true
+    stop_powerd
     return $rc
 }
 
@@ -130,19 +184,31 @@ fails=0
 # Calamares manages mount changes for the partitions the user selects.
 # Do not force-unmount unrelated drives or globally disable swap on launch.
 
+# Ubuntu sudo may spam SELinux chcon noise on systems without labels; keep the
+# installer log readable for real Calamares/Qt failures.
+append_calamares_log() {
+    local tmp pipe_rc
+    tmp=$(mktemp /tmp/devos-calamares.XXXXXX)
+    "$@" >"$tmp" 2>&1
+    pipe_rc=$?
+    grep -E -v -i 'chcon:|getfilecon' "$tmp" >>"$log" || true
+    rm -f "$tmp"
+    return "$pipe_rc"
+}
+
 while true; do
     started=$(date +%s)
 
     if [ "$fails" -eq 0 ]; then
         echo "==> Launching DevOS Installer (Hardware Mode)..." >> "$log"
-        run_calamares "$@" >>"$log" 2>&1
+        append_calamares_log run_calamares "$@"
         rc=$?
     elif [ "$fails" -eq 1 ]; then
         echo "==> Hardware graphics mode exited quickly. Relaunching in Universal Safe Software Mode..." >> "$log"
         export LIBGL_ALWAYS_SOFTWARE=1
         export QT_QUICK_BACKEND=software
         export QMLSCENE_DEVICE=softwarecontext
-        run_calamares -d "$@" >>"$log" 2>&1
+        append_calamares_log run_calamares -d "$@"
         rc=$?
     else
         echo "==> Launching Calamares in Safe Mode with verbose diagnostics..." >> "$log"
@@ -151,7 +217,7 @@ while true; do
         export QMLSCENE_DEVICE=softwarecontext
         xhost +local: >/dev/null 2>&1 || true
         xhost + >/dev/null 2>&1 || true
-        run_calamares -d "$@" >>"$log" 2>&1
+        append_calamares_log run_calamares -d "$@"
         rc=$?
     fi
 

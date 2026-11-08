@@ -123,8 +123,21 @@ def test_premium_light_wallpaper_preferred(monkeypatch):
     monkeypatch.setattr(module.os.path, 'isfile', lambda p: p.startswith('/usr/share/wallpapers/'))
     monkeypatch.setattr(module, '_run_cmd', lambda args: scripts.append(args[-1]) or True)
     assert ThemeSwitcher.apply_wallpaper('light')
-    assert 'file:///usr/share/wallpapers/DevOS-Premium-01-PearlFold/contents/images/wallpaper.png' in scripts[0]
+    assert 'file:///usr/share/wallpapers/DevOS-Premium-08-PearlDawn/contents/images/wallpaper.png' in scripts[0]
     assert 'var light = true;' in scripts[0]
+    assert 'DevOS-Premium-01-CyanOrbit' in scripts[0]
+
+
+def test_premium_dark_wallpaper_restores_cyan_orbit(monkeypatch):
+    import theme_switcher as module
+    scripts = []
+    monkeypatch.setattr(module.shutil, 'which', lambda _: '/usr/bin/qdbus6')
+    monkeypatch.setattr(module.os.path, 'isfile', lambda p: p.startswith('/usr/share/wallpapers/'))
+    monkeypatch.setattr(module, '_run_cmd', lambda args: scripts.append(args[-1]) or True)
+    assert ThemeSwitcher.apply_wallpaper('dark')
+    assert 'var light = false;' in scripts[0]
+    assert 'file:///usr/share/wallpapers/DevOS-Premium-01-CyanOrbit/contents/images/wallpaper.png' in scripts[0]
+    assert 'file:///usr/share/wallpapers/DevOS-Premium-08-PearlDawn/contents/images/wallpaper.png' in scripts[0]
 
 
 def test_legacy_wallpaper_fallback(monkeypatch):

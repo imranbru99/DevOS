@@ -1,85 +1,107 @@
 {
   "tool": "built-in image_gen",
+  "collection": "DevOS Home Premium 2026",
+  "notes": "Cyan/sapphire/obsidian brand language. Calm left/upper for icons and homepage text. Landscape 16:9 masters plus portrait variants for flagship entries.",
   "prompts": [
     {
       "id": "01",
-      "prompt": "Use case: stylized-concept. Create one premium desktop wallpaper for DevOS, a polished Windows alternative. Asset 01 of a curated collection, 'Pearl Fold'. Wide 16:9 landscape. Sculptural pearlescent white and ice-blue satin glass folds forming a generous sweeping arc, physically plausible translucent thickness, beautiful soft studio lighting, subtle blue refraction, pale silver-blue background, outstanding premium industrial-design art direction. Large calm negative space across upper left for desktop icons; sculpture concentrated center-right. Full bleed wallpaper only, no interface, no text, no logo, no watermark, no border. Rich three-dimensional detail, sophisticated restrained colors, not flat vector waves."
+      "name": "Cyan Orbit",
+      "prompt": "Premium desktop wallpaper for DevOS OS homepage, 16:9 wide. Deep ink navy to charcoal studio background. Soft luminous cyan orbital rings and a few tiny bright nodes orbiting a calm center-right glow, inspired by a modern developer OS boot motif. Large empty calm space on the left and upper-left for desktop icons and homepage text. Soft volumetric light, subtle film grain, physically believable glass-blue glow, restrained sophisticated palette of midnight navy and cyan. No text, no logo, no UI."
     },
     {
       "id": "02",
-      "prompt": "Use case: stylized-concept. Asset 02, 'Sapphire Bloom', one distinct premium desktop wallpaper for DevOS, a polished Windows alternative. Deep blue folded translucent glass petals, sculptural open bloom, midnight navy studio background, luminous azure edges. Wide 16:9 landscape, full bleed. Exceptional premium art direction, realistic depth and materials, restrained sophisticated palette, soft gradients without banding. Keep upper left calm for desktop icons and bottom edge visually quiet; primary subject centered or center-right. Wallpaper artwork only. No text, logos, watermark, border, collage, interface or desktop icons. Not flat vector waves."
+      "name": "Sapphire Vein",
+      "prompt": "Premium DevOS wallpaper 16:9. Deep sapphire navy field with one elegant translucent cyan light vein flowing diagonally center-right like polished glass light through dark stone. Quiet left third empty for icons and homepage headline. Soft rim lighting, cool cyan and deep blue only, no purple haze."
     },
     {
       "id": "03",
-      "prompt": "Use case: stylized-concept. Asset 03, 'Champagne Silk', one distinct premium desktop wallpaper for DevOS, a polished Windows alternative. Champagne gold silk sculpture curling into a soft arch, warm ivory background, refined satin highlights. Wide 16:9 landscape, full bleed. Exceptional premium art direction, realistic depth and materials, restrained sophisticated palette, soft gradients without banding. Keep upper left calm for desktop icons and bottom edge visually quiet; primary subject centered or center-right. Wallpaper artwork only. No text, logos, watermark, border, collage, interface or desktop icons. Not flat vector waves."
+      "name": "Glass Kernel",
+      "prompt": "Premium DevOS wallpaper 16:9. A single frosted glass kernel orb with soft cyan refraction sitting center-right on a dark slate studio background. Thin caustic light rings around it. Generous empty left and top margins for OS icons and homepage content."
     },
     {
       "id": "04",
-      "prompt": "Use case: stylized-concept. Asset 04, 'Obsidian Halo', one distinct premium desktop wallpaper for DevOS, a polished Windows alternative. Black ceramic torus with polished titanium edges, charcoal background, dramatic soft rim light, minimalist monumental form. Wide 16:9 landscape, full bleed. Exceptional premium art direction, realistic depth and materials, restrained sophisticated palette, soft gradients without banding. Keep upper left calm for desktop icons and bottom edge visually quiet; primary subject centered or center-right. Wallpaper artwork only. No text, logos, watermark, border, collage, interface or desktop icons. Not flat vector waves."
+      "name": "Night Buffer",
+      "prompt": "Premium DevOS wallpaper 16:9 for dark homepage. Soft layered night fog buffers in deep navy with a gentle cyan horizon glow low on the right. Extremely calm empty left half for desktop icons. Minimal abstract atmosphere."
     },
     {
       "id": "05",
-      "prompt": "Use case: stylized-concept. Asset 05, 'Arctic Prism', one distinct premium desktop wallpaper for DevOS, a polished Windows alternative. Massive frosted glass prism refracting subtle cyan light, glacial pale blue background, architectural precision. Wide 16:9 landscape, full bleed. Exceptional premium art direction, realistic depth and materials, restrained sophisticated palette, soft gradients without banding. Keep upper left calm for desktop icons and bottom edge visually quiet; primary subject centered or center-right. Wallpaper artwork only. No text, logos, watermark, border, collage, interface or desktop icons. Not flat vector waves."
+      "name": "Signal Fold",
+      "prompt": "Premium DevOS wallpaper 16:9. Sculptural folded satin-glass ribbon in icy cyan and soft white catching light, concentrated on the right side. Pale cool silver-blue studio background. Large calm negative space upper-left for homepage hero text and icons."
     },
     {
       "id": "06",
-      "prompt": "Use case: stylized-concept. Asset 06, 'Jade Current', one distinct premium desktop wallpaper for DevOS, a polished Windows alternative. Flowing emerald and jade translucent glass sculpture, deep forest-green background, elegant organic curves. Wide 16:9 landscape, full bleed. Exceptional premium art direction, realistic depth and materials, restrained sophisticated palette, soft gradients without banding. Keep upper left calm for desktop icons and bottom edge visually quiet; primary subject centered or center-right. Wallpaper artwork only. No text, logos, watermark, border, collage, interface or desktop icons. Not flat vector waves."
+      "name": "Cobalt Drift",
+      "prompt": "Premium DevOS wallpaper 16:9. Two overlapping drifting cobalt glass slabs with soft cyan edge light floating center-right over deep ink background. Calm empty left for icons and homepage."
     },
     {
       "id": "07",
-      "prompt": "Use case: stylized-concept. Asset 07, 'Lavender Mist', one distinct premium desktop wallpaper for DevOS, a polished Windows alternative. Soft lavender satin ribbon folded into a voluminous sculptural loop, pale lilac background, airy diffuse studio light. Wide 16:9 landscape, full bleed. Exceptional premium art direction, realistic depth and materials, restrained sophisticated palette, soft gradients without banding. Keep upper left calm for desktop icons and bottom edge visually quiet; primary subject centered or center-right. Wallpaper artwork only. No text, logos, watermark, border, collage, interface or desktop icons. Not flat vector waves."
+      "name": "Soft Lattice",
+      "prompt": "Premium DevOS wallpaper 16:9. Extremely subtle soft 3D lattice of translucent cyan rods fading into deep navy, denser on the right, nearly empty on the left for desktop icons. Soft depth of field, elegant tech atmosphere without looking like a circuit board schematic."
     },
     {
       "id": "08",
-      "prompt": "Use case: stylized-concept. Asset 08, 'Copper Dune', one distinct premium desktop wallpaper for DevOS, a polished Windows alternative. Photorealistic sculpted copper-colored desert dunes, graceful shadow geometry, warm evening light, clear uncluttered sky. Wide 16:9 landscape, full bleed. Exceptional premium art direction, realistic depth and materials, restrained sophisticated palette, soft gradients without banding. Keep upper left calm for desktop icons and bottom edge visually quiet; primary subject centered or center-right. Wallpaper artwork only. No text, logos, watermark, border, collage, interface or desktop icons. Not flat vector waves."
+      "name": "Pearl Dawn",
+      "prompt": "Premium DevOS light-mode wallpaper 16:9 for homepage. Soft pearlescent white and ice-cyan dawn glow with gentle sculptural glass curve on the right. Airy pale silver background, large calm left negative space for icons and light UI."
     },
     {
       "id": "09",
-      "prompt": "Use case: stylized-concept. Asset 09, 'Azure Coast', one distinct premium desktop wallpaper for DevOS, a polished Windows alternative. Aerial fine-art photograph of turquoise water meeting smooth white sand in a sweeping curve, quiet luxurious coastal atmosphere. Wide 16:9 landscape, full bleed. Exceptional premium art direction, realistic depth and materials, restrained sophisticated palette, soft gradients without banding. Keep upper left calm for desktop icons and bottom edge visually quiet; primary subject centered or center-right. Wallpaper artwork only. No text, logos, watermark, border, collage, interface or desktop icons. Not flat vector waves."
+      "name": "Ink Horizon",
+      "prompt": "Premium DevOS wallpaper 16:9. Nearly black ink field with a thin luminous cyan horizon line and soft glow low on the right third. Vast calm empty space above and left for homepage content. Minimal cinematic abstract."
     },
     {
       "id": "10",
-      "prompt": "Use case: stylized-concept. Asset 10, 'Alpine Silence', one distinct premium desktop wallpaper for DevOS, a polished Windows alternative. Photorealistic serene alpine lake reflecting distant snow peaks, soft dawn blue light, simple spacious composition. Wide 16:9 landscape, full bleed. Exceptional premium art direction, realistic depth and materials, restrained sophisticated palette, soft gradients without banding. Keep upper left calm for desktop icons and bottom edge visually quiet; primary subject centered or center-right. Wallpaper artwork only. No text, logos, watermark, border, collage, interface or desktop icons. Not flat vector waves."
+      "name": "Prism Dock",
+      "prompt": "Premium DevOS wallpaper 16:9. Three floating frosted glass prisms docked in a soft diagonal on the right, casting cyan caustics on a dark charcoal floor gradient. Empty left half for icons."
     },
     {
       "id": "11",
-      "prompt": "Use case: stylized-concept. Asset 11, 'Lunar Silver', one distinct premium desktop wallpaper for DevOS, a polished Windows alternative. Silver metallic folded ribbon sculpture with brushed satin surfaces, graphite background, refined monochrome studio lighting. Wide 16:9 landscape, full bleed. Exceptional premium art direction, realistic depth and materials, restrained sophisticated palette, soft gradients without banding. Keep upper left calm for desktop icons and bottom edge visually quiet; primary subject centered or center-right. Wallpaper artwork only. No text, logos, watermark, border, collage, interface or desktop icons. Not flat vector waves."
+      "name": "Aurora Shell",
+      "prompt": "Premium DevOS wallpaper 16:9. Soft restrained cyan-teal aurora shell curling gently across the upper-right sky over deep midnight, quiet reflective dark ground. Large calm left for icons and homepage. Elegant subtle aurora not neon overload."
     },
     {
       "id": "12",
-      "prompt": "Use case: stylized-concept. Asset 12, 'Rose Quartz', one distinct premium desktop wallpaper for DevOS, a polished Windows alternative. Translucent rose quartz sculptural arch with frosted pink glass surfaces, warm pearl background, sophisticated gentle refraction. Wide 16:9 landscape, full bleed. Exceptional premium art direction, realistic depth and materials, restrained sophisticated palette, soft gradients without banding. Keep upper left calm for desktop icons and bottom edge visually quiet; primary subject centered or center-right. Wallpaper artwork only. No text, logos, watermark, border, collage, interface or desktop icons. Not flat vector waves."
+      "name": "Terminal Glow",
+      "prompt": "Premium DevOS wallpaper 16:9. Abstract ambient desk atmosphere: soft cyan glow reflecting on dark matte surface from the right, shallow depth of field, no keyboard no screen no UI visible, just light and mood for a developer OS. Empty left composition for icons."
     },
     {
       "id": "13",
-      "prompt": "Use case: stylized-concept. Asset 13, 'Midnight Aurora', one distinct premium desktop wallpaper for DevOS, a polished Windows alternative. Photorealistic restrained emerald aurora over distant black mountains and calm lake, deep midnight sky, elegant subdued luminous atmosphere. Wide 16:9 landscape, full bleed. Exceptional premium art direction, realistic depth and materials, restrained sophisticated palette, soft gradients without banding. Keep upper left calm for desktop icons and bottom edge visually quiet; primary subject centered or center-right. Wallpaper artwork only. No text, logos, watermark, border, collage, interface or desktop icons. Not flat vector waves."
+      "name": "Frost Panel",
+      "prompt": "Premium DevOS wallpaper 16:9. Tall overlapping frosted glass panels standing center-right with soft cyan edge light and pale ice refraction, glacial cool studio background. Calm open left area for desktop icons."
     },
     {
       "id": "14",
-      "prompt": "Use case: stylized-concept. Asset 14, 'Porcelain Wave', one distinct premium desktop wallpaper for DevOS, a polished Windows alternative. White porcelain sculptural wave with thick soft folded edges, pale warm gray studio background, tactile matte finish. Wide 16:9 landscape, full bleed. Exceptional premium art direction, realistic depth and materials, restrained sophisticated palette, soft gradients without banding. Keep upper left calm for desktop icons and bottom edge visually quiet; primary subject centered or center-right. Wallpaper artwork only. No text, logos, watermark, border, collage, interface or desktop icons. Not flat vector waves."
+      "name": "Graphite Halo",
+      "prompt": "Premium DevOS wallpaper 16:9. Monumental soft graphite halo ring with brushed metal edge and faint cyan rim light on near-black background. Subject on right, large empty left. Minimalist luxury OS aesthetic."
     },
     {
       "id": "15",
-      "prompt": "Use case: stylized-concept. Asset 15, 'Cobalt Orbit', one distinct premium desktop wallpaper for DevOS, a polished Windows alternative. Two intersecting sculptural cobalt glass loops, dark ink background, crisp controlled blue rim lighting, premium material rendering. Wide 16:9 landscape, full bleed. Exceptional premium art direction, realistic depth and materials, restrained sophisticated palette, soft gradients without banding. Keep upper left calm for desktop icons and bottom edge visually quiet; primary subject centered or center-right. Wallpaper artwork only. No text, logos, watermark, border, collage, interface or desktop icons. Not flat vector waves."
+      "name": "Azure Ribbon",
+      "prompt": "Premium DevOS wallpaper 16:9. One continuous flowing azure satin-glass ribbon sweeping from lower center to upper right with luminous cyan highlights on deep navy. Spacious calm left for homepage text."
     },
     {
       "id": "16",
-      "prompt": "Use case: stylized-concept. Asset 16, 'Solar Veil', one distinct premium desktop wallpaper for DevOS, a polished Windows alternative. Thin translucent amber silk sheets suspended in an elegant rolling wave, warm terracotta background, golden diffused illumination. Wide 16:9 landscape, full bleed. Exceptional premium art direction, realistic depth and materials, restrained sophisticated palette, soft gradients without banding. Keep upper left calm for desktop icons and bottom edge visually quiet; primary subject centered or center-right. Wallpaper artwork only. No text, logos, watermark, border, collage, interface or desktop icons. Not flat vector waves."
+      "name": "Quiet Mesh",
+      "prompt": "Premium DevOS wallpaper 16:9. Soft translucent mesh fabric of pale cyan and silver gently draped on the right over a cool gray-blue atmosphere. Very calm open left for icons."
     },
     {
       "id": "17",
-      "prompt": "Use case: stylized-concept. Asset 17, 'Glacier Valley', one distinct premium desktop wallpaper for DevOS, a polished Windows alternative. Photorealistic remote glacial valley with ice-blue river winding among dark rocks, high altitude soft light, spacious cinematic aerial composition. Wide 16:9 landscape, full bleed. Exceptional premium art direction, realistic depth and materials, restrained sophisticated palette, soft gradients without banding. Keep upper left calm for desktop icons and bottom edge visually quiet; primary subject centered or center-right. Wallpaper artwork only. No text, logos, watermark, border, collage, interface or desktop icons. Not flat vector waves."
+      "name": "Ember Trace",
+      "prompt": "Premium DevOS wallpaper 16:9. Deep charcoal background with a refined dual-tone light trace: soft champagne gold meeting cool cyan in a thin elegant arc on the right. Luxury premium accent. Empty left for icons and homepage."
     },
     {
       "id": "18",
-      "prompt": "Use case: stylized-concept. Asset 18, 'Graphite Flow', one distinct premium desktop wallpaper for DevOS, a polished Windows alternative. Layered graphite satin carbon-like sculptural sheets with smooth curves and subtle silver highlights, near black background. Wide 16:9 landscape, full bleed. Exceptional premium art direction, realistic depth and materials, restrained sophisticated palette, soft gradients without banding. Keep upper left calm for desktop icons and bottom edge visually quiet; primary subject centered or center-right. Wallpaper artwork only. No text, logos, watermark, border, collage, interface or desktop icons. Not flat vector waves."
+      "name": "Liquid Lens",
+      "prompt": "Premium DevOS wallpaper 16:9. Giant liquid glass lens dome on the right refracting soft cyan and sapphire light, dark studio surround. Physically accurate refraction and caustics, calm empty left composition for desktop icons."
     },
     {
       "id": "19",
-      "prompt": "Use case: stylized-concept. Asset 19, 'Opal Horizon', one distinct premium desktop wallpaper for DevOS, a polished Windows alternative. Opalescent translucent glass folded shell, pale sky-blue background, subtle peach and aqua refraction, refined airy studio sculpture. Wide 16:9 landscape, full bleed. Exceptional premium art direction, realistic depth and materials, restrained sophisticated palette, soft gradients without banding. Keep upper left calm for desktop icons and bottom edge visually quiet; primary subject centered or center-right. Wallpaper artwork only. No text, logos, watermark, border, collage, interface or desktop icons. Not flat vector waves."
+      "name": "Void Ring",
+      "prompt": "Premium DevOS wallpaper 16:9. Near-black void with one precise thin cyan luminous ring floating center-right and a soft radial falloff. Ultra minimal monumental composition, large empty left for homepage hero content."
     },
     {
       "id": "20",
-      "prompt": "Use case: stylized-concept. Asset 20, 'Dusk Monolith', one distinct premium desktop wallpaper for DevOS, a polished Windows alternative. Minimalist architectural stone arch standing among smooth mauve dunes at dusk, soft peach horizon, photorealistic premium fine-art landscape. Wide 16:9 landscape, full bleed. Exceptional premium art direction, realistic depth and materials, restrained sophisticated palette, soft gradients without banding. Keep upper left calm for desktop icons and bottom edge visually quiet; primary subject centered or center-right. Wallpaper artwork only. No text, logos, watermark, border, collage, interface or desktop icons. Not flat vector waves."
+      "name": "Home Bloom",
+      "prompt": "Premium DevOS homepage hero wallpaper 16:9. Soft radial cyan bloom from mid-right over deep navy, gentle glass petal-like translucent layers opening quietly, lots of open dark space on the left for brand title and CTA. Elegant premium atmosphere matching a polished developer OS."
     }
   ]
 }
