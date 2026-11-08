@@ -2,14 +2,14 @@
 Type=Application
 Version=1.0
 Name=AI Actions
-GenericName=Rewrite, translate or summarize selected text
-Comment=Select text in any app and press Meta+Alt+A: rewrite, fix grammar, translate or summarize it with DevOS AI on this PC
-Exec=/usr/local/bin/devos-run --desktop=devos-ai-actions --name="AI Actions" /usr/local/share/devos/components/aiactions/aiactions.py
+GenericName=Rewrite or fix selected text
+Comment=Select text, then open from the app menu (or Win+Alt+Shift+A) to rewrite, fix grammar, translate
+Exec=/usr/local/bin/devos-ai-actions
 Icon=devos-ai-actions
 Terminal=false
 StartupNotify=false
 Categories=Utility;TextTools;
 Keywords=ai;rewrite;grammar;translate;bangla;summarize;explain;reply;writing;selection;
-X-KDE-Shortcuts=Meta+Alt+A
-
+X-KDE-Shortcuts=Meta+Alt+Shift+A
 StartupWMClass=devos-ai-actions
+NoDisplay=false

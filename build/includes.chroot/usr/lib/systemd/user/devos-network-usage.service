@@ -1,0 +1,9 @@
+[Unit]
+Description=DevOS Network Usage sample (daily data counters)
+Documentation=file:///usr/local/share/devos/components/networkusage/networkusage.py
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/share/devos/components/networkusage/networkusage.py sample
+Nice=10
+IOSchedulingClass=idle

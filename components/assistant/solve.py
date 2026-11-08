@@ -11,8 +11,10 @@ import os
 import re
 import sys
 
+# Real PC symptoms only — polite "help me" / "please help" alone is NOT a problem
+# (that used to hijack IELTS / study questions into a Security dump).
 _PROBLEM = re.compile(
-    r"\b(?:help me|i need help|can you help|fix (?:this|it|my|the)|something(?:'s| is) wrong|"
+    r"\b(?:fix (?:this|it|my|the)|something(?:'s| is) wrong|"
     r"not working|doesn'?t work|won'?t work|is broken|virus|malware|phishing|scam|hacked|"
     r"suspicious link|is this (?:link |site |address )?safe|is my (?:pc|computer|laptop) "
     r"(?:safe|secure|ok|infected)|security check|check (?:my )?security|"
@@ -20,6 +22,8 @@ _PROBLEM = re.compile(
     r"no internet|can'?t connect|cannot connect|wifi (?:is )?(?:down|broken|dead)|"
     r"internet (?:is )?(?:down|not working|gone|dead))\b",
     re.I)
+_HELP_POLITE = re.compile(
+    r"\b(?:help me|i need help|can you help|please help|would you (?:please )?help)\b", re.I)
 _PASTED_ERROR = re.compile(r"\b(?:traceback|exception|error:|errno)\b", re.I)
 _URL = re.compile(r"https?://[^\s<>'\"]+|www\.[^\s<>'\"]+", re.I)
 _OPEN_VERB = re.compile(r"\b(?:open|launch|start|go to)\b", re.I)
@@ -30,11 +34,14 @@ _SLOW = re.compile(r"\b(?:slow|lag|freez\w*|full disk|no space|storage)\b", re.I
 
 
 def wants_solve(text: str) -> bool:
-    """True when the message is a problem to solve, not a normal command."""
+    """True when the message is a PC problem to solve, not a normal question."""
     raw = text or ""
-    if _OPEN_VERB.search(raw) and re.search(r"\bhelp me\b", raw, re.I):
+    if _OPEN_VERB.search(raw) and _HELP_POLITE.search(raw):
         return False
-    if re.fullmatch(r"(?:help me|i need help|can you help)[.?!]?", (raw or "").strip(), re.I):
+    if re.fullmatch(r"(?:help me|i need help|can you help|please help)[.?!]?", (raw or "").strip(), re.I):
+        return False
+    # "Would you please help me become an IELTS expert?" → model, not Security.
+    if _HELP_POLITE.search(raw) and not _PROBLEM.search(raw) and not urls_in(raw) and not _PASTED_ERROR.search(raw):
         return False
     if _PROBLEM.search(raw):
         return True

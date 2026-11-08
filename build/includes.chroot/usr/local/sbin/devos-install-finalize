@@ -168,6 +168,63 @@ if [ -f /usr/local/sbin/devos-apply-branding ]; then
     /bin/bash /usr/local/sbin/devos-apply-branding || true
 fi
 
+# Match the daily DevOS layout: zram ≈ 50% of RAM (fast compressed swap) plus
+# a disk swapfile of the same size (capped) for overflow under heavy load.
+# Calamares leaves disk swap off so the EFI+root wipe stays simple; we add
+# the file here inside the new install.
+echo "==> Creating performance swapfile (≈50% RAM, max 16 GiB)"
+ensure_swapfile() {
+    local mem_kb size_b size_gb free_kb need_kb swapdir swapfile
+    mem_kb=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)
+    if [ "${mem_kb:-0}" -lt 1048576 ]; then
+        echo "Skipping swapfile: less than 1 GiB RAM reported"
+        return 0
+    fi
+    # Half of RAM, at least 2 GiB, at most 16 GiB (same ballpark as this PC's 15–16G).
+    size_b=$(( mem_kb * 1024 / 2 ))
+    if [ "$size_b" -lt $((2 * 1024 * 1024 * 1024)) ]; then
+        size_b=$((2 * 1024 * 1024 * 1024))
+    fi
+    if [ "$size_b" -gt $((16 * 1024 * 1024 * 1024)) ]; then
+        size_b=$((16 * 1024 * 1024 * 1024))
+    fi
+    need_kb=$(( size_b / 1024 + 1048576 ))
+    free_kb=$(df -Pk / | awk 'NR==2 {print $4}')
+    if [ "${free_kb:-0}" -lt "$need_kb" ]; then
+        echo "Skipping swapfile: not enough free space on / (need ~$((need_kb/1024/1024)) GiB)"
+        return 0
+    fi
+    swapdir=/swap
+    swapfile="${swapdir}/swapfile"
+    mkdir -p "$swapdir"
+    if [ "$(stat -f -c %T / 2>/dev/null || true)" = "btrfs" ]; then
+        chattr +C "$swapdir" 2>/dev/null || true
+    fi
+    if [ -f "$swapfile" ]; then
+        echo "Swapfile already present at ${swapfile}"
+    else
+        if ! fallocate -l "$size_b" "$swapfile" 2>/dev/null; then
+            dd if=/dev/zero of="$swapfile" bs=1M count=$((size_b/1024/1024)) status=none || {
+                echo "Swapfile create failed; continuing without disk swap" >&2
+                rm -f "$swapfile"
+                return 0
+            }
+        fi
+        chmod 600 "$swapfile"
+        mkswap "$swapfile" >/dev/null || {
+            echo "mkswap failed; removing incomplete swapfile" >&2
+            rm -f "$swapfile"
+            return 0
+        }
+        size_gb=$(( size_b / 1024 / 1024 / 1024 ))
+        echo "Created ${swapfile} (${size_gb} GiB)"
+    fi
+    if ! grep -qE '^[[:space:]]*/swap/swapfile[[:space:]]' /etc/fstab 2>/dev/null; then
+        printf '/swap/swapfile none swap defaults,pri=10 0 0\n' >> /etc/fstab
+    fi
+}
+ensure_swapfile
+
 # The initramfs step, which runs next, must be allowed to rebuild the boot image.
 rm -f /run/devos-skip-initramfs
 

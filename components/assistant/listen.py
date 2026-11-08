@@ -7,21 +7,22 @@ DevOS AI - hands-free voice commands, without opening the chat window.
                           do it, and show the result in a small overlay.
                           Pressing the shortcut again while listening stops
                           the recording early.
-    listen.py --daemon    "Hey DevOS" listener (opt-in, sidebar toggle in
-                          DevOS AI, saved in ~/.config/devos/assistant.json).
+    listen.py --daemon    Wake-name listener (default “Mira”; opt-in sidebar
+                          toggle in DevOS AI, saved in ~/.config/devos/assistant.json).
                           A cheap energy VAD watches 30 ms microphone frames;
                           only a finished speech segment of 0.4-6 s is turned
                           into text, and only a segment that starts with the
-                          wake phrase does anything. The command can follow in
-                          the same breath ("Hey DevOS, open Chrome") or within
+                          wake name does anything. The command can follow in
+                          the same breath ("Mira, open Chrome") or within
                           6 seconds. Skips work while the CPU is busy, on low
                           battery, or while another app uses the microphone.
-                          Shows a tray icon (pause / turn off).
+                          Shows a tray icon (pause / turn off) and speaks the
+                          short reply in the language you spoke.
 
 Everything runs on this PC; nothing is sent anywhere. Commands go through the
 same whitelisted router and tools as the chat window (tools.py); actions that
 need a confirmation (shut down, restart, uninstall ...) are only done after a
-click on the overlay. No spoken replies: the overlay shows the result.
+click on the overlay.
 
 The pieces below the GUI line import without a display so tests can drive
 them with fake audio, fake transcribers and dry_run tools.
@@ -56,7 +57,16 @@ LOW_BATTERY_PCT = 15
 HIDE_AFTER_MS = 3000
 HIDE_AFTER_BUTTON_MS = 9000
 
-HANDS_FREE_LABEL = "Hands-free: say “Hey DevOS”"
+def hands_free_label() -> str:
+    try:
+        import voice_prefs
+        name = voice_prefs.wake_name()
+    except Exception:
+        name = "Mira"
+    return f"Hands-free: say “{name}”"
+
+
+HANDS_FREE_LABEL = "Hands-free: say “Mira”"  # default; UI refreshes from hands_free_label()
 NOT_UNDERSTOOD_TEXT = "I'm not sure how to do that here. Open DevOS AI to ask about it."
 OPEN_IN_APP_LABEL = "Open in DevOS AI"
 NOTHING_HEARD_TEXT = "I didn't catch that. Try again, a little closer to the microphone."
@@ -94,7 +104,20 @@ def save_config(path: str = CONFIG_PATH, **updates) -> Dict[str, object]:
 
 
 def hands_free_enabled(path: str = CONFIG_PATH) -> bool:
-    return bool(load_config(path).get("hands_free", False))
+    try:
+        import voice_prefs
+        return bool(voice_prefs.load(path).get("hands_free", False))
+    except Exception:
+        return bool(load_config(path).get("hands_free", False))
+
+
+def wake_name(path: str = CONFIG_PATH) -> str:
+    try:
+        import voice_prefs
+        return voice_prefs.wake_name(path)
+    except Exception:
+        data = load_config(path)
+        return str(data.get("wake_name") or "Mira")
 
 
 def live_session(cmdline_path: str = "/proc/cmdline") -> bool:
@@ -243,6 +266,35 @@ class Outcome:
     data: List[Dict[str, object]] = field(default_factory=list)
 
 
+def speak_outcome(out: Outcome, heard: str = "") -> None:
+    """Speak a short reply after hands-free / push-to-talk, matching spoken language."""
+    if out is None or not (out.text or "").strip():
+        return
+    try:
+        import voice_prefs
+        if voice_prefs.is_stop_phrase(heard or ""):
+            voice._stop_speech()
+            return
+    except Exception:
+        pass
+    # Pure UI actions already give feedback on screen — stay quiet.
+    if out.handled and out.actions and all(a in voice.SILENT_ACTIONS for a in out.actions):
+        return
+    if (out.text or "").lower() in ("call ended.", "stopped."):
+        voice._stop_speech()
+        return
+    spoken = getattr(voice.Transcriber, "last_language", "") or ""
+    try:
+        import voice_prefs
+        lang = voice_prefs.resolve_reply_language(spoken, out.text or heard or "")
+    except Exception:
+        lang = voice.reply_language(out.text or heard or "")
+    try:
+        voice.speak_reply(out.text, language=lang)
+    except Exception:
+        pass
+
+
 class CommandRunner:
     """Routes a spoken sentence and runs it with the whitelisted tools.
 
@@ -302,7 +354,7 @@ class CommandRunner:
 
 
 class HandsFree:
-    """The "Hey DevOS" state machine. Speech segments in, events out.
+    """Wake-name state machine (default Mira). Speech segments in, events out.
 
     events: ("skipped", reason) ("ignored", text) ("wake", "") ("heard", cmd)
             ("result", Outcome) ("timeout", "")
@@ -333,9 +385,14 @@ class HandsFree:
     def on_segment(self, pcm: bytes) -> List[Tuple[str, object]]:
         events = self.tick()
         if self.armed:
-            # the command after "Hey DevOS": any language, no guard (the user is waiting)
             self.armed_until = 0.0
             text = voice.fix_transcript(self.transcribe_command(pcm) or "").strip()
+            try:
+                import voice_prefs
+                if voice_prefs.is_stop_phrase(text):
+                    return events + [("result", Outcome(heard=text, ok=True, text="Call ended.", handled=True))]
+            except Exception:
+                pass
             woke, rest = voice.match_wake(text)
             if woke and not rest:
                 self.armed_until = self.clock() + self.follow_up_s
@@ -343,19 +400,38 @@ class HandsFree:
             cmd = rest if woke else text
             if not cmd:
                 return events + [("timeout", "")]
+            try:
+                import voice_prefs
+                if voice_prefs.is_stop_phrase(cmd):
+                    return events + [("result", Outcome(heard=cmd, ok=True, text="Call ended.", handled=True))]
+            except Exception:
+                pass
             return events + [("heard", cmd), ("result", self.runner.run(cmd))]
         if self.guard is not None:
             why = self.guard()
             if why:
                 return events + [("skipped", why)]
         text = voice.fix_transcript(self.transcribe_wake(pcm) or "").strip()
+        try:
+            import voice_prefs
+            if voice_prefs.is_stop_phrase(text):
+                return events + [("result", Outcome(heard=text, ok=True, text="Stopped.", handled=True))]
+        except Exception:
+            pass
         woke, rest = voice.match_wake(text)
         if not woke:
             return events + [("ignored", text)]
+        try:
+            import voice_prefs
+            if rest and voice_prefs.is_stop_phrase(rest):
+                return events + [("wake", ""), ("result", Outcome(heard=rest, ok=True, text="Stopped.", handled=True))]
+        except Exception:
+            pass
         if rest and len(rest.split()) >= 1 and re.search(r"[A-Za-zঀ-৿]{2,}", rest):
             return events + [("wake", ""), ("heard", rest), ("result", self.runner.run(rest))]
+        # Bare "Mira" → open a voice call in DevOS AI
         self.armed_until = self.clock() + self.follow_up_s
-        return events + [("wake", "")]
+        return events + [("wake", ""), ("call", "")]
 
 
 def segments_from_frames(frames, detector: Optional[voice.SegmentDetector] = None):
@@ -394,6 +470,13 @@ def open_in_app_command(text: str) -> List[str]:
     if os.path.isfile(CHAT_LAUNCHER):
         return [CHAT_LAUNCHER, "--ask", text]
     return [tools.PYTHON, ASSISTANT_PY, "--ask", text]
+
+
+def open_call_command() -> List[str]:
+    """Open DevOS AI already in a voice call (wake name said with no command)."""
+    if os.path.isfile(CHAT_LAUNCHER):
+        return [CHAT_LAUNCHER, "--call"]
+    return [tools.PYTHON, ASSISTANT_PY, "--call"]
 
 
 def recorder_frames(argv: List[str], frame_bytes: int, stop: threading.Event, on_proc=None):
@@ -513,7 +596,9 @@ def run_once(dry_run: bool = False, argv=None) -> int:
                 bridge.event.emit("result", Outcome(heard="", ok=False, text=NOTHING_HEARD_TEXT))
                 return
             bridge.event.emit("heard", text)
-            bridge.event.emit("result", runner.run(text))
+            outcome = runner.run(text)
+            bridge.event.emit("result", outcome)
+            speak_outcome(outcome, text)
         except Exception as exc:       # never leave a frozen overlay on screen
             bridge.event.emit("result", Outcome(heard="", ok=False, text=f"Voice command stopped: {exc}"))
     ov.handle_event("listening", "")
@@ -524,7 +609,7 @@ def run_once(dry_run: bool = False, argv=None) -> int:
 
 
 def run_daemon(dry_run: bool = False, argv=None, config_path: str = CONFIG_PATH) -> int:
-    """'Hey DevOS' listener with a tray icon. Exits at once unless turned on."""
+    """Wake-name listener with a tray icon. Exits at once unless turned on."""
     if live_session() or not hands_free_enabled(config_path):
         return 0
     lock = take_lock("devos-voice-daemon.lock")
@@ -548,7 +633,8 @@ def run_daemon(dry_run: bool = False, argv=None, config_path: str = CONFIG_PATH)
         return rc == 0 and mic_used_by_others(out, [os.getpid(), state["recorder_pid"]])
     guard = Guard(ctx, mic_check=mic_check, paused=lambda: state["paused"])
     runner = CommandRunner(ctx, dry_run=dry_run, confirm=lambda a: bridge.ask_confirm(a.confirm, a.label))
-    hf = HandsFree(lambda pcm: voice.Transcriber.transcribe_as(pcm, "en"), runner,
+    # Auto language for wake too — "Mira" / "মিরা" both need to match.
+    hf = HandsFree(voice.Transcriber.transcribe, runner,
                    transcribe_command=voice.Transcriber.transcribe, guard=guard.reason)
     bridge.level.connect(ov.set_level)
     bridge.event.connect(lambda kind, payload: ov.handle_event(kind, payload))
@@ -622,8 +708,24 @@ def run_daemon(dry_run: bool = False, argv=None, config_path: str = CONFIG_PATH)
                 continue
             try:
                 for kind, payload in hf.on_segment(seg):
+                    if kind == "call":
+                        tools.popen_detached(open_call_command())
+                        bridge.event.emit("listening", "")
+                        continue
                     if kind in ("wake", "heard", "result", "timeout"):
                         bridge.event.emit("listening" if kind == "wake" else kind, payload)
+                    if kind == "result" and isinstance(payload, Outcome):
+                        # Stop phrases: silence TTS, don't narrate tool chatter.
+                        try:
+                            import voice_prefs
+                            if voice_prefs.is_stop_phrase(payload.heard or ""):
+                                voice._stop_speech()
+                        except Exception:
+                            pass
+                        if (payload.text or "").lower() in ("call ended.", "stopped."):
+                            voice._stop_speech()
+                        else:
+                            speak_outcome(payload, payload.heard or "")
             except Exception as exc:
                 bridge.event.emit("result", Outcome(heard="", ok=False, text=f"Voice command stopped: {exc}"))
     threading.Thread(target=reader, daemon=True).start()
@@ -640,7 +742,7 @@ def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="DevOS AI voice commands")
     g = p.add_mutually_exclusive_group(required=True)
     g.add_argument("--once", action="store_true", help="listen for one command (push-to-talk)")
-    g.add_argument("--daemon", action="store_true", help="listen for 'Hey DevOS' (if turned on)")
+    g.add_argument("--daemon", action="store_true", help="listen for wake name (Mira by default, if turned on)")
     p.add_argument("--dry-run", action="store_true", help="show what would be done, do nothing")
     ns = p.parse_args(argv[1:])
     if ns.once:

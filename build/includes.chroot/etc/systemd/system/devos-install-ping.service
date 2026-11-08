@@ -1,0 +1,23 @@
+[Unit]
+Description=DevOS anonymous install count (deferred until online)
+Documentation=file:///usr/local/share/devos/components/install-ping/install_ping.py
+# Quiet background job: counts one GitHub Release download when the net is up.
+Wants=network-online.target
+After=network-online.target NetworkManager-wait-online.service
+ConditionPathExists=/var/lib/DevOS/install-ping.pending
+ConditionPathExists=!/var/lib/DevOS/install-ping.done
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/devos-install-ping --once
+# Stay out of the way of the desktop and big downloads.
+Nice=19
+IOSchedulingClass=idle
+TimeoutStartSec=90
+# Offline / flaky DNS: try again later without bothering the user.
+Restart=on-failure
+RestartSec=300
+
+[Install]
+WantedBy=multi-user.target

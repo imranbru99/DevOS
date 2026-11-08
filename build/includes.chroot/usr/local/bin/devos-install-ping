@@ -1,0 +1,2 @@
+#!/bin/bash
+exec /usr/bin/python3 /usr/local/share/devos/components/install-ping/install_ping.py "$@"

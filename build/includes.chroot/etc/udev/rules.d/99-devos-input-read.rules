@@ -1,0 +1,2 @@
+# DevOS Voice Typing: click-to-stop needs read access to input event nodes
+KERNEL=="event*", SUBSYSTEM=="input", GROUP="input", MODE="0660"

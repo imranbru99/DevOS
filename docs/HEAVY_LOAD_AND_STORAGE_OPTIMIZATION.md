@@ -12,8 +12,10 @@ improvement is claimed without measurements on the target hardware.
   adaptive energy preference, uses small read-ahead on SSD/NVMe and a separate
   HDD policy. It does not force maximum clocks, deep disk queues or PCIe power
   settings. User-selected power profiles remain available in Power Settings.
-- Compressed zram swap remains enabled. Its virtual capacity equals RAM; this
-  is not preallocated physical RAM or a guaranteed doubling of usable memory.
+- Compressed zram swap remains enabled at 50% of physical RAM (about 15–16 GiB
+  on a 32 GiB PC), matching the daily install. A disk `/swap/swapfile` of the
+  same size (capped at 16 GiB) is created at install time for overflow. Zram
+  capacity is virtual, not preallocated RAM or a guaranteed memory multiplier.
 - Pending buffered writes are capped at 64 MiB for background writeback and
   256 MiB for writer throttling, instead of growing to gigabytes on large PCs.
   Writes can still block on a saturated or failing device.

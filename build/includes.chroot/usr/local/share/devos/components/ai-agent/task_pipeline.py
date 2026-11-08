@@ -542,16 +542,138 @@ def discover_agents() -> Dict[str, Dict[str, Any]]:
     return agents
 
 
-def notify(title: str, message: str, urgency: str = "normal"):
-    """Sends native desktop notification asynchronously."""
+# Fixed replace-id so Pipeline toasts overwrite each other instead of stacking.
+_PIPELINE_NOTIFY_ID = 424242
+
+
+def notify(title: str, message: str, urgency: str = "normal", expire_ms: int = 4000):
+    """Desktop notifications are off — pipeline activity stays in the Activity log only.
+
+    Set DEVOS_PIPELINE_DESKTOP_NOTIFY=1 to re-enable rare toasts (still never for stalls).
+    """
+    if os.environ.get("DEVOS_PIPELINE_DESKTOP_NOTIFY", "").strip() not in ("1", "true", "yes"):
+        return
     try:
+        if title.strip().lower() == "pipeline stall":
+            return
+        ms = max(1000, min(int(expire_ms), 15000))
+        # Plasma pins ``critical`` until dismissed; map to normal so toasts expire.
+        level = "normal" if urgency == "critical" else (urgency or "normal")
         subprocess.Popen(
-            ["notify-send", "-a", "DevOS AI Pipeline", "-u", urgency, title, message],
+            [
+                "notify-send",
+                "-a", "DevOS AI Pipeline",
+                "-u", level,
+                "-t", str(ms),
+                f"--replace-id={_PIPELINE_NOTIFY_ID}",
+                "--hint=int:transient:1",
+                "--hint=string:desktop-entry:devos-ai-pipeline",
+                title,
+                message,
+            ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
     except Exception:
         pass
+
+
+def clear_pipeline_notifications():
+    """Bulk-dismiss Plasma notification popups (incl. stuck Pipeline Stall toasts).
+
+    Plasma 6 has no ClearHistory API. The reliable workaround is: send a throwaway
+    Notify to learn the current max id, then CloseNotification for every id up to it.
+    """
+    try:
+        import dbus  # type: ignore
+    except Exception:
+        dbus = None  # type: ignore
+
+    max_id = _PIPELINE_NOTIFY_ID
+    if dbus is not None:
+        try:
+            bus = dbus.SessionBus()
+            notif = dbus.Interface(
+                bus.get_object(
+                    "org.freedesktop.Notifications",
+                    "/org/freedesktop/Notifications",
+                ),
+                "org.freedesktop.Notifications",
+            )
+            # Transient probe — returns the highest id Plasma has handed out.
+            max_id = int(
+                notif.Notify(
+                    "DevOS AI Pipeline",
+                    dbus.UInt32(0),
+                    "",
+                    " ",
+                    " ",
+                    dbus.Array([], signature="s"),
+                    dbus.Dictionary(
+                        {
+                            "urgency": dbus.Byte(0),
+                            "transient": dbus.Boolean(True),
+                            "x-kde-visibility": "ignore",
+                        },
+                        signature="sv",
+                    ),
+                    1,
+                )
+            )
+            # Close every notification up to current id (covers stalled history).
+            for i in range(max_id, 0, -1):
+                try:
+                    notif.CloseNotification(dbus.UInt32(i))
+                except Exception:
+                    pass
+            return
+        except Exception:
+            pass
+
+    # Fallback without python3-dbus: gdbus probe + close window
+    try:
+        out = subprocess.check_output(
+            [
+                "gdbus", "call", "--session",
+                "--dest", "org.freedesktop.Notifications",
+                "--object-path", "/org/freedesktop/Notifications",
+                "--method", "org.freedesktop.Notifications.Notify",
+                "DevOS AI Pipeline",
+                "0",
+                "",
+                " ",
+                " ",
+                "[]",
+                '{"urgency": <byte 0>, "transient": <true>}',
+                "1",
+            ],
+            text=True,
+            timeout=5,
+        )
+        # e.g. (uint32 1491,)
+        digits = "".join(ch if ch.isdigit() else " " for ch in out).split()
+        if digits:
+            max_id = max(max_id, int(digits[0]))
+    except Exception:
+        max_id = max(max_id, 5000)
+
+    for i in range(max_id, 0, -1):
+        try:
+            subprocess.run(
+                [
+                    "gdbus", "call", "--session",
+                    "--dest", "org.freedesktop.Notifications",
+                    "--object-path", "/org/freedesktop/Notifications",
+                    "--method", "org.freedesktop.Notifications.CloseNotification",
+                    str(i),
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=1,
+                check=False,
+            )
+        except Exception:
+            pass
 
 
 def copy_to_clipboard(text: str):
@@ -1486,11 +1608,18 @@ class TaskPipeline:
         # Premium stall watchdog — notify once per task when idle past mode threshold
         try:
             import pipeline_premium as _premium
+            seen = set(self.context.get("stall_notify_keys") or [])
             for stall in _premium.detect_stalls(self.queue, self.context):
                 tid = stall["id"]
+                # One in-app event per task per watchdog window — no desktop toast.
                 key = f"stall:{tid}:{stall['idle_minutes'] // max(1, stall['watchdog_minutes'])}"
-                if self.context.get("last_stall_key") == key:
+                if key in seen:
                     continue
+                seen.add(key)
+                # Cap memory; drop oldest keys
+                if len(seen) > 64:
+                    seen = set(list(seen)[-32:])
+                self.context["stall_notify_keys"] = sorted(seen)
                 self.context["last_stall_key"] = key
                 self._save_context()
                 msg = (
@@ -1499,7 +1628,6 @@ class TaskPipeline:
                     f"(watchdog {stall['watchdog_minutes']}m). Check the IDE or Retry."
                 )
                 self.emit_event(msg)
-                notify("Pipeline Stall", msg[:120], urgency="critical")
                 updated = True
         except Exception:
             pass
@@ -1525,8 +1653,15 @@ class TaskPipeline:
             return "aider"
         if ag in ("local", "devos-code", "ollama"):
             return "local"
+        # local-2 / local-3 / … are separate slots so multiple DevOS coding
+        # engines can build different projects at the same time.
+        if ag.startswith("local-") and ag.split("-", 1)[-1].isdigit():
+            return ag
         if ag in ("cursor-agent", "cursor_agent", "cursor"):
             return "cursor-agent"
+        # cursor-agent-2 / cursor-agent-3 / … = parallel Cursor CLI workers
+        if ag.startswith("cursor-agent-") and ag.rsplit("-", 1)[-1].isdigit():
+            return ag
         return ag
 
     @staticmethod
@@ -2004,14 +2139,26 @@ class TaskPipeline:
             except Exception as exc:
                 return False, f"Codex CLI error: {exc}"
 
-        elif agent in ("cursor-agent", "cursor_agent", "cursor"):
+        elif agent in ("cursor-agent", "cursor_agent", "cursor") or (
+            isinstance(agent, str)
+            and agent.startswith("cursor-agent-")
+            and agent.rsplit("-", 1)[-1].isdigit()
+        ):
             cursor_bin = discover_agents().get("cursor-agent", {}).get("bin")
             if not cursor_bin:
                 return False, "Cursor Agent is not installed. Choose it in Features or run: sudo devos-install-cursor-agent"
             try:
                 # Non-interactive print mode so the pipeline can observe completion.
+                self.emit_event(f"Starting Cursor Agent ({agent}) in the project workspace…")
                 res = subprocess.run(
-                    [str(cursor_bin), "--print", "--output-format", "text", prompt],
+                    [
+                        str(cursor_bin),
+                        "--print",
+                        "--force",
+                        "--output-format",
+                        "text",
+                        prompt,
+                    ],
                     capture_output=True, text=True, timeout=3600,
                     cwd=task.get("project") or None,
                 )
@@ -2022,11 +2169,17 @@ class TaskPipeline:
             except Exception as exc:
                 return False, f"Cursor Agent error: {exc}"
 
-        elif agent == "local":
+        elif agent == "local" or (
+            isinstance(agent, str)
+            and agent.startswith("local-")
+            and agent.split("-", 1)[-1].isdigit()
+        ):
             worker = Path(__file__).resolve().parent.parent / "code-agent/pipeline_worker.py"
             if not worker.is_file():
                 return False, "DevOS coding engine is missing; reinstall the code-agent component."
-            self.emit_event("Starting DevOS coding engine in the project workspace…")
+            self.emit_event(
+                f"Starting DevOS coding engine ({agent}) in the project workspace…"
+            )
             # Prompts go through stdin, not command-line arguments or repository files.
             with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as prompt_file:
                 prompt_file.write(prompt)

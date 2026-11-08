@@ -1,0 +1,27 @@
+#!/bin/bash
+# Default: Voice Typing mic (Win+Alt+A). Use --popup for the rewrite grid.
+export DEVOS_DESKTOP_FILE="${DEVOS_DESKTOP_FILE:-devos-ai-actions}"
+SCRIPT_AI="/usr/local/share/devos/components/aiactions/aiactions.py"
+SCRIPT_VT="/usr/local/share/devos/components/voicetype/voicetype.py"
+[ -f "$HOME/project/dev-os/components/aiactions/aiactions.py" ] && SCRIPT_AI="$HOME/project/dev-os/components/aiactions/aiactions.py"
+[ -f "$HOME/project/dev-os/components/voicetype/voicetype.py" ] && SCRIPT_VT="$HOME/project/dev-os/components/voicetype/voicetype.py"
+
+want_popup=0
+for a in "$@"; do
+  case "$a" in
+    --popup|--file|--text|--action|--help|-h) want_popup=1; break ;;
+  esac
+done
+
+if [ "$want_popup" = 1 ]; then
+  args=()
+  for a in "$@"; do
+    [ "$a" = "--popup" ] || args+=("$a")
+  done
+  export DEVOS_APP_NAME="${DEVOS_APP_NAME:-AI Actions}"
+  exec -a "devos-ai-actions" /usr/bin/python3 "$SCRIPT_AI" --popup "${args[@]}"
+fi
+
+export DEVOS_DESKTOP_FILE=devos-voice-typing
+export DEVOS_APP_NAME="Voice Typing"
+exec -a "devos-voice-typing" /usr/bin/python3 "$SCRIPT_VT" "$@"

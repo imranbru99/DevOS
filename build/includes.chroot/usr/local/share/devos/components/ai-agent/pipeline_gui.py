@@ -35,6 +35,7 @@ from task_pipeline import (
     to_slug,
     split_prompts,
     notify,
+    clear_pipeline_notifications,
     copy_to_clipboard,
     get_grouped_projects,
     detect_current_project,
@@ -1484,6 +1485,16 @@ class PipelineWindow(QtWidgets.QMainWindow):
         btn_clear.clicked.connect(self.clear_queue)
         header_layout.addWidget(btn_clear)
 
+        btn_clear_alerts = QtWidgets.QPushButton("Clear Alerts")
+        btn_clear_alerts.setObjectName("small_btn")
+        btn_clear_alerts.setStyleSheet(
+            "background-color: #7c2d12; color: #fed7aa; font-size: 11px; "
+            "padding: 6px 12px; border: 1px solid #ea580c; border-radius: 6px;"
+        )
+        btn_clear_alerts.setToolTip("Dismiss all stacked Pipeline Stall / DevOS AI Pipeline desktop notifications")
+        btn_clear_alerts.clicked.connect(self.clear_alerts)
+        header_layout.addWidget(btn_clear_alerts)
+
         main_layout.addLayout(header_layout)
 
         # Toast Banner for Instant Visual Action Feedback
@@ -2062,6 +2073,10 @@ class PipelineWindow(QtWidgets.QMainWindow):
         clear_logs_btn = QtWidgets.QPushButton("Clear Logs")
         clear_logs_btn.clicked.connect(self.clear_logs)
         log_controls.addWidget(clear_logs_btn)
+        clear_alerts_btn = QtWidgets.QPushButton("Clear Alerts")
+        clear_alerts_btn.setToolTip("Dismiss stacked DevOS AI Pipeline desktop notifications")
+        clear_alerts_btn.clicked.connect(self.clear_alerts)
+        log_controls.addWidget(clear_alerts_btn)
         right_layout.addLayout(log_controls)
 
         # Live Execution Output Box
@@ -2350,6 +2365,13 @@ class PipelineWindow(QtWidgets.QMainWindow):
     def clear_logs(self):
         self.pipeline.clear_events()
         self.log_box.clear()
+
+    def clear_alerts(self):
+        # Runs the Plasma max-id close loop (old stall toasts used ids ~1000+).
+        clear_pipeline_notifications()
+        self.toast_banner.setText("All desktop alerts cleared.")
+        self.toast_banner.show()
+        QtCore.QTimer.singleShot(2500, self.toast_banner.hide)
 
     def update_cur_prompt_metrics(self):
         text = self.current_prompt_input.toPlainText().strip()
@@ -2922,14 +2944,20 @@ class PipelineWindow(QtWidgets.QMainWindow):
             self.btn_run.setStyleSheet("")
             self.runner_timer.stop()
             self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Pipeline paused by user.")
+            # Default: stop new work AND abort in-flight local/queued agent steps so
+            # Pause actually frees the UI (Close must not hang on artisan serve etc.).
             inflight = [t for t in self.pipeline.list() if t.get("status") in ("RUNNING", "SUBMITTED")]
             if inflight:
                 answer = QtWidgets.QMessageBox.question(
                     self,
-                    "Abort in-flight work?",
-                    "Pause stops new tasks. Also abort the agent work already running?\n\n"
-                    "Yes = mark in-flight tasks failed/cancelled so slots free up.\n"
-                    "No = let current agent work finish (old behavior).",
+                    "Stop current work?",
+                    "Pause already stops the next task.\n\n"
+                    "Also stop work that is still running now?\n\n"
+                    "Yes = abort in-flight steps + stop local coding workers "
+                    "(recommended — lets you close this window).\n"
+                    "No = only pause the queue; current step keeps going.",
+                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                    QtWidgets.QMessageBox.Yes,
                 )
                 if answer == QtWidgets.QMessageBox.Yes:
                     aborted = self.pipeline.abort_inflight(
@@ -2937,8 +2965,13 @@ class PipelineWindow(QtWidgets.QMainWindow):
                         task_ids=[t["id"] for t in inflight],
                     )
                     self.log_box.append(
-                        f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Aborted {aborted} in-flight task(s)."
+                        f"[{datetime.datetime.now().strftime('%H:%M:%S')}] "
+                        f"Aborted {aborted} in-flight task(s) and stopped local workers."
                     )
+                    # Stop GUI worker thread observing/dispatching
+                    if self.worker is not None and self.worker.isRunning():
+                        self.worker.requestInterruption()
+                        self.worker.wait(1500)
                     self.refresh_queue()
 
     def busy(self):
@@ -3019,11 +3052,47 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.refresh_queue()
 
     def closeEvent(self, event):
-        if self.busy() or any(t.is_alive() for t in self.pipeline._dispatch_threads):
-            self.log_box.append("Pause stops the next task; wait for the current command to finish before closing.")
-            event.ignore()
-        else:
+        dispatch_alive = any(t.is_alive() for t in getattr(self.pipeline, "_dispatch_threads", []))
+        worker_busy = self.worker is not None and self.worker.isRunning()
+        if self.busy() or dispatch_alive or (worker_busy and self.is_running):
+            answer = QtWidgets.QMessageBox.question(
+                self,
+                "Close Pipeline?",
+                "Work is still running in the background.\n\n"
+                "Yes = pause, abort in-flight steps, stop local workers, then close.\n"
+                "No = keep this window open.",
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.Yes,
+            )
+            if answer != QtWidgets.QMessageBox.Yes:
+                self.log_box.append(
+                    "Close cancelled — pause first or wait for the current step, "
+                    "or choose Yes to force-stop."
+                )
+                event.ignore()
+                return
+            self.is_running = False
+            self.runner_timer.stop()
+            self.btn_run.setText("Run Pipeline")
+            self.btn_run.setObjectName("primary")
+            self.btn_run.setStyleSheet("")
+            try:
+                self.pipeline.abort_inflight(reason="Aborted because Pipeline window was closed")
+            except Exception as exc:
+                self.log_box.append(f"Abort during close: {exc}")
+            if self.worker is not None and self.worker.isRunning():
+                self.worker.requestInterruption()
+                self.worker.wait(1500)
             event.accept()
+            return
+        # Paused with leftover dispatch threads: still allow close after a soft stop
+        if dispatch_alive and not self.is_running:
+            try:
+                self.pipeline.stop_local_workers()
+                self.pipeline.stop_dispatch_threads(timeout=0.8)
+            except Exception:
+                pass
+        event.accept()
 
     def _failover_target_agent(self, task_agent: str) -> str:
         """Pick a failover agent that does not re-hit an already cooled Google Antigravity quota."""

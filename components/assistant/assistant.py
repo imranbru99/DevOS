@@ -35,6 +35,8 @@ import tools  # noqa: E402
 import listen  # noqa: E402
 import vision  # noqa: E402
 import voice  # noqa: E402
+import voice_prefs  # noqa: E402
+import subprocess  # noqa: E402
 
 APP_TITLE = "DevOS AI"
 
@@ -71,7 +73,7 @@ SIDEBAR_W = 260
 COLUMN_MAX = 760
 NARROW = 900
 
-PLACEHOLDER = "Message DevOS AI…  (type, attach, or hold the mic)"
+PLACEHOLDER = "Message DevOS AI…  (type, attach, or tap the call mic)"
 ATTACH_FILTER = ("Images and documents (*.png *.jpg *.jpeg *.webp *.pdf *.txt *.md *.docx);;"
                  "Images (*.png *.jpg *.jpeg *.webp);;Documents (*.pdf *.txt *.md *.docx)")
 IMAGE_FILTER = "Images (*.png *.jpg *.jpeg *.webp)"
@@ -660,7 +662,7 @@ class SendButton(QtWidgets.QAbstractButton):
 
 
 class MicButton(QtWidgets.QAbstractButton):
-    """Click to toggle, or hold to talk. While recording: red with a pulsing ring."""
+    """Call button: tap to start/end a voice call with Mira. Red pulse while in call."""
     pressed_at = 0.0
 
     def __init__(self):
@@ -668,6 +670,7 @@ class MicButton(QtWidgets.QAbstractButton):
         self.setFixedSize(36, 36)
         self.setCursor(Qt.PointingHandCursor)
         self.recording = False
+        self.in_call = False
         self.level = 0.0
         self._hover = False
         self._t = 0.0
@@ -682,13 +685,19 @@ class MicButton(QtWidgets.QAbstractButton):
         self.setCursor(Qt.ArrowCursor if self.unavailable else Qt.PointingHandCursor)
         self.set_recording(self.recording)
 
+    def set_in_call(self, on):
+        self.in_call = bool(on)
+        self.set_recording(self.recording or self.in_call)
+
     def set_recording(self, on):
         self.recording = on
-        if self.unavailable and not on:
+        if self.unavailable and not on and not self.in_call:
             self.setToolTip(self.unavailable)
+        elif on or self.in_call:
+            self.setToolTip("End call — tap ■ (or Esc / say “Mira stop”). Pause while talking to auto-send.")
         else:
-            self.setToolTip("Stop listening (Esc)" if on else "Speak a command (click, or hold to talk)")
-        if on:
+            self.setToolTip("Start voice call (tap) · or say “Mira”")
+        if on or self.in_call:
             self._timer.start(33)
         else:
             self._timer.stop()
@@ -1633,9 +1642,13 @@ class Waveform(QtWidgets.QWidget):
 
     def _tick(self):
         self.shown = max(self.value, self.shown * 0.72)
-        jitter = 0.85 + 0.3 * ((time.monotonic() * 7.3) % 1.0)
-        self.levels.append(min(1.0, self.shown * jitter))
-        self.value *= 0.6
+        # Flat line when silent — no fake jitter from background.
+        if self.shown < 0.04:
+            self.levels.append(0.0)
+        else:
+            jitter = 0.9 + 0.2 * ((time.monotonic() * 7.3) % 1.0)
+            self.levels.append(min(1.0, self.shown * jitter))
+        self.value *= 0.55
         self.update()
 
     def paintEvent(self, _e):
@@ -1649,7 +1662,8 @@ class Waveform(QtWidgets.QWidget):
         vals = [0.0] * (n - len(vals)) + vals
         p.setBrush(accent_gradient(0, 0, w, 0, 230))
         for i, v in enumerate(vals):
-            bh = max(3.0, (h - 2) * v)
+            # Tiny floor only when there is real speech energy.
+            bh = (h - 2) * v if v >= 0.05 else 2.0
             p.drawRoundedRect(QtCore.QRectF(i * step + 1, (h - bh) / 2, 3, bh), 1.5, 1.5)
         p.end()
 
@@ -2277,8 +2291,9 @@ class Switch(QtWidgets.QAbstractButton):
 
 
 class HandsFreeRow(QtWidgets.QWidget):
-    """Sidebar footer: turn the "Hey DevOS" listener on or off."""
+    """Sidebar footer: wake-word listener (default name Mira) on or off."""
     toggled = QtCore.pyqtSignal(bool)
+    settings_clicked = QtCore.pyqtSignal()
 
     HINT_MS = 4000
 
@@ -2306,6 +2321,11 @@ class HandsFreeRow(QtWidgets.QWidget):
         self.switch.toggled.connect(self._changed)
         h.addWidget(self.switch)
         v.addLayout(h)
+        self.settings_btn = QtWidgets.QPushButton("Voice settings…")
+        self.settings_btn.setObjectName("ghost")
+        self.settings_btn.setCursor(Qt.PointingHandCursor)
+        self.settings_btn.clicked.connect(self.settings_clicked.emit)
+        v.addWidget(self.settings_btn)
         # one small inline hint under the switch (never a chat message); hides itself
         self.hint = QtWidgets.QLabel()
         self.hint.setObjectName("smartSub")
@@ -2318,18 +2338,31 @@ class HandsFreeRow(QtWidgets.QWidget):
         self._hint_timer.timeout.connect(self.hint.hide)
         self.available = True
         self.unavailable_reason = ""
-        self.setAccessibleName(listen.HANDS_FREE_LABEL)
-        self._tip = (listen.HANDS_FREE_LABEL + ", then your command — DevOS AI does it without opening this "
-                     "window. Listening happens on this PC only.\nAny time: press Meta+H and speak.")
-        self.setToolTip(self._tip)
+        self._refresh_tip()
         self._label(False)
+
+    def wake_name(self):
+        return voice_prefs.wake_name()
+
+    def _refresh_tip(self):
+        name = self.wake_name()
+        self.setAccessibleName(f"Hands-free: say “{name}”")
+        self._tip = (
+            f"Say “{name}” then your command — DevOS AI listens without tapping the mic. "
+            f"Listening stays on this PC.\nAny time: press Meta+H and speak. "
+            f"Change the name or voice in Voice settings."
+        )
+        self.setToolTip(self._tip)
 
     def _changed(self, on):
         self._label(on)
         self.toggled.emit(on)
 
     def _label(self, on):
-        self.sub.setText("On · “Hey DevOS”" if on else ("Say “Hey DevOS”" if self.available else "Not available"))
+        name = self.wake_name()
+        self.sub.setText(
+            f"On · say “{name}”" if on else (f"Say “{name}”" if self.available else "Not available")
+        )
         pm = QtGui.QPixmap(60, 60)
         pm.fill(Qt.transparent)
         pm.setDevicePixelRatio(2)
@@ -2346,6 +2379,7 @@ class HandsFreeRow(QtWidgets.QWidget):
 
     def set_on(self, on):
         self.switch.set_quiet(on)
+        self._refresh_tip()
         self._label(on)
 
     def set_available(self, ok, reason=""):
@@ -2356,6 +2390,7 @@ class HandsFreeRow(QtWidgets.QWidget):
         self.switch.set_dimmed(not ok)
         for w in (self.title, self.sub):
             w.setEnabled(bool(ok))
+        self._refresh_tip()
         tip = self._tip if ok else self.unavailable_reason
         self.setToolTip(tip)
         self.switch.setToolTip(tip)
@@ -2368,6 +2403,97 @@ class HandsFreeRow(QtWidgets.QWidget):
         self.hint.setText(text)
         self.hint.show()
         self._hint_timer.start(self.HINT_MS)
+
+
+class VoiceSettingsDialog(QtWidgets.QDialog):
+    """Wake name, voice gender/language, and a Play sample button."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("DevOS AI · Voice settings")
+        self.setModal(True)
+        self.resize(440, 420)
+        prefs = voice_prefs.load()
+        root = QtWidgets.QVBoxLayout(self)
+        root.setSpacing(12)
+
+        root.addWidget(QtWidgets.QLabel("Wake name (say this to start listening)"))
+        self.name_edit = QtWidgets.QLineEdit(str(prefs.get("wake_name") or "Mira"))
+        self.name_edit.setPlaceholderText("Mira")
+        root.addWidget(self.name_edit)
+
+        self.hands = QtWidgets.QCheckBox("Listen for the wake name without tapping the microphone")
+        self.hands.setChecked(bool(prefs.get("hands_free")))
+        root.addWidget(self.hands)
+
+        root.addWidget(QtWidgets.QLabel("Spoken reply voice"))
+        gender_row = QtWidgets.QHBoxLayout()
+        self.gender_female = QtWidgets.QRadioButton("Female")
+        self.gender_male = QtWidgets.QRadioButton("Male")
+        if str(prefs.get("tts_gender")) == "male":
+            self.gender_male.setChecked(True)
+        else:
+            self.gender_female.setChecked(True)
+        gender_row.addWidget(self.gender_female)
+        gender_row.addWidget(self.gender_male)
+        gender_row.addStretch(1)
+        root.addLayout(gender_row)
+
+        root.addWidget(QtWidgets.QLabel("Reply language"))
+        self.lang = QtWidgets.QComboBox()
+        self.lang.addItem("Match what I speak (recommended)", "auto")
+        self.lang.addItem("Always English", "en")
+        self.lang.addItem("Always Bangla (better Bangla listening)", "bn")
+        cur = str(prefs.get("tts_language") or "auto")
+        idx = max(0, self.lang.findData(cur))
+        self.lang.setCurrentIndex(idx)
+        root.addWidget(self.lang)
+
+        root.addWidget(QtWidgets.QLabel("Test this voice"))
+        test_row = QtWidgets.QHBoxLayout()
+        self.test_lang = QtWidgets.QComboBox()
+        self.test_lang.addItem("English sample", "en")
+        self.test_lang.addItem("Bangla sample", "bn")
+        test_row.addWidget(self.test_lang, 1)
+        self.test_btn = QtWidgets.QPushButton("Play sample")
+        self.test_btn.clicked.connect(self._play_sample)
+        test_row.addWidget(self.test_btn)
+        root.addLayout(test_row)
+        self.test_status = QtWidgets.QLabel("")
+        self.test_status.setWordWrap(True)
+        root.addWidget(self.test_status)
+
+        tip = QtWidgets.QLabel(
+            "When wake listening is on, say your wake name (default Mira), then the command. "
+            "If you speak Bangla, Mira replies in Bangla."
+        )
+        tip.setWordWrap(True)
+        tip.setObjectName("smartSub")
+        root.addWidget(tip)
+        root.addStretch(1)
+
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Save | QtWidgets.QDialogButtonBox.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        root.addWidget(buttons)
+
+    def _play_sample(self):
+        gender = "male" if self.gender_male.isChecked() else "female"
+        lang = self.test_lang.currentData()
+        self.test_status.setText("Playing…")
+        QtWidgets.QApplication.processEvents()
+        ok, msg = voice_prefs.play_test(lang, gender)
+        self.test_status.setText(msg if ok else ("Could not play: " + msg))
+
+    def values(self):
+        return {
+            "wake_name": self.name_edit.text().strip() or "Mira",
+            "hands_free": self.hands.isChecked(),
+            "tts_gender": "male" if self.gender_male.isChecked() else "female",
+            "tts_language": self.lang.currentData(),
+        }
 
 
 class Sidebar(QtWidgets.QWidget):
@@ -2770,6 +2896,9 @@ class AssistantWindow(QtWidgets.QWidget):
         self._voice_reason = ""
         self._voice_checking = False
         self._hands_free_told = False   # "Hands-free is on" confirmation: once per session
+        self._speak_reply = False       # True when this turn came from the mic — speak the answer
+        self._stream_speaker = None     # speaks sentences while the answer is still typing
+        self._call_active = False       # continuous voice call (mic ↔ Mira)
         self._query = ""
         self._handle = None
         self._stream_row = None
@@ -2804,6 +2933,8 @@ class AssistantWindow(QtWidgets.QWidget):
         self.sidebar.smart.clicked.connect(self.smarter_ai)
         self.sidebar.hands_free.set_on(listen.hands_free_enabled())
         self.sidebar.hands_free.toggled.connect(self.set_hands_free)
+        self.sidebar.hands_free.settings_clicked.connect(self.open_voice_settings)
+        self._voice_reply_lang = None  # set for mic turns so replies match spoken language
 
         self.main = MainArea(self)
         root = QtWidgets.QVBoxLayout(self.main)
@@ -2901,8 +3032,8 @@ class AssistantWindow(QtWidgets.QWidget):
         tb.addWidget(self.attach_btn)
         tb.addStretch(1)
         self.mic_btn = MicButton()
-        self.mic_btn.pressed.connect(self._mic_pressed)
-        self.mic_btn.released.connect(self._mic_released)
+        self.mic_btn.clicked.connect(self._mic_clicked)
+        self.mic_btn.pressed.connect(self._mic_mark_press)
         tb.addWidget(self.mic_btn)
         tb.addSpacing(4)
         self.send_btn = SendButton()
@@ -3058,6 +3189,12 @@ class AssistantWindow(QtWidgets.QWidget):
         self._voice_reason = "" if ok else (reason or voice.VOICE_UNAVAILABLE_TEXT)
         self.mic_btn.set_unavailable(self._voice_reason)
         self.sidebar.hands_free.set_available(ok, self._voice_reason)
+        if ok:
+            # Warm neural TTS while the window is open so the first reply speaks ASAP.
+            try:
+                voice.warm_tts(voice_prefs.tts_language_pref() if voice_prefs.tts_language_pref() in ("en", "bn") else "en")
+            except Exception:
+                voice.warm_tts("en")
 
     def _voice_usable(self):
         if self._voice_ok is None:          # first click before the background check finished
@@ -3125,9 +3262,18 @@ class AssistantWindow(QtWidgets.QWidget):
             if hist is not self.history:
                 return
             self._stream_text += piece
+            # Feed TTS immediately — do not wait for the chat bubble / whole words.
+            if self._speak_reply:
+                if self._stream_speaker is None:
+                    lang = self._voice_reply_lang or voice.reply_language(self._stream_text or "")
+                    self._stream_speaker = voice.StreamSpeaker()
+                    self._stream_speaker.start(language=lang)
+                self._stream_speaker.feed_delta_total(self._stream_text)
             if self._stream_row is None:
                 preview = engine.stream_preview(self._stream_text)
                 if not preview:
+                    if not self._stream_timer.isActive():
+                        self._stream_timer.start(33)
                     return
                 self.hide_thinking()
                 self._stream_row = self._add_row(StreamingRow())
@@ -3139,6 +3285,8 @@ class AssistantWindow(QtWidgets.QWidget):
     def _flush_stream(self):
         if self._stream_row is not None:
             self._stream_row.set_markdown(engine.stream_preview(self._stream_text))
+        if self._stream_speaker is not None and self._stream_text:
+            self._stream_speaker.feed_delta_total(self._stream_text)
 
     def _end_stream(self):
         self._stream_timer.stop()
@@ -3151,6 +3299,28 @@ class AssistantWindow(QtWidgets.QWidget):
             row.setParent(None)
             row.deleteLater()
         return row is not None
+
+    def _finish_stream_speech(self, final_md=None):
+        """Flush leftover speech only — never start a second full read-aloud."""
+        sp = self._stream_speaker
+        self._stream_speaker = None
+        if sp is None:
+            return False
+        used = bool(sp.used)
+        # Feed the final answer so the tail is never dropped when streaming ended early.
+        if final_md:
+            try:
+                sp.feed_delta_total(final_md)
+            except Exception:
+                pass
+
+        def done(_r):
+            # Resume call listening only after speech fully finishes.
+            if self._call_active:
+                QtCore.QTimer.singleShot(350, self._continue_call_listen)
+
+        self._run(lambda _w: sp.finish(), done, track_busy=False)
+        return used
 
     def _on_scroll(self, v):
         if self._scroll_anim is not None and self._scroll_anim.state() == QtCore.QAbstractAnimation.Running:
@@ -3481,7 +3651,7 @@ class AssistantWindow(QtWidgets.QWidget):
 
     # -- sending ------------------------------------------------------------
 
-    def send(self, text=None):
+    def send(self, text=None, from_voice=False):
         if self.busy:
             return
         if not isinstance(text, str):
@@ -3490,11 +3660,39 @@ class AssistantWindow(QtWidgets.QWidget):
         files = list(self.attachments)
         if not text and not files:
             return
+        self._speak_reply = bool(from_voice)
+        if self._stream_speaker is not None:
+            self._stream_speaker.stop()
+            self._stream_speaker = None
+        # Warm TTS immediately on mic turns so speech doesn't wait 3–5s after text.
+        if from_voice:
+            spoken = getattr(self, "_last_spoken_lang", None) or voice.Transcriber.last_language
+            lang = voice_prefs.resolve_reply_language(spoken, text or "")
+            self._voice_reply_lang = lang
+            self._stream_speaker = voice.StreamSpeaker()
+            self._stream_speaker.start(language=lang)
+        else:
+            # Typed: still honour Always EN/BN preference for the model reply.
+            pref = voice_prefs.tts_language_pref()
+            self._voice_reply_lang = pref if pref in ("en", "bn") else voice.reply_language(text or "")
         self.input.clear()
         self.clear_files()
+        # Typed action commands (open Chrome, search, …) run quietly — no chat clutter.
+        # Voice turns always show the user bubble so they see what was heard.
+        plan_preview = None
+        if text and not files and not from_voice:
+            plan_preview = self.assistant.plan(text, self.history)
+            if (plan_preview.actions
+                    and not plan_preview.leftover
+                    and all(a.name in voice.SILENT_ACTIONS for a in plan_preview.actions)):
+                try:
+                    self._dispatch(text, files, quiet_actions=True)
+                except Exception as exc:
+                    self._worker_failed(str(exc) or exc.__class__.__name__)
+                return
         self.add_user(text, files)
         try:
-            self._dispatch(text, files)
+            self._dispatch(text, files, quiet_actions=False)
         except Exception as exc:
             self._worker_failed(str(exc) or exc.__class__.__name__)
 
@@ -3507,11 +3705,11 @@ class AssistantWindow(QtWidgets.QWidget):
                 return paths
         return []
 
-    def _dispatch(self, text, files):
+    def _dispatch(self, text, files, quiet_actions=False):
         hist = self.history
-        on_replies = self._replies_for(hist)
+        on_replies = self._replies_for(hist, quiet=quiet_actions)
         handle = engine.StreamHandle()
-        on_delta = self._delta_for(hist)
+        on_delta = None if quiet_actions else self._delta_for(hist)
         if not files and text:
             # If the user asks to reread or check the image/document from history
             if re.search(r"\b(?:re-?read|read\s+again|check\s+again|look\s+again|from\s+history|re-?process)\b", text, re.I):
@@ -3528,10 +3726,12 @@ class AssistantWindow(QtWidgets.QWidget):
             actions = []
             for a in plan.actions:
                 if a.confirm and not self.confirm(a.confirm, a.label):
-                    self.add_bot(f"Okay, I won't {a.label[:1].lower() + a.label[1:]}.")
+                    if not quiet_actions:
+                        self.add_bot(f"Okay, I won't {a.label[:1].lower() + a.label[1:]}.")
                     continue
                 actions.append(a)
             if not actions:
+                self._speak_reply = False
                 return
             self._schedule_in_app_reminders(actions)
             if any(a.name == "type_text" for a in actions):
@@ -3541,33 +3741,63 @@ class AssistantWindow(QtWidgets.QWidget):
                     if a.name == "type_text":
                         a.args["avoid_window"] = str(int(self.winId()))
                 self.showMinimized()
-            self.show_thinking("Working on it")
+            if not quiet_actions:
+                self.show_thinking("Working on it")
             self._handle = handle
+            # Pure do-it actions from voice still should not be narrated ("Opening Chrome…").
+            if self._speak_reply and not plan.leftover and all(a.name in voice.SILENT_ACTIONS for a in actions):
+                self._speak_reply = False
             self._run(lambda w: self.assistant.run_actions(actions, text, plan.leftover, hist,
-                                                           on_delta=w.delta.emit, cancel=handle),
+                                                           on_delta=(None if quiet_actions else w.delta.emit),
+                                                           cancel=handle),
                       on_replies, on_delta=on_delta)
             return
         self.show_thinking()
         self._handle = handle
-        self._run(lambda w: [self.assistant.chat(text, hist, on_delta=w.delta.emit, cancel=handle)], on_replies,
-                  on_delta=on_delta)
+        reply_lang = self._voice_reply_lang
+        self._run(
+            lambda w: [self.assistant.chat(
+                text, hist, on_delta=w.delta.emit, cancel=handle, reply_lang=reply_lang,
+            )],
+            on_replies,
+            on_delta=on_delta,
+        )
 
-    def _replies_for(self, hist):
+    def _replies_for(self, hist, quiet=False):
+        speak = self._speak_reply
         def done(replies):
             self._handle = None
+            self._speak_reply = False
             self._update_send()
+            if quiet:
+                # Typed "go to Chrome and search…" — action already ran; no chat cards.
+                self.hide_thinking()
+                self._end_stream()
+                self.input.setFocus()
+                return
             if hist is not self.history:      # the user switched chats meanwhile
                 for r in replies or []:
                     hist.add("assistant", r.text, **({} if r.ok else {"ok": False}))
                 self._save(hist)
                 return
-            self._replies(replies)
+            self._replies(replies, speak=speak)
         return done
 
-    def _replies(self, replies):
+    def _replies(self, replies, speak=False):
         self.hide_thinking()
-        streamed = self._end_stream()
         replies = list(replies or [])
+        final_md = ""
+        for r in replies:
+            if r.ok and getattr(r, "source", "") in ("model", "tool", ""):
+                final_md = r.text or final_md
+        streamed = self._end_stream()
+        # If we streamed speech live, only flush the tail — do NOT read the whole
+        # answer again (that caused the same reply to be spoken multiple times).
+        streamed_speech = self._finish_stream_speech(final_md) if speak else False
+        if not speak and self._stream_speaker is not None:
+            self._stream_speaker.stop()
+            self._stream_speaker = None
+        spoken_parts = []
         for i, r in enumerate(replies):
             if hasattr(r, "data") and isinstance(r.data, dict) and r.data.get("clipboard"):
                 try:
@@ -3578,6 +3808,20 @@ class AssistantWindow(QtWidgets.QWidget):
             still = streamed and i == len(replies) - 1 and getattr(r, "source", "") == "model"
             self.add_bot(r.text, ok=r.ok, buttons=r.buttons, animate=not still,
                          level="info" if r.text == "Stopped." else None)
+            if speak and not streamed_speech and r.ok and getattr(r, "source", "") in ("model", "tool", ""):
+                plain = voice.plain_for_speech(r.text or "")
+                if plain and not re.match(r"^(Opening|Saved to|Typing)\b", plain, re.I):
+                    spoken_parts.append(plain)
+        if speak and spoken_parts and not streamed_speech:
+            to_say = " ".join(spoken_parts)
+
+            def spoken_done(_r):
+                if self._call_active:
+                    QtCore.QTimer.singleShot(350, self._continue_call_listen)
+
+            self._run(lambda _w: voice.speak_reply(to_say), spoken_done, track_busy=False)
+        elif self._call_active and speak and not streamed_speech:
+            QtCore.QTimer.singleShot(400, self._continue_call_listen)
         self.input.setFocus()
 
     def _last_prompt(self):
@@ -3742,34 +3986,98 @@ class AssistantWindow(QtWidgets.QWidget):
             self.check_status()
         self._run(job, done, fail, track_busy=False, on_progress=prog)
 
-    # -- voice --------------------------------------------------------------
+    # -- voice / call -------------------------------------------------------
 
-    def _mic_pressed(self):
+    def _mic_mark_press(self):
         MicButton.pressed_at = time.monotonic()
+
+    def _mic_clicked(self):
+        """Tap mic/■ — start call, or hang up immediately while in a call."""
+        # In a call, ■ always hangs up (no need to say “Mira stop”).
+        if self._call_active:
+            self.end_call(say=True)
+            MicButton.pressed_at = 0.0
+            return
+        # One-shot listen (not a call): cancel this take — don't show “didn't catch that”.
         if self.recorder is not None:
+            self._discard_voice_result = True
             self.stop_listening()
             MicButton.pressed_at = 0.0
             return
-        self.start_listening()
-
-    def _mic_released(self):
-        # held for a while -> push-to-talk: releasing stops
-        if self.recorder is not None and MicButton.pressed_at and time.monotonic() - MicButton.pressed_at > 0.6:
-            self.stop_listening()
+        self.start_call()
+        MicButton.pressed_at = 0.0
 
     def _listening_ui_on(self):
         self.mic_btn.set_recording(True)
+        self.mic_btn.set_in_call(self._call_active)
         self.input.hide()
         self.rec_bar.show()
         self.rec_bar.start()
+        if self._call_active:
+            self.rec_bar.label.setText("Call · waiting for you to speak…")
 
-    def start_listening(self):
+    def start_call(self):
+        """Phone-style voice call: listen → Mira speaks → listen again until hang-up."""
         if not self._voice_usable():
-            # a transient note by the mic, never a chat message (clicking again must not pile up cards)
             self.toast.show_for(self.mic_btn, self._voice_reason + " You can still type your request.",
                                 above=self.composer)
             return
-        rec = voice.Recorder()
+        self._call_active = True
+        self._call_misses = 0
+        self.mic_btn.set_in_call(True)
+        # Free the mic: pause the always-on Mira daemon while this call owns it.
+        try:
+            listen.save_config(paused=True)
+        except Exception:
+            pass
+        name = voice_prefs.wake_name()
+        self.toast.show_for(
+            self.mic_btn,
+            f"Call started — speak, then pause to send. Tap ■ to hang up (or say “{name} stop”).",
+            above=self.composer,
+        )
+        self.start_listening()
+
+    def end_call(self, say=False):
+        was = self._call_active
+        self._call_active = False
+        self._call_misses = 0
+        self.mic_btn.set_in_call(False)
+        # Hang-up stops the in-flight recorder; ignore its empty/failed result so we
+        # don't flash “I didn't catch that…” right after “Call ended.”
+        if self.recorder is not None:
+            self._discard_voice_result = True
+        self.stop_listening()
+        if self._stream_speaker is not None:
+            self._stream_speaker.stop()
+            self._stream_speaker = None
+        try:
+            voice._stop_speech()
+        except Exception:
+            pass
+        # Give the mic back to hands-free Mira if it was on.
+        try:
+            if listen.hands_free_enabled():
+                listen.save_config(paused=False)
+        except Exception:
+            pass
+        self._listening_ui_off()
+        if was and say:
+            self.add_bot("Call ended.", ok=False, save=False, level="ok")
+
+    def _continue_call_listen(self):
+        if not self._call_active or self.busy or self.recorder is not None:
+            return
+        self.start_listening()
+
+    def start_listening(self):
+        if not self._voice_usable():
+            self.toast.show_for(self.mic_btn, self._voice_reason + " You can still type your request.",
+                                above=self.composer)
+            return
+        if self.recorder is not None:
+            return
+        rec = voice.Recorder(call_mode=bool(self._call_active))
         self.recorder = rec
         self._listening_ui_on()
 
@@ -3779,7 +4087,8 @@ class AssistantWindow(QtWidgets.QWidget):
             if problem or not pcm:
                 return "", problem or "Nothing was recorded."
             w.level.emit(-1.0)
-            return voice.fix_transcript(voice.Transcriber.transcribe(pcm)), ""
+            text = voice.fix_transcript(voice.Transcriber.transcribe(pcm))
+            return text, "", voice.Transcriber.last_language or ""
 
         def level(v):
             if v < 0:
@@ -3787,25 +4096,85 @@ class AssistantWindow(QtWidgets.QWidget):
                 self.rec_bar.set_level(0)
                 self.mic_btn.set_level(0)
                 return
+            if self._call_active:
+                if v >= 0.35:
+                    self.rec_bar.label.setText("Call · hearing you… (pause to send · ■ hang up)")
+                elif v >= 0.12:
+                    self.rec_bar.label.setText("Call · listening…")
+                else:
+                    self.rec_bar.label.setText("Call · speak now, then pause · ■ to hang up")
             self.rec_bar.set_level(v)
             self.mic_btn.set_level(v)
 
         def done(res):
             self._listening_ui_off()
-            text, problem = res
+            discard = bool(getattr(self, "_discard_voice_result", False))
+            self._discard_voice_result = False
+            self.recorder = None
+            if discard:
+                return
+            if len(res) == 3:
+                text, problem, spoken_lang = res
+            else:
+                text, problem = res
+                spoken_lang = ""
             if problem:
-                self.add_bot(problem, ok=False, save=False)
+                if self._call_active:
+                    self._call_misses = getattr(self, "_call_misses", 0) + 1
+                    if self._call_misses >= 3:
+                        self.toast.show_for(
+                            self.mic_btn,
+                            "Still no speech — talk closer to the mic, then pause. Tap ■ to hang up.",
+                            above=self.composer,
+                        )
+                        self._call_misses = 0
+                        QtCore.QTimer.singleShot(1200, self._continue_call_listen)
+                    else:
+                        QtCore.QTimer.singleShot(700, self._continue_call_listen)
+                else:
+                    self.add_bot(problem, ok=False, save=False)
                 return
             if not text:
-                self.add_bot("I didn't catch that. Try again, a little closer to the microphone.", ok=False,
-                             save=False)
+                if self._call_active:
+                    self._call_misses = getattr(self, "_call_misses", 0) + 1
+                    QtCore.QTimer.singleShot(500, self._continue_call_listen)
+                else:
+                    self.add_bot("I didn't catch that. Try again, a little closer to the microphone.",
+                                 ok=False, save=False)
                 return
+            self._call_misses = 0
+            if voice_prefs.is_stop_phrase(text):
+                self.end_call(say=True)
+                return
+            woke, rest = voice_prefs.match_wake_name(text)
+            # In an active call, bare "Mira" is not a command — keep listening.
+            if woke and not rest:
+                if not self._call_active:
+                    self.start_call()
+                else:
+                    QtCore.QTimer.singleShot(300, self._continue_call_listen)
+                return
+            if woke and rest:
+                text = rest
+            self._last_spoken_lang = spoken_lang or voice.guess_language(text)
+            # Always answer this turn, then (_replies) starts listening again.
+            if self._call_active:
+                self.rec_bar.hide()
+                self.input.show()
             self.input.setPlainText(text)
-            QtCore.QTimer.singleShot(350, self.send)
+            QtCore.QTimer.singleShot(150, lambda t=text: self.send(t, from_voice=True))
 
         def fail(msg):
             self._listening_ui_off()
-            self.add_bot(f"Voice input stopped: {msg}", ok=False, save=False, level="error")
+            discard = bool(getattr(self, "_discard_voice_result", False))
+            self._discard_voice_result = False
+            self.recorder = None
+            if discard:
+                return
+            if self._call_active:
+                QtCore.QTimer.singleShot(800, self._continue_call_listen)
+            else:
+                self.add_bot(f"Voice input stopped: {msg}", ok=False, save=False, level="error")
 
         self.voice_worker = self._run(job, done, fail, track_busy=False, on_level=level)
 
@@ -3825,18 +4194,46 @@ class AssistantWindow(QtWidgets.QWidget):
             row.set_on(False)
             row.show_hint("Hands-free works after DevOS is installed on this PC.")
             return
+        name = voice_prefs.wake_name()
         listen.save_config(hands_free=bool(on), paused=False)
+        voice_prefs.save(hands_free=bool(on), paused=False)
         if not on:
             row.hint.hide()
         if on:
             tools.popen_detached([tools.PYTHON, os.path.join(HERE, "listen.py"), "--daemon"])
             if not self._hands_free_told:   # explain once per session, not on every toggle
                 self._hands_free_told = True
-                self.add_bot("Hands-free is on. Say **“Hey DevOS”** and then your command, for example "
-                             "“Hey DevOS, open Chrome”. A microphone icon in the panel shows it's listening; "
-                             "turn it off here or from that icon.", ok=False, save=False, level="ok")
+                self.add_bot(
+                    f"Hands-free is on. Say **“{name}”** then your command, for example "
+                    f"“{name}, open Chrome”. Speak Bangla and the reply is Bangla. "
+                    f"Change the name under **Voice settings**.",
+                    ok=False, save=False, level="ok",
+                )
             else:
-                row.show_hint("Hands-free is on.", ok=True)
+                row.show_hint(f"Listening for “{name}”.", ok=True)
+
+    def open_voice_settings(self):
+        dlg = VoiceSettingsDialog(self)
+        if dlg.exec_() != QtWidgets.QDialog.Accepted:
+            return
+        vals = dlg.values()
+        was_on = listen.hands_free_enabled()
+        voice_prefs.save(**vals)
+        listen.save_config(**vals)
+        self.sidebar.hands_free.set_on(bool(vals.get("hands_free")))
+        # Restart listener if wake name / hands-free changed while on
+        if vals.get("hands_free"):
+            if was_on:
+                # bounce daemon so it reloads wake name
+                subprocess.run(
+                    ["pkill", "-f", "listen.py --daemon"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+            self.set_hands_free(True)
+        elif was_on:
+            self.set_hands_free(False)
+        name = voice_prefs.wake_name()
+        self.sidebar.hands_free.show_hint(f"Saved. Wake name is “{name}”.", ok=True)
 
     def _schedule_in_app_reminders(self, actions):
         """Reminders also pop up here while the window stays open (the desktop notification fires anyway)."""
@@ -3859,6 +4256,8 @@ class AssistantWindow(QtWidgets.QWidget):
     def _listening_ui_off(self):
         self.recorder = None
         self.mic_btn.set_recording(False)
+        if not self._call_active:
+            self.mic_btn.set_in_call(False)
         self.mic_btn.set_level(0)
         self.rec_bar.stop()
         self.rec_bar.hide()
@@ -3878,8 +4277,8 @@ class AssistantWindow(QtWidgets.QWidget):
         self.sidebar.search.selectAll()
 
     def escape(self):
-        if self.recorder is not None:
-            self.stop_listening()
+        if self._call_active or self.recorder is not None:
+            self.end_call(say=bool(self._call_active))
         elif self._handle is not None and self.busy:
             self.stop_generation()
         elif self.drop.isVisible():
@@ -3892,7 +4291,7 @@ class AssistantWindow(QtWidgets.QWidget):
             self.input.setFocus()
 
     def closeEvent(self, e):
-        self.stop_listening()
+        self.end_call(say=False)
         if self.history.messages:
             self.history.save()
         super().closeEvent(e)
@@ -3925,6 +4324,9 @@ def main(argv=None):
         ask = " ".join(argv[i + 1:i + 2]).strip()
         if ask:
             QtCore.QTimer.singleShot(400, lambda: win.send(ask))
+    # Hands-free “Mira” with no command → start a voice call
+    if "--call" in argv:
+        QtCore.QTimer.singleShot(500, win.start_call)
     return app.exec_()
 
 

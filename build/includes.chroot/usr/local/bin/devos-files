@@ -25,6 +25,7 @@ import argparse
 import fnmatch
 import shlex
 import tempfile
+import threading
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -48,6 +49,7 @@ try:
     )
     from PyQt5.QtGui import (
         QBrush,
+        QClipboard,
         QColor,
         QDrag,
         QFont,
@@ -91,6 +93,7 @@ try:
         QRadioButton,
         QRubberBand,
         QScrollArea,
+        QShortcut,
         QSizePolicy,
         QSplitter,
         QStackedWidget,
@@ -99,6 +102,7 @@ try:
         QTableWidget,
         QTableWidgetItem,
         QTabWidget,
+        QTextEdit,
         QToolButton,
         QTreeWidget,
         QTreeWidgetItem,
@@ -720,13 +724,17 @@ def load_storage_insight():
     return None
 
 
+_STORAGE_INSIGHT_LOCK = threading.Lock()
+
+
 def get_storage_insight(mount="/", max_age=90.0):
     """Cached OS-vs-user storage breakdown for This PC / Properties."""
     import time
     now = time.time()
-    cached = _STORAGE_INSIGHT_CACHE.get("report")
-    if cached and (now - _STORAGE_INSIGHT_CACHE.get("ts", 0)) < max_age:
-        return cached
+    with _STORAGE_INSIGHT_LOCK:
+        cached = _STORAGE_INSIGHT_CACHE.get("report")
+        if cached and (now - _STORAGE_INSIGHT_CACHE.get("ts", 0)) < max_age:
+            return cached
     mod = load_storage_insight()
     if not mod:
         return None
@@ -734,8 +742,9 @@ def get_storage_insight(mount="/", max_age=90.0):
         report = mod.analyze(mount=mount)
     except Exception:
         return None
-    _STORAGE_INSIGHT_CACHE["ts"] = now
-    _STORAGE_INSIGHT_CACHE["report"] = report
+    with _STORAGE_INSIGHT_LOCK:
+        _STORAGE_INSIGHT_CACHE["ts"] = time.time()
+        _STORAGE_INSIGHT_CACHE["report"] = report
     return report
 
 
@@ -1049,9 +1058,191 @@ def list_drives():
 
 
 def open_file_with_default(path):
-    """Open file using xdg-open."""
-    if os.path.exists(path):
+    """Open with the default app — text files go straight to DevOS Notepad (raised)."""
+    if not os.path.exists(path):
+        return
+    ext = os.path.splitext(path)[1].lower()
+    # Double-click .txt/.md should surface Notepad immediately (not hide behind Files).
+    if ext in (".txt", ".text", ".log", ".md", ".markdown", ".csv", ".ini", ".cfg",
+               ".conf", ".env", ".json", ".xml", ".yaml", ".yml", ".toml"):
+        candidates = [
+            ["devos-notepad", path],
+            [sys.executable, "/usr/local/share/devos/components/notepad/notepad.py", path],
+            [sys.executable, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                         "share", "devos", "components", "notepad", "notepad.py"), path],
+            [sys.executable, os.path.expanduser("~/project/dev-os/components/notepad/notepad.py"), path],
+        ]
+        for cmd in candidates:
+            try:
+                if cmd[0] == "devos-notepad" and not shutil.which("devos-notepad"):
+                    continue
+                if cmd[0] == sys.executable and not os.path.isfile(cmd[1]):
+                    continue
+                subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return
+            except OSError:
+                continue
+    try:
         subprocess.Popen(["xdg-open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        pass
+
+
+def _looks_like_plain_text(data: bytes) -> bool:
+    """Reject binary clipboard payloads (e.g. PNG screenshots) mistaken for text."""
+    if not data:
+        return False
+    if data.startswith(b"\x89PNG") or data.startswith(b"\xff\xd8\xff") or data.startswith(b"GIF8"):
+        return False
+    sample = data[:64]
+    if b"\x00" in sample:
+        return False
+    try:
+        sample.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    return True
+
+
+def clipboard_text() -> str:
+    """Plain text from CLIPBOARD or PRIMARY (Qt → Wayland text MIME → X11).
+
+    Other apps often still paste while Files sees nothing: Chrome/Wayland may
+    leave text on PRIMARY after a select, or CLIPBOARD may only hold a screenshot
+    (`image/png`) which makes Qt gray out Paste in QLineEdit.
+    """
+    try:
+        clip = QApplication.clipboard()
+        text = clip.text() or ""
+        if text and not text.startswith("\x89PNG"):
+            return text
+        # Also check Qt's selection (PRIMARY) buffer.
+        text = clip.text(QClipboard.Selection) or ""
+        if text:
+            return text
+    except Exception:
+        pass
+
+    commands = (
+        ["wl-paste", "-t", "text", "--no-newline"],
+        ["wl-paste", "-t", "text/plain", "--no-newline"],
+        ["wl-paste", "-t", "text/plain;charset=utf-8", "--no-newline"],
+        ["wl-paste", "--primary", "-t", "text", "--no-newline"],
+        ["wl-paste", "--primary", "-t", "text/plain", "--no-newline"],
+        ["xclip", "-selection", "clipboard", "-o"],
+        ["xclip", "-selection", "primary", "-o"],
+        ["xsel", "--clipboard", "--output"],
+        ["xsel", "--primary", "--output"],
+    )
+    for cmd in commands:
+        try:
+            out = subprocess.check_output(cmd, stderr=subprocess.DEVNULL, timeout=1.5)
+        except Exception:
+            continue
+        if not _looks_like_plain_text(out):
+            continue
+        text = out.decode("utf-8", errors="replace").strip("\x00")
+        if text:
+            return text
+    return ""
+
+
+def sync_clipboard_text_into_qt() -> str:
+    """Pull system text into Qt CLIPBOARD so the stock Paste menu enables."""
+    text = clipboard_text()
+    if not text:
+        return ""
+    try:
+        clip = QApplication.clipboard()
+        # Don't clobber a real text clipboard with the same value unnecessarily,
+        # but do replace empty / image-only Qt state.
+        current = clip.text() or ""
+        if current != text:
+            clip.setText(text)
+    except Exception:
+        pass
+    return text
+
+
+def focus_is_text_input(widget=None) -> bool:
+    """True when keystrokes should go to a text field, not file Cut/Copy/Paste."""
+    w = widget
+    if w is None:
+        try:
+            w = QApplication.focusWidget()
+        except Exception:
+            return False
+    while w is not None:
+        if isinstance(w, (QLineEdit, QTextEdit, QPlainTextEdit)):
+            return True
+        if w.isWindow() and w is not QApplication.activeWindow():
+            break
+        try:
+            w = w.parentWidget()
+        except Exception:
+            break
+    return False
+
+
+def prompt_name_dialog(parent, title: str, label: str, initial: str,
+                       select_stem: bool = False) -> Optional[str]:
+    """Name prompt that focuses the field and accepts Ctrl+V / context Paste."""
+    dlg = QDialog(parent)
+    dlg.setWindowTitle(title)
+    dlg.setMinimumWidth(320)
+    layout = QVBoxLayout(dlg)
+    layout.addWidget(QLabel(label))
+    edit = QLineEdit(initial)
+    edit.setClearButtonEnabled(True)
+    edit.setContextMenuPolicy(Qt.CustomContextMenu)
+    layout.addWidget(edit)
+    btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+    btns.accepted.connect(dlg.accept)
+    btns.rejected.connect(dlg.reject)
+    layout.addWidget(btns)
+
+    def _paste_into_edit():
+        text = sync_clipboard_text_into_qt()
+        if not text:
+            return
+        line = text.splitlines()[0].strip()
+        if line:
+            edit.insert(line)
+
+    def _context_menu(pos):
+        # Rebuild menu so Paste is enabled when PRIMARY/Wayland has text even if
+        # Qt's clipboard only holds a screenshot.
+        sync_clipboard_text_into_qt()
+        menu = edit.createStandardContextMenu()
+        for action in menu.actions():
+            if action.shortcut() == QKeySequence.Paste or "Paste" in (action.text() or ""):
+                action.setEnabled(bool(clipboard_text()))
+                try:
+                    action.triggered.disconnect()
+                except Exception:
+                    pass
+                action.triggered.connect(_paste_into_edit)
+                break
+        menu.exec_(edit.mapToGlobal(pos))
+
+    def _select():
+        sync_clipboard_text_into_qt()
+        edit.setFocus(Qt.OtherFocusReason)
+        if select_stem and "." in (edit.text() or ""):
+            edit.setSelection(0, edit.text().rfind("."))
+        else:
+            edit.selectAll()
+
+    edit.customContextMenuRequested.connect(_context_menu)
+
+    sc = QShortcut(QKeySequence.Paste, edit)
+    sc.setContext(Qt.WidgetWithChildrenShortcut)
+    sc.activated.connect(_paste_into_edit)
+
+    QTimer.singleShot(0, _select)
+    if dlg.exec_() != QDialog.Accepted:
+        return None
+    return (edit.text() or "").strip() or None
 
 
 def open_pc_properties():
@@ -1506,7 +1697,16 @@ class DriveCard(QFrame):
         row.addLayout(text_layout, 1)
 
     def _load_insight(self):
-        report = get_storage_insight(mount=self.drive.get("mount") or "/")
+        # Never block This PC open — disk sizing runs in a worker thread.
+        mount = self.drive.get("mount") or "/"
+
+        def work():
+            report = get_storage_insight(mount=mount)
+            QTimer.singleShot(0, lambda: self._apply_insight(report))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _apply_insight(self, report):
         if not report:
             return
         self.insight.setText(report.get("summary") or "")
@@ -1926,6 +2126,11 @@ class BreadcrumbBar(QWidget):
 class ExplorerTableItem(QTableWidgetItem):
     """Custom table item ensuring folders always sort above files."""
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Never inline-edit on double-click — that must open the file like Windows.
+        self.setFlags(self.flags() & ~Qt.ItemIsEditable)
+
     def __lt__(self, other):
         is_dir_self = bool(self.data(Qt.UserRole + 1))
         is_dir_other = bool(other.data(Qt.UserRole + 1))
@@ -1955,6 +2160,7 @@ class ExplorerTableWidget(QTableWidget):
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.setDefaultDropAction(Qt.CopyAction)
+        self.setEditTriggers(QAbstractItemView.NoEditTriggers)
 
         self._drag_start_pos = None
         self._drag_item_was_selected = False
@@ -1962,16 +2168,24 @@ class ExplorerTableWidget(QTableWidget):
         self._rubber_band = QRubberBand(QRubberBand.Rectangle, self.viewport())
 
     def _is_on_item_content(self, pos):
+        """True when the click is on a file/folder row (any column), like Windows."""
         item = self.itemAt(pos)
-        if not item:
-            return False
-        if item.column() == 0:
-            index = self.model().index(item.row(), 0)
-            rect = self.visualRect(index)
-            text_w = self.fontMetrics().horizontalAdvance(item.text())
-            content_w = 40 + text_w + 20
-            return (rect.left() <= pos.x() <= rect.left() + content_w)
-        return False
+        return item is not None
+
+    def mouseDoubleClickEvent(self, event):
+        # Open on double-click even if a prior press returned early for drag.
+        if event.button() == Qt.LeftButton:
+            item = self.itemAt(event.pos())
+            if item is not None:
+                window = self.window()
+                if hasattr(window, "_on_table_item_double_clicked"):
+                    settings = getattr(window, "_settings", {}) or {}
+                    picker = getattr(window, "_picker_mode", False)
+                    if picker or not settings.get("single_click", False):
+                        window._on_table_item_double_clicked(item)
+                        event.accept()
+                        return
+        super().mouseDoubleClickEvent(event)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -1980,7 +2194,7 @@ class ExplorerTableWidget(QTableWidget):
             on_content = self._is_on_item_content(pos)
 
             if not on_content or item is None:
-                # Clicked empty space or blank area of cell -> start marquee selection box
+                # Clicked empty space -> start marquee selection box
                 if not (event.modifiers() & (Qt.ControlModifier | Qt.ShiftModifier)):
                     self.clearSelection()
                 self._rubber_origin = pos
@@ -1992,9 +2206,12 @@ class ExplorerTableWidget(QTableWidget):
             else:
                 self._drag_start_pos = pos
                 self._drag_item_was_selected = bool(item and item.isSelected())
-
+                self._rubber_origin = None
+                # Still deliver the press so selection + double-click timing work.
+                # Keep multi-select when pressing an already-selected row (drag later).
                 if self._drag_item_was_selected and not (event.modifiers() & (Qt.ControlModifier | Qt.ShiftModifier)):
-                    self._rubber_origin = None
+                    super().mousePressEvent(event)
+                    # Restore multi-selection that QTableWidget would have collapsed.
                     return
                 else:
                     self._rubber_origin = pos
@@ -2144,11 +2361,26 @@ class ExplorerListWidget(QListWidget):
         self.setDropIndicatorShown(True)
         self.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.setDefaultDropAction(Qt.CopyAction)
+        self.setEditTriggers(QAbstractItemView.NoEditTriggers)
 
         self._drag_start_pos = None
         self._drag_item_was_selected = False
         self._rubber_origin = None
         self._rubber_band = QRubberBand(QRubberBand.Rectangle, self.viewport())
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            item = self.itemAt(event.pos())
+            if item is not None:
+                window = self.window()
+                if hasattr(window, "_on_list_item_double_clicked"):
+                    settings = getattr(window, "_settings", {}) or {}
+                    picker = getattr(window, "_picker_mode", False)
+                    if picker or not settings.get("single_click", False):
+                        window._on_list_item_double_clicked(item)
+                        event.accept()
+                        return
+        super().mouseDoubleClickEvent(event)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -2167,8 +2399,9 @@ class ExplorerListWidget(QListWidget):
             else:
                 self._drag_start_pos = pos
                 self._drag_item_was_selected = bool(item and item.isSelected())
+                self._rubber_origin = None
                 if self._drag_item_was_selected and not (event.modifiers() & (Qt.ControlModifier | Qt.ShiftModifier)):
-                    self._rubber_origin = None
+                    super().mousePressEvent(event)
                     return
                 else:
                     self._rubber_origin = pos
@@ -2939,13 +3172,22 @@ class WindowsDrivePropertiesDialog(QDialog):
         layout.addLayout(btn_row)
 
     def _fill_storage_insight(self):
-        report = get_storage_insight(mount=self.drive.get("mount") or "/")
-        if not report or not hasattr(self, "insight_body"):
-            if hasattr(self, "insight_body"):
-                self.insight_body.setText(
-                    "DevOS system is typically ~12–18 GB. Most of the used bar is your files, "
-                    "apps, and caches — use Disk Cleanup to reclaim freeable space."
-                )
+        mount = self.drive.get("mount") or "/"
+
+        def work():
+            report = get_storage_insight(mount=mount)
+            QTimer.singleShot(0, lambda: self._apply_storage_insight(report))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _apply_storage_insight(self, report):
+        if not hasattr(self, "insight_body"):
+            return
+        if not report:
+            self.insight_body.setText(
+                "DevOS system is typically ~12–18 GB. Most of the used bar is your files, "
+                "apps, and caches — use Disk Cleanup to reclaim freeable space."
+            )
             return
         lines = []
         for cat in report.get("categories") or []:
@@ -5852,24 +6094,8 @@ class WindowsFileExplorer(QMainWindow):
         while os.path.exists(os.path.join(self._current_path, suggested_name)):
             suggested_name = f"New Document ({idx}).md"
             idx += 1
-        dlg = QDialog(self)
-        dlg.setWindowTitle("New Markdown Document")
-        dlg.setMinimumWidth(320)
-        layout = QVBoxLayout(dlg)
-        layout.addWidget(QLabel("File name:"))
-        edit = QLineEdit(suggested_name)
-        if "." in suggested_name:
-            edit.setSelection(0, suggested_name.rfind("."))
-        else:
-            edit.selectAll()
-        layout.addWidget(edit)
-        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        btns.accepted.connect(dlg.accept)
-        btns.rejected.connect(dlg.reject)
-        layout.addWidget(btns)
-        if dlg.exec_() != QDialog.Accepted:
-            return
-        name = edit.text().strip()
+        name = prompt_name_dialog(self, "New Markdown Document", "File name:",
+                                  suggested_name, select_stem=True)
         if not name:
             return
         target = os.path.join(self._current_path, name)
@@ -6060,23 +6286,7 @@ class WindowsFileExplorer(QMainWindow):
             suggested_name = f"{base_name} ({counter})"
             counter += 1
 
-        dlg = QDialog(self)
-        dlg.setWindowTitle("New Folder")
-        dlg.setMinimumWidth(320)
-        layout = QVBoxLayout(dlg)
-        layout.addWidget(QLabel("Folder name:"))
-        edit = QLineEdit(suggested_name)
-        edit.selectAll()
-        layout.addWidget(edit)
-        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        btns.accepted.connect(dlg.accept)
-        btns.rejected.connect(dlg.reject)
-        layout.addWidget(btns)
-
-        if dlg.exec_() != QDialog.Accepted:
-            return
-
-        folder_name = edit.text().strip()
+        folder_name = prompt_name_dialog(self, "New Folder", "Folder name:", suggested_name)
         if not folder_name:
             return
 
@@ -6153,24 +6363,15 @@ class WindowsFileExplorer(QMainWindow):
             return
         target = paths[0]
         old_name = os.path.basename(target)
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Rename")
-        layout = QVBoxLayout(dlg)
-        layout.addWidget(QLabel(f"Rename '{old_name}' to:"))
-        edit = QLineEdit(old_name)
-        layout.addWidget(edit)
-        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        btns.accepted.connect(dlg.accept)
-        btns.rejected.connect(dlg.reject)
-        layout.addWidget(btns)
-        if dlg.exec_() == QDialog.Accepted:
-            new_name = edit.text().strip()
-            if new_name and new_name != old_name:
-                try:
-                    os.rename(target, os.path.join(os.path.dirname(target), new_name))
-                    self.refresh()
-                except OSError as err:
-                    QMessageBox.critical(self, "Error", f"Failed to rename: {err.strerror}")
+        new_name = prompt_name_dialog(
+            self, "Rename", f"Rename '{old_name}' to:", old_name,
+            select_stem=("." in old_name and not os.path.isdir(target)))
+        if new_name and new_name != old_name:
+            try:
+                os.rename(target, os.path.join(os.path.dirname(target), new_name))
+                self.refresh()
+            except OSError as err:
+                QMessageBox.critical(self, "Error", f"Failed to rename: {err.strerror}")
 
     def action_delete(self):
         if self.is_in_recycle_bin():
@@ -6315,26 +6516,15 @@ class WindowsFileExplorer(QMainWindow):
         if not os.path.exists(target):
             return
         old_name = os.path.basename(target)
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Rename")
-        dlg.setWindowIcon(get_win_icon("folder" if os.path.isdir(target) else "file-doc", 24))
-        dlg.resize(320, 120)
-        layout = QVBoxLayout(dlg)
-        layout.addWidget(QLabel(f"Rename '{old_name}' to:"))
-        edit = QLineEdit(old_name)
-        layout.addWidget(edit)
-        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        btns.accepted.connect(dlg.accept)
-        btns.rejected.connect(dlg.reject)
-        layout.addWidget(btns)
-        if dlg.exec_() == QDialog.Accepted:
-            new_name = edit.text().strip()
-            if new_name and new_name != old_name:
-                try:
-                    os.rename(target, os.path.join(os.path.dirname(target), new_name))
-                    self.refresh()
-                except OSError as err:
-                    QMessageBox.critical(self, "Error", f"Failed to rename: {err.strerror}")
+        new_name = prompt_name_dialog(
+            self, "Rename", f"Rename '{old_name}' to:", old_name,
+            select_stem=("." in old_name and not os.path.isdir(target)))
+        if new_name and new_name != old_name:
+            try:
+                os.rename(target, os.path.join(os.path.dirname(target), new_name))
+                self.refresh()
+            except OSError as err:
+                QMessageBox.critical(self, "Error", f"Failed to rename: {err.strerror}")
 
     def action_rename_drive(self, drive):
         QMessageBox.information(self, "Rename Drive", f"Drive labels for {drive.get('title')} can be edited in Drive Properties or DevOS Disk Doctor.")
@@ -6872,26 +7062,8 @@ class WindowsFileExplorer(QMainWindow):
             suggested_name = f"New Text Document ({idx}).txt"
             idx += 1
 
-        dlg = QDialog(self)
-        dlg.setWindowTitle("New Text Document")
-        dlg.setMinimumWidth(320)
-        layout = QVBoxLayout(dlg)
-        layout.addWidget(QLabel("File name:"))
-        edit = QLineEdit(suggested_name)
-        if "." in suggested_name:
-            edit.setSelection(0, suggested_name.rfind("."))
-        else:
-            edit.selectAll()
-        layout.addWidget(edit)
-        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        btns.accepted.connect(dlg.accept)
-        btns.rejected.connect(dlg.reject)
-        layout.addWidget(btns)
-
-        if dlg.exec_() != QDialog.Accepted:
-            return
-
-        file_name = edit.text().strip()
+        file_name = prompt_name_dialog(self, "New Text Document", "File name:",
+                                       suggested_name, select_stem=True)
         if not file_name:
             return
 
@@ -6948,27 +7120,55 @@ class WindowsFileExplorer(QMainWindow):
 
         if event.key() == Qt.Key_Back:
             self.go_back()
-        elif event.key() == Qt.Key_Backspace and not self.search_box.hasFocus() and not self.address_bar.path_edit.hasFocus():
+        elif event.key() == Qt.Key_Backspace and not focus_is_text_input() and not self.search_box.hasFocus() and not self.address_bar.path_edit.hasFocus():
             self.go_back()
         elif event.key() == Qt.Key_F5:
             self.refresh()
         elif event.modifiers() == Qt.ShiftModifier and event.key() == Qt.Key_Delete:
-            self.action_delete_permanently()
+            if focus_is_text_input():
+                super().keyPressEvent(event)
+            else:
+                self.action_delete_permanently()
         elif event.key() == Qt.Key_Delete:
-            if self.is_in_recycle_bin():
+            if focus_is_text_input():
+                super().keyPressEvent(event)
+            elif self.is_in_recycle_bin():
                 self.action_delete_permanently()
             else:
                 self.action_delete()
         elif event.key() == Qt.Key_F2:
-            self.action_rename()
+            if focus_is_text_input():
+                super().keyPressEvent(event)
+            else:
+                self.action_rename()
         elif event.modifiers() == (Qt.ControlModifier | Qt.ShiftModifier) and event.key() == Qt.Key_C:
-            self.action_copy_path()
+            if focus_is_text_input():
+                super().keyPressEvent(event)
+            else:
+                self.action_copy_path()
         elif event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_C:
-            self.action_copy()
+            # Don't steal Ctrl+C from name/search fields — that must copy text.
+            if focus_is_text_input():
+                super().keyPressEvent(event)
+            else:
+                self.action_copy()
         elif event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_X:
-            self.action_cut()
+            if focus_is_text_input():
+                super().keyPressEvent(event)
+            else:
+                self.action_cut()
         elif event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_V:
-            self.action_paste()
+            # File paste must not block text paste into New Folder / Rename / Search.
+            if focus_is_text_input():
+                w = QApplication.focusWidget()
+                if isinstance(w, QLineEdit):
+                    text = clipboard_text()
+                    if text:
+                        w.insert(text.splitlines()[0])
+                        return
+                super().keyPressEvent(event)
+            else:
+                self.action_paste()
         elif event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_L:
             self.address_bar.switch_to_edit()
         elif event.modifiers() == Qt.AltModifier and event.key() == Qt.Key_D:

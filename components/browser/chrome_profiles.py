@@ -287,7 +287,7 @@ Exec={devos_bin} --incognito
 
 [Desktop Action new-guest-window]
 Name=New Guest Window
-Exec={devos_bin} --guest
+Exec={devos_bin} --guest --class=chrome-guest
 """
     full_content = base_content + "".join(action_blocks)
     with open(user_desktop, "w", encoding="utf-8") as f:
@@ -854,6 +854,30 @@ def get_profile_tab_domains(chrome_config_dir):
     return {k: v["domains"] for k, v in data.items()}
 
 
+def get_open_browser_profile_keys(chrome_dir, profiles):
+    """
+    Profile directories Chrome currently has open as browser windows
+    (Local State last_active_profiles). Empty when Chrome is closed or
+    the file cannot be read — callers must then fall back.
+    """
+    local_state = os.path.join(chrome_dir, "Local State")
+    if not os.path.isfile(local_state):
+        return []
+    try:
+        with open(local_state, "r", encoding="utf-8") as f:
+            ls = json.load(f)
+        last_active = ls.get("profile", {}).get("last_active_profiles") or []
+    except Exception:
+        return []
+    out = []
+    seen = set()
+    for key in last_active:
+        if key in profiles and key not in seen:
+            out.append(key)
+            seen.add(key)
+    return out
+
+
 def get_ranked_active_profiles(chrome_dir, profiles):
     """
     Return profile keys ordered by recent active browser usage,
@@ -862,18 +886,9 @@ def get_ranked_active_profiles(chrome_dir, profiles):
     ranked = []
     seen = set()
 
-    local_state = os.path.join(chrome_dir, "Local State")
-    if os.path.isfile(local_state):
-        try:
-            with open(local_state, "r", encoding="utf-8") as f:
-                ls = json.load(f)
-            last_active = ls.get("profile", {}).get("last_active_profiles") or []
-            for p in last_active:
-                if p in profiles and p not in seen:
-                    ranked.append(p)
-                    seen.add(p)
-        except Exception:
-            pass
+    for p in get_open_browser_profile_keys(chrome_dir, profiles):
+        ranked.append(p)
+        seen.add(p)
 
     # Sort remaining profiles by session modification times
     sess_times = []
@@ -968,32 +983,67 @@ def _any_guest_chrome_pid() -> bool:
     return False
 
 
+def _wm_class_profile(wm_class, profiles):
+    """Return profile name when WM_CLASS is already chrome-<slug> / chrome-guest."""
+    wc = (wm_class or "").lower()
+    if "chrome-guest" in wc:
+        return "Guest"
+    for _key, p_name in profiles.items():
+        slug = slugify(p_name)
+        if slug and f"chrome-{slug}" in wc:
+            return p_name
+    return None
+
+
 def detect_window_profile(w, profiles, home_dir=None, assigned_profiles=None, prof_session_data=None):
     """
     Determine profile name from window attributes and session activity:
-    - Guest session (WM_CLASS, title, or --guest cmdline) BEFORE any avatar profile
-    - Title containing profile markers like [ProfileName] or (Guest)
-    - Tab title and bookmark match from profile Sessions/Session_* and Bookmarks
-    - Explicit launch WM_CLASS (e.g. chrome-blog)
-    - Active profile session ranking for generic titles (New Tab)
+    - Real Guest (--guest cmdline / chrome-guest class) before any avatar profile
+    - WM_CLASS chrome-<slug> only when that profile is currently open in Chrome
+      (avoids sticky wrong badges after a shared-process mis-tag)
+    - Title markers, session/bookmark match among open profiles, then fallback
     """
     wid = w.get("id") if isinstance(w, dict) else None
     title = w.get("title", "") if isinstance(w, dict) else str(w)
     wm_class = (w.get("wm_class", "") if isinstance(w, dict) else "").lower()
+    pid = _window_pid(wid) if wid else 0
+    is_guest_proc = bool(wid and _cmdline_is_guest(pid))
 
-    # Guest must win before session/title heuristics — Guest tabs are often
-    # titled only "New Tab - Google Chrome" and were wrongly getting Work's face.
-    if "chrome-guest" in wm_class or re.search(r"\bGuest\b", title or "", re.IGNORECASE):
+    if not home_dir:
+        home_dir = os.path.expanduser("~")
+    chrome_dir = os.path.join(home_dir, ".config/google-chrome")
+    open_keys = get_open_browser_profile_keys(chrome_dir, profiles)
+    open_names = {profiles[k] for k in open_keys if k in profiles}
+
+    # Guest only when the process/class really is Guest — never sticky forever.
+    if is_guest_proc or "chrome-guest" in wm_class:
         if wid:
             WINDOW_PROFILE_CACHE[wid] = "Guest"
         return "Guest"
-    if wid and _cmdline_is_guest(_window_pid(wid)):
-        WINDOW_PROFILE_CACHE[wid] = "Guest"
+    # Title "(Guest)" / " - Guest" only — bare word "Guest" in page titles is too noisy.
+    if re.search(r"(\(Guest\)| - Guest( - |$))", title or "", re.IGNORECASE):
+        if wid:
+            WINDOW_PROFILE_CACHE[wid] = "Guest"
         return "Guest"
-    # Shared browser process: if a Guest Chrome is running and this window was
-    # already marked Guest, keep it. Do not steal avatars for New Tab titles.
+
+    # Trust chrome-<slug> only if that profile is among Chrome's open browser
+    # profiles. A shared Chrome PID previously got Work windows rewritten to
+    # chrome-tony; without this check the wrong face sticks forever.
+    class_prof = _wm_class_profile(wm_class, profiles)
+    if class_prof and class_prof != "Guest":
+        if not open_names or class_prof in open_names:
+            if wid:
+                WINDOW_PROFILE_CACHE[wid] = class_prof
+            return class_prof
+        if wid and WINDOW_PROFILE_CACHE.get(wid) == class_prof:
+            del WINDOW_PROFILE_CACHE[wid]
+
     if wid and WINDOW_PROFILE_CACHE.get(wid) == "Guest":
-        return "Guest"
+        del WINDOW_PROFILE_CACHE[wid]
+    if wid and open_names and WINDOW_PROFILE_CACHE.get(wid) not in open_names:
+        # Cached name is for a profile Chrome no longer has open.
+        if WINDOW_PROFILE_CACHE.get(wid):
+            del WINDOW_PROFILE_CACHE[wid]
 
     # Check for [ProfileName]
     m = re.search(r"\[([^\]]+)\]", title)
@@ -1011,21 +1061,16 @@ def detect_window_profile(w, profiles, home_dir=None, assigned_profiles=None, pr
                     WINDOW_PROFILE_CACHE[wid] = p_name
                 return p_name
 
-    if not home_dir:
-        home_dir = os.path.expanduser("~")
-    chrome_dir = os.path.join(home_dir, ".config/google-chrome")
-
     if prof_session_data is None:
         prof_session_data = get_profile_session_data(chrome_dir)
 
     # Clean title for comparison
     title_clean = title.replace(" - Google Chrome", "").strip().lower()
-    keywords = [kw for kw in re.findall(r"[a-zA-Z0-9]+", title_clean) if len(kw) >= 4]
 
-    # Rank profiles by match score for this title
-    # Sort profiles by session mtime descending
+    # Prefer open browser profiles when scoring session/title matches.
+    score_keys = open_keys or list(profiles.keys())
     sorted_profs = sorted(
-        prof_session_data.items(),
+        ((k, prof_session_data[k]) for k in score_keys if k in prof_session_data),
         key=lambda item: item[1].get("mtime", 0),
         reverse=True,
     )
@@ -1039,25 +1084,23 @@ def detect_window_profile(w, profiles, home_dir=None, assigned_profiles=None, pr
         p_name = profiles[p_key]
         score = 0
 
-        # Exact title match
         for t in sdata.get("titles", []):
             if t == title_clean:
                 score += 150
             elif len(t) >= 5 and (t in title_clean or title_clean in t):
                 score += 100
 
-        # Keyword match
         for d in sdata.get("domains", []):
             if len(d) >= 4 and d in title_clean:
                 score += 40
 
-        # Recency bonus
         if score > 0:
             mtime = sdata.get("mtime", 0)
             recency = max(0, 30 - int((time.time() - mtime) / 3600))
             score += recency
+            if open_keys and p_key in open_keys:
+                score += 50
 
-            # Penalty if already assigned to another open window
             if assigned_profiles and p_name in assigned_profiles:
                 score -= 30
 
@@ -1070,26 +1113,14 @@ def detect_window_profile(w, profiles, home_dir=None, assigned_profiles=None, pr
             WINDOW_PROFILE_CACHE[wid] = best_prof
         return best_prof
 
-    # If already cached and valid, keep cached assignment
     if wid and wid in WINDOW_PROFILE_CACHE:
-        return WINDOW_PROFILE_CACHE[wid]
+        cached = WINDOW_PROFILE_CACHE[wid]
+        if not open_names or cached in open_names:
+            return cached
 
-    # Check wm_class if launched explicitly with --class=chrome-<slug>
-    if "chrome-guest" in wm_class:
-        if wid:
-            WINDOW_PROFILE_CACHE[wid] = "Guest"
-        return "Guest"
-    for p_key, p_name in profiles.items():
-        slug = slugify(p_name)
-        if f"chrome-{slug}" in wm_class:
-            if wid:
-                WINDOW_PROFILE_CACHE[wid] = p_name
-            return p_name
-
-    # Unassigned fallback using ranked active profiles (never invent Guest → Work)
-    ranked_keys = get_ranked_active_profiles(chrome_dir, profiles)
+    # Unassigned fallback: open browser profiles first (never invent Guest → Work)
+    ranked_keys = open_keys or get_ranked_active_profiles(chrome_dir, profiles)
     if assigned_profiles:
-        # Pick first active profile not yet assigned to an open window
         for k in ranked_keys:
             name = profiles.get(k, k)
             if name not in assigned_profiles:

@@ -604,7 +604,16 @@ def main(argv=None) -> int:
     p.add_argument("--file", help="work on this text file (Dolphin service menu)")
     p.add_argument("--action", choices=list(ACTION_BY_KEY), help="start this action at once")
     p.add_argument("--text", help="start with this text instead of the selection")
-    ns = p.parse_args(argv[1:])
+    p.add_argument("--popup", action="store_true",
+                   help="show the rewrite popup (default without args: Voice Typing mic)")
+    ns, _unknown = p.parse_known_args(argv[1:])
+
+    # Daily shortcut Win+Alt+A must open the green mic, not this rewrite grid.
+    if not ns.popup and not ns.file and ns.text is None and not ns.action:
+        vt = os.path.join(COMPONENTS, "voicetype", "voicetype.py")
+        if not os.path.isfile(vt):
+            vt = "/usr/local/share/devos/components/voicetype/voicetype.py"
+        os.execv(sys.executable, [sys.executable, vt] + [a for a in argv[1:] if a != "--popup"])
 
     typer = voicetype.Typer()
     window = ""

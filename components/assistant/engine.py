@@ -758,8 +758,12 @@ class Assistant:
         return None
 
     def chat(self, text: str, history: Optional[History] = None,
-             on_delta: Optional[Callable[[str], None]] = None, cancel: Optional[StreamHandle] = None) -> Reply:
-        """on_delta(piece) gets the answer as it is written (streaming); cancel.stop() ends it early."""
+             on_delta: Optional[Callable[[str], None]] = None, cancel: Optional[StreamHandle] = None,
+             reply_lang: Optional[str] = None) -> Reply:
+        """on_delta(piece) gets the answer as it is written (streaming); cancel.stop() ends it early.
+
+        reply_lang: ``en`` / ``bn`` — answer in that language (voice turns match what the user spoke).
+        """
         fast = fast_chat_reply(text, history)
         if fast is not None:
             if on_delta is not None:
@@ -767,6 +771,15 @@ class Assistant:
             return fast
 
         system = APP_PROMPT
+        if reply_lang == "bn":
+            system += (
+                "\n\n[Language]: The user spoke or wrote in Bangla. Reply entirely in clear Bangla (বাংলা). "
+                "Keep Markdown. Do not switch to English unless they ask."
+            )
+        elif reply_lang == "en":
+            system += (
+                "\n\n[Language]: Reply in clear English. Keep Markdown."
+            )
         doc_ctx = self._recent_file_context(history)
         if doc_ctx:
             system += (

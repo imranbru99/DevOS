@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="0.55" stop-color="#0284c7"/>
+      <stop offset="1" stop-color="#0c4a6e"/>
+    </linearGradient>
+    <linearGradient id="bar" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#7dd3fc"/>
+      <stop offset="1" stop-color="#f0f9ff"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="17" fill="url(#g)"/>
+  <!-- usage bars -->
+  <rect x="16" y="34" width="6" height="14" rx="2" fill="url(#bar)" opacity="0.85"/>
+  <rect x="25" y="26" width="6" height="22" rx="2" fill="url(#bar)"/>
+  <rect x="34" y="18" width="6" height="30" rx="2" fill="url(#bar)"/>
+  <rect x="43" y="28" width="6" height="20" rx="2" fill="url(#bar)" opacity="0.9"/>
+  <!-- pulse / signal arc -->
+  <g fill="none" stroke="#ecfeff" stroke-width="2.2" stroke-linecap="round" opacity="0.95">
+    <path d="M20 16c6-5 18-5 24 0"/>
+    <path d="M24 20c4-3.2 12-3.2 16 0" opacity="0.7"/>
+  </g>
+  <!-- baseline -->
+  <path d="M14 50h36" stroke="#e0f2fe" stroke-width="2" stroke-linecap="round" opacity="0.55"/>
+</svg>

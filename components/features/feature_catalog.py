@@ -389,17 +389,24 @@ FEATURES += [
     F("taskman", "devos", "Task Manager", "Processes, performance, startup apps, users and services. "
       "Opens with Ctrl+Shift+Esc.", 1, win="Task Manager", presets=ESSENTIAL,
       builtin={"desktop": ["devos-taskman.desktop"]}),
+    F("netusage", "devos", "Network Usage", "Network interfaces, last 30 days per day (graph), and "
+      "monthly totals. Keeps 12 months of data only.", 1, win="Data usage", presets=ESSENTIAL,
+      builtin={"desktop": ["devos-network-usage.desktop"],
+               "enable": [["systemctl", "--user", "enable", "--now", "devos-network-usage.timer"]],
+               "disable": [["systemctl", "--user", "disable", "--now", "devos-network-usage.timer"]]}),
     F("security", "devos", "DevOS Security", "Virus scanning of downloads and USB drives, phishing-site "
       "blocking, firewall, security updates and Disk Guard in one place.", 1, win="Windows Security",
       presets=ESSENTIAL, builtin={"desktop": ["devos-security.desktop"]}),
     F("devosnotes", "devos", "DevOS Notes", "Notes, sticky notes and voice notes with AI summaries; saved in "
       "Documents so Cloud Backup keeps them.", 1, win="Sticky Notes / OneNote", presets=ESSENTIAL,
       builtin={"desktop": ["devos-notes.desktop"]}),
-    F("voicetype", "devos", "Voice typing (Win+Alt+H)", "Speak instead of typing in any app, in Bangla or "
-      "English, fully offline.", 1, win="Voice typing (Win+H)", presets=ESSENTIAL,
+    F("voicetype", "devos", "Voice Typing (Win+Alt+A / H)", "Click any text box (WhatsApp, Chrome, Cursor, mail, Notepad…), "
+      "press Win+Alt+A or Win+Alt+H — green mic types at the caret; click anywhere to stop; Bangla or English offline.", 1,
+      win="Voice typing (Win+H)", presets=ESSENTIAL,
       builtin={"desktop": ["devos-voice-typing.desktop"]}),
-    F("aiactions", "devos", "AI on any text (Win+Alt+A)", "Select text anywhere to rewrite, fix, shorten, "
-      "translate or summarize it with DevOS AI.", 1, win="Copilot", presets=ESSENTIAL,
+    F("aiactions", "devos", "AI on selected text (Win+Alt+Shift+A)", "Select text to rewrite, fix grammar, "
+      "shorten, translate or summarize with DevOS AI (optional; daily typing uses Voice Typing).", 1,
+      win="Copilot", presets=ESSENTIAL,
       builtin={"desktop": ["devos-ai-actions.desktop"]}),
     F("clipboard", "devos", "Clipboard history (Win+V)", "Press Win+V to pick something you copied earlier "
       "and paste it back. Stays on this PC.", 1, win="Clipboard history (Win+V)", presets=ESSENTIAL,

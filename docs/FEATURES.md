@@ -1,6 +1,6 @@
 # DevOS current feature inventory
 
-Reviewed against the source tree on **October 26, 2026**. This inventory describes
+Reviewed against the source tree on **November 8, 2026**. This inventory describes
 implemented components and configured installation options. It is not a claim
 that every app, hardware device or installation path has been tested. The current
 source targets Ubuntu 26.04 LTS (Resolute), amd64. An older published ISO may not
@@ -37,15 +37,16 @@ contain these changes.
 | Display | Resolution, refresh and scaling controls; keep/revert workflow. Hardware discovery uses XRandR, so Wayland may require native Plasma display settings. |
 | Power | Battery/AC status, efficiency/balanced/performance modes, separate idle timeouts, sleep, lock, restart and shutdown. X11-based idle/display controls are session-dependent. |
 | Monitoring | Task Manager with process/performance/startup/service views; Optimizer with friendly application names, idle-memory suggestions, cache cleanup and storage warnings. |
-| Productivity | Notepad session recovery, Notes, clipboard history, emoji search, screenshots, voice typing and AI actions on selected text. |
+| Productivity | Notepad session recovery (Voice Typing socket insert), Notes, clipboard history, emoji search, screenshots, Voice Typing (Win+Alt+A/H, click-to-stop, Wayland `kwtypr`) and AI actions on selected text (Win+Alt+Shift+A). |
 | Media | VLC, image/PDF viewers, SimpleScreenRecorder and FFmpeg in package lists. Other creative apps are selectable downloads. |
 | Family | Optional Islamic content, prayer/Qibla tools, Family Safety and a local browser body-region filter. Kids Mode is an escapable full-screen playground, not an account lock. |
 
 ## AI, development and connectivity
 
 - Local assistant with conversation history, streaming, system-information answers,
-  multi-step app/settings actions, notes, reminders, document reading, OCR and
-  English/Bangla voice interaction. Web search and navigation open network services.
+  multi-step app/settings actions (YouTube play, stop media, type into focused chat),
+  notes, reminders, document reading, OCR and English/Bangla voice interaction.
+  Web search and navigation open network services. Long dictation uses Voice Typing.
 - Local OpenAI-compatible API at `http://127.0.0.1:11434/v1`, API documentation,
   optional authenticated LAN sharing and model management. Tiny chat model is the
   build default; larger chat, coding and vision models download separately.
@@ -241,8 +242,8 @@ delivery contract. Check `devos features list` on the installed system for state
 | `taskman` | Task Manager | ISO package/component |
 | `security` | DevOS Security | ISO package/component |
 | `devosnotes` | DevOS Notes | ISO package/component |
-| `voicetype` | Voice typing (Win+Alt+H) | ISO package/component |
-| `aiactions` | AI on any text (Win+Alt+A) | ISO package/component |
+| `voicetype` | Voice Typing (Win+Alt+A / Win+Alt+H); click-to-stop; Wayland `kwtypr` | ISO package/component |
+| `aiactions` | AI on selected text (Win+Alt+Shift+A) | ISO package/component |
 | `clipboard` | Clipboard history (Win+V) | ISO package/component |
 | `emoji` | Emoji panel (Win+.) | ISO package/component |
 | `codeagent` | DevOS AI Code Agent | Bundled app; local model or configured cloud provider; catalog recommends 8 GB RAM |

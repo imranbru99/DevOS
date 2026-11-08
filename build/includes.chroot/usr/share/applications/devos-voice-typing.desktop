@@ -2,14 +2,13 @@
 Type=Application
 Version=1.0
 Name=Voice Typing
-GenericName=Dictate into any app
-Comment=Speak and DevOS types it into the app you are using, offline, in Bangla or English (Meta+Alt+H)
-Exec=/usr/local/bin/devos-run --desktop=devos-voice-typing --name="Voice Typing" /usr/local/share/devos/components/voicetype/voicetype.py
+GenericName=Speak into any text box
+Comment=Click WhatsApp / mail / Notepad, press Win+Alt+H or Win+Alt+A — green mic listens and types (Bangla/English, offline)
+Exec=/usr/local/bin/devos-voice-typing
 Icon=devos-voice-typing
 Terminal=false
 StartupNotify=false
 Categories=Utility;Accessibility;
-Keywords=voice;typing;dictation;dictate;speech to text;speak;microphone;bangla;bengali;win+h;
-X-KDE-Shortcuts=Meta+Alt+H
-
+Keywords=voice;typing;dictation;dictate;speech to text;speak;microphone;bangla;bengali;whatsapp;win+h;win+alt+a;
+X-KDE-Shortcuts=Meta+Alt+H;Meta+Alt+A
 StartupWMClass=devos-voice-typing

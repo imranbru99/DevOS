@@ -1,0 +1,12 @@
+{
+  "repo": "imranbru99/DevOS",
+  "fetched_at": null,
+  "note": "Placeholder until the Download stats workflow or tools/download-stats.py --write runs. Publish the ISO on a GitHub Release so download_count can grow.",
+  "totals": {
+    "all_counted_assets": 0,
+    "iso": 0,
+    "update_bundle": 0
+  },
+  "releases": [],
+  "assets": []
+}

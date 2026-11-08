@@ -1,0 +1,12 @@
+[Unit]
+Description=Sample DevOS Network Usage every minute
+
+[Timer]
+OnBootSec=45s
+OnUnitActiveSec=1min
+AccuracySec=15s
+Persistent=true
+Unit=devos-network-usage.service
+
+[Install]
+WantedBy=timers.target

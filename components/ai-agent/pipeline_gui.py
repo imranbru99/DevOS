@@ -35,6 +35,7 @@ from task_pipeline import (
     to_slug,
     split_prompts,
     notify,
+    clear_pipeline_notifications,
     copy_to_clipboard,
     get_grouped_projects,
     detect_current_project,
@@ -1484,6 +1485,16 @@ class PipelineWindow(QtWidgets.QMainWindow):
         btn_clear.clicked.connect(self.clear_queue)
         header_layout.addWidget(btn_clear)
 
+        btn_clear_alerts = QtWidgets.QPushButton("Clear Alerts")
+        btn_clear_alerts.setObjectName("small_btn")
+        btn_clear_alerts.setStyleSheet(
+            "background-color: #7c2d12; color: #fed7aa; font-size: 11px; "
+            "padding: 6px 12px; border: 1px solid #ea580c; border-radius: 6px;"
+        )
+        btn_clear_alerts.setToolTip("Dismiss all stacked Pipeline Stall / DevOS AI Pipeline desktop notifications")
+        btn_clear_alerts.clicked.connect(self.clear_alerts)
+        header_layout.addWidget(btn_clear_alerts)
+
         main_layout.addLayout(header_layout)
 
         # Toast Banner for Instant Visual Action Feedback
@@ -2062,6 +2073,10 @@ class PipelineWindow(QtWidgets.QMainWindow):
         clear_logs_btn = QtWidgets.QPushButton("Clear Logs")
         clear_logs_btn.clicked.connect(self.clear_logs)
         log_controls.addWidget(clear_logs_btn)
+        clear_alerts_btn = QtWidgets.QPushButton("Clear Alerts")
+        clear_alerts_btn.setToolTip("Dismiss stacked DevOS AI Pipeline desktop notifications")
+        clear_alerts_btn.clicked.connect(self.clear_alerts)
+        log_controls.addWidget(clear_alerts_btn)
         right_layout.addLayout(log_controls)
 
         # Live Execution Output Box
@@ -2350,6 +2365,13 @@ class PipelineWindow(QtWidgets.QMainWindow):
     def clear_logs(self):
         self.pipeline.clear_events()
         self.log_box.clear()
+
+    def clear_alerts(self):
+        # Runs the Plasma max-id close loop (old stall toasts used ids ~1000+).
+        clear_pipeline_notifications()
+        self.toast_banner.setText("All desktop alerts cleared.")
+        self.toast_banner.show()
+        QtCore.QTimer.singleShot(2500, self.toast_banner.hide)
 
     def update_cur_prompt_metrics(self):
         text = self.current_prompt_input.toPlainText().strip()

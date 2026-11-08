@@ -1,0 +1,8 @@
+#!/bin/bash
+# DevOS Network Usage
+export DEVOS_DESKTOP_FILE=devos-network-usage
+SCRIPT="/usr/local/share/devos/components/networkusage/networkusage.py"
+if [ ! -f "$SCRIPT" ]; then
+  SCRIPT="/home/imran/project/dev-os/components/networkusage/networkusage.py"
+fi
+exec -a "devos-network-usage" /usr/bin/python3 "$SCRIPT" "$@"

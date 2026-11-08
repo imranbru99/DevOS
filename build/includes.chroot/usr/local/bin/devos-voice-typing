@@ -1,0 +1,6 @@
+#!/bin/bash
+export DEVOS_DESKTOP_FILE=devos-voice-typing
+export DEVOS_APP_NAME="${DEVOS_APP_NAME:-Voice Typing}"
+export PATH="/usr/local/bin:/usr/bin:$PATH"
+SCRIPT="/usr/local/share/devos/components/voicetype/voicetype.py"
+exec -a "devos-voice-typing" /usr/bin/python3 "$SCRIPT" "$@"

@@ -22,7 +22,7 @@
 
 ---
 
-## Current source — October 26, 2026
+## Current source — November 8, 2026
 
 The source targets **Ubuntu 26.04 LTS (Resolute Raccoon), amd64**. Ubuntu's
 26.04.1 point release is available; standard support for the Ubuntu base runs
@@ -30,7 +30,8 @@ through May 2031. That schedule does not extend automatically to DevOS tools or
 third-party apps. See [Ubuntu's release list](https://ubuntu.com/project/docs/release-team/list-of-releases/).
 
 Read the [complete current feature inventory](docs/FEATURES.md),
-[latest changes](CHANGELOG.md), and [update guide](docs/UPDATES.md).
+[latest changes](CHANGELOG.md), [update guide](docs/UPDATES.md), and
+[download counts](docs/DOWNLOAD-STATS.md).
 Read the [October 26 release validation and remaining hardware checks](docs/RELEASE_VALIDATION_2026-10-26.md).
 See the [long-term maintenance guide](docs/LONG_TERM_MAINTENANCE.md) for recovery,
 storage, update coverage, and release-validation requirements.
@@ -40,6 +41,14 @@ The current release build uses `out/devos-26.04-amd64-final.iso` and its `.sha25
 
 **Recently added and improved**
 
+- **Voice Typing (Win+Alt+A / Win+Alt+H):** WhatsApp-style green mic for any text box
+  (WhatsApp, Chrome, Cursor, mail, Notepad…). Remembers the mouse position, types on
+  Plasma Wayland via KWin fake-input (`kwtypr`), supports Bangla and English offline,
+  keeps listening across pauses, and stops on **mouse click** or the hotkey again.
+- **Notepad ↔ Voice Typing:** Wayland-safe insert over a local socket so dictation lands
+  at the caret without stealing focus from the editor.
+- **AI on selected text:** moved to **Win+Alt+Shift+A** (rewrite / grammar / translate);
+  daily dictate uses Voice Typing, not the rewrite grid.
 - **Sign-in screen:** centered dark card, readable password field, show-password control,
   account/session selection, clock/date, login feedback and restart/shutdown controls.
 - **Broadband Connection:** connect or disconnect a direct ONU/modem with ISP PPPoE
@@ -69,6 +78,8 @@ The current release build uses `out/devos-26.04-amd64-final.iso` and its `.sha25
 
 | Feature | How to use it |
 | --- | --- |
+| Voice Typing | Click inside any text box (WhatsApp, Chrome, Cursor, mail, Notepad…). Press **Win+Alt+A** or **Win+Alt+H**. Speak; after a short pause words appear at the caret. Keep talking for the next phrase. **Click anywhere** or press the hotkey again to stop. Offline Bangla and English. |
+| AI on selected text | Select text, then **Win+Alt+Shift+A** for rewrite, grammar, shorten, translate, summarize or reply (local DevOS AI). |
 | Installer and SSD/HDD storage | Start **Install DevOS**. Choose **Manual partitioning** to create or resize a layout; **Erase disk** automatically formats the chosen system disk. **Data drives** optionally creates one, two, or three ext4 data volumes (A/B/C labels, custom sizes). Review every disk in Summary before Install. Drives you do not select are preserved. |
 | Modern dialogs | DevOS applications share spaced confirmation/input dialogs, readable labels, keyboard focus, and consistent buttons. Optimizer uses **Delete selected files** with **Cancel** as the default. The real KDE/Polkit password agent uses a dedicated DevOS Quick Controls style with a dark blue background, rounded larger password field, cyan focus outline and larger buttons; its authentication backend remains intact. |
 | Wallpapers and appearance | Open **Settings → Appearance** or the desktop wallpaper picker. The source includes 252 validated wallpaper images. Dark/light appearance and display scaling remain configurable. |
@@ -175,14 +186,15 @@ DevOS exists to give people — especially Windows users and developers — **an
 |---|---|
 | 🪟 **Windows apps** | `.exe` / `.msi` open with a double-click (32- and 64-bit). Popular apps such as AnyDesk, Zoom, Discord, Spotify and Steam get their **native DevOS version** offered instead. |
 | 🤖 **Android apps** | `.apk` files install into a built-in Android system (downloaded once on first use, ~850 MB). WhatsApp, Telegram, Spotify and similar APKs are offered as native DevOS apps — no Android download needed. |
-| ✨ **DevOS AI** | Private on-device assistant: PC questions, actions, notes, web search, reminders, PDFs, text-in-images, photos, voice (Bangla + English), Islamic daily Ayah & Hadith with Muhiuddin Khan Bangla translation, **Meta+H** push-to-talk and optional **“Hey DevOS”**. |
+| ✨ **DevOS AI** | Private on-device assistant: PC questions, actions, notes, web search, reminders, PDFs, text-in-images, photos, voice (Bangla + English), Islamic daily Ayah & Hadith with Muhiuddin Khan Bangla translation, **Win+H** push-to-talk and optional **“Hey DevOS”**. |
+| 🎙️ **Voice Typing** | **Win+Alt+A** / **Win+Alt+H** — dictate into WhatsApp, Chrome, Cursor, mail or Notepad; green mic; click anywhere to stop; offline Bangla + English on Plasma Wayland. |
 | 🌙 **Islamic & Modesty** | Authentic Quran & Hadith with verified **Muhiuddin Khan Bangla translation** & Arabic, offline prayer times & Qibla. Intelligent on-device modesty filter for Chrome/Brave/Edge with selectable detection modes and text-image exclusions. Detection can miss content or blur it incorrectly. |
 | 🧹 **DevOS Optimizer** | Finds apps you haven't used for 15+ minutes and offers to close them (with real app names like *This PC*, *Notepad*); cleans temp files, caches, the Recycle Bin and Windows-app leftovers. |
 | 🚀 **Kids Mode** | Safe cosmic playground with interactive mouse-play physics (`devos-kids-mode`); children can play safely while background jobs keep running. |
 | 📦 **Apps window** | Windows-style *Installed apps*: uninstall Linux, Windows and Android apps, clear cache, reset data and browser cookies. |
-| 📝 **Notepad** | Windows 11-style tabs; **unsaved text survives crashes and power cuts**. |
-| 💻 **Developer ready** | VS Code, Git, Node.js, Python, PHP + Composer, MariaDB, PostgreSQL, Redis, SQLite, Podman (Docker-compatible). |
-| 🎨 **Premium look** | Dark DevOS theme, icons-only taskbar, **25+ wallpapers**, a modern installer, DevOS names everywhere (Files, Terminal, Settings…). |
+| 📝 **Notepad** | Windows 11-style tabs; **unsaved text survives crashes and power cuts**; accepts Voice Typing at the caret on Wayland. |
+| 💻 **Developer ready** | VS Code, Git, Node.js, Python, PHP + Composer, MariaDB, PostgreSQL, Redis, SQLite, Podman (Docker-compatible), AI Code Agent, AI Pipeline. |
+| 🎨 **Premium look** | Dark DevOS theme, icons-only taskbar, **250+ wallpapers**, a modern installer, DevOS names everywhere (Files, Terminal, Settings…). |
 | ⚡ **Small & fast** | ISO size checked during build; boots straight to the desktop, compressed RAM swap, optional btrfs + zstd storage, memory-hog protection. |
 
 ---
@@ -215,11 +227,12 @@ DevOS exists to give people — especially Windows users and developers — **an
   | `Win + H` | **DevOS AI voice command** |
   | `Win + V` | **Clipboard history** — pick something you copied and paste it back |
   | `Win + .` | **Emoji** — search and paste a smile, a heart, food, or the Bangladesh flag |
-  | `Win + Alt + H` | **Voice typing** into the app you are using |
-  | `Win + Alt + A` | **AI on selected text** — rewrite, fix, shorten, translate, summarize |
+  | `Win + Alt + A` | **Voice Typing** — green mic; speak into the text box under the mouse |
+  | `Win + Alt + H` | **Voice Typing** (same as Win+Alt+A) |
+  | `Win + Alt + Shift + A` | **AI on selected text** — rewrite, fix, shorten, translate, summarize |
   | `Ctrl + Shift + Esc` | **Task Manager** |
 
-- **25+ wallpapers**: the new DevOS Sapphire Waves default plus flagship designs (Golden Cloudscape, Cosmic Orbit, Alpine Floral Terrace, Kids Learning Room, Aurora Veil, Silk Current, Nebula Drift…), with previews in *Configure Desktop and Wallpaper*. See [`tools/wallpapers/preview.jpg`](tools/wallpapers/preview.jpg).
+- **250+ wallpapers**: Sapphire Waves default plus designs such as Golden Cloudscape, Cosmic Orbit, Alpine Floral Terrace, Kids Learning Room, Aurora Veil, Silk Current, Nebula Drift… Previews in *Configure Desktop and Wallpaper*. See [`tools/wallpapers/preview.jpg`](tools/wallpapers/preview.jpg).
 - **Night light** warms the screen from 7:00 pm to 6:30 am, the way Windows does, and leaves daytime colour alone. Turn it off in Settings → Display & Monitor → Night Light.
 - **Your work comes back.** After a restart or shutdown, DevOS opens the same applications again. Browsers reopen their tabs, Notepad and DevOS Code reopen the same files (including unsaved text), and Files, Terminal, Kate and the other KDE apps reopen the documents that were on screen.
 - Everything is called **DevOS**: the sign-in session, “About this PC”, and apps named by what they do — *Files, Terminal, Text Editor, Photos, Document Viewer, Settings, Task Manager*.
@@ -259,7 +272,9 @@ Open **DevOS AI** from the desktop, or press **Win + H** and just speak.
 | Say or type | DevOS AI does |
 |---|---|
 | “Go to Chrome and search HP latest laptop” | Opens Chrome with that Google search |
-| “Play lo-fi music on YouTube” / “Directions to Dhaka airport” | YouTube / Maps search |
+| “Play lo-fi music on YouTube” / “Directions to Dhaka airport” | YouTube play / Maps search |
+| “Stop the music” / “Stop this song” / “Pause” | Stops or pauses media playback |
+| “Write a message: আসসালামু আলাইকুম” (with WhatsApp focused) | Types into the focused chat box |
 | “Open Notepad and save my name Imran Ahmed, number 0151…” | Saves a note in *Documents/Notes* and opens it |
 | “Take a note: buy milk, eggs and bread” | Same, as a note |
 | “Remind me in 10 minutes to call mom” / “Set a timer for 5 minutes” | Desktop reminder, even if the window is closed |
@@ -270,6 +285,8 @@ Open **DevOS AI** from the desktop, or press **Win + H** and just speak.
 | “Today's Islamic” / “Today's ayah” / “আজকের আয়াত” | Shows authentic Quran Ayah & Hadith of the day with Arabic, English, and **Muhiuddin Khan Bangla translation** directly from verified local datasets with zero AI hallucination |
 | “Help me, Wi-Fi is not working”, “Is my PC safe?”, “Is this link safe?” plus the address | Checks this PC and does the safe next step |
 
+For long dictation into WhatsApp, Chrome, Cursor or mail, use **Voice Typing** (**Win+Alt+A**) instead of DevOS AI chat — the green mic types while you speak.
+
 Shut down, restart and uninstall always ask for confirmation first.
 
 **Documents & images**
@@ -279,7 +296,8 @@ Shut down, restart and uninstall always ask for confirmation first.
 
 **Voice**
 - Offline speech recognition for **Bangla and English** (included in the ISO).
-- **Win + H**: speak a command; a small pill shows what was heard and the result.
+- **Win + H**: speak a *command* to DevOS AI; a small pill shows what was heard and the result.
+- **Win + Alt + A** / **Win + Alt + H**: **Voice Typing** into the text box under the mouse (not a chat reply) — see §16.
 - **“Hey DevOS”** hands-free mode (off by default, one switch in the sidebar), with battery and CPU guards and a tray icon to pause it.
 
 **Experience**
@@ -299,6 +317,7 @@ Shut down, restart and uninstall always ask for confirmation first.
 ### 6. Notepad
 - Tabs, find & replace, go to line, zoom, word wrap, line/column status bar — like Windows 11 Notepad.
 - **Never lose text:** every tab (including unsaved *Untitled* ones) is saved automatically and restored after a crash, a forced close or a power cut.
+- **Voice Typing:** dictation inserts at the caret over a local socket on Wayland (no focus fight with the floating mic).
 
 ### 7. For developers & AI Engineers
 - **DevOS AI Code Agent**: Autonomous pair programming and development agent with repository planning, interactive diff reviews, prompt queuing, cancellation, retry/rerun, live dev server preview, and terminal execution (`devos-ai-code-agent` or desktop shortcut). Supports both local offline LLMs and optional cloud providers (Google Gemini, Groq, DeepSeek, OpenAI).
@@ -481,8 +500,8 @@ Shut down, restart and uninstall always ask for confirmation first.
 | DevOS AI | Private assistant: PC questions, actions, notes, search, reminders, PDFs, photos, voice. Win+H |
 | DevOS AI Models | Pick a larger model, photo understanding, or the coding model. Share the API on your Wi-Fi |
 | DevOS AI API | OpenAI-compatible local API and docs at `http://127.0.0.1:11434/docs` |
-| AI on any text | Select text, press Win+Alt+A: rewrite, fix grammar, shorten, translate, summarize, reply |
-| Voice typing | Dictate into any app in Bangla or English. Win+Alt+H. Offline |
+| Voice Typing | Click a text box, press **Win+Alt+A** or **Win+Alt+H**: green mic, live type, click anywhere to stop. Bangla + English offline |
+| AI on selected text | Select text, press **Win+Alt+Shift+A**: rewrite, fix grammar, shorten, translate, summarize, reply |
 | Clipboard history | Win+V. Pick an earlier copy and paste it back |
 | Emoji panel | Win+. Search smile, love, food or `bd` |
 | DevOS Notes | Notebooks, sticky notes, voice notes, AI summarize / to-do / translate |
@@ -503,6 +522,11 @@ Shut down, restart and uninstall always ask for confirmation first.
 | Cloud Backup | Optional Google Drive or OneDrive backup of your folders |
 | Dashboard | PC overview in its own window |
 | Storage Doctor | What is using the disk, with a way to clean it |
+| Broadband Connection | PPPoE dial-up for direct ONU / fiber modems (`devos-broadband`) |
+| Screen Recorder | Record the screen, then trim / mute / replace voice (`devos recorder`) |
+| AI Pipeline | Ordered Antigravity / Codex / Cursor Agent / Claude queue (`devos pipeline gui`) |
+| Display & Power | Resolution, refresh, scale; battery vs plugged-in sleep (`devos-display`, `devos-power`) |
+| Kids Mode | Full-screen space playground; work keeps running behind it |
 | Settings, Files, This PC, Terminal, Photos | The everyday desktop, named as what they do |
 | Night light | Warmer screen from 7:00 pm to 6:30 am |
 | Islamic DevOS | Prayer times, Qibla, Hijri date, daily ayah and hadith. Islamic family preset |
@@ -568,13 +592,21 @@ DevOS includes a dark dashboard for hardware status, storage tools, local runtim
 
 ### 16. Built-in productivity & AI everywhere
 - **DevOS Notes** — notebooks, sticky notes on the desktop, voice notes, AI summarize / to-do / translate; saved in Documents.
-- **Voice typing (Win+Alt+H)** — dictate into any app in Bangla or English, offline.
-- **AI on any text (Win+Alt+A)** — select text anywhere → rewrite, fix grammar, shorten, translate, summarize, reply.
+- **Voice Typing (Win+Alt+A / Win+Alt+H)** — WhatsApp-style green mic for *any* focused text box:
+  1. Click the message/compose box (WhatsApp, Chrome, Cursor, mail, Notepad…).
+  2. Press **Win+Alt+A** (or **Win+Alt+H**). The mic remembers that mouse spot.
+  3. Speak; after a short pause, words appear. Keep speaking for the next phrase.
+  4. **Click anywhere** or press the hotkey again to stop.
+  - Offline **Bangla and English** speech recognition (bundled).
+  - Plasma Wayland typing uses KWin fake-input (`kwtypr`); Notepad also accepts inserts via a local socket.
+  - Dictated text is always copied to the clipboard as a Ctrl+V safety net.
+- **AI on selected text (Win+Alt+Shift+A)** — select text anywhere → rewrite, fix grammar, shorten, translate, summarize, reply (local model).
 - **Clipboard history (Win+V)** — the copies you already made, one click to paste one back into the app you were using.
 - **Emoji panel (Win+.)** — search “love”, “laugh”, “food” or “bd” and it pastes the emoji. Say “open emoji” to DevOS AI.
 - **DevOS AI Code Agent** — a Cursor-style coding agent on the local model: plans, reads code, shows every change as a diff to accept, asks before running commands. Appears only on PCs with 8 GB+ RAM and a Medium+ or Coding AI model.
+- **AI Pipeline** — ordered queue of Antigravity / Codex / Cursor Agent / Claude tasks (`devos pipeline gui`).
 - **Install anything:** paste a Microsoft Store, Google Play, App Store or Flathub link (or say "install Zoom") and DevOS AI finds the DevOS version, the web version, or tells you honestly when an app can't run on DevOS.
-- DevOS's own tools (Dashboard, Storage Doctor…) open in their **own DevOS windows**, not browser tabs.
+- DevOS's own tools (Dashboard, Storage Doctor, Broadband, Security, Phone Link, Share, Backup…) open in their **own DevOS windows**, not browser tabs.
 
 ### 17. Cloud Backup — optional Google Drive / OneDrive
 - **Off by default.** Turn it on, sign in to Google Drive or OneDrive in your browser, and pick Documents, Desktop, Pictures and/or Downloads.
@@ -737,6 +769,9 @@ devos restore                                    # btrfs restore points
 devos-security check https://example.com         # look-alike and scam check
 devos-clipboard                                  # clipboard history (Win+V)
 devos-emoji                                      # emoji panel (Win+.)
+devos-voice-typing                               # Voice Typing mic (Win+Alt+A / Win+Alt+H)
+devos-ai-actions                                 # AI rewrite grid on selected text (Win+Alt+Shift+A)
+devos pipeline gui                               # AI workflow queue (Antigravity / Codex / …)
 devos-islamic today                              # today's prayer times, Hijri date, ayah & hadith
 sudo devos-modesty enable --mode women           # optional local body-region filter (estimates may be wrong)
 devos-kids-mode                                  # launch the full-screen space playground
@@ -748,6 +783,8 @@ devos-files                                      # Files / This PC
 devos-archive                                    # archive helper; see --help
 devos-ai-code-agent                              # DevOS AI Code Agent GUI
 devos-familysafe                                 # Family safety and content guard
+devos-recorder                                   # screen recorder + clip editor
+devos-dashboard                                  # opening dashboard / system control
 ```
 
 ---
@@ -765,13 +802,16 @@ DevOS/
 ├── components/
 │   ├── assistant/                   # DevOS AI app: chat window, commands, voice, documents, photos
 │   ├── ai-core/                     # Local AI service (OpenAI-compatible API on 127.0.0.1:11434)
+│   ├── voicetype/                   # Voice Typing (Win+Alt+A/H) + kwtypr Wayland inject
+│   ├── aiactions/                   # AI rewrite grid on selected text (Win+Alt+Shift+A)
 │   ├── apps/                        # Apps window (uninstall, cache, cookies)
 │   ├── optimizer/                   # DevOS Optimizer (idle apps, clean-up)
 │   ├── taskman/                     # Task Manager (Ctrl+Shift+Esc)
-│   ├── notepad/                     # Notepad with crash-proof sessions
+│   ├── notepad/                     # Notepad with crash-proof sessions + Voice Typing socket
 │   ├── apphub/                      # App routing, safety scan, native-version catalog
 │   ├── winlayer/                    # Windows programs
 │   ├── androidlayer/                # Android apps
+│   ├── broadband/ recorder/ pipeline/ security/ phonelink/ share/
 │   ├── devserver/ code-agent/ ai-agent/ settings/ dashboard/ first-boot/ linuxlayer/
 │   └── devos_cli.py                 # `devos` command
 ├── tests/

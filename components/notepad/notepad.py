@@ -16,7 +16,9 @@ import datetime
 import hashlib
 import json
 import os
+import shutil
 import signal
+import subprocess
 import sys
 import tempfile
 import time
@@ -1742,12 +1744,82 @@ def _load_gui():
             self.lbl_eol.setText(EOL_LABELS.get(ed.eol, "Unix (LF)"))
             self.lbl_enc.setText(ENCODING_LABELS.get(ed.encoding, "UTF-8"))
 
+        def insert_dictation(self, text):
+            """Insert voice-typed text at the caret (used by DevOS Voice Typing)."""
+            text = text if isinstance(text, str) else ""
+            if not text:
+                return
+            self.bring_to_front()
+            ed = self.current_editor()
+            if ed is None:
+                return
+            ed.setFocus(Qt.OtherFocusReason)
+            ed.insertPlainText(text)
+
         def bring_to_front(self):
+            """Surface Notepad when Files double-clicks a document (Wayland-safe)."""
             if self.isMinimized():
                 self.showNormal()
+            self.setWindowState((self.windowState() & ~Qt.WindowMinimized) | Qt.WindowActive)
             self.show()
             self.raise_()
             self.activateWindow()
+            try:
+                wh = self.windowHandle()
+                if wh is not None and hasattr(wh, "requestActivate"):
+                    wh.requestActivate()
+            except Exception:
+                pass
+            # Plasma Wayland often ignores Qt raise_ — load a tiny KWin script once.
+            try:
+                needle = (self.windowTitle() or "Notepad").replace("\\", "\\\\").replace("'", "\\'")
+                script = (
+                    "var list = (workspace.windowList ? workspace.windowList() : workspace.clientList());\n"
+                    "for (var i = 0; i < list.length; i++) {\n"
+                    "  var c = list[i];\n"
+                    "  var cap = (c.caption || '') + '';\n"
+                    "  var cls = (c.resourceClass || '') + '';\n"
+                    "  if (cap.indexOf('%s') !== -1 || cls.toLowerCase().indexOf('notepad') !== -1) {\n"
+                    "    if (workspace.activeWindow !== undefined) workspace.activeWindow = c;\n"
+                    "    else workspace.activeClient = c;\n"
+                    "    break;\n"
+                    "  }\n"
+                    "}\n"
+                ) % needle[:64]
+                path = os.path.join(
+                    os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir(),
+                    "devos-raise-notepad.js",
+                )
+                with open(path, "w", encoding="utf-8") as fh:
+                    fh.write(script)
+                for bus in ("qdbus6", "qdbus-qt6", "qdbus"):
+                    if not shutil.which(bus):
+                        continue
+                    subprocess.run(
+                        [bus, "org.kde.KWin", "/Scripting",
+                         "org.kde.kwin.Scripting.unloadScript", "devos-raise-notepad"],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2,
+                    )
+                    subprocess.run(
+                        [bus, "org.kde.KWin", "/Scripting",
+                         "org.kde.kwin.Scripting.loadScript", path, "devos-raise-notepad"],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2,
+                    )
+                    subprocess.run(
+                        [bus, "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting.start"],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2,
+                    )
+                    break
+            except Exception:
+                pass
+            try:
+                if shutil.which("wmctrl"):
+                    subprocess.Popen(
+                        ["wmctrl", "-a", "Notepad"],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    )
+            except Exception:
+                pass
 
     def apply_theme(app):
         app.setStyle("Fusion")
@@ -1831,14 +1903,36 @@ def _load_gui():
             line = self._buffers[sock].split(b"\n", 1)[0]
             self._buffers[sock] = b""
             try:
-                files = json.loads(line.decode("utf-8")).get("files") or []
+                msg = json.loads(line.decode("utf-8"))
             except (ValueError, AttributeError):
-                files = []
-            files = [f for f in files if isinstance(f, str)]
+                msg = {}
+            if not isinstance(msg, dict):
+                msg = {}
+            files = [f for f in (msg.get("files") or []) if isinstance(f, str)]
+            insert = msg.get("insert")
+            inserted = False
             if files:
                 self.window.open_files(files)
+            if isinstance(insert, str) and insert:
+                # Voice Typing → insert at caret (works on Wayland; no xdotool needed).
+                # Do it synchronously so the caller gets a real ack.
+                try:
+                    self.window.insert_dictation(insert)
+                    inserted = True
+                except Exception:
+                    inserted = False
+            # Always raise — even when the same file was already open.
             self.window.bring_to_front()
-            sock.write(b"ok\n")
+            try:
+                from PyQt5.QtCore import QTimer
+                QTimer.singleShot(50, self.window.bring_to_front)
+                QTimer.singleShot(250, self.window.bring_to_front)
+            except Exception:
+                pass
+            if inserted:
+                sock.write(b"inserted\n")
+            else:
+                sock.write(b"ok\n")
             sock.flush()
 
     _GUI = {
@@ -1895,6 +1989,8 @@ def create_app(argv=None, store=None):
     app.aboutToQuit.connect(win.autosave)
     instance.listen(win)
     win.show()
+    if files:
+        win.bring_to_front()
     win.autosave()
     return app, win
 

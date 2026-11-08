@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Network Usage
+Name[bn]=নেটওয়ার্ক ব্যবহার
+GenericName=Data usage
+Comment=See network interfaces, last 30 days per day, and monthly totals (12 months kept)
+Comment[bn]=নেটওয়ার্ক ইন্টারফেস, গত ৩০ দিনের ব্যবহার এবং মাসিক মোট দেখুন
+Exec=/usr/local/bin/devos-network-usage
+Icon=devos-network-usage
+Terminal=false
+Categories=Network;System;Monitor;
+Keywords=network;bandwidth;data;usage;gb;wifi;ethernet;vnstat;graph;
+StartupWMClass=devos-network-usage

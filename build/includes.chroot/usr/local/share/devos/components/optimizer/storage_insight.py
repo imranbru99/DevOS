@@ -17,49 +17,67 @@ GB = 1024 ** 3
 
 
 def _du_bytes(path: Path) -> int:
-    """Prefer `du -sb` (fast); fall back to a shallow walk."""
+    """Size via `du -sb`. Keep du's total even when exit≠0 (permission denials).
+
+    Never recurse in Python — walking /usr or ~/project freezes This PC for many
+    seconds when du itself already printed a usable size in under a second.
+    """
     if not path.exists():
         return 0
     try:
         import subprocess
-        out = subprocess.check_output(
+        proc = subprocess.run(
             ["du", "-sb", "--apparent-size", str(path)],
-            stderr=subprocess.DEVNULL,
-            timeout=8,
+            capture_output=True,
+            text=True,
+            timeout=6,
         )
-        return int(out.split()[0])
+        line = (proc.stdout or "").strip()
+        if line:
+            return int(line.split()[0])
     except Exception:
         pass
-    total = 0
     try:
         if path.is_file() and not path.is_symlink():
             return path.stat().st_size
-        with os.scandir(path) as entries:
-            for entry in entries:
-                try:
-                    if entry.is_symlink():
-                        continue
-                    if entry.is_file(follow_symlinks=False):
-                        total += entry.stat(follow_symlinks=False).st_size
-                    elif entry.is_dir(follow_symlinks=False):
-                        total += _du_bytes(Path(entry.path))
-                except OSError:
-                    continue
     except OSError:
-        return total
-    return total
+        pass
+    return 0
 
 
 def _sum_existing(paths: List[Path], budget: Optional[List[int]] = None) -> int:
-    total = 0
-    for p in paths:
-        if budget is not None and budget[0] <= 0:
-            break
-        size = _du_bytes(p)
-        total += size
+    """Sum path sizes; run independent `du` calls in parallel."""
+    existing = [p for p in paths if p.exists()]
+    if not existing:
+        return 0
+    if len(existing) == 1:
+        size = _du_bytes(existing[0])
         if budget is not None:
             budget[0] -= size
-    return total
+        return size
+    try:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        total = 0
+        with ThreadPoolExecutor(max_workers=min(8, len(existing))) as pool:
+            futures = {pool.submit(_du_bytes, p): p for p in existing}
+            for fut in as_completed(futures):
+                size = fut.result() or 0
+                total += size
+                if budget is not None:
+                    budget[0] -= size
+                    if budget[0] <= 0:
+                        break
+        return total
+    except Exception:
+        total = 0
+        for p in existing:
+            if budget is not None and budget[0] <= 0:
+                break
+            size = _du_bytes(p)
+            total += size
+            if budget is not None:
+                budget[0] -= size
+        return total
 
 
 def secondary_data_roots(home: Optional[Path] = None) -> List[Path]:

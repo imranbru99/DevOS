@@ -125,6 +125,10 @@ def cmd_enable(_args):
         print("Texts not downloaded yet: %s" % exc)
     if not os.path.exists(notifier.settings_path()):
         notifier.save_settings(notifier.load_settings())
+    try:
+        notifier.ensure_clear_voice()
+    except Exception:
+        pass
     rc = subprocess.call(["systemctl", "--user", "enable", "--now", SERVICE])
     print("Prayer reminders are on." if rc == 0 else "Could not start the reminder service.")
     return rc
@@ -205,6 +209,10 @@ QPushButton#nav { background: transparent; border: 1px solid transparent; color:
 QPushButton#nav:checked { background: #0f172a; border-color: #1e293b; color: #f8fafc; }
 QPushButton#seg { background: #0b1220; border: 1px solid #1e293b; border-radius: 8px; padding: 4px 10px; color: #94a3b8; }
 QPushButton#seg:checked { background: #0c4a6e; border-color: #38bdf8; color: #f8fafc; }
+QPushButton#speak { background: #0b1220; border: 1px solid #1e293b; border-radius: 8px; padding: 4px 12px;
+  color: #7dd3fc; font-weight: 600; }
+QPushButton#speak:hover { border-color: #38bdf8; color: #f8fafc; }
+QPushButton#speak:checked { background: #0c4a6e; border-color: #38bdf8; color: #f8fafc; }
 QPushButton:disabled { color: #64748b; }
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QTimeEdit {
   background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 6px; }
@@ -238,6 +246,20 @@ def run_gui(screenshot=None):
 
         def run(self):
             self.done.emit(content.ai_reflection(self.item, self.lang))
+
+    class SpeakWorker(QtCore.QThread):
+        """Speak one card's text off the UI thread; notifier waits so voices never overlap."""
+        finished = QtCore.pyqtSignal()
+
+        def __init__(self, text, lang, parent=None):
+            super().__init__(parent)
+            self.text, self.lang = text, lang
+
+        def run(self):
+            try:
+                notifier.speak_text(self.text, self.lang)
+            finally:
+                self.finished.emit()
 
     class QiblaDial(QtWidgets.QWidget):
         """A compass rose with a needle at the Qibla bearing (from true north)."""
@@ -303,13 +325,18 @@ def run_gui(screenshot=None):
     class TextCard(QtWidgets.QFrame):
         """Ayah / Hadith card: Arabic (RTL) + translation + source + optional AI reflection."""
 
+        # Only one card speaks at a time across the whole window.
+        _active_speak = None
+
         def __init__(self, title, fonts, parent=None):
             super().__init__(parent)
             self.setObjectName("card")
             self.fonts = fonts
+            self.title = title
             self.item = None
             self.lang = "bn"
             self.worker = None
+            self.speak_worker = None
             outer = QtWidgets.QVBoxLayout(self)
             outer.setContentsMargins(18, 16, 18, 16)
             outer.setSpacing(10)
@@ -329,6 +356,14 @@ def run_gui(screenshot=None):
                 self.seg.addButton(b)
                 head.addWidget(b)
             self.seg.buttonClicked.connect(lambda b: self.set_lang(b.property("lang")))
+            self.speak_btn = QtWidgets.QPushButton("Speak")
+            self.speak_btn.setObjectName("speak")
+            self.speak_btn.setToolTip(
+                "Read this card aloud in a clear voice (Bangla neural TTS when online; "
+                "one voice at a time)")
+            self.speak_btn.setEnabled(False)
+            self.speak_btn.clicked.connect(self.toggle_speak)
+            head.addWidget(self.speak_btn)
             outer.addLayout(head)
 
             self.ref = QtWidgets.QLabel("")
@@ -417,6 +452,7 @@ def run_gui(screenshot=None):
             self.item = item
             self.aibox.hide()
             self.explain.setEnabled(bool(item))
+            self.speak_btn.setEnabled(bool(item))
             if not item:
                 self.ref.setText("")
                 self.arabic.hide()
@@ -431,6 +467,45 @@ def run_gui(screenshot=None):
             self.bn.setText(item["bn"])
             self.en.setText(item["en"])
             self.set_lang(self.lang)
+
+        def speak_text_for_card(self):
+            """Translation in the selected language (Bangla or English), with a short intro."""
+            if not self.item:
+                return "", "bn"
+            lang = "bn" if self.lang == "bn" else "en"
+            body = " ".join((self.item.get(lang) or self.item.get("en") or "").split())
+            if self.title.lower().startswith("ayah"):
+                intro = "আজকের আয়াত। " if lang == "bn" else "Ayah of the day. "
+            else:
+                intro = "আজকের হাদিস। " if lang == "bn" else "Hadith of the day. "
+            return intro + body, lang
+
+        def toggle_speak(self):
+            if self.speak_worker and self.speak_worker.isRunning():
+                notifier._stop_speech()
+                return
+            # Stop any other card that is still speaking.
+            other = TextCard._active_speak
+            if other and other is not self and other.speak_worker and other.speak_worker.isRunning():
+                notifier._stop_speech()
+                other.speak_worker.wait(1500)
+                other._speak_idle()
+            text, lang = self.speak_text_for_card()
+            if not text.strip():
+                return
+            self.speak_btn.setText("Stop")
+            self.speak_btn.setEnabled(True)
+            TextCard._active_speak = self
+            self.speak_worker = SpeakWorker(text, lang, self)
+            self.speak_worker.finished.connect(self._speak_idle)
+            self.speak_worker.start()
+
+        def _speak_idle(self):
+            self.speak_btn.setText("Speak")
+            self.speak_btn.setEnabled(bool(self.item))
+            if TextCard._active_speak is self:
+                TextCard._active_speak = None
+            self.speak_worker = None
 
         def ask_ai(self):
             if not self.item or self.worker:
@@ -695,24 +770,35 @@ def run_gui(screenshot=None):
             self.language = QtWidgets.QComboBox()
             self.language.addItem("বাংলা (Bangla)", "bn")
             self.language.addItem("English", "en")
-            f4.addRow("Translation", self.language)
+            f4.addRow("Translation & spoken language", self.language)
             c.addLayout(f4)
+            self.play_sound = QtWidgets.QCheckBox(
+                "Play a sound (system chime, or your own adhan file below)")
+            self.speak = QtWidgets.QCheckBox(
+                "Speak prayer name and daily Ayah/Hadith (espeak)")
+            c.addWidget(self.play_sound)
+            c.addWidget(self.speak)
+            daily_note = QtWidgets.QLabel(
+                "If the PC was off at the daily time, Ayah and Hadith still notify "
+                "once later the same day — about a minute after you sign in.")
+            daily_note.setObjectName("muted")
+            daily_note.setWordWrap(True)
+            c.addWidget(daily_note)
             snd = QtWidgets.QHBoxLayout()
             self.sound = QtWidgets.QLineEdit()
             self.sound.setReadOnly(True)
-            self.sound.setPlaceholderText("No sound (DevOS does not include an adhan)")
+            self.sound.setPlaceholderText("Optional adhan file — leave empty for the system chime")
             choose = QtWidgets.QPushButton("Choose…")
             choose.clicked.connect(self.choose_sound)
             clear = QtWidgets.QPushButton("Clear")
             clear.clicked.connect(lambda: self.sound.setText(""))
             test = QtWidgets.QPushButton("Test")
-            test.clicked.connect(lambda: notifier.notify("DevOS Islamic", "This is how a prayer reminder looks.",
-                                                         self.sound.text()))
+            test.clicked.connect(self.test_notify)
             snd.addWidget(self.sound, 1)
             snd.addWidget(choose)
             snd.addWidget(clear)
             snd.addWidget(test)
-            c.addWidget(QtWidgets.QLabel("Sound at prayer time (your own audio file)"))
+            c.addWidget(QtWidgets.QLabel("Optional adhan / reminder audio file"))
             c.addLayout(snd)
             c.addStretch(1)
             self.fetch_status = QtWidgets.QLabel("")
@@ -754,7 +840,25 @@ def run_gui(screenshot=None):
             hh, mm = notifier._parse_hhmm(s.get("daily_time"))
             self.daily_time.setTime(QtCore.QTime(hh, mm))
             self.language.setCurrentIndex(max(0, self.language.findData(s.get("language", "bn"))))
+            self.play_sound.setChecked(bool(s.get("play_sound", True)))
+            self.speak.setChecked(bool(s.get("speak", True)))
             self.sound.setText(s.get("sound", ""))
+
+        def test_notify(self):
+            lang = self.language.currentData() or "bn"
+            fake = {
+                "play_sound": self.play_sound.isChecked(),
+                "speak": self.speak.isChecked(),
+                "sound": self.sound.text(),
+                "language": lang,
+            }
+            sound = notifier.resolve_sound(fake, "prayer") if fake["play_sound"] else ""
+            speak = notifier.prayer_speech("dhuhr", fake) if fake["speak"] else ""
+            notifier.notify(
+                "Dhuhr time",
+                "Test: this is how a prayer reminder looks and sounds.",
+                sound=sound, speak=speak, language=lang,
+            )
 
         def fill_cities(self, text):
             current = self.city_list.currentItem().text() if self.city_list.currentItem() else None
@@ -793,6 +897,8 @@ def run_gui(screenshot=None):
             s["daily_text"] = self.daily.isChecked()
             s["daily_time"] = self.daily_time.time().toString("HH:mm")
             s["language"] = self.language.currentData()
+            s["play_sound"] = self.play_sound.isChecked()
+            s["speak"] = self.speak.isChecked()
             s["sound"] = self.sound.text()
             notifier.save_settings(s)
             self.settings = notifier.load_settings()

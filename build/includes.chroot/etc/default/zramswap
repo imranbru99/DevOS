@@ -1,5 +1,6 @@
-# Compressed swap capacity, not preallocated RAM or a guaranteed memory multiplier.
-# Compression depends on workload; incompressible data still consumes memory.
+# Compressed swap in RAM — same policy as the daily DevOS install:
+# about half of physical RAM (≈15–16 GiB on a 32 GiB PC). This is virtual
+# capacity, not preallocated memory; compression depends on the workload.
 ALGO=zstd
-PERCENT=100
+PERCENT=50
 PRIORITY=100
