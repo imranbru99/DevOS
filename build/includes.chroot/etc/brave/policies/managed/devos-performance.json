@@ -1,0 +1,13 @@
+{
+  "_comment": "Many Chrome windows + throttle background workers. TotalMemoryLimitMb retuned at boot by devos-chrome-tune.",
+  "HighEfficiencyModeEnabled": true,
+  "MemorySaverModeSavings": 2,
+  "TotalMemoryLimitMb": 9500,
+  "BackgroundModeEnabled": false,
+  "BackgroundAppUpdateEnabled": false,
+  "HardwareAccelerationModeEnabled": true,
+  "MetricsReportingEnabled": false,
+  "UrlKeyedAnonymizedDataCollectionEnabled": false,
+  "SafeBrowsingExtendedReportingEnabled": false,
+  "ChromeCleanupReportingEnabled": false
+}

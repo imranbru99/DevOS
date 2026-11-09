@@ -5,6 +5,33 @@ set -euo pipefail
 # Retire the legacy hook-generated sysctl file in reused build roots.
 rm -f /etc/sysctl.d/99-devos-performance.conf
 systemctl disable earlyoom.service devos-hardware.service || true
+
+# systemctl enable can fail in a chroot — write durable wants like hook 05.
+want() {
+    local unit="$1" dir="$2" src=""
+    mkdir -p "$dir"
+    if [ -f "/etc/systemd/system/${unit}" ]; then
+        src="/etc/systemd/system/${unit}"
+    elif [ -f "/usr/lib/systemd/system/${unit}" ]; then
+        src="/usr/lib/systemd/system/${unit}"
+    elif [ -f "/lib/systemd/system/${unit}" ]; then
+        src="/lib/systemd/system/${unit}"
+    else
+        return 0
+    fi
+    ln -sfn "$src" "${dir}/${unit}"
+}
+
 systemctl enable zramswap.service systemd-oomd.service devos-performance-tune.service || true
 systemctl enable thermald.service || true
+systemctl enable fstrim.timer || true
+systemctl enable tmp.mount || true
 systemctl --global enable devos-optimizer-clean.timer || true
+
+want zramswap.service /etc/systemd/system/multi-user.target.wants
+want systemd-oomd.service /etc/systemd/system/multi-user.target.wants
+want devos-performance-tune.service /etc/systemd/system/multi-user.target.wants
+want thermald.service /etc/systemd/system/multi-user.target.wants
+want fstrim.timer /etc/systemd/system/timers.target.wants
+# /tmp in RAM — Chrome guest profiles and build junk stay off the SSD.
+want tmp.mount /etc/systemd/system/local-fs.target.wants

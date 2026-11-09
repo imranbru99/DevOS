@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
-Name=DevOS AI Models
+Name=AI Models
 GenericName=Choose your AI model
-Comment=Pick a bigger or smaller DevOS AI for this PC and share the local AI API
+Comment=Pick a bigger or smaller on-PC AI model and optional API access
 Exec=/usr/local/bin/devos-ai-models
 Icon=devos-ai-models
 Terminal=false

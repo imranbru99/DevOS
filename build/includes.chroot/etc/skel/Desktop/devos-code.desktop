@@ -2,11 +2,12 @@
 Version=1.0
 Name=DevOS Code
 GenericName=Code Editor
-Comment=Code editor
+Comment=Modern code editor with DevOS AI
 Exec=devos-code %F
-Icon=code
+Icon=devos-code
 Terminal=false
 Type=Application
-Categories=Development;TextEditor;
+StartupWMClass=code
+Categories=Development;TextEditor;IDE;
 MimeType=text/plain;text/x-python;text/x-csrc;application/javascript;
 StartupNotify=true

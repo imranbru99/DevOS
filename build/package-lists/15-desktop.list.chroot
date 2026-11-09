@@ -28,6 +28,8 @@ fonts-inter
 fonts-liberation
 fonts-noto-core
 papirus-icon-theme
+# Global Theme Apply watcher (devos-heal-theme-watch)
+inotify-tools
 qt5-style-kvantum
 # KDE / Polkit use Qt 6; both toolkits need the same native style.
 qt6-style-kvantum

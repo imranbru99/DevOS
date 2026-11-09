@@ -1,3 +1,4 @@
 [General]
+confirmLogout=true
 loginMode=restorePreviousLogout
 excludeApps=google-chrome,google-chrome-stable,chrome,firefox,firefox-bin,microsoft-edge,msedge,brave,brave-browser,chromium,chromium-browser,code,codium,code-oss,emoji.py,devos-emoji,devos-voice,devos-chat,aiactions.py,optimizer.py

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Snipping Tool
+GenericName=Screenshot
+Comment=Capture the screen
+Exec=spectacle
+Icon=spectacle
+Terminal=false
+Categories=Qt;Utility;Graphics;
+Keywords=screenshot;snip;snipping;capture;screen;spectacle;
+StartupNotify=true
+StartupWMClass=spectacle

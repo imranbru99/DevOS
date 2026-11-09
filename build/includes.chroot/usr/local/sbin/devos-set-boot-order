@@ -1,56 +1,61 @@
 #!/bin/bash
-# Move the DevOS EFI entry in front of Windows Boot Manager.
-# A missing entry is not a failure: BIOS machines have no EFI variables.
-set +e
+# Register the exact EFI partition selected and mounted by Calamares.
+set -euo pipefail
+export LC_ALL=C
 
-if [ ! -d /sys/firmware/efi ]; then
-    exit 0
-fi
-if ! command -v efibootmgr >/dev/null 2>&1; then
-    exit 0
-fi
+esp="$1"
+loader='\EFI\DevOS\shimx64.efi'
+device="$(findmnt -n -o SOURCE --mountpoint "$esp")"
+disk_name="$(lsblk -ndo PKNAME "$device")"
+kernel_name="$(lsblk -ndo KNAME "$device")"
+part="$(cat "/sys/class/block/$kernel_name/partition")"
+partuuid="$(lsblk -ndo PARTUUID "$device")"
+test -n "$disk_name"
+test -n "$part"
+test -n "$partuuid"
+test -s "$esp/EFI/DevOS/shimx64.efi"
 
-# QEMU and some firmware block forever on EFI variables. A hang here is
-# reported as "External command failed to finish."
-boot="$(timeout -k 5 15 efibootmgr 2>/dev/null)" || boot=""
+efi() { timeout -k 2 12 efibootmgr "$@"; }
 
-# Match Boot#### whether or not it is the current (*) entry. From the live USB
-# the asterisk sits on the USB entry, not on DevOS — requiring * skipped DevOS
-# and left Windows first after reboot.
-pick_entry() {
-    local label="$1"
-    # BRE: optional literal '*', then spaces, then the EFI description.
-    printf '%s\n' "$boot" | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\?[[:space:]]*'"${label}"'.*/\1/p' | head -n 1
+matching_entry() {
+    # Match partition identity and path. Labels are display text only.
+    awk -v id="$partuuid" -v part="$part" '
+        BEGIN {
+            id = tolower(id)
+            if (length(id) == 36)
+                device_path = "hd(" part ",gpt," id ","
+            else
+                device_path = "hd(" part ",mbr,0x" substr(id, 1, 8) ","
+        }
+        /^Boot[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]/ {
+            line = tolower($0)
+            if (index(line, device_path) && index(line, "file(\\efi\\devos\\shimx64.efi)")) {
+                print substr($0, 5, 4)
+                exit
+            }
+        }'
 }
 
-first="$(pick_entry 'DevOS')"
-if [ -z "$first" ]; then
-    first="$(pick_entry 'ubuntu')"
+entries="$(efi -v)"
+entry="$(matching_entry <<< "$entries")"
+if [ -z "$entry" ]; then
+    efi -C -d "/dev/$disk_name" -p "$part" -L DevOS -l "$loader"
+    entries="$(efi -v)"
+    entry="$(matching_entry <<< "$entries")"
+    test -n "$entry"
 fi
-if [ -z "$first" ]; then
-    exit 0
-fi
-
-order="$(printf '%s\n' "$boot" | sed -n 's/^BootOrder:[[:space:]]*//p' | tr -d ' ')"
-new="$first"
-old_ifs="$IFS"
-IFS=','
-for id in $order; do
-    [ -n "$id" ] || continue
-    if [ "$(printf '%s' "$id" | tr '[:lower:]' '[:upper:]')" = "$(printf '%s' "$first" | tr '[:lower:]' '[:upper:]')" ]; then
-        continue
+order="$(sed -n 's/^BootOrder:[[:space:]]*//p' <<< "$entries")"
+new_order="$entry"
+IFS=, read -ra old_entries <<< "$order"
+for old in "${old_entries[@]}"; do
+    if [ -n "$old" ] && [ "${old^^}" != "${entry^^}" ]; then
+        new_order+=",$old"
     fi
-    new="${new},${id}"
 done
-IFS="$old_ifs"
-
-# Put DevOS first and set BootNext so the immediate reboot skips Windows.
-timeout -k 5 15 efibootmgr -o "$new" >/dev/null 2>&1 || true
-timeout -k 5 15 efibootmgr -n "$first" >/dev/null 2>&1 || true
-# Some firmware ignores BootOrder until Windows Boot Manager is deactivated.
-win="$(pick_entry 'Windows Boot Manager')"
-if [ -n "$win" ] && [ "$win" != "$first" ]; then
-    timeout -k 5 15 efibootmgr -A -b "$win" >/dev/null 2>&1 || true
-fi
-timeout -k 5 15 efibootmgr -a -b "$first" >/dev/null 2>&1 || true
-exit 0
+efi -b "$entry" -a
+efi -o "$new_order"
+efi -n "$entry"
+entries="$(efi -v)"
+test "$(matching_entry <<< "$entries")" = "$entry"
+test "$(sed -n 's/^BootOrder:[[:space:]]*//p' <<< "$entries")" = "$new_order"
+test "$(sed -n 's/^BootNext:[[:space:]]*//p' <<< "$entries")" = "$entry"

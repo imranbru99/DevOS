@@ -148,7 +148,7 @@ def main(argv=None):
         def open_app(self):
             try:
                 open_windows_app()
-                self.notice.setText('Windows App opened separately from your everyday browser. Sign in on first use. Portal theme: Settings → Dark Mode off. Remote desktop theme: Windows Settings → Personalization → Colors.')
+                self.notice.setText('Windows App opened as its own window (not a Chrome tab). Sign in on first use. Connect Cloud PC from inside that window. Portal theme: Settings → Dark Mode off. Remote desktop theme: Windows Settings → Personalization → Colors.')
             except OSError as exc:
                 self.notice.setText('Could not open Windows App: '+str(exc))
                 self.show_window()
@@ -239,7 +239,14 @@ def main(argv=None):
         client.disconnectFromServer();client.deleteLater();window.show_window()
     server.newConnection.connect(receive)
     app.aboutToQuit.connect(window.shutdown)
-    window.show()
+    try:
+        from app_identity import show_window as show_branded
+        show_branded(window, "devos-web-winapp")
+    except Exception:
+        from app_identity import decorate_window, fit_to_screen
+        decorate_window(window)
+        fit_to_screen(window)
+        window.show()
     if args.open:window.open_app()
     return app.exec_()
 

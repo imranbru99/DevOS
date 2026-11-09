@@ -1085,10 +1085,10 @@ def gui() -> int:
     app.setApplicationName("devos-familysafe")
     app.setApplicationDisplayName("Family Safety")
     app.setDesktopFileName("devos-familysafe")
-    from app_identity import apply as apply_identity
+    from app_identity import apply as apply_identity, show_window
     apply_identity(app, "devos-familysafe")
     window = Window()
-    window.show()
+    show_window(window, "devos-familysafe")
     return app.exec_()
 
 

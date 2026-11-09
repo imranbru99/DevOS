@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
-Name=DevOS Features
-GenericName=Apps & features
+Name=Features
+GenericName=Optional apps & defaults
 Comment=Add or remove apps and choose your default apps
 Exec=/usr/local/bin/devos-features
 Icon=devos-features

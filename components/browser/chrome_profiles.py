@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
 DevOS Chrome Profile & Icon Manager
-Generates distinct badged icons and desktop entries for each Google Chrome profile
-(e.g., Work, Mirza, Tony, Guest) so each profile window appears as its own icon
-with its profile name clearly visible inside the icon on the taskbar.
-Also runs a dynamic watcher that unifies open windows with taskbar launchers
-so pinned Chrome icons are never duplicated.
+
+Windows-like Chrome taskbar:
+  - Idle pin = Google Chrome logo
+  - While profiles run = one avatar icon per open profile (never grouped)
+  - When all close = restore the Google Chrome pin
+
+Uses distinct WM classes (chrome-<profile>) and Plasma Icon Tasks launcher swap.
 """
 
 import ctypes
@@ -37,8 +39,8 @@ def get_chrome_profiles(config_dir=None):
                 profiles[key] = name
         except Exception:
             pass
-    if not profiles:
-        profiles["Default"] = "Work"
+    # Never invent fake "Work" / Guest Start-menu apps. Empty Chrome config =
+    # no profile list yet (user opens Chrome and creates profiles there).
     return profiles
 
 
@@ -261,7 +263,10 @@ Icon={icon_line}
 
     actions_str = ";".join(action_keys) + ";"
     user_desktop = os.path.join(home_dir, ".local/share/applications/google-chrome.desktop")
+    default_key = next((k for k, _ in all_profiles if k != "guest"), "Default")
+    default_slug = slugify(next((n for k, n in all_profiles if k == default_key), "Chrome"))
 
+    # Idle pin keeps stock Chrome class; running profiles use chrome-<slug>.
     base_content = f"""[Desktop Entry]
 Version=1.0
 Name=Google Chrome
@@ -279,11 +284,11 @@ Actions={actions_str}
 
 [Desktop Action new-window]
 Name=New Window
-Exec={devos_bin}
+Exec={devos_bin} --profile-directory="{default_key}" --class=chrome-{default_slug}
 
 [Desktop Action new-private-window]
 Name=New Incognito Window
-Exec={devos_bin} --incognito
+Exec={devos_bin} --incognito --class=chrome-{default_slug}
 
 [Desktop Action new-guest-window]
 Name=New Guest Window
@@ -311,7 +316,9 @@ def sync_all_profiles(home_dir=None):
     details = get_chrome_profile_details(chrome_dir)
     profiles = {k: v["name"] for k, v in details.items()}
 
-    all_profiles = list(profiles.items())
+    # Real Chrome profiles only; Guest is a right-click action, not a fake person.
+    real_profiles = list(profiles.items())
+    all_profiles = list(real_profiles)
     all_profiles.append(("guest", "Guest"))
 
     created_desktops = []
@@ -346,12 +353,13 @@ Icon={icon_line}
 """)
 
     actions_str = ";".join(action_keys) + ";"
-    # Default launcher opens the first/default profile with its own WM class so
-    # Plasma/GNOME can show a separate avatar icon per profile, like Windows.
-    default_key = "Default" if "Default" in profiles else (all_profiles[0][0] if all_profiles else "Default")
+    # Idle Chrome pin always uses Default (or first real profile) — never Guest.
+    default_key = "Default" if "Default" in profiles else (
+        real_profiles[0][0] if real_profiles else "Default"
+    )
     default_name = profiles.get(default_key, "Chrome")
-    default_slug = slugify(default_name)
-    default_class = f"chrome-{default_slug}"
+    default_slug = slugify(default_name) if profiles else "chrome"
+    default_class = "google-chrome" if not profiles else f"chrome-{default_slug}"
     common_actions = f"""Actions={actions_str}
 
 [Desktop Action new-window]
@@ -384,11 +392,13 @@ Exec={devos_bin} --guest --class=chrome-guest
         else:
             exec_cmd = f'{devos_bin} --profile-directory="{key}" --class={wm_class}'
 
+        # NoDisplay: taskbar / WM_CLASS matching only — never Start menu clutter.
+        # Profiles belong in Chrome's profile picker (and right-click on Chrome).
         content = f"""[Desktop Entry]
 Version=1.0
 Name=Google Chrome ({name})
 GenericName=Web Browser
-Comment=Access the Internet as {name}
+Comment=Chrome profile — open from Chrome profile manager (not listed in Start)
 Exec={exec_cmd} %U
 StartupNotify=true
 StartupWMClass={wm_class}
@@ -396,20 +406,55 @@ Terminal=false
 Icon={icon_name}
 Type=Application
 Categories=Network;WebBrowser;
+NoDisplay=true
+Hidden=false
+X-DevOS-ChromeProfile=true
 {common_actions}"""
         with open(desktop_file, "w", encoding="utf-8") as f:
             f.write(content)
         created_desktops.append(desktop_file)
 
-    # Main Chrome launcher uses the default profile's avatar + WM class so the
-    # taskbar shows the profile photo instead of a generic Chrome blob.
-    default_avatar = (details.get(default_key) or {}).get("avatar")
-    generate_badged_icon(
-        default_name,
+    # Hide any leftover profile launchers that older DevOS builds left visible.
+    try:
+        for name in os.listdir(apps_dir):
+            if not (name.startswith("chrome-") and name.endswith(".desktop")):
+                continue
+            path = os.path.join(apps_dir, name)
+            try:
+                text = open(path, encoding="utf-8", errors="replace").read()
+            except OSError:
+                continue
+            if "NoDisplay=true" in text:
+                continue
+            if "X-DevOS-ChromeProfile=true" not in text and "StartupWMClass=chrome-" not in text:
+                continue
+            if "NoDisplay=" in text:
+                text = re.sub(r"(?m)^NoDisplay=.*$", "NoDisplay=true", text)
+            else:
+                text = text.replace("Type=Application\n", "Type=Application\nNoDisplay=true\n", 1)
+                if "NoDisplay=true" not in text:
+                    text += "\nNoDisplay=true\n"
+            try:
+                with open(path, "w", encoding="utf-8") as fh:
+                    fh.write(text)
+            except OSError:
+                pass
+    except OSError:
+        pass
+
+    # Idle pin: Chrome logo. Running windows use chrome-<profile> classes instead.
+    stock = get_stock_chrome_icon()
+    for dest in (
         os.path.join(icons_dir_48, "google-chrome.png"),
         os.path.join(icons_dir_128, "google-chrome.png"),
-        avatar_path=default_avatar,
-    )
+    ):
+        try:
+            if stock and os.path.isfile(stock):
+                shutil.copyfile(stock, dest)
+            else:
+                generate_badged_icon("Chrome", dest, None, avatar_path=None)
+        except OSError:
+            pass
     user_desktop = os.path.join(home_dir, ".local/share/applications/google-chrome.desktop")
     base_content = f"""[Desktop Entry]
 Version=1.0
@@ -418,7 +463,7 @@ GenericName=Web Browser
 Comment=Access the Internet
 Exec={devos_bin} --profile-directory="{default_key}" --class={default_class} %U
 StartupNotify=true
-StartupWMClass={default_class}
+StartupWMClass=google-chrome
 Terminal=false
 Icon=google-chrome
 Type=Application
@@ -455,6 +500,17 @@ MimeType=application/pdf;application/rdf+xml;application/rss+xml;application/xht
             f,
             indent=2,
         )
+
+    # Rename raw https://… Chrome apps and hide duplicates (Windows App twice, etc.).
+    try:
+        from browser.chrome_start_menu import clean_chrome_start_menu
+        clean_chrome_start_menu(Path(apps_dir))
+    except Exception:
+        try:
+            from chrome_start_menu import clean_chrome_start_menu
+            clean_chrome_start_menu(Path(apps_dir))
+        except Exception:
+            pass
 
     return created_desktops
 
@@ -634,10 +690,10 @@ def _is_chrome_launcher(entry: str) -> bool:
 
 def sync_plasma_profile_launchers(home_dir=None, active_slugs=None):
     """
-    Pin Chrome like Windows:
-    - No Chrome windows → show the pinned Google Chrome icon.
-    - Any Chrome window open → hide that pin; show only running profile icons.
-    Other pinned apps are preserved.
+    Windows-like Chrome pins:
+      - No Chrome windows → show Google Chrome logo pin
+      - Profiles open → hide that pin; show one avatar launcher per open profile
+    Other apps stay grouped; Chrome profiles stay ungrouped via distinct WM class.
     """
     home = home_dir or os.path.expanduser("~")
     cfg = Path(home) / ".config/plasma-org.kde.plasma.desktop-appletsrc"
@@ -674,29 +730,32 @@ def sync_plasma_profile_launchers(home_dir=None, active_slugs=None):
     active = [(s or "").strip().lower() for s in (active_slugs or []) if (s or "").strip()]
     chrome_launchers = []
     if active:
-        # Browser is open → do not show the idle pinned Google Chrome icon.
+        # Browser is open → hide idle Chrome pin; show each open profile avatar.
         seen = set()
         for slug in active:
             if slug in seen or slug in {"default"}:
                 continue
             desktop = f"chrome-{slug}.desktop"
             if not os.path.isfile(os.path.join(apps_dir, desktop)):
-                # Work often only has google-chrome.desktop; ensure chrome-work exists via sync.
                 continue
             chrome_launchers.append(f"applications:{desktop}")
             seen.add(slug)
+        if not chrome_launchers:
+            chrome_launchers = ["applications:google-chrome.desktop"]
     else:
-        # Nothing open → restore the normal pinned Chrome launcher.
         chrome_launchers = ["applications:google-chrome.desktop"]
 
     launchers = preserved + chrome_launchers
     updates = {
         "launchers": ",".join(launchers) if launchers else "applications:google-chrome.desktop",
+        # Keep launchers visible as their own buttons (Windows profile icons).
         "separateLaunchers": "true",
-        "groupingStrategy": "0",
+        # Group other apps; Chrome profiles still split via different WM classes.
+        "groupingStrategy": "1",
         "launchInPlace": "true",
-        # Hide a pin when its own window is running (profile pins).
-        "hideActivatedLaunchers": "true",
+        # Windows-like: open apps keep the same pin with an indicator under the icon
+        # (never hide the pin / spawn a blank second tile for every running app).
+        "hideActivatedLaunchers": "false",
     }
 
     parts = re.split(r"(?m)(?=^\[)", text)
@@ -1142,10 +1201,11 @@ def detect_window_profile(w, profiles, home_dir=None, assigned_profiles=None, pr
 
 def apply_window_profiles(home_dir=None):
     """
-    Inspect all open Chrome windows and assign profile desktop files and badged icons.
-    Each profile window gets its own badged icon and desktop entry on the taskbar.
-    When browser windows are open, the pinned launcher is hidden so no blank/unbadged
-    icons remain. When all windows close, the pinned launcher is restored.
+    Windows-like Chrome taskbar: one avatar icon per open profile, never grouped.
+
+    Sets per-profile WM_CLASS + desktop file, badges the window icon, hides the
+    idle Google Chrome pin while any browser window is open, and restores it when
+    every window is closed.
     """
     global _LAST_PLASMA_LAUNCHERS
     if not home_dir:
@@ -1157,7 +1217,6 @@ def apply_window_profiles(home_dir=None):
     name_to_key = {v["name"]: k for k, v in details.items()}
     windows = get_x11_windows()
 
-    # Filter for real Chrome browser windows (exclude PWAs like Windows App, Maps, etc.)
     chrome_wins = []
     active_wids = set()
     for w in windows:
@@ -1165,11 +1224,9 @@ def apply_window_profiles(home_dir=None):
         title = w["title"]
         active_wids.add(w["id"])
 
-        # Strictly ignore any Chrome PWA / Chrome App (starts with crx_) or Windows App
         if "crx_" in wc or "windows app" in title.lower() or "setting up" in title.lower():
             continue
 
-        # Match stock Chrome, DevOS wrapper (.devos-real), and per-profile classes.
         is_chrome = (
             "google-chrome" in wc
             or "chrome-" in wc
@@ -1183,67 +1240,51 @@ def apply_window_profiles(home_dir=None):
         ):
             chrome_wins.append(w)
 
-    # Clean up stale window profile cache entries
     stale = [wid for wid in WINDOW_PROFILE_CACHE if wid not in active_wids]
     for wid in stale:
         del WINDOW_PROFILE_CACHE[wid]
 
     if not chrome_wins:
-        # Restore the pinned Google Chrome icon when every window is closed.
         if sync_plasma_profile_launchers(home_dir, []):
             if _LAST_PLASMA_LAUNCHERS != ():
                 _LAST_PLASMA_LAUNCHERS = ()
                 reload_plasmashell()
         return 0
 
-    prof_session_data = get_profile_session_data(chrome_dir)
-
     icons_dir_48 = os.path.join(home_dir, ".local/share/icons/hicolor/48x48/apps")
     icons_dir_128 = os.path.join(home_dir, ".local/share/icons/hicolor/128x128/apps")
+    os.makedirs(icons_dir_48, exist_ok=True)
+    os.makedirs(icons_dir_128, exist_ok=True)
 
     assigned_profiles = set()
     processed = 0
     active_slugs = []
-    default_key = "Default" if "Default" in profiles else next(iter(profiles), "Default")
-    default_name = profiles.get(default_key, "Chrome")
-    default_slug = slugify(default_name)
+    prof_session_data = get_profile_session_data(chrome_dir)
 
     for w in chrome_wins:
-        prof_name = detect_window_profile(w, profiles, home_dir, assigned_profiles, prof_session_data)
+        prof_name = detect_window_profile(
+            w, profiles, home_dir, assigned_profiles, prof_session_data
+        )
         assigned_profiles.add(prof_name)
         slug = slugify(prof_name)
         if slug not in active_slugs:
             active_slugs.append(slug)
         is_guest = (prof_name or "").lower() == "guest" or slug == "guest"
         prof_key = None if is_guest else name_to_key.get(prof_name)
-        # Guest never inherits a signed-in profile photo.
         avatar = None if is_guest else ((details.get(prof_key) or {}).get("avatar") if prof_key else None)
 
-        # Ensure avatar-badged icon for this profile exists / stays fresh
         prof_icon_48 = os.path.join(icons_dir_48, f"chrome-{slug}.png")
         prof_icon_128 = os.path.join(icons_dir_128, f"chrome-{slug}.png")
         generate_badged_icon(prof_name, prof_icon_48, prof_icon_128, avatar_path=avatar)
-
-        # Apply _NET_WM_ICON directly to window
         set_window_icon(w["id"], prof_icon_48, prof_icon_128)
 
-        # Every profile gets its own desktop id + WM class (Windows-style split icons).
-        # The pinned Google Chrome launcher uses the default profile's class.
         class_name = f"chrome-{slug}"
         set_window_wm_class(w["id"], class_name, class_name)
-        # Always use the per-profile desktop id so the idle google-chrome pin
-        # can be removed while any Chrome window is open.
         set_window_desktop_file(w["id"], f"chrome-{slug}.desktop", home_dir=home_dir)
-        if not is_guest and (prof_name == default_name or slug == default_slug):
-            try:
-                shutil.copyfile(prof_icon_48, os.path.join(icons_dir_48, "google-chrome.png"))
-                shutil.copyfile(prof_icon_128, os.path.join(icons_dir_128, "google-chrome.png"))
-            except Exception:
-                pass
-
         processed += 1
 
-    # Teach Plasma Icon Tasks about each open profile; drop the idle Chrome pin.
+    # Ensure .desktop files exist for every active slug before swapping pins.
+    sync_all_profiles(home_dir)
     launcher_key = tuple(active_slugs)
     if sync_plasma_profile_launchers(home_dir, active_slugs):
         if launcher_key != _LAST_PLASMA_LAUNCHERS:
@@ -1253,10 +1294,20 @@ def apply_window_profiles(home_dir=None):
     return processed
 
 
-def watch_chrome_windows(home_dir=None, poll_interval=1.0):
-    """Continuously monitor and badge Chrome windows."""
+def watch_chrome_windows(home_dir=None, poll_interval=None):
+    """Monitor Chrome windows and refresh taskbar profile icons.
+
+    Default poll is 5s (was 1s) — still snappy when switching profiles, far
+    cheaper at idle. Override with DEVOS_CHROME_POLL_S.
+    """
     if not home_dir:
         home_dir = os.path.expanduser("~")
+    if poll_interval is None:
+        try:
+            poll_interval = float(os.environ.get("DEVOS_CHROME_POLL_S", "5"))
+        except ValueError:
+            poll_interval = 5.0
+    poll_interval = max(2.0, float(poll_interval))
 
     # Initial sync
     sync_all_profiles(home_dir)
@@ -1277,11 +1328,13 @@ def watch_chrome_windows(home_dir=None, poll_interval=1.0):
             if cur_state != last_win_state:
                 apply_window_profiles(home_dir)
                 last_win_state = cur_state
+            # Idle longer when Chrome is not open.
+            sleep_for = poll_interval if chrome_wins else max(poll_interval, 15.0)
 
-        except Exception as e:
-            pass
+        except Exception:
+            sleep_for = poll_interval
 
-        time.sleep(poll_interval)
+        time.sleep(sleep_for)
 
 
 if __name__ == "__main__":

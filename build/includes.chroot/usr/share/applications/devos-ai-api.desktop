@@ -1,5 +1,6 @@
 [Desktop Entry]
-Type=ApplicationStartupWMClass=devos-ai-api
+Type=Application
+StartupWMClass=devos-ai-api
 
 Name=DevOS AI API
 GenericName=Local AI reference

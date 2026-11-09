@@ -1,0 +1,40 @@
+#!/bin/bash
+# Discard idle tabs under pressure while leaving RAM for the desktop.
+# The policy is a threshold for each browser instance, not a system cap.
+set -u
+
+ram_mb=$(awk '/^MemTotal:/ {print int($2 / 1024)}' /proc/meminfo)
+test -n "$ram_mb" || exit 1
+limit_mb=$((ram_mb * 65 / 100))
+[ "$limit_mb" -ge 1024 ] || limit_mb=1024
+
+body=$(printf '%s\n' \
+  '{' \
+  '  "HighEfficiencyModeEnabled": true,' \
+  '  "MemorySaverModeSavings": 2,' \
+  "  \"TotalMemoryLimitMb\": ${limit_mb}," \
+  '  "BackgroundModeEnabled": false,' \
+  '  "BackgroundAppUpdateEnabled": false,' \
+  '  "HardwareAccelerationModeEnabled": true,' \
+  '  "MetricsReportingEnabled": false,' \
+  '  "UrlKeyedAnonymizedDataCollectionEnabled": false,' \
+  '  "SafeBrowsingExtendedReportingEnabled": false,' \
+  '  "ChromeCleanupReportingEnabled": false' \
+  '}')
+
+for dir in \
+    /etc/opt/chrome/policies/managed \
+    /etc/chromium/policies/managed \
+    /etc/chromium-browser/policies/managed \
+    /etc/brave/policies/managed
+do
+    mkdir -p "$dir" 2>/dev/null || continue
+    printf '%s\n' "$body" > "$dir/devos-performance.json" 2>/dev/null || true
+    chmod 644 "$dir/devos-performance.json" 2>/dev/null || true
+done
+
+mkdir -p /etc/devos 2>/dev/null || true
+printf 'chrome_total_memory_limit_mb=%s\nchrome_ram_mb=%s\nchrome_memory_saver=maximum\nchrome_background_workers=browser-default\n' \
+    "$limit_mb" "$ram_mb" > /etc/devos/chrome-tune.env 2>/dev/null || true
+
+exit 0

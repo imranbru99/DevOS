@@ -1,5 +1,6 @@
 [Desktop Entry]
-Type=ApplicationStartupWMClass=devos-windows
+Type=Application
+StartupWMClass=devos-windows
 
 Name=Windows
 Comment=Show open windows

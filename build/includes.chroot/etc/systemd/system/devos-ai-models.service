@@ -10,11 +10,14 @@ StartLimitIntervalSec=0
 [Service]
 Type=oneshot
 ExecStart=/usr/local/bin/devos-ai-models download
-# Multi-GB downloads: no start timeout, and keep the PC responsive meanwhile.
+# Multi-GB downloads stay a background worker so Chrome keeps priority.
 TimeoutStartSec=infinity
-Nice=10
+Slice=devos-workloads.slice
+Nice=15
+CPUWeight=20
+IOWeight=15
+CPUQuota=30%
 IOSchedulingClass=idle
-# Offline or interrupted: try again in a few minutes (downloads resume).
 Restart=on-failure
 RestartSec=180
 

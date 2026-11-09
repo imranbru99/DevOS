@@ -1,9 +1,40 @@
 [Plymouth Theme]
 Name=DevOS
-Description=DevOS installer boot
-ModuleName=script
+Description=DevOS two-step splash (Ubuntu spinner plugin; script DRM blanks some Intel TVs)
+ModuleName=two-step
 
-[script]
+[two-step]
+Font=Inter 12
+TitleFont=Inter 28
 ImageDir=/usr/share/plymouth/themes/devos
-ScriptFile=/usr/share/plymouth/themes/devos/devos.script
-# title=DevOS
+DialogHorizontalAlignment=.5
+DialogVerticalAlignment=.382
+TitleHorizontalAlignment=.5
+TitleVerticalAlignment=.382
+HorizontalAlignment=.5
+VerticalAlignment=.7
+WatermarkHorizontalAlignment=.5
+WatermarkVerticalAlignment=.45
+Transition=none
+TransitionDuration=0.0
+BackgroundStartColor=0x070a12
+BackgroundEndColor=0x070a12
+ProgressBarBackgroundColor=0x26324d
+ProgressBarForegroundColor=0x38bdf8
+MessageBelowAnimation=true
+
+[boot-up]
+UseEndAnimation=false
+
+[shutdown]
+UseEndAnimation=false
+
+[reboot]
+UseEndAnimation=false
+
+[updates]
+SuppressMessages=true
+ProgressBarShowPercentComplete=true
+UseProgressBar=true
+Title=Installing Updates...
+SubTitle=Do not turn off your computer

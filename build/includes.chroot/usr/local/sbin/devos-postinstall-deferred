@@ -1,0 +1,63 @@
+#!/bin/bash
+# First-boot / post-install polish deferred from Calamares finalize.
+# Keeps the ~64% "Running shell processes…" step under ~1 minute on slow disks.
+set +e
+export DEBIAN_FRONTEND=noninteractive
+STAMP=/var/lib/DevOS/postinstall-deferred.done
+mkdir -p /var/lib/DevOS
+if [ -f "$STAMP" ]; then
+    exit 0
+fi
+
+echo "==> DevOS deferred post-install starting"
+
+if [ -x /usr/local/sbin/devos-apply-branding ]; then
+    timeout -k 10 180 /bin/bash /usr/local/sbin/devos-apply-branding || true
+elif [ -x /usr/local/sbin/devos-debrand-desktop ]; then
+    timeout -k 10 120 /bin/bash /usr/local/sbin/devos-debrand-desktop || true
+fi
+
+if [ -x /usr/local/sbin/devos-force-english-ui ]; then
+    timeout -k 5 60 /bin/bash /usr/local/sbin/devos-force-english-ui || true
+fi
+
+if [ -x /usr/local/sbin/devos-chrome-tune ]; then
+    timeout -k 5 30 /bin/bash /usr/local/sbin/devos-chrome-tune || true
+fi
+
+# Overflow swap behind zram (skip if slow — zram alone is enough).
+if [ ! -f /swap/swapfile ]; then
+    mem_kb=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)
+    if [ "${mem_kb:-0}" -ge 1048576 ]; then
+        size_b=$(( mem_kb * 1024 / 4 ))
+        [ "$size_b" -lt $((2 * 1024 * 1024 * 1024)) ] && size_b=$((2 * 1024 * 1024 * 1024))
+        [ "$size_b" -gt $((8 * 1024 * 1024 * 1024)) ] && size_b=$((8 * 1024 * 1024 * 1024))
+        mkdir -p /swap
+        [ "$(stat -f -c %T / 2>/dev/null || true)" = "btrfs" ] && chattr +C /swap 2>/dev/null
+        if timeout -k 5 45 fallocate -l "$size_b" /swap/swapfile 2>/dev/null; then
+            chmod 600 /swap/swapfile
+            mkswap /swap/swapfile >/dev/null 2>&1 || rm -f /swap/swapfile
+            if [ -f /swap/swapfile ] && ! grep -qE '^[[:space:]]*/swap/swapfile[[:space:]]' /etc/fstab 2>/dev/null; then
+                printf '/swap/swapfile none swap defaults,pri=0 0 0\n' >> /etc/fstab
+            fi
+            swapon /swap/swapfile 2>/dev/null || true
+        else
+            rm -f /swap/swapfile
+        fi
+    fi
+fi
+
+# Rebuild initramfs once if casper hooks were stripped during install.
+if [ -f /var/lib/DevOS/need-initramfs-rebuild ]; then
+    UPD=/usr/sbin/update-initramfs
+    [ -x /usr/sbin/update-initramfs.devos-real ] && UPD=/usr/sbin/update-initramfs.devos-real
+    if [ -x "$UPD" ]; then
+        timeout -k 20 300 "$UPD" -u -k all || true
+    fi
+    rm -f /var/lib/DevOS/need-initramfs-rebuild
+fi
+
+date -u +"done %Y-%m-%dT%H:%M:%SZ" > "$STAMP"
+rm -f /var/lib/DevOS/need-postinstall-deferred
+echo "==> DevOS deferred post-install finished"
+exit 0

@@ -218,6 +218,17 @@ body.luxury-dark {
   color: var(--accent-emerald);
   font-weight: 500;
 }
+.status-pill.offline,
+.status-pill.reconnecting {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.35);
+  color: #f59e0b;
+}
+.status-pill.offline .pulse-dot,
+.status-pill.reconnecting .pulse-dot {
+  background: #f59e0b;
+  box-shadow: 0 0 10px #f59e0b;
+}
 
 .pulse-dot {
   width: 8px;
@@ -1294,9 +1305,61 @@ body:not(.is-installed) .installed-only {
   display: none !important;
 }
 
-/* Follow the desktop color-scheme preference without losing DevOS accents. */
+/* Radius tokens shared by light and dark. */
+:root {
+  --radius-lg: 20px;
+  --radius-md: 12px;
+  --radius-sm: 8px;
+}
+
+/* Dark desktop when data-theme=dark (ISO default is light). */
+:root,
+html[data-theme="dark"],
+body[data-theme="dark"],
+body.luxury-dark:not([data-theme="light"]) {
+  color-scheme: dark;
+  --bg-canvas: #0b1020;
+  --bg-card: rgba(23, 33, 53, .94);
+  --bg-card-hover: #202f49;
+  --bg-inset: #101a2c;
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-hover: rgba(0, 242, 254, 0.35);
+  --accent-cyan: #7dd3fc;
+  --accent-blue: #60a5fa;
+  --accent-purple: #8b5cf6;
+  --accent-emerald: #10b981;
+  --accent-amber: #f59e0b;
+  --accent-rose: #f43f5e;
+  --text-main: #f8fafc;
+  --text-muted: #b9c7db;
+  --text-sub: #a5b5cd;
+}
+
+/* Light desktop — paired canvas + text (no dark-on-dark / light-on-light). */
+html[data-theme="light"],
+body[data-theme="light"] {
+  color-scheme: light;
+  --bg-canvas: #f8fafc;
+  --bg-card: rgba(255,255,255,.96);
+  --bg-card-hover: #edf4fd;
+  --bg-inset: #eef3f9;
+  --border-subtle: #cbd5e1;
+  --border-hover: #2563eb;
+  --accent-cyan: #087eaa;
+  --accent-blue: #2563eb;
+  --accent-purple: #7050b5;
+  --accent-emerald: #087e59;
+  --accent-amber: #9a6007;
+  --accent-rose: #be2449;
+  --text-main: #172438;
+  --text-muted: #475569;
+  --text-sub: #52647a;
+}
+
+/* Fallback before API sets data-theme: follow OS preference. */
 @media (prefers-color-scheme: light) {
-  :root {
+  :root:not([data-theme]),
+  body:not([data-theme]) {
     color-scheme: light;
     --bg-canvas: #f8fafc;
     --bg-card: rgba(255,255,255,.96);
@@ -1316,19 +1379,23 @@ body:not(.is-installed) .installed-only {
   }
 }
 
-/* Sapphire workspace: quieter surfaces and consistent interaction states. */
-:root {
-  --bg-canvas: #0b1020;
-  --bg-card: rgba(23, 33, 53, .94);
-  --bg-card-hover: #202f49;
-  --bg-inset: #101a2c;
-  --accent-cyan: #7dd3fc;
-  --accent-blue: #60a5fa;
-  --text-muted: #b9c7db;
-  --text-sub: #a5b5cd;
-  --radius-lg: 20px;
-  --radius-md: 12px;
-  --radius-sm: 8px;
+html[data-theme="light"] #command-dialog,
+body[data-theme="light"] #command-dialog {
+  background: #ffffff; color: var(--text-main); border-color: #cbd5e1;
+}
+html[data-theme="light"] #command-search,
+body[data-theme="light"] #command-search {
+  background: #f8fafc; color: var(--text-main); border-color: #cbd5e1;
+}
+html[data-theme="light"] .command-result.selected,
+html[data-theme="light"] .command-result:hover,
+body[data-theme="light"] .command-result.selected,
+body[data-theme="light"] .command-result:hover {
+  background: #e8eef8; border-color: #94a3b8;
+}
+html[data-theme="light"] .nav-links,
+body[data-theme="light"] .nav-links {
+  background: #ffffffcc;
 }
 .app-layout { max-width: 1600px; margin: auto; padding: 28px; gap: 24px; }
 .ambient-glow { opacity: .12; animation: none; }

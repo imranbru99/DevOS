@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=Text Editor
+GenericName=Edit documents and code
+Comment=Write notes, scripts, and code — clean, modern, and easy
+Exec=kate --desktopfile /usr/share/applications/devos-editor.desktop %U
+Icon=accessories-text-editor
+Terminal=false
+Categories=Qt;Utility;TextEditor;
+MimeType=text/plain;text/x-python;text/x-csrc;text/x-c++src;text/html;text/css;text/markdown;application/x-shellscript;application/json;application/javascript;text/x-java;text/x-chdr;text/x-c++hdr;
+Keywords=text;editor;notepad;code;script;documents;write;kate;
+StartupNotify=true
+StartupWMClass=kate
+X-KDE-StartupNotify=true

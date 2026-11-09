@@ -1,0 +1,227 @@
+#!/bin/bash
+# Force English for every visible OS string (menus, clock, formats, login).
+# Bangla typing (Avro) and voice still work — those do not need LC_TIME/LANG=bn_*.
+# Safe to run at image build, install finalize (after localecfg), and every desktop login.
+set -u
+
+EN_LOCALE='en_US.UTF-8'
+
+write_file() {
+    local path="$1" body="$2" mode="${3:-644}"
+    mkdir -p "$(dirname "$path")"
+    printf '%s' "$body" > "$path"
+    chmod "$mode" "$path" 2>/dev/null || true
+}
+
+LOCALE_BODY="# DevOS: English UI and formats only.
+# Timezone/region (e.g. Asia/Dhaka) is independent. Bangla input is Avro/ibus.
+LANG=${EN_LOCALE}
+LANGUAGE=en_US:en
+LC_CTYPE=${EN_LOCALE}
+LC_NUMERIC=${EN_LOCALE}
+LC_TIME=${EN_LOCALE}
+LC_COLLATE=${EN_LOCALE}
+LC_MONETARY=${EN_LOCALE}
+LC_MESSAGES=${EN_LOCALE}
+LC_PAPER=${EN_LOCALE}
+LC_NAME=${EN_LOCALE}
+LC_ADDRESS=${EN_LOCALE}
+LC_TELEPHONE=${EN_LOCALE}
+LC_MEASUREMENT=${EN_LOCALE}
+LC_IDENTIFICATION=${EN_LOCALE}
+"
+
+PLASMA_BODY="[Formats]
+LANG=${EN_LOCALE}
+LANGUAGE=en_US:en
+LC_CTYPE=${EN_LOCALE}
+LC_NUMERIC=${EN_LOCALE}
+LC_TIME=${EN_LOCALE}
+LC_COLLATE=${EN_LOCALE}
+LC_MONETARY=${EN_LOCALE}
+LC_MESSAGES=${EN_LOCALE}
+LC_PAPER=${EN_LOCALE}
+LC_NAME=${EN_LOCALE}
+LC_ADDRESS=${EN_LOCALE}
+LC_TELEPHONE=${EN_LOCALE}
+LC_MEASUREMENT=${EN_LOCALE}
+LC_IDENTIFICATION=${EN_LOCALE}
+useDetailed=false
+
+[Translations]
+LANGUAGE=en_US
+"
+
+KDEGLOBALS_LOCALE="[Locale]
+Country=us
+Language=en_US
+MonetaryDecimalSymbol=.
+DecimalSymbol=.
+ThousandsSeparator=,
+"
+
+PROFILE_SH="#!/bin/sh
+# Visible OS text stays English even if a package or installer set bn_*.
+export LANG=${EN_LOCALE}
+export LANGUAGE=en_US:en
+export LC_ALL=
+export LC_CTYPE=${EN_LOCALE}
+export LC_NUMERIC=${EN_LOCALE}
+export LC_TIME=${EN_LOCALE}
+export LC_COLLATE=${EN_LOCALE}
+export LC_MONETARY=${EN_LOCALE}
+export LC_MESSAGES=${EN_LOCALE}
+export LC_PAPER=${EN_LOCALE}
+export LC_NAME=${EN_LOCALE}
+export LC_ADDRESS=${EN_LOCALE}
+export LC_TELEPHONE=${EN_LOCALE}
+export LC_MEASUREMENT=${EN_LOCALE}
+export LC_IDENTIFICATION=${EN_LOCALE}
+"
+
+is_root=0
+if [ "$(id -u)" -eq 0 ]; then
+    is_root=1
+fi
+
+if [ "$is_root" -eq 1 ]; then
+    write_file /etc/default/locale "$LOCALE_BODY"
+    write_file /etc/locale.conf "$LOCALE_BODY"
+    write_file /etc/environment "$LOCALE_BODY"
+    write_file /etc/profile.d/devos-english-ui.sh "$PROFILE_SH" 755
+    mkdir -p /etc/environment.d
+    write_file /etc/environment.d/90devos-english-ui.conf "$LOCALE_BODY"
+    mkdir -p /etc/xdg
+    write_file /etc/xdg/plasma-localerc "$PLASMA_BODY"
+
+    # System-wide KDE locale (Country=us) so Regional Settings cannot leave BD formats.
+    kg_sys=/etc/xdg/kdeglobals
+    if [ -f "$kg_sys" ]; then
+        python3 - "$kg_sys" <<'PY' 2>/dev/null || true
+import re
+import sys
+from pathlib import Path
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8", errors="replace")
+block = "[Locale]\nCountry=us\nLanguage=en_US\nMonetaryDecimalSymbol=.\nDecimalSymbol=.\nThousandsSeparator=,\n\n"
+if "[Locale]" in text:
+    text = re.sub(r"(?ms)^\[Locale\].*?(?=^\[|\Z)", block, text, count=1)
+else:
+    if text and not text.endswith("\n"):
+        text += "\n"
+    text += "\n" + block
+path.write_text(text, encoding="utf-8")
+PY
+    else
+        write_file "$kg_sys" "$KDEGLOBALS_LOCALE"
+    fi
+
+    # Plasma session env — full LC_* so digital clock never inherits bn_BD.
+    write_file /etc/xdg/plasma-workspace/env/devos-english-ui.sh "$PROFILE_SH" 755
+
+    if command -v locale-gen >/dev/null 2>&1; then
+        if [ -f /etc/locale.gen ]; then
+            sed -i 's/^# *en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen 2>/dev/null || true
+            if ! grep -qE '^en_US\.UTF-8 UTF-8' /etc/locale.gen 2>/dev/null; then
+                printf '\nen_US.UTF-8 UTF-8\n' >> /etc/locale.gen
+            fi
+        fi
+        locale-gen en_US.UTF-8 >/dev/null 2>&1 || true
+    fi
+    if command -v update-locale >/dev/null 2>&1; then
+        update-locale \
+            LANG=${EN_LOCALE} LANGUAGE=en_US:en \
+            LC_CTYPE=${EN_LOCALE} LC_NUMERIC=${EN_LOCALE} LC_TIME=${EN_LOCALE} \
+            LC_COLLATE=${EN_LOCALE} LC_MONETARY=${EN_LOCALE} LC_MESSAGES=${EN_LOCALE} \
+            LC_PAPER=${EN_LOCALE} LC_NAME=${EN_LOCALE} LC_ADDRESS=${EN_LOCALE} \
+            LC_TELEPHONE=${EN_LOCALE} LC_MEASUREMENT=${EN_LOCALE} \
+            LC_IDENTIFICATION=${EN_LOCALE} >/dev/null 2>&1 || true
+    fi
+
+    homes="/etc/skel"
+    for d in /home/* /root; do
+        [ -d "$d" ] || continue
+        homes="$homes $d"
+    done
+else
+    homes="$HOME"
+fi
+
+fix_user_home() {
+    home="$1"
+    [ -n "$home" ] && [ -d "$home" ] || return 0
+    conf="$home/.config"
+    mkdir -p "$conf" 2>/dev/null || return 0
+    write_file "$conf/plasma-localerc" "$PLASMA_BODY"
+
+    kg="$conf/kdeglobals"
+    if [ -f "$kg" ]; then
+        python3 - "$kg" <<'PY' 2>/dev/null || true
+import re
+import sys
+from pathlib import Path
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8", errors="replace")
+block = "[Locale]\nCountry=us\nLanguage=en_US\nMonetaryDecimalSymbol=.\nDecimalSymbol=.\nThousandsSeparator=,\n\n"
+if "[Locale]" in text:
+    text = re.sub(r"(?ms)^\[Locale\].*?(?=^\[|\Z)", block, text, count=1)
+else:
+    if text and not text.endswith("\n"):
+        text += "\n"
+    text += "\n" + block
+path.write_text(text, encoding="utf-8")
+PY
+    else
+        write_file "$kg" "$KDEGLOBALS_LOCALE"
+    fi
+
+    for envf in "$home/.pam_environment" "$home/.bashrc" "$home/.profile" "$home/.xprofile"; do
+        [ -f "$envf" ] || continue
+        sed -i \
+            -e '/^LANG=bn_/d' \
+            -e '/^LANGUAGE=bn/d' \
+            -e '/^LC_[A-Z]*=bn_/d' \
+            -e '/^LC_ALL=bn_/d' \
+            -e '/^export LANG=bn_/d' \
+            -e '/^export LANGUAGE=bn/d' \
+            -e '/^export LC_[A-Z]*=bn_/d' \
+            -e '/^export LC_ALL=bn_/d' \
+            "$envf" 2>/dev/null || true
+    done
+
+    # Ensure login shells always export English formats (idempotent).
+    pam="$home/.pam_environment"
+    if [ -w "$(dirname "$pam")" ] 2>/dev/null || [ -f "$pam" ]; then
+        {
+            echo "LANG=${EN_LOCALE}"
+            echo "LANGUAGE DEFAULT=en_US:en"
+            echo "LC_TIME=${EN_LOCALE}"
+            echo "LC_MESSAGES=${EN_LOCALE}"
+            echo "LC_NUMERIC=${EN_LOCALE}"
+        } > "$pam" 2>/dev/null || true
+        chmod 644 "$pam" 2>/dev/null || true
+    fi
+}
+
+for home in $homes; do
+    fix_user_home "$home"
+done
+
+# Current process (login apply-desktop / installer chroot)
+export LANG=${EN_LOCALE}
+export LANGUAGE=en_US:en
+unset LC_ALL 2>/dev/null || true
+export LC_CTYPE=${EN_LOCALE}
+export LC_NUMERIC=${EN_LOCALE}
+export LC_TIME=${EN_LOCALE}
+export LC_COLLATE=${EN_LOCALE}
+export LC_MONETARY=${EN_LOCALE}
+export LC_MESSAGES=${EN_LOCALE}
+export LC_PAPER=${EN_LOCALE}
+export LC_NAME=${EN_LOCALE}
+export LC_ADDRESS=${EN_LOCALE}
+export LC_TELEPHONE=${EN_LOCALE}
+export LC_MEASUREMENT=${EN_LOCALE}
+export LC_IDENTIFICATION=${EN_LOCALE}
+
+exit 0

@@ -10,4 +10,4 @@ Terminal=false
 Categories=Settings;HardwareSettings;DesktopSettings;AudioVideo;Audio;Qt;
 Keywords=sound;audio;volume;speaker;headphone;microphone;mic;mixer;settings;output;input;mute;
 StartupNotify=true
-StartupWMClass=DevOS Sound
+StartupWMClass=devos-sound

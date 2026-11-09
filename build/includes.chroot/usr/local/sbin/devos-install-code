@@ -1,5 +1,5 @@
 #!/bin/bash
-# Install Visual Studio Code as a system package so the editor matches a current IDE.
+# Install Visual Studio Code and brand it as DevOS Code (never leave users on Kate).
 set -euo pipefail
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -7,8 +7,50 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-if command -v code >/dev/null 2>&1; then
-    echo "Visual Studio Code is already installed."
+brand_as_devos_code() {
+    # Hide the stock "Code" / "Visual Studio Code" menu entries; DevOS Code is the pin.
+    mkdir -p /usr/local/share/applications
+    for id in code code-url-handler code-workspace; do
+        src="/usr/share/applications/${id}.desktop"
+        [ -f "$src" ] || continue
+        {
+            echo '[Desktop Entry]'
+            echo 'Type=Application'
+            echo 'NoDisplay=true'
+            echo 'Hidden=true'
+            echo 'X-DevOS-Hidden=true'
+        } > "/usr/local/share/applications/${id}.desktop"
+    done
+
+    # Product name inside the IDE chrome.
+    for product in \
+        /usr/share/code/resources/app/product.json \
+        /usr/lib/code/resources/app/product.json \
+        /usr/share/code-oss/resources/app/product.json
+    do
+        [ -f "$product" ] || continue
+        python3 - "$product" <<'PY'
+import json, sys
+path = sys.argv[1]
+with open(path, encoding="utf-8") as handle:
+    data = json.load(handle)
+data["nameShort"] = "DevOS Code"
+data["nameLong"] = "DevOS Code"
+data["applicationName"] = data.get("applicationName") or "code"
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2)
+    handle.write("\n")
+PY
+    done
+
+    if command -v update-desktop-database >/dev/null 2>&1; then
+        update-desktop-database /usr/local/share/applications >/dev/null 2>&1 || true
+    fi
+}
+
+if command -v code >/dev/null 2>&1 || command -v codium >/dev/null 2>&1; then
+    brand_as_devos_code
+    echo "DevOS Code (Visual Studio Code) is ready."
     exit 0
 fi
 
@@ -23,4 +65,10 @@ echo "Installing Visual Studio Code..."
 DEBIAN_FRONTEND=noninteractive apt-get install -y "${deb}" \
     || DEBIAN_FRONTEND=noninteractive apt-get install -fy
 
-echo "Visual Studio Code is installed."
+if ! command -v code >/dev/null 2>&1; then
+    echo "VS Code installed but 'code' was not found on PATH." >&2
+    exit 1
+fi
+
+brand_as_devos_code
+echo "DevOS Code is installed."

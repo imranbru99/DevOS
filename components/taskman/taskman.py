@@ -84,16 +84,68 @@ PRETTY = {
     "chromium": "Chromium", "chromium-browser": "Chromium",
     "firefox": "Firefox", "firefox-bin": "Firefox",
     "code": "Visual Studio Code", "codium": "VSCodium", "cursor": "Cursor",
-    "plasmashell": "Desktop", "dolphin": "Files", "konsole": "Terminal",
-    "kate": "Text Editor", "okular": "Document Viewer", "gimp": "GIMP",
-    "soffice.bin": "LibreOffice", "vlc": "VLC", "spotify": "Spotify",
+    "plasmashell": "Desktop", "dolphin": "File Explorer", "konsole": "Terminal",
+    "kate": "Text Editor", "okular": "PDF Viewer", "gwenview": "Photos",
+    "gimp": "GIMP", "soffice.bin": "LibreOffice", "vlc": "VLC", "spotify": "Spotify",
     "telegram-desktop": "Telegram", "discord": "Discord", "steam": "Steam",
-    "systemsettings": "Settings", "kwin_x11": "Window manager",
-    "kwin_wayland": "Window manager",
+    "systemsettings": "Settings", "kwin_x11": "Desktop Window Manager",
+    "kwin_wayland": "Desktop Window Manager", "kwin": "Desktop Window Manager",
     "taskman.py": "Task Manager", "devos-taskman": "Task Manager", "taskman": "Task Manager",
-    "devos-files": "Files", "devos-terminal": "Terminal",
+    "devos-files": "File Explorer", "devos-terminal": "Terminal",
     "devos-settings": "Settings", "devos-ai-code-agent": "AI Code Agent",
+    "kinfocenter": "About this PC", "devos-about": "About this PC", "about.py": "About this PC",
+    "baloorunner": "File Search Helper", "baloo_file": "File Search Indexer",
+    "baloo_file_extractor": "File Search Indexer",
+    "kdeconnectd": "Phone Link", "kdeconnect-indicator": "Phone Link",
+    "kdeconnect-app": "Phone Link", "kdeconnect-handler": "Phone Link",
+    "kglobalacceld": "Keyboard Shortcuts", "kglobalaccel5": "Keyboard Shortcuts",
+    "kglobalaccel6": "Keyboard Shortcuts",
+    "knighttimed": "Night Light", "knighttime": "Night Light",
+    "btop": "Resource Monitor", "btop++": "Resource Monitor", "devos-resources": "Resource Monitor",
+    "devos-browser": "Browser", "devos-portal-fc": "App Permissions Helper",
+    "xdg-desktop-portal-kde": "App Permissions Helper",
+    "xdg-desktop-portal": "App Permissions Helper",
+    "notify-send": "Notification", "plasmashell": "Desktop",
+    "power_settings.py": "Power & sleep", "power_settings": "Power & sleep",
+    "devos-power": "Power & sleep",
+    "devos-tray-overflow": "System Tray", "optimizer.py": "PC Optimizer",
+    "devos-optimizer": "PC Optimizer", "security_center.py": "Security",
+    "devos-security": "Security", "dashboard_server.py": "Dashboard",
+    "devos-dashboard": "Dashboard", "pipeline_gui.py": "AI Pipeline",
+    "assistant.py": "DevOS AI", "devos-chat": "DevOS AI",
+    "filezilla": "File Transfer", "filelight": "Storage Sense",
+    "keepassxc": "Password Manager", "ksmserver": "Session",
+    "kded6": "Desktop Services", "kded5": "Desktop Services",
+    "polkit-kde-authentication-agent-1": "Permission Prompt",
+    "polkit-kde-authentication-agent": "Permission Prompt",
+    "polkit-kde-auth": "Permission Prompt",
+    # Background desktop helpers (never show raw KDE names).
+    "xorg": "Display Server", "Xorg": "Display Server",
+    "kaccess": "Accessibility",
+    "org_kde_powerdevil": "Power Manager", "powerdevil": "Power Manager",
+    "kactivitymanagerd": "Activity Manager", "kactivitymanage": "Activity Manager",
+    "kscreen_backend_launcher": "Display Helper", "kscreen_backend": "Display Helper",
+    "gmenudbusmenuproxy": "Menu Helper", "gmenudbusmenupr": "Menu Helper",
+    "xembedsniproxy": "Tray Icon Helper",
+    "server.py": "DevOS AI Core", "ai-core": "DevOS AI Core",
+    "devos-ai-core": "DevOS AI Core", "llama-server": "AI Model Engine",
+    "ollama": "AI Model Engine",
 }
+
+# Full cmdline path fragments → friendly name (beats bare server.py).
+CMDLINE_PRETTY = (
+    ("/ai-core/server.py", "DevOS AI Core"),
+    ("/components/ai-core/", "DevOS AI Core"),
+    ("devos-ai-core", "DevOS AI Core"),
+    ("/dashboard/dashboard_server.py", "Dashboard"),
+    ("/optimizer/optimizer.py", "PC Optimizer"),
+    ("/security/security_center.py", "Security"),
+    ("/assistant/assistant.py", "DevOS AI"),
+    ("/taskman/taskman.py", "Task Manager"),
+    ("/power/power_settings.py", "Power & sleep"),
+    ("/notes/notes.py", "Notes"),
+    ("/broadband/broadband.py", "Internet Dial-up"),
+)
 
 STATE_NAMES = {
     "R": "Running", "S": "Sleeping", "D": "Disk sleep", "Z": "Zombie",
@@ -194,6 +246,21 @@ def parse_status(text):
     return uid, rss_kb
 
 
+def parse_pss_kb(text):
+    """Proportional set size — Windows Task Manager style (shared pages split).
+
+    Summing VmRSS across Chrome's 16–20 processes double-counts shared
+    libraries and can report 5–7 GB when the real footprint is closer to 1 GB.
+    /proc/pid/smaps_rollup Pss avoids that inflation.
+    """
+    for line in (text or "").splitlines():
+        if line.startswith("Pss:"):
+            parts = line.split()
+            if len(parts) >= 2 and parts[1].isdigit():
+                return int(parts[1])
+    return None
+
+
 def parse_io(text):
     read_b = write_b = 0
     for line in (text or "").splitlines():
@@ -228,11 +295,28 @@ def elf_arch(header):
 
 
 def pretty_name(comm):
-    if comm in PRETTY:
-        return PRETTY[comm]
     if not comm:
         return "Process"
-    return comm[0].upper() + comm[1:]
+    key = comm.strip()
+    if key in PRETTY:
+        return PRETTY[key]
+    lower = key.lower()
+    if lower in PRETTY:
+        return PRETTY[lower]
+    base, ext = os.path.splitext(lower)
+    if ext in (".py", ".sh", ".js") and (base in PRETTY or lower in PRETTY):
+        return PRETTY.get(base) or PRETTY.get(lower)
+    if lower.startswith("devos-"):
+        rest = lower[6:]
+        if rest in PRETTY:
+            return PRETTY[rest]
+        return key.replace("-", " ").title()
+    cleaned = re.sub(r"[\._-]?(service|daemon|helper)$", "", lower, flags=re.I)
+    if cleaned in PRETTY:
+        return PRETTY[cleaned]
+    if key[:1].islower():
+        return key[0].upper() + key[1:]
+    return key
 
 
 def state_name(code):
@@ -273,37 +357,95 @@ def extract_script_name(cmdline):
     return None
 
 
+def label_from_cmdline(cmdline):
+    """Map full script paths (ai-core/server.py) to premium names."""
+    joined = " ".join(cmdline or []).lower().replace("\\", "/")
+    for needle, label in CMDLINE_PRETTY:
+        if needle.lower() in joined:
+            return label
+    return None
+
+
+def resolve_process_label(comm, cmdline):
+    path_label = label_from_cmdline(cmdline)
+    if path_label:
+        return path_label
+    if comm and (comm.startswith(("python", "node", "ruby", "perl", "bash", "sh")) or
+                 (cmdline and os.path.basename((cmdline or [""])[0]).startswith(
+                     ("python", "node", "ruby", "perl", "bash", "sh")))):
+        script = extract_script_name(cmdline)
+        if script:
+            return pretty_name(script)
+    if cmdline:
+        base = os.path.basename(cmdline[0]) or comm
+        return pretty_name(base)
+    return pretty_name(comm)
+
+
 def description_of(proc):
-    if proc["cmdline"]:
-        base = os.path.basename(proc["cmdline"][0]) or proc["comm"]
-        if base.startswith(("python", "node", "ruby", "perl", "bash", "sh")):
-            script = extract_script_name(proc["cmdline"])
-            if script:
-                return script
-        return base
-    return proc["comm"]
+    return resolve_process_label(proc.get("comm") or "", proc.get("cmdline") or [])
 
 
 def parse_passwd(text):
+    """uid -> {name, shell, home} for human vs system filtering."""
     users = {}
     for line in (text or "").splitlines():
         parts = line.split(":")
-        if len(parts) >= 3 and parts[2].isdigit():
-            users[int(parts[2])] = parts[0]
+        if len(parts) >= 7 and parts[2].isdigit():
+            users[int(parts[2])] = {
+                "name": parts[0],
+                "shell": parts[6],
+                "home": parts[5],
+            }
+        elif len(parts) >= 3 and parts[2].isdigit():
+            users[int(parts[2])] = {
+                "name": parts[0],
+                "shell": parts[6] if len(parts) > 6 else "",
+                "home": parts[5] if len(parts) > 5 else "",
+            }
     return users
 
 
 def user_name(uid, users):
     if uid is None:
         return ""
-    if uid in users:
-        return users[uid]
+    entry = users.get(uid)
+    if isinstance(entry, dict):
+        return entry.get("name") or str(uid)
+    if entry:
+        return entry
     if uid == 0:
         return "root"
     return str(uid)
 
 
+NOLOGIN_SHELLS = {
+    "/usr/sbin/nologin", "/sbin/nologin", "/bin/false", "/usr/bin/nologin",
+    "/bin/nologin", "nologin", "false",
+}
+
+
+def is_signed_in_person(uid, users, members):
+    """Windows Users tab: real people only — never redis/geoclue/cups accounts."""
+    if uid is None:
+        return False
+    # System / service accounts are UID < 1000 on DevOS/Ubuntu.
+    if uid < 1000:
+        return False
+    entry = users.get(uid) or {}
+    if isinstance(entry, dict):
+        shell = (entry.get("shell") or "").strip()
+        if shell in NOLOGIN_SHELLS:
+            return False
+    # Must have at least one interactive (GUI/terminal) process, or any process
+    # when the account is a normal login user (uid >= 1000).
+    if not members:
+        return False
+    return True
+
+
 def parse_meminfo(text):
+    """Windows-style memory: In use = total − MemAvailable (cache still freeable)."""
     values = {}
     for line in (text or "").splitlines():
         key, _, rest = line.partition(":")
@@ -315,10 +457,17 @@ def parse_meminfo(text):
     total = values["MemTotal"]
     avail = values.get("MemAvailable", values.get("MemFree", 0))
     used = max(0, total - avail)
+    # Approximate reclaimable file cache (same idea as Windows "Cached").
+    cached = max(0, values.get("Cached", 0) + values.get("SReclaimable", 0) - values.get("Shmem", 0))
+    buffers = values.get("Buffers", 0)
     return {
         "total_kb": total,
         "used_kb": used,
+        "available_kb": avail,
+        "cached_kb": cached,
+        "buffers_kb": buffers,
         "percent": round(100.0 * used / total, 1) if total else 0.0,
+        "available_percent": round(100.0 * avail / total, 1) if total else 0.0,
     }
 
 
@@ -452,6 +601,50 @@ def rate(curr, prev, seconds):
     return max(0.0, (curr - prev) / seconds)
 
 
+# Friendly Windows-style labels for common services (never show raw unit noise).
+SERVICE_PRETTY = {
+    "accounts-daemon.service": "User Accounts",
+    "alsa-restore.service": "Sound Card Restore",
+    "apparmor.service": "App Security Profiles",
+    "avahi-daemon.service": "Network Device Discovery",
+    "bluetooth.service": "Bluetooth",
+    "cron.service": "Scheduled Tasks",
+    "cups-browsed.service": "Network Printer Discovery",
+    "cups.service": "Print Spooler",
+    "dbus.service": "System Messaging",
+    "NetworkManager.service": "Network",
+    "systemd-resolved.service": "DNS",
+    "systemd-timesyncd.service": "Clock Sync",
+    "systemd-oomd.service": "Memory Guard",
+    "polkit.service": "Permission Service",
+    "redis-server.service": "Redis Cache",
+    "redis.service": "Redis Cache",
+    "ssh.service": "Remote Desktop (SSH)",
+    "sshd.service": "Remote Desktop (SSH)",
+    "ufw.service": "Firewall",
+    "devos-ai-core.service": "DevOS AI Core",
+    "devos-dashboard.service": "Dashboard",
+    "devos-diskguard.service": "Disk Guard",
+    "devos-features.service": "Optional Apps Installer",
+    "devos-freshclam.service": "Virus Signature Updates",
+    "devos-performance-tune.service": "Performance Tuning",
+    "devos-rfkill.service": "Wi‑Fi & Bluetooth Radios",
+}
+
+
+def friendly_service_name(unit_name, description=""):
+    if unit_name in SERVICE_PRETTY:
+        return SERVICE_PRETTY[unit_name]
+    bare = unit_name[:-8] if unit_name.endswith(".service") else unit_name
+    if bare.startswith("devos-"):
+        return bare[6:].replace("-", " ").title()
+    # Prefer a short human Description when the unit id is opaque.
+    desc = (description or "").strip()
+    if desc and not desc.lower().startswith(bare.lower()) and len(desc) < 60:
+        return desc
+    return bare.replace("-", " ").replace("_", " ").title()
+
+
 def parse_systemctl_show(text):
     units = []
     for block in (text or "").split("\n\n"):
@@ -467,13 +660,27 @@ def parse_systemctl_show(text):
             pid = int(item.get("MainPID") or 0)
         except ValueError:
             pid = 0
+        unit_file = (item.get("UnitFileState") or "").lower()
+        if unit_file in ("enabled", "enabled-runtime", "static", "indirect", "generated"):
+            startup = "Automatic"
+        elif unit_file in ("disabled", "masked"):
+            startup = "Disabled"
+        elif unit_file:
+            startup = unit_file.title()
+        else:
+            startup = "Manual"
+        state = item.get("ActiveState") or ""
+        desc = item.get("Description") or ""
         units.append({
             "name": name,
+            "display": friendly_service_name(name, desc),
             "pid": pid,
-            "state": item.get("ActiveState") or "",
-            "description": item.get("Description") or "",
+            "state": state,
+            "startup": startup,
+            "unit_file_state": unit_file,
+            "description": desc,
         })
-    units.sort(key=lambda unit: unit["name"].lower())
+    units.sort(key=lambda unit: (unit["display"] or unit["name"]).lower())
     return units
 
 
@@ -640,12 +847,18 @@ def default_runner(argv, timeout=8):
 
 
 def service_action(name, action, runner=None):
-    if action not in ("start", "stop", "restart"):
+    # Windows-like: Start / Stop / Restart / Disable (off at boot) / Enable.
+    if action not in ("start", "stop", "restart", "enable", "disable"):
         return {"status": "REFUSED", "reason": "Unsupported action."}
     if not safe_unit(name):
         return {"status": "REFUSED", "reason": "Not a service name."}
     runner = runner or default_runner
-    code, _out, err = runner(["systemctl", action, name], timeout=30)
+    argv = ["systemctl", action, name]
+    if action == "disable":
+        argv = ["systemctl", "disable", "--now", name]
+    elif action == "enable":
+        argv = ["systemctl", "enable", "--now", name]
+    code, _out, err = runner(argv, timeout=30)
     if code == 0:
         return {"status": "OK", "name": name, "action": action}
     text = (err or "").lower()
@@ -707,6 +920,9 @@ def read_process(proc_root, pid, pagesz):
     cmdline = parse_cmdline(read_text(os.path.join(base, "cmdline")))
     if rss_kb is None:
         rss_kb = stat["rss_pages"] * pagesz / 1024.0
+    # Prefer PSS (shared-aware) so multi-process apps match Windows numbers.
+    pss_kb = parse_pss_kb(read_text(os.path.join(base, "smaps_rollup")))
+    mem_kb = pss_kb if pss_kb is not None else rss_kb
     comm = stat["comm"]
     if len(comm) >= 14:
         try:
@@ -720,14 +936,7 @@ def read_process(proc_root, pid, pagesz):
             if cmd_base and (cmd_base == comm or cmd_base.startswith(comm)):
                 comm = cmd_base
 
-    app_name = pretty_name(comm)
-    if comm.startswith(("python", "node", "ruby", "perl", "bash", "sh")) and cmdline:
-        script = extract_script_name(cmdline)
-        if script:
-            if script in PRETTY:
-                app_name = PRETTY[script]
-            else:
-                app_name = pretty_name(script)
+    app_name = resolve_process_label(comm, cmdline)
 
     proc = {
         "pid": stat["pid"],
@@ -743,7 +952,7 @@ def read_process(proc_root, pid, pagesz):
         "starttime": stat["starttime"],
         "threads": stat["threads"],
         "io": parse_io(read_text(os.path.join(base, "io"))),
-        "memory_mb": round(rss_kb / 1024.0, 1),
+        "memory_mb": round(mem_kb / 1024.0, 1),
         "arch": elf_arch(read_bytes(os.path.join(base, "exe"), 64)),
         "cpu": None,
         "disk_bps": None,
@@ -834,10 +1043,19 @@ def build_users(procs, passwd_text):
         slot.append(proc)
     rows = []
     for uid, members in buckets.items():
+        if not is_signed_in_person(uid, names, members):
+            continue
+        display = user_name(uid, names)
+        # Prefer "You" feel for the current desktop account.
+        try:
+            if uid == os.getuid():
+                display = "%s (signed in)" % display
+        except (AttributeError, OSError):
+            pass
         rows.append({
             "uid": uid,
-            "name": user_name(uid, names),
-            "status": "Running",
+            "name": display,
+            "status": "Active",
             "cpu": _sum(member["cpu"] for member in members),
             "memory_mb": round(sum(member["memory_mb"] for member in members), 1),
             "disk_bps": _sum(member["disk_bps"] for member in members),
@@ -1063,7 +1281,10 @@ class Machine:
             "memory": None if not mem else {
                 "total_mb": round(mem["total_kb"] / 1024.0, 1),
                 "used_mb": round(mem["used_kb"] / 1024.0, 1),
+                "available_mb": round(mem["available_kb"] / 1024.0, 1),
+                "cached_mb": round(mem["cached_kb"] / 1024.0, 1),
                 "percent": mem["percent"],
+                "available_percent": mem["available_percent"],
                 "zram": _zram_active(read_text(self._path("swaps"))),
             },
             "disks": disks,
@@ -1095,7 +1316,8 @@ class Machine:
         runner = self.runner or default_runner
         code, out, _err = runner(
             ["systemctl", "show", "--type=service", "--no-pager",
-             "-p", "Id", "-p", "ActiveState", "-p", "MainPID", "-p", "Description"],
+             "-p", "Id", "-p", "ActiveState", "-p", "MainPID", "-p", "Description",
+             "-p", "UnitFileState"],
             timeout=8)
         self._services = parse_systemctl_show(out) if code == 0 else []
         self._services_at = now
@@ -1177,9 +1399,12 @@ def main(argv=None):
     if args.cmd == "services":
         _code, out, _err = default_runner(
             ["systemctl", "show", "--type=service", "--no-pager",
-             "-p", "Id", "-p", "ActiveState", "-p", "MainPID", "-p", "Description"])
+             "-p", "Id", "-p", "ActiveState", "-p", "MainPID", "-p", "Description",
+             "-p", "UnitFileState"])
         for row in parse_systemctl_show(out):
-            print("%s\t%s\t%s\t%s" % (row["state"], row["pid"] or "", row["name"], row["description"]))
+            print("%s\t%s\t%s\t%s\t%s" % (
+                row["state"], row.get("startup") or "", row["pid"] or "",
+                row.get("display") or row["name"], row["description"]))
         return 0
     if args.cmd == "service":
         result = service_action(args.name, args.action)
@@ -1399,13 +1624,16 @@ def run_gui():
                 QPushButton#actionBtn:hover { background-color: #1975c5; border-color: #106ebe; }
                 QPushButton#actionBtn:pressed { background-color: #005a9e; }
                 QPushButton#endBtn {
-                    background-color: #ffffff; color: #1b1b1b; border: 1px solid #d1d5db;
-                    border-radius: 6px; padding: 6px 16px; font-weight: 500;
+                    background-color: #c42b1c; color: #ffffff; border: 1px solid #b22a1b;
+                    border-radius: 6px; padding: 6px 18px; font-weight: 650; min-width: 110px;
                 }
-                QPushButton#endBtn:hover { background-color: #f3f4f6; border-color: #9ca3af; }
-                QPushButton#endBtn:pressed { background-color: #e5e7eb; }
+                QPushButton#endBtn:hover { background-color: #d1342a; border-color: #c42b1c; }
+                QPushButton#endBtn:pressed { background-color: #a82518; }
                 QPushButton#endBtn:disabled {
-                    background-color: #f9fafb; color: #9ca3af; border: 1px solid #e5e7eb;
+                    background-color: #f3f4f6; color: #9ca3af; border: 1px solid #e5e7eb;
+                }
+                QFrame#actionBar {
+                    background: #ffffff; border-top: 1px solid #e5e7eb;
                 }
                 QListWidget#perfDevices { background: transparent; border: none; outline: none; }
                 QListWidget#perfDevices::item {
@@ -1464,12 +1692,35 @@ def run_gui():
             self.run_btn.clicked.connect(self.run_new)
             self.end_btn = QtWidgets.QPushButton("End task")
             self.end_btn.setObjectName("endBtn")
+            self.end_btn.setToolTip("Select a program in the list, then click End task (or press Delete)")
             self.end_btn.clicked.connect(self.end_selected)
             self.end_btn.setEnabled(False)
+            self.end_btn.setShortcut(QtGui.QKeySequence.Delete)
             top.addWidget(self.run_btn)
             top.addWidget(self.end_btn)
             right_layout.addLayout(top)
             right_layout.addWidget(self.stack, 1)
+
+            # Windows-style bottom bar so End task is always obvious.
+            action_bar = QtWidgets.QFrame()
+            action_bar.setObjectName("actionBar")
+            bar = QtWidgets.QHBoxLayout(action_bar)
+            bar.setContentsMargins(12, 10, 12, 10)
+            self.end_hint = QtWidgets.QLabel("Select a program, then click End task — or press Delete")
+            self.end_hint.setObjectName("muted")
+            bar.addWidget(self.end_hint, 1)
+            self.end_btn_bottom = QtWidgets.QPushButton("End task")
+            self.end_btn_bottom.setObjectName("endBtn")
+            self.end_btn_bottom.setEnabled(False)
+            self.end_btn_bottom.clicked.connect(self.end_selected)
+            bar.addWidget(self.end_btn_bottom)
+            self.svc_disable_btn = QtWidgets.QPushButton("Disable")
+            self.svc_disable_btn.setObjectName("actionBtn")
+            self.svc_disable_btn.setEnabled(False)
+            self.svc_disable_btn.setVisible(False)
+            self.svc_disable_btn.clicked.connect(self._toggle_service_startup)
+            bar.addWidget(self.svc_disable_btn)
+            right_layout.addWidget(action_bar)
             layout.addWidget(right, 1)
 
             self.proc_tree = self._tree(["Name", "Status", "CPU", "Memory", "Disk", "Network"])
@@ -1508,13 +1759,16 @@ def run_gui():
             self.details_table.itemSelectionChanged.connect(self._selection)
             self.stack.addWidget(self.details_table)
 
-            self.services_table = self._table(["Name", "PID", "State", "Description"])
+            self.services_table = self._table(
+                ["Name", "Status", "Startup type", "PID", "Description"])
             self.services_table.horizontalHeader().setStretchLastSection(True)
-            for c, w in {0: 240, 1: 80, 2: 100}.items():
+            for c, w in {0: 200, 1: 100, 2: 110, 3: 70}.items():
                 self.services_table.horizontalHeader().setSectionResizeMode(c, QtWidgets.QHeaderView.Interactive)
                 self.services_table.setColumnWidth(c, w)
-            self.services_table.horizontalHeader().setSectionResizeMode(3, QtWidgets.QHeaderView.Stretch)
+            self.services_table.horizontalHeader().setSectionResizeMode(4, QtWidgets.QHeaderView.Stretch)
             self.services_table.itemSelectionChanged.connect(self._selection)
+            self.services_table.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+            self.services_table.customContextMenuRequested.connect(self._services_menu)
             self.stack.addWidget(self.services_table)
             self.show_page(0)
             self.timer = QtCore.QTimer(self)
@@ -1815,9 +2069,26 @@ def run_gui():
             elif key == "memory":
                 memory = snap["memory"] or {}
                 used = fmt_mb(memory.get("used_mb")) or "—"
+                avail = fmt_mb(memory.get("available_mb")) or "—"
+                cached = fmt_mb(memory.get("cached_mb")) or "—"
                 total = fmt_mb(memory.get("total_mb")) or "—"
                 pct = fmt_pct(memory.get("percent")) or "—"
-                zram_txt = "Active (zram)" if memory.get("zram") else "Standard"
+                avail_pct = fmt_pct(memory.get("available_percent")) or "—"
+                zram_txt = "On (saves RAM)" if memory.get("zram") else "Off"
+                # Top RAM consumers — answers "why 50% with few apps?"
+                top = []
+                for section in ("apps", "background"):
+                    for row in (snap.get("processes") or {}).get(section) or []:
+                        top.append((row.get("label") or row.get("name") or "App",
+                                    float(row.get("memory_mb") or 0)))
+                top.sort(key=lambda item: item[1], reverse=True)
+                heavy = [(name, mb) for name, mb in top if mb >= 50][:5]
+                top_html = "".join(
+                    "<tr><td style='padding:2px 8px 2px 0;color:#334155;'>%s</td>"
+                    "<td style='padding:2px 0;text-align:right;color:#0f172a;font-weight:600;'>%s</td></tr>"
+                    % (name, fmt_mb(mb))
+                    for name, mb in heavy
+                ) or "<tr><td style='color:#64748b;'>No large apps right now</td></tr>"
                 html = """
                 <div style='font-family:"Segoe UI",sans-serif;'>
                     <table width='100%%' cellspacing='6' cellpadding='0'>
@@ -1825,13 +2096,24 @@ def run_gui():
                             %s
                             %s
                             %s
+                            %s
                         </tr>
                     </table>
+                    <p style='color:#0f172a;font-size:13px;font-weight:650;margin:14px 2px 6px;'>
+                      Largest memory users
+                    </p>
+                    <table width='100%%' cellspacing='0' cellpadding='0'>%s</table>
+                    <p style='color:#6b7280;font-size:12px;margin:10px 2px 0;'>
+                      Memory %% is RAM — not your SSD. Chrome tabs and DevOS AI Core (local model)
+                      often use several GB. End task on those to free RAM; Cached is reused automatically.
+                    </p>
                 </div>
                 """ % (
-                    card("In Use", used, "%s of total" % pct),
-                    card("Installed", total, "Available memory"),
-                    card("Compression", zram_txt, "Memory optimizer"),
+                    card("In use", used, "%s of installed" % pct),
+                    card("Available", avail, "%s ready for apps" % avail_pct),
+                    card("Cached", cached, "Freed when apps need it"),
+                    card("Installed", total, "Physical RAM · %s" % zram_txt),
+                    top_html,
                 )
                 self.perf_facts.setText(html)
             elif key.startswith("disk-"):
@@ -1932,10 +2214,16 @@ def run_gui():
             ], hidden_tail=1)
 
         def _fill_users(self):
+            rows = self.snap["users"]
+            if not rows:
+                self._set_rows(self.users_table, [[
+                    "No other people signed in", "—", "—", "—", "—", "—",
+                ]])
+                return
             self._set_rows(self.users_table, [
                 [row["name"], row["status"], fmt_pct(row["cpu"]), fmt_mb(row["memory_mb"]),
-                 fmt_disk(row["disk_bps"]), "—"]
-                for row in self.snap["users"]
+                 fmt_disk(row["disk_bps"]), "%d apps" % row.get("processes", 0)]
+                for row in rows
             ])
 
         def _fill_details(self):
@@ -1949,10 +2237,21 @@ def run_gui():
                 self._select_pid_row(self.details_table, 1, selected)
 
         def _fill_services(self):
+            def status_label(state):
+                return {
+                    "active": "Running",
+                    "inactive": "Stopped",
+                    "failed": "Failed",
+                    "activating": "Starting…",
+                    "deactivating": "Stopping…",
+                }.get(state, state or "—")
+
             self._set_rows(self.services_table, [
-                [row["name"], str(row["pid"] or ""), row["state"], row["description"]]
+                [row.get("display") or row["name"], status_label(row["state"]),
+                 row.get("startup") or "Manual", str(row["pid"] or ""),
+                 row["description"], row["name"]]
                 for row in self.snap["services"]
-            ])
+            ], hidden_tail=1)
 
         def _set_rows(self, table, rows, hidden_tail=0):
             table.setRowCount(len(rows))
@@ -1965,17 +2264,17 @@ def run_gui():
                         item.setData(QtCore.Qt.UserRole, extra)
                     
                     # Modern status badge colors
-                    if text in ("Running", "Enabled", "active"):
-                        item.setForeground(QtGui.QBrush(QtGui.QColor("#15803d"))) # Green
+                    if text in ("Running", "Enabled", "active", "Active", "Automatic"):
+                        item.setForeground(QtGui.QBrush(QtGui.QColor("#15803d")))
                         font = item.font()
                         font.setBold(True)
                         item.setFont(font)
-                    elif text in ("Disabled", "inactive", "dead", "Stopped", "Zombie"):
-                        item.setForeground(QtGui.QBrush(QtGui.QColor("#94a3b8"))) # Muted slate
-                    elif text in ("Sleeping", "Idle"):
-                        item.setForeground(QtGui.QBrush(QtGui.QColor("#64748b"))) # Neutral
-                    elif text in ("failed", "Disk sleep"):
-                        item.setForeground(QtGui.QBrush(QtGui.QColor("#dc2626"))) # Red
+                    elif text in ("Disabled", "inactive", "dead", "Stopped", "Zombie", "Manual"):
+                        item.setForeground(QtGui.QBrush(QtGui.QColor("#94a3b8")))
+                    elif text in ("Sleeping", "Idle", "Starting…", "activating"):
+                        item.setForeground(QtGui.QBrush(QtGui.QColor("#64748b")))
+                    elif text in ("failed", "Failed", "Disk sleep"):
+                        item.setForeground(QtGui.QBrush(QtGui.QColor("#dc2626")))
                         font = item.font()
                         font.setBold(True)
                         item.setFont(font)
@@ -2032,24 +2331,61 @@ def run_gui():
                     table.selectRow(row)
                     return
 
+        def _set_end_enabled(self, enabled, label="End task", hint=None, show_disable=False, disable_label="Disable"):
+            self.end_btn.setEnabled(enabled)
+            self.end_btn.setText(label)
+            if hasattr(self, "end_btn_bottom"):
+                show_end = label in ("End task", "Stop", "Start")
+                self.end_btn_bottom.setEnabled(enabled and show_end)
+                self.end_btn_bottom.setText(label if label in ("Stop", "Start") else "End task")
+                self.end_btn_bottom.setVisible(show_end)
+            if hasattr(self, "svc_disable_btn"):
+                self.svc_disable_btn.setVisible(show_disable)
+                self.svc_disable_btn.setEnabled(enabled and show_disable)
+                self.svc_disable_btn.setText(disable_label)
+            if hasattr(self, "end_hint"):
+                if hint is not None:
+                    self.end_hint.setText(hint)
+                elif label == "End task":
+                    self.end_hint.setText(
+                        "End task ready — press Delete or click End task"
+                        if enabled else
+                        "Select a program, then click End task — or press Delete"
+                    )
+                elif show_disable:
+                    self.end_hint.setText(
+                        "Stop ends it now · Disable also stops it from starting at boot (like Windows Services)"
+                    )
+                else:
+                    self.end_hint.setText("Choose a row, then use the button on the right")
+
         def _selection(self):
             page = self.stack.currentIndex()
             if page == 0:
-                self.end_btn.setEnabled(bool(self._selected_pids()))
-                self.end_btn.setText("End task")
+                self._set_end_enabled(bool(self._selected_pids()), "End task")
             elif page == 5:
-                self.end_btn.setEnabled(self._table_pid(self.details_table, 1) is not None)
-                self.end_btn.setText("End task")
+                self._set_end_enabled(self._table_pid(self.details_table, 1) is not None, "End task")
             elif page == 3:
-                self.end_btn.setEnabled(self.startup_table.currentRow() >= 0)
-                self.end_btn.setText("Disable" if self._startup_enabled() else "Enable")
+                self._set_end_enabled(
+                    self.startup_table.currentRow() >= 0,
+                    "Disable" if self._startup_enabled() else "Enable",
+                )
             elif page == 6:
                 state = self._service_state()
-                self.end_btn.setEnabled(bool(state))
-                self.end_btn.setText("Stop" if state == "active" else "Start")
+                startup = self._service_startup()
+                running = state in ("Running", "active", "Starting…", "activating")
+                disabled = startup == "Disabled"
+                self._set_end_enabled(
+                    bool(state),
+                    "Stop" if running else "Start",
+                    show_disable=True,
+                    disable_label="Enable" if disabled else "Disable",
+                )
             else:
-                self.end_btn.setEnabled(False)
-                self.end_btn.setText("End task")
+                self._set_end_enabled(
+                    False, "End task",
+                    "Open Processes, select a program, then click End task",
+                )
 
         def _startup_enabled(self):
             row = self.startup_table.currentRow()
@@ -2062,8 +2398,24 @@ def run_gui():
             row = self.services_table.currentRow()
             if row < 0:
                 return ""
+            item = self.services_table.item(row, 1)
+            return item.text() if item else ""
+
+        def _service_startup(self):
+            row = self.services_table.currentRow()
+            if row < 0:
+                return ""
             item = self.services_table.item(row, 2)
             return item.text() if item else ""
+
+        def _service_unit_name(self):
+            row = self.services_table.currentRow()
+            if row < 0:
+                return ""
+            item = self.services_table.item(row, 0)
+            if not item:
+                return ""
+            return item.data(QtCore.Qt.UserRole) or item.text()
 
         def _menu(self, pos):
             item = self.proc_tree.itemAt(pos)
@@ -2072,6 +2424,23 @@ def run_gui():
             menu = QtWidgets.QMenu(self)
             menu.addAction("End task", self.end_selected)
             menu.exec_(self.proc_tree.viewport().mapToGlobal(pos))
+
+        def _services_menu(self, pos):
+            index = self.services_table.indexAt(pos)
+            if not index.isValid():
+                return
+            self.services_table.selectRow(index.row())
+            state = self._service_state()
+            startup = self._service_startup()
+            running = state in ("Running", "active", "Starting…", "activating")
+            menu = QtWidgets.QMenu(self)
+            menu.addAction("Stop" if running else "Start", self._toggle_service)
+            menu.addAction(
+                "Enable (start at boot)" if startup == "Disabled" else "Disable (don't start at boot)",
+                self._toggle_service_startup,
+            )
+            menu.addAction("Restart", lambda: self._service_do("restart"))
+            menu.exec_(self.services_table.viewport().mapToGlobal(pos))
 
         def end_selected(self):
             page = self.stack.currentIndex()
@@ -2122,20 +2491,43 @@ def run_gui():
                 QtWidgets.QMessageBox.warning(self, APP_NAME, result.get("reason") or result["status"])
             self.refresh()
 
-        def _toggle_service(self):
-            row = self.services_table.currentRow()
-            if row < 0:
+        def _service_do(self, action):
+            name = self._service_unit_name()
+            if not name:
                 return
-            name = self.services_table.item(row, 0).text()
-            action = "stop" if self._service_state() == "active" else "start"
+            label = {
+                "stop": "Stop", "start": "Start", "restart": "Restart",
+                "disable": "Disable", "enable": "Enable",
+            }.get(action, action)
+            answer = QtWidgets.QMessageBox.question(
+                self, APP_NAME,
+                "%s this service?\n\n%s" % (label, name),
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            )
+            if answer != QtWidgets.QMessageBox.Yes:
+                return
             result = service_action(name, action)
             if result["status"] == "NEEDS_ROOT":
                 pkexec = os.environ.get("PKEXEC", "pkexec")
-                subprocess.run([pkexec, "systemctl", action, name], check=False)
+                argv = ["systemctl", action, name]
+                if action == "disable":
+                    argv = ["systemctl", "disable", "--now", name]
+                elif action == "enable":
+                    argv = ["systemctl", "enable", "--now", name]
+                subprocess.run([pkexec] + argv, check=False)
             elif result["status"] not in ("OK",):
                 QtWidgets.QMessageBox.warning(self, APP_NAME, result.get("detail") or result["status"])
             self.machine._services_at = 0
             self.refresh()
+
+        def _toggle_service(self):
+            state = self._service_state()
+            running = state in ("Running", "active", "Starting…", "activating")
+            self._service_do("stop" if running else "start")
+
+        def _toggle_service_startup(self):
+            startup = self._service_startup()
+            self._service_do("enable" if startup == "Disabled" else "disable")
 
         def run_new(self):
             command, ok = QtWidgets.QInputDialog.getText(self, "Run new task", "Open:")
@@ -2168,12 +2560,12 @@ def run_gui():
     _install_dialog_style(app)
     app.setApplicationName("devos-taskman")
     app.setApplicationDisplayName("Task Manager")
+    from app_identity import apply as apply_identity, show_window
     if hasattr(app, "setDesktopFileName"):
         app.setDesktopFileName("devos-taskman")
-        from app_identity import apply as apply_identity
         apply_identity(app, "devos-taskman")
     window = Window()
-    window.show()
+    show_window(window, "devos-taskman")
     return app.exec_()
 
 

@@ -6,7 +6,8 @@ Comment=Built-in browser. Smaller than Chrome and uses the desktop's own web eng
 Exec=/usr/bin/falkon %U
 Icon=devos-falkon
 Terminal=false
-Type=ApplicationStartupWMClass=devos-falkon
+Type=Application
+StartupWMClass=devos-falkon
 
 Categories=Network;WebBrowser;
 MimeType=text/html;application/xhtml+xml;x-scheme-handler/http;x-scheme-handler/https;

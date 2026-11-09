@@ -11,6 +11,6 @@ fi
 # The local reminder is optional and never claims to track the remote session.
 if [ "${1:-}" = "--reminder" ]; then
     shift
-    exec /usr/bin/python3 "$component" "$@"
+    exec -a "$(basename "$0")" /usr/bin/python3 "$component" "$@"
 fi
-exec /usr/bin/python3 "$(dirname "$component")/browser_launch.py" "$@"
+exec -a "$(basename "$0")" /usr/bin/python3 "$(dirname "$component")/browser_launch.py" "$@"

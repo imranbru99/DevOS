@@ -9,17 +9,24 @@ Rows=1
 breezedecorationEnabled=true
 overviewEnabled=true
 presentwindowsEnabled=true
-blurEnabled=true
-kwin4_effect_fadeEnabled=true
-kwin4_effect_scaleEnabled=true
-slidingpopupsEnabled=true
-squashEnabled=true
+# Blur/fade/scale cost GPU every frame; off for Windows-like snappiness.
+blurEnabled=false
+kwin4_effect_fadeEnabled=false
+kwin4_effect_scaleEnabled=false
+slidingpopupsEnabled=false
+squashEnabled=false
 
 [Compositing]
 Enabled=true
+LatencyPolicy=Low
+OpenGLIsUnsafe=false
+AllowTearing=true
+MaxFPS=60
+
+
 
 [Windows]
-BorderlessMaximizedWindows=true
+BorderlessMaximizedWindows=false
 TitlebarDoubleClickCommand=Maximize
 FocusPolicy=ClickToFocus
 

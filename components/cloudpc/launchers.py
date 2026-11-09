@@ -23,11 +23,19 @@ def integrate(directory, command='/usr/local/bin/devos-windows-app'):
             start = lines.index('[Desktop Entry]') + 1
             end = next((i for i in range(start, len(lines)) if lines[i].startswith('[')), len(lines))
             values = dict(line.split('=', 1) for line in lines[start:end] if '=' in line and not line.startswith('#'))
-            if values.get('Name', '').lower() != 'windows app':
+            name = values.get('Name', '').strip().lower()
+            exec_line = values.get('Exec', '').lower()
+            is_windows_app = (
+                name == 'windows app'
+                or name.startswith('http://windows.cloud.microsoft')
+                or name.startswith('https://windows.cloud.microsoft')
+                or 'windows.cloud.microsoft' in exec_line
+            )
+            if not is_windows_app:
                 continue
             if values.get('X-DevOS-Cloud-Companion') == 'true' and values.get('Exec') == command and 'StartupWMClass' not in values:
                 continue
-            if values.get('X-DevOS-Cloud-Companion') != 'true' and '--app-id=' + match[1] not in values.get('Exec', ''):
+            if values.get('X-DevOS-Cloud-Companion') != 'true' and '--app-id=' + match[1] not in values.get('Exec', '') and 'windows.cloud.microsoft' not in exec_line:
                 continue
             body = [line for line in lines[start:end] if not line.startswith(('Exec=', 'NoDisplay=', 'X-DevOS-Cloud-Companion=', 'StartupWMClass='))]
             body += ['Exec=' + command, 'NoDisplay=true', 'X-DevOS-Cloud-Companion=true']

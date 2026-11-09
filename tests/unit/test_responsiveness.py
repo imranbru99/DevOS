@@ -72,7 +72,10 @@ class ResponsivenessTests(unittest.TestCase):
                 p.write_text(content)
                 return p
             governor = write("devices/system/cpu/cpu0/cpufreq/scaling_governor", "powersave")
-            write("devices/system/cpu/cpu0/cpufreq/scaling_available_governors", "powersave schedutil")
+            write("devices/system/cpu/cpu0/cpufreq/scaling_available_governors",
+                  "powersave schedutil performance")
+            write("devices/system/cpu/cpu0/cpufreq/energy_performance_preference",
+                  "balance_performance")
             for name, rotating, available in (("nvme0n1", "0", "[mq-deadline] none"),
                     ("sda", "0", "[none] mq-deadline"), ("sdb", "1", "[mq-deadline] bfq"),
                     ("sdc", "0", "[none]")):
@@ -82,9 +85,11 @@ class ResponsivenessTests(unittest.TestCase):
             script = (ROOT / "build/includes.chroot/usr/local/sbin/devos-tune-hardware").read_text()
             # Only an isolated fixture is written, never the host's sysfs.
             script = script.replace("/sys/", str(sysroot) + "/")
+            # No Battery sysfs → treat as AC / desktop → performance governor.
+            script = script.replace("/sys/class/power_supply/", str(sysroot) + "/class/power_supply/")
             subprocess.run(["bash"], input=script, text=True, check=True)
-            self.assertEqual(governor.read_text().strip(), "schedutil")
-            for name, scheduler, ahead in (("nvme0n1", "none", "128"),
+            self.assertEqual(governor.read_text().strip(), "performance")
+            for name, scheduler, ahead in (("nvme0n1", "none", "256"),
                     ("sda", "mq-deadline", "128"), ("sdb", "bfq", "1024"), ("sdc", "[none]", "128")):
                 self.assertEqual((sysroot / f"block/{name}/queue/scheduler").read_text().strip(), scheduler)
                 self.assertEqual((sysroot / f"block/{name}/queue/read_ahead_kb").read_text().strip(), ahead)

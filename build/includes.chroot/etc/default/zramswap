@@ -1,6 +1,6 @@
-# Compressed swap in RAM — same policy as the daily DevOS install:
-# about half of physical RAM (≈15–16 GiB on a 32 GiB PC). This is virtual
-# capacity, not preallocated memory; compression depends on the workload.
+# Compressed RAM swap (Windows Memory Compression analogue).
+# Swap capacity is allocated on demand. Leave room to absorb browser
+# memory spikes before the lower-priority disk swap is needed.
 ALGO=zstd
 PERCENT=50
 PRIORITY=100

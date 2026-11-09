@@ -346,6 +346,36 @@ class DevOSSystemMetrics:
         return ""
 
     @classmethod
+    def appearance_theme(cls) -> str:
+        """Return light|dark for the dashboard chrome (Cupertino maps to those)."""
+        settings = os.path.expanduser("~/.config/devos/settings.json")
+        try:
+            with open(settings, encoding="utf-8") as handle:
+                mode = json.load(handle).get("appearance", {}).get("theme", "")
+            mode = str(mode).lower().strip()
+            if mode in ("light", "mac-light"):
+                return "light"
+            if mode in ("dark", "mac"):
+                return "dark"
+        except (OSError, ValueError, TypeError, AttributeError):
+            pass
+        try:
+            kde = os.path.expanduser("~/.config/kdeglobals")
+            with open(kde, encoding="utf-8", errors="replace") as handle:
+                text = handle.read().lower()
+            for line in text.splitlines():
+                if line.startswith("colorscheme="):
+                    scheme = line.split("=", 1)[1].strip()
+                    if "light" in scheme:
+                        return "light"
+                    if "dark" in scheme or scheme in ("devos", "breezedark"):
+                        return "dark"
+                    break
+        except OSError:
+            pass
+        return "light"
+
+    @classmethod
     def get_metrics(cls) -> Dict[str, Any]:
         identity = system_identity()
         mem = read_meminfo()
@@ -386,6 +416,7 @@ class DevOSSystemMetrics:
             "boot_mode": "uefi" if is_uefi else "bios",
             "secure_boot": read_secure_boot() if is_uefi else None,
             "desktop": cls.desktop(),
+            "theme": cls.appearance_theme(),
             "uptime_sec": read_uptime(),
         }
 

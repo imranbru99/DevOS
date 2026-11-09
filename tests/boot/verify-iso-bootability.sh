@@ -110,11 +110,14 @@ required=(
     /casper/filesystem.squashfs
     /casper/filesystem.size
     /boot/grub/grub.cfg
+    /boot/grub/loopback.cfg
     /boot/grub/i386-pc/eltorito.img
     /boot/grub/i386-pc/normal.mod
     /boot/grub/x86_64-efi/normal.mod
     /EFI/BOOT/BOOTX64.EFI
     /EFI/BOOT/grubx64.efi
+    /EFI/BOOT/grub.cfg
+    /EFI/ubuntu/grub.cfg
     /.disk/info
 )
 for f in "${required[@]}"; do
@@ -180,6 +183,19 @@ if command -v unsquashfs >/dev/null 2>&1 && command -v xorriso >/dev/null 2>&1; 
     fi
 else
     skip "xorriso/unsquashfs not available, cannot verify rootfs contents"
+fi
+
+# --- UEFI stub must chain to the full menu (not leave users at grub>) ---
+if command -v xorriso >/dev/null 2>&1; then
+    EFI_CFG="${TMP}/efi-grub.cfg"
+    xorriso -osirrox on -indev "$ISO" -extract /EFI/BOOT/grub.cfg "$EFI_CFG" >/dev/null 2>&1 || true
+    if [ -f "$EFI_CFG" ] && grep -q 'configfile \$prefix/grub.cfg' "$EFI_CFG" \
+        && grep -q 'search --no-floppy --set=root --file /casper/vmlinuz' "$EFI_CFG" \
+        && ! grep -q 'menuentry' "$EFI_CFG"; then
+        pass "EFI/BOOT/grub.cfg is a chainload stub (avoids laptop grub> shell)"
+    else
+        fail "EFI/BOOT/grub.cfg must be a search+configfile stub, not a full menu"
+    fi
 fi
 
 # --- Summary ---

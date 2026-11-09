@@ -29,7 +29,8 @@ class DialogStyle(QtCore.QObject):
                 widget.setMinimumWidth(min(580, available))
                 for button in widget.findChildren(QtWidgets.QPushButton):
                     width = max(110, len(button.text().replace('&', '')) * 9 + 16)
-                    button.setStyleSheet('QPushButton { min-width: %dpx; }' % width)
+                    # Keep dialog button colors — only size, never wipe the themed sheet.
+                    button.setMinimumWidth(width)
                     button.setMinimumHeight(44)
                 if widget.layout():
                     widget.layout().setContentsMargins(24, 20, 24, 20)

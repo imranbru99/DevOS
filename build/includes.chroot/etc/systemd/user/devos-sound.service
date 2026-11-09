@@ -1,17 +1,17 @@
 [Unit]
-Description=DevOS Windows 11 Sound Tray
+Description=DevOS Sound Tray
 PartOf=graphical-session.target
 After=graphical-session.target
+# Autostart desktop launches the tray; keep this unit available but not
+# double-started (no graphical-session.target.wants link).
 
 [Service]
 Type=simple
 ExecStart=/usr/local/bin/devos-sound --tray
 Restart=on-failure
 RestartSec=2
-Environment=DISPLAY=:1
-Environment=WAYLAND_DISPLAY=wayland-0
-Environment=QT_QPA_PLATFORM=xcb
-Environment=XDG_RUNTIME_DIR=/run/user/1000
+# Inherit DISPLAY / WAYLAND / XDG_RUNTIME_DIR from the graphical session.
+# Do not hard-code :1 or uid 1000 — that breaks every other seat/user.
 
 [Install]
 WantedBy=graphical-session.target

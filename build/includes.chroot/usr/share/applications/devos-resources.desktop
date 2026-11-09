@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Resource Monitor
+GenericName=CPU, memory, and process monitor
+Comment=Live CPU, memory, disk, and network usage — easy to read
+Exec=devos-resources
+Icon=devos-resources
+Terminal=false
+Categories=System;Monitor;
+Keywords=btop;htop;cpu;memory;ram;process;monitor;performance;resources;system;
+StartupNotify=true
+StartupWMClass=konsole
+X-DevOS-Backend=btop

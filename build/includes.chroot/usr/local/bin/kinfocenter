@@ -1,0 +1,22 @@
+#!/bin/bash
+# DevOS: anything that launches "kinfocenter" opens visual About this PC.
+# Stock KDE Info Center (broken pages without extra tools) stays at /usr/bin/kinfocenter.
+# Classic details in About this PC, or: DEVOS_CLASSIC_INFO=1 kinfocenter
+set -e
+CLASSIC="/usr/bin/kinfocenter"
+if [ "${DEVOS_CLASSIC_INFO:-}" = "1" ] || [ "${1:-}" = "--classic" ]; then
+  if [ "${1:-}" = "--classic" ]; then
+    shift
+  fi
+  if [ -x "$CLASSIC" ]; then
+    exec "$CLASSIC" "$@"
+  fi
+fi
+if [ -x /usr/local/bin/devos-about ]; then
+  exec /usr/local/bin/devos-about "$@"
+fi
+if [ -x "$CLASSIC" ]; then
+  exec "$CLASSIC" "$@"
+fi
+echo "About this PC is not installed." >&2
+exit 1

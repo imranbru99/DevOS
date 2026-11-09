@@ -1667,10 +1667,10 @@ def run_gui():
     app.setApplicationName("devos-phonelink")
     app.setApplicationDisplayName("Phone Link")
     app.setDesktopFileName("devos-phonelink")
-    from app_identity import apply as apply_identity
+    from app_identity import apply as apply_identity, show_window
     apply_identity(app, "devos-phonelink")
     win = Window()
-    win.show()
+    show_window(win, "devos-phonelink")
     return app.exec_()
 
 

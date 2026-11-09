@@ -12,7 +12,7 @@ import time
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     selection = parser.add_mutually_exclusive_group()
-    selection.add_argument('--select', choices=[f'{i:02d}' for i in range(1, 21)], help='Apply a specific collection entry, such as 20 for Home Bloom')
+    selection.add_argument('--select', choices=[f'{i:02d}' for i in range(1, 51)], help='Apply a specific collection entry, such as 50 for Apex Bloom')
     selection.add_argument('--apply', choices=['light', 'dark'], help='Apply Pearl Dawn (light) or Cyan Orbit (dark) to all Plasma desktops')
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[3]

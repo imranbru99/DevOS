@@ -37,7 +37,7 @@ import time
 import urllib.error
 import urllib.request
 
-APP_NAME = "DevOS Optimizer"
+APP_NAME = "PC Optimizer"
 MB = 1024 * 1024
 GB = 1024 * MB
 DAY = 86400
@@ -98,7 +98,8 @@ PRETTY_NAMES = {
     "libreoffice": "LibreOffice", "soffice.bin": "LibreOffice",
     "gimp": "GIMP", "gimp-2.10": "GIMP", "inkscape": "Inkscape",
     "vlc": "VLC", "telegram-desktop": "Telegram", "slack": "Slack",
-    "discord": "Discord", "spotify": "Spotify", "okular": "Okular",
+    "discord": "Discord", "spotify": "Spotify", "okular": "PDF Viewer", "btop": "Resource Monitor",
+    "gwenview": "Photos", "dolphin": "File Explorer", "konsole": "Terminal", "kate": "Text Editor",
     "dolphin": "Dolphin", "konsole": "Konsole", "kate": "Kate",
     "obs": "OBS Studio", "steam": "Steam", "zoom": "Zoom",
 }
@@ -1526,7 +1527,7 @@ def run_gui(open_cleanup=False):
             self.rows = {}
             self.threads = []
             self.freed_msg = ""
-            self.setWindowTitle("DevOS Optimizer — Clean up")
+            self.setWindowTitle("PC Optimizer — Clean up")
             self.setWindowIcon(app_icon())
             self.setMinimumSize(640, 700)
             self.resize(660, 720)
@@ -1683,6 +1684,29 @@ def run_gui(open_cleanup=False):
                 row["frame"].deleteLater()
             self.rows = {}
             self.status.hide()
+            if not results:
+                empty = card()
+                elay = QtWidgets.QVBoxLayout(empty)
+                elay.setContentsMargins(24, 28, 24, 28)
+                title = QtWidgets.QLabel("All clear")
+                title.setObjectName("cardTitle")
+                body = QtWidgets.QLabel(
+                    "Nothing to clean right now. Temporary files and caches look healthy."
+                )
+                body.setObjectName("muted")
+                body.setWordWrap(True)
+                tip = QtWidgets.QLabel("Tip: open Security for virus scans, or Storage Sense to see what fills this PC.")
+                tip.setObjectName("muted")
+                tip.setWordWrap(True)
+                elay.addWidget(title)
+                elay.addWidget(body)
+                elay.addWidget(tip)
+                self.list_layout.insertWidget(1, empty)
+                self.rows["_empty"] = {"frame": empty, "check": None, "result": None}
+                self.total_label.setText("Nothing to clean")
+                self.rescan_btn.setEnabled(True)
+                self.clean_btn.setEnabled(False)
+                return
             for i, r in enumerate(results):
                 frame = card()
                 lay = QtWidgets.QVBoxLayout(frame)
@@ -1713,10 +1737,16 @@ def run_gui(open_cleanup=False):
             self.update_total()
 
         def selected(self):
-            return [row["result"] for row in self.rows.values() if row["check"].isChecked()]
+            return [
+                row["result"] for row in self.rows.values()
+                if row.get("check") is not None and row["check"].isChecked()
+            ]
 
         def toggle_select_all(self):
-            available = [r for r in self.rows.values() if r["check"].isEnabled()]
+            available = [
+                r for r in self.rows.values()
+                if r.get("check") is not None and r["check"].isEnabled()
+            ]
             if not available:
                 return
             all_checked = all(r["check"].isChecked() for r in available)
@@ -1731,7 +1761,10 @@ def run_gui(open_cleanup=False):
             self.update_total()
 
         def update_total(self):
-            available = [r for r in self.rows.values() if r["check"].isEnabled()]
+            available = [
+                r for r in self.rows.values()
+                if r.get("check") is not None and r["check"].isEnabled()
+            ]
             checked_count = sum(1 for r in available if r["check"].isChecked())
             all_checked = bool(available) and (checked_count == len(available))
 
@@ -2041,7 +2074,7 @@ def run_gui(open_cleanup=False):
     qapp = QtWidgets.QApplication(sys.argv)
     _install_dialog_style(qapp)
     qapp.setApplicationName("devos-optimizer")
-    qapp.setApplicationDisplayName("DevOS Optimizer")
+    qapp.setApplicationDisplayName("PC Optimizer")
     if hasattr(qapp, "setDesktopFileName"):
         qapp.setDesktopFileName("devos-optimizer")
         from app_identity import apply as apply_identity

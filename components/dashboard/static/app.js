@@ -69,27 +69,63 @@ function switchTab(tabId) {
   }
 }
 
-// Live Clock
+// Live Clock — always English numerals / AM-PM (never secondary-locale digits).
 function initClock() {
   const clockEl = document.getElementById('live-clock');
+  if (!clockEl) return;
   function update() {
     const now = new Date();
-    clockEl.textContent = now.toLocaleTimeString();
+    clockEl.textContent = now.toLocaleTimeString('en-US', {
+      hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true,
+    });
   }
   update();
   setInterval(update, 1000);
+}
+
+function setConnPill(state, label) {
+  const pill = document.querySelector('.status-pill');
+  if (!pill) return;
+  pill.classList.remove('online', 'offline', 'reconnecting');
+  pill.classList.add(state);
+  const text = pill.querySelector('span:last-child') || pill;
+  if (label) text.textContent = label;
+}
+
+function showMetricsOffline() {
+  setConnPill('offline', 'Reconnecting…');
+  setText('cpu-percent', '—');
+  setText('ram-percent', '—');
+  setText('disk-percent', '—');
+  setText('cpu-model', 'Dashboard service starting…');
+  setText('ram-usage-text', 'Waiting for live data');
+  setText('disk-usage-text', 'Waiting for live data');
+  setText('ai-tier-badge', '—');
+  setText('zram-badge', '—');
+  setText('fs-badge', '—');
 }
 
 // System Telemetry Fetch
 async function fetchSystemMetrics() {
   try {
     const res = await fetch('/api/system/status');
-    if (!res.ok) return;
+    if (!res.ok) {
+      showMetricsOffline();
+      return;
+    }
     const data = await res.json();
+    setConnPill('online', 'Online');
 
     // Live USB or installed PC: shows/hides installer-only controls.
     document.body.classList.toggle('is-live', !!data.live);
     document.body.classList.toggle('is-installed', !data.live);
+    // Match DevOS Appearance (light/dark) so dashboard text fits either screen.
+    const theme = (data.theme === 'light' || data.theme === 'dark')
+      ? data.theme
+      : (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+    document.documentElement.setAttribute('data-theme', theme);
+    document.body.setAttribute('data-theme', theme);
+    document.documentElement.style.colorScheme = theme;
     setText('system-status-text', data.badge || data.os_name || 'DevOS');
     setText('foot-os', data.pretty_name || data.os_name || 'DevOS');
 
@@ -143,6 +179,7 @@ async function fetchSystemMetrics() {
     setText('foot-sep', data.desktop && boot ? '•' : '');
   } catch (err) {
     console.debug('Dashboard API not reachable', err);
+    showMetricsOffline();
   }
 }
 

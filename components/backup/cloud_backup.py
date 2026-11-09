@@ -1410,16 +1410,16 @@ def run_gui():
     _install_dialog_style(qapp)
     qapp.setApplicationName("devos-backup")
     qapp.setApplicationDisplayName("Cloud Backup")
+    from app_identity import apply as apply_identity, show_window
     if hasattr(qapp, "setDesktopFileName"):
         qapp.setDesktopFileName("devos-backup")
-        from app_identity import apply as apply_identity
         apply_identity(qapp, "devos-backup")
     font = QtGui.QFont("Inter")
     if not QtGui.QFontInfo(font).exactMatch():
         font = QtGui.QFont("Noto Sans")
     qapp.setFont(font)
     win = BackupWindow()
-    win.show()
+    show_window(win, "devos-backup")
     return qapp.exec_()
 
 

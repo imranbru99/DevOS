@@ -572,13 +572,13 @@ def main():
     _install_dialog_style(app)
     app.setApplicationName("devos-disk")
     app.setApplicationDisplayName("Storage & Boot Doctor")
+    from app_identity import apply as apply_identity, show_window
     if hasattr(app, "setDesktopFileName"):
         app.setDesktopFileName("devos-disk")
-        from app_identity import apply as apply_identity
         apply_identity(app, "devos-disk")
     app.setFont(QFont("Inter", 10))
     window = DiskDoctorWindow()
-    window.show()
+    show_window(window, "devos-disk")
     sys.exit(app.exec_())
 
 

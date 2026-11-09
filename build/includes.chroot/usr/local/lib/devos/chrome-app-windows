@@ -3,6 +3,7 @@
 # Connecting a Cloud PC is window.open() inside Windows App. Chrome opens that
 # as a browser tab unless this is on in the Chrome process that is already
 # running, so every launch of Chrome comes through here.
+# Also injects Windows-like memory flags when callers bypass devos-browser.
 set -u
 
 here="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
@@ -13,7 +14,24 @@ if [ ! -x "$real" ]; then
 fi
 
 feature="PwaNavigationCapturing:aux_context_keep_same_container/true"
-args=(--ozone-platform=x11)
+args=(--ozone-platform=x11 --process-per-site)
+ram_gb=$(awk '/^MemTotal:/ {printf "%d", $2/1048576}' /proc/meminfo 2>/dev/null || echo 8)
+renderer_limit=8
+if [ "$ram_gb" -ge 24 ]; then
+    renderer_limit=14
+elif [ "$ram_gb" -ge 12 ]; then
+    renderer_limit=10
+elif [ "$ram_gb" -le 6 ]; then
+    renderer_limit=4
+fi
+args+=("--renderer-process-limit=${renderer_limit}")
+
+# Prefer /dev/shm when there is room; only fall back to /tmp when shm is tiny.
+shm_free_kb=$(df -k /dev/shm 2>/dev/null | awk 'NR==2 {print $4}')
+if [ -n "${shm_free_kb:-}" ] && [ "$shm_free_kb" -lt 262144 ]; then
+    args+=(--disable-dev-shm-usage)
+fi
+
 extra=""
 for a in "$@"; do
     case "$a" in
@@ -24,6 +42,9 @@ for a in "$@"; do
             else
                 extra="$piece"
             fi
+            ;;
+        --process-per-site|--renderer-process-limit=*|--disable-dev-shm-usage|--ozone-platform=*)
+            # Already set above / ignore duplicates from wrappers.
             ;;
         *)
             args+=("$a")

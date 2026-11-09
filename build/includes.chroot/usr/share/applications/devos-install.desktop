@@ -1,5 +1,6 @@
 [Desktop Entry]
-Type=ApplicationStartupWMClass=devos-install
+Type=Application
+StartupWMClass=devos-install
 
 Version=1.0
 Name=Install DevOS

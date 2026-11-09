@@ -1,13 +1,14 @@
 [Desktop Entry]
 Version=1.0
 Name=Notepad
-GenericName=Text Editor
-Comment=Write and edit notes and plain text
+GenericName=Plain text editor
+Comment=Edit plain text files — like Windows Notepad (not sticky Notes)
 Exec=devos-notepad %F
 Icon=devos-notepad
 Terminal=false
 Type=Application
-Categories=Qt;KDE;Utility;TextEditor;
+Categories=Qt;Utility;TextEditor;
 MimeType=text/plain;text/markdown;
+Keywords=notepad;text;editor;txt;plain;
 StartupNotify=true
 StartupWMClass=devos-notepad

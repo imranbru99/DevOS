@@ -142,20 +142,47 @@ def configured_parallel(path: str = "/etc/devos/ai.conf") -> int:
         return 0
 
 
-def configured_idle_timeout(path: str = "/etc/devos/ai.conf") -> int:
-    value = os.environ.get("DEVOS_AI_IDLE_TIMEOUT", "")
+# Sleep policy: never hold the GGUF in RAM when nobody is chatting.
+# 10 minutes after the last message → unload. Next chat loads again (~1s).
+DEFAULT_IDLE_TIMEOUT_SECONDS = 600
+
+
+def _conf_value(keys, path: str = "/etc/devos/ai.conf", env: str = "") -> str:
+    value = os.environ.get(env, "") if env else ""
     try:
         with open(path, encoding="utf-8") as handle:
             for line in handle:
                 key, _, val = line.partition("=")
-                if key.strip() in ("idle_timeout", "timeout"):
+                if key.strip() in keys:
                     value = val.strip()
     except OSError:
         pass
+    user = os.path.expanduser("~/.config/devos/ai.conf")
+    if user != path:
+        try:
+            with open(user, encoding="utf-8") as handle:
+                for line in handle:
+                    key, _, val = line.partition("=")
+                    if key.strip() in keys:
+                        value = val.strip()
+        except OSError:
+            pass
+    return (value or "").strip()
+
+
+def configured_idle_timeout(path: str = "/etc/devos/ai.conf") -> int:
+    value = _conf_value(("idle_timeout", "timeout"), path=path, env="DEVOS_AI_IDLE_TIMEOUT")
     try:
-        return int(value)
+        seconds = int(value)
     except ValueError:
         return 0
+    return max(60, seconds) if seconds > 0 else 0
+
+
+def configured_warmup(path: str = "/etc/devos/ai.conf") -> bool:
+    """Preload at boot is OFF unless explicitly enabled (burns 4–8 GB RAM)."""
+    raw = _conf_value(("warmup", "warm_up", "preload"), path=path, env="DEVOS_AI_WARMUP").lower()
+    return raw in ("1", "true", "yes", "on")
 
 
 def _int_env(name: str, default: int) -> int:
@@ -506,17 +533,11 @@ class DevOSAIEngine:
         self.active_model = "devos-ai"
         ram = float(self.tier_info.get("ram_gb") or 4)
         conf_timeout = configured_idle_timeout()
-        if conf_timeout > 0:
-            self.idle_timeout_seconds = conf_timeout
-        elif ram >= 24.0:
-            self.idle_timeout_seconds = 86400 * 7  # 7 days (never unload during normal usage on 32GB RAM)
-        elif ram >= 15.5:
-            self.idle_timeout_seconds = 86400      # 24 hours on 16GB+ RAM
-        elif ram >= 7.5:
-            self.idle_timeout_seconds = 3600       # 1 hour on 8GB+ RAM
-        else:
-            self.idle_timeout_seconds = 300        # 5 min on small memory (<8GB) systems
-        self.last_activity = time.time()
+        # Hard default: 10 minutes for every PC. Config/env may only shorten or
+        # lengthen deliberately — never "keep forever on big RAM".
+        self.idle_timeout_seconds = conf_timeout if conf_timeout > 0 else DEFAULT_IDLE_TIMEOUT_SECONDS
+        # 0 = never used yet. Accidental loads without a chat unload on first watch.
+        self.last_activity = 0.0
         self.is_loaded = False
         self._model_file = None
         self.tokens_generated = 0
@@ -903,18 +924,20 @@ class DevOSAIEngine:
             slot.llm = None
 
     def unload_if_idle(self) -> bool:
-        """Give the model's memory back when nobody has asked anything for a
-        while. It held 1.6-2.7 GB for hours, and on a 4 GB laptop that made
-        Android and Chrome get killed. The file is memory-mapped, so loading it
-        again on the next question takes about a second. Extra slots (parallel
-        agents) are freed sooner than the first one."""
+        """Sleep policy: free the GGUF after idle_timeout with no chat/embed use.
+
+        The HTTP daemon stays up (cheap). Only the multi-GB model leaves RAM.
+        Next DevOS AI message loads it again in about a second.
+        """
         now = time.time()
         freed = False
+        # Never-used activity stamp → treat as already idle (covers mistaken warm-up).
+        last = self.last_activity if self.last_activity > 0 else 0.0
         for slot in self._slots:
             if slot.llm is None:
                 continue
             if slot.index == 0:
-                idle = now - self.last_activity >= self.idle_timeout_seconds
+                idle = (now - last) >= self.idle_timeout_seconds if last > 0 else True
             else:
                 idle = now - slot.last_used >= min(self.EXTRA_SLOT_IDLE_SECONDS, self.idle_timeout_seconds)
             if not idle or slot.busy or not slot.lock.acquire(blocking=False):
@@ -925,6 +948,12 @@ class DevOSAIEngine:
                 freed = True
             finally:
                 slot.lock.release()
+        # Embedding model can also sit at hundreds of MB.
+        if getattr(self, "_embed_llm", None) is not None:
+            embed_idle = (now - last) >= self.idle_timeout_seconds if last > 0 else True
+            if embed_idle:
+                self._embed_llm = None
+                freed = True
         if freed:
             self.is_loaded = any(s.llm is not None for s in self._slots)
             import gc
@@ -934,23 +963,28 @@ class DevOSAIEngine:
                 ctypes.CDLL("libc.so.6").malloc_trim(0)  # hand freed pages back to the system
             except Exception:
                 pass
+            sys.stderr.write(
+                f"[ai-core] sleep: model unloaded after {self.idle_timeout_seconds}s idle "
+                "(next chat loads again)\n"
+            )
         return freed
 
     def idle_watch(self):
+        # Check often so a 10‑minute policy is felt within ~15s of the deadline.
         while True:
-            time.sleep(30)
-            if self.unload_if_idle():
-                sys.stderr.write("[ai-core] idle: model unloaded to free memory\n")
+            time.sleep(15)
+            self.unload_if_idle()
 
     def warm_up(self):
-        """Load the model and process the system prompt at service start, so
-        the first question does not pay for it."""
+        """Optional boot preload — OFF by default (see configured_warmup)."""
         try:
             slot = self._slots[0]
             with slot.lock:
                 self._load(slot, "chat")
                 if slot.llm is None:
                     return
+                # Count as activity so idle timer starts from warm-up, not epoch.
+                self.last_activity = time.time()
                 slot.llm.create_chat_completion(
                     messages=self._build_chat([{"role": "user", "content": "Hi"}]),
                     max_tokens=1,
@@ -1157,10 +1191,32 @@ def _measure_pc_facts() -> str:
 # The only DevOS team contact details the AI may give; the model once made up
 # a LinkedIn URL. Same list as ABOUT_TEXT in components/assistant/tools.py.
 DEVOS_CONTACTS = (
-    "email devos@imrandev.bd; contact form https://imrandev.bd/contact; "
-    "WhatsApp https://wa.me/+8801576918420; GitHub https://github.com/imranbru99; "
-    "LinkedIn https://linkedin.com/in/imranbru99"
+    "contact form https://imrandev.bd/contact; email me@imrandev.bd; "
+    "LinkedIn https://linkedin.com/in/imranbru99; GitHub https://github.com/imranbru99; "
+    "WhatsApp https://wa.me/+8801576918420"
 )
+
+
+def _owner_prompt_facts() -> str:
+    """PC owner profile from My Profile — never invent missing fields."""
+    try:
+        from settings.owner_profile import owner_facts_line
+        return owner_facts_line()
+    except Exception:
+        try:
+            import importlib.util
+            path = "/usr/local/share/devos/components/settings/owner_profile.py"
+            spec = importlib.util.spec_from_file_location("owner_profile", path)
+            if spec and spec.loader:
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                return mod.owner_facts_line()
+        except Exception:
+            pass
+    return (
+        "PC owner profile unavailable. If asked who owns this PC, say the owner can add "
+        "name, email, bio and portfolio in Start → My Profile."
+    )
 
 
 def devos_identity_prompt(ram=None, tier=None) -> str:
@@ -1173,6 +1229,7 @@ def devos_identity_prompt(ram=None, tier=None) -> str:
         hardware = (" Facts about THIS computer (use them when asked about the PC, its "
                     "configuration, processor, RAM, storage, graphics or battery; never invent "
                     "other specs): " + facts + ".")
+    owner = _owner_prompt_facts()
     return (
         "You are DevOS AI, the private assistant built into DevOS. "
         "DevOS and DevOS AI are made by the DevOS team, led by Imran Ahmed (Imran Dev); "
@@ -1181,6 +1238,11 @@ def devos_identity_prompt(ram=None, tier=None) -> str:
         "team is, or where the source code is, give these names and links. "
         "Contact details of the DevOS team (give exactly these when asked how to contact or reach "
         "the team or Imran, and never invent any other email, phone, URL or profile): " + DEVOS_CONTACTS + ". "
+        "When asked who owns this PC, whose computer this is, who uses this laptop, or the PC "
+        "owner's name/email/bio/portfolio, use ONLY this owner profile and never invent missing "
+        "fields: " + owner + " "
+        "Do not confuse the PC owner with the DevOS creator unless they are the same person in "
+        "that profile. "
         "You run entirely on this computer: nothing the user types is sent to the internet. "
         "You are not Claude, ChatGPT, Gemini, Copilot or any other cloud service, and you were not made by "
         "Anthropic, OpenAI, Google, Microsoft or Alibaba; never say you are. "
@@ -1616,14 +1678,22 @@ def run_server():
     # Threads: /health answers at once even while a long reply is generating.
     server = ThreadingHTTPServer((host, PORT), OpenAIHandler)
     server.daemon_threads = True
-    # Load the model and process the system prompt now, not on the first question.
     import threading
-    threading.Thread(target=engine.warm_up, daemon=True).start()
+    # Sleep-by-default: HTTP stays up, GGUF stays out of RAM until first chat.
+    if configured_warmup():
+        threading.Thread(target=engine.warm_up, daemon=True).start()
+        sys.stderr.write("[ai-core] warmup enabled — model will preload (uses several GB RAM)\n")
+    else:
+        sys.stderr.write(
+            f"[ai-core] sleep mode: model loads on first chat, unloads after "
+            f"{engine.idle_timeout_seconds}s idle\n"
+        )
     threading.Thread(target=engine.idle_watch, daemon=True).start()
     print(f"DevOS AI Core daemon listening on http://{host}:{PORT}/v1")
     print(f"Docs: http://{host}:{PORT}/docs")
     print(f"Hardware tier: {engine.tier_info['tier']}")
     print(f"Active model: {engine.active_model}")
+    print(f"Idle unload: {engine.idle_timeout_seconds}s · warmup: {'on' if configured_warmup() else 'off'}")
     speed = engine.speed_info()
     print(f"Speed: {speed['prompt_threads']} prompt threads, {speed['threads']} reply threads, "
           f"kv {speed['kv_cache']}, gpu layers {speed['gpu_layers']}")

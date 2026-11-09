@@ -1,9 +1,9 @@
 [Desktop Entry]
 Type=Application
-Name=DevOS Optimizer
+Name=PC Optimizer
 GenericName=Clean up and speed up
-Comment=Free disk space and find apps that are holding memory
-Exec=/usr/local/bin/devos-run --desktop=devos-optimizer --name="DevOS Optimizer" /usr/local/share/devos/components/optimizer/optimizer.py --cleanup
+Comment=Free disk space and find apps using too much memory
+Exec=/usr/local/bin/devos-run --desktop=devos-optimizer --name="PC Optimizer" /usr/local/share/devos/components/optimizer/optimizer.py --cleanup
 Icon=devos-optimizer
 Terminal=false
 Categories=System;Utility;

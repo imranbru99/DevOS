@@ -1,4 +1,6 @@
 [General]
+# Always show the Shut down / Restart confirmation greeter (do not skip).
+confirmLogout=true
 # After a restart or shutdown, open the same applications and documents again.
 loginMode=restorePreviousLogout
 # These apps restore their own tabs and files. Listing them here keeps

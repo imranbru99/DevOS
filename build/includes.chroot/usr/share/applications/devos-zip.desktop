@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Zip Folders
+GenericName=Archive Manager
+Comment=Open and create zip files
+Exec=ark %U
+Icon=utilities-file-archiver
+Terminal=false
+Categories=Qt;Utility;Archiving;Compression;
+MimeType=application/zip;application/x-tar;application/x-compressed-tar;application/x-7z-compressed;application/x-rar;
+Keywords=zip;unzip;rar;7z;extract;compress;archive;ark;
+StartupNotify=true
+StartupWMClass=ark

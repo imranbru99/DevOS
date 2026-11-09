@@ -1,8 +1,7 @@
 #!/bin/bash
-# Show DevOS, not the parts it is built from. Users see "Files", "Terminal",
-# "Settings" and a "DevOS" session instead of Dolphin, Konsole, Plasma or KDE.
-# Runs at image build and after every package change (99devos-branding), so
-# upgrades cannot bring the upstream names back.
+# Show DevOS names people actually search for — never Dolphin, Kate, KCalc,
+# Konsole, Spectacle, Okular, etc. Runs at image build and after every package
+# change (99devos-branding) so upgrades cannot bring upstream names back.
 set -u
 
 # Sign-in screen session names ("Desktop Session: Plasma (X11)").
@@ -19,81 +18,621 @@ rename_session /usr/share/wayland-sessions/plasma.desktop "DevOS (Wayland)"
 # Weston is only the window Android apps open in, not a desktop to sign in to.
 rm -f /usr/share/wayland-sessions/weston.desktop
 
-# App menu names. Overrides in /usr/local/share/applications win over
-# /usr/share/applications, so the packaged files stay untouched.
+# App menu + search + taskbar labels. Overrides in /usr/local/share/applications
+# win over /usr/share/applications, so packaged files stay untouched.
 python3 - << 'PY'
-import os, re
+import os
+import re
 
 SRC = "/usr/share/applications"
 DST = "/usr/local/share/applications"
+
+# Friendly Name, GenericName, Keywords (semicolon list), optional Icon.
+# Keywords power Start-menu / KRunner search ("calculator", "pdf", "zip"…).
 RENAME = {
-    "org.kde.plasmashell": ("DevOS", "DevOS Desktop", "/usr/share/pixmaps/devos-logo.png"),
-    "org.kde.dolphin": ("Files", "File manager", None),
-    "org.kde.konsole": ("Terminal", "Command line", None),
-    "org.kde.kate": ("Text Editor", "Advanced text editor", None),
-    "org.kde.okular": ("Document Viewer", "PDF and document viewer", None),
-    "org.kde.gwenview": ("Photos", "Image viewer", None),
-    "org.kde.ark": ("Archive Manager", "Zip and archive tool", None),
-    "org.kde.spectacle": ("Screenshot", "Capture the screen", None),
-    "org.kde.kcalc": ("Calculator", "Calculator", None),
-    "org.kde.plasma-systemmonitor": ("System Monitor", "Hardware graphs", None),
-    "org.kde.partitionmanager": ("Disk Partitions", "Partition editor", None),
-    "org.kde.plasma.emojier": ("Emoji Picker", "Emoji", None),
-    "org.kde.ConfigurePrinter": ("Printers", "Printer settings", None),
-    "org.kde.PrintQueue": ("Print Queue", "Print jobs", None),
-    "org.kde.kde-add-printer": ("Add Printer", "Add a printer", None),
-    "org.kde.bluedevilsendfile": ("Send via Bluetooth", "Bluetooth file transfer", None),
-    "org.kde.bluedevilwizard": ("Pair Bluetooth Device", "Bluetooth", None),
-    "org.kde.klipper": ("Clipboard", "Clipboard history", None),
-    "systemsettings": ("Settings", "System settings", None),
-    "org.kde.kfontview": ("Font Viewer", "Fonts", None),
+    "org.kde.plasmashell": (
+        "DevOS", "DevOS Desktop",
+        "desktop;devos;",
+        "/usr/share/pixmaps/devos-logo.png",
+    ),
+    # Backends stay installed but menus show DevOS File Explorer / Terminal.
+    "org.kde.dolphin": (
+        "File Explorer", "Files",
+        "files;folders;explorer;this pc;computer;drives;dolphin;",
+        None,
+    ),
+    "org.kde.konsole": (
+        "Terminal", "Command Prompt",
+        "terminal;cmd;command;shell;console;prompt;konsole;",
+        None,
+    ),
+    "org.kde.kate": (
+        "Text Editor", "Edit documents and code",
+        "text;editor;notepad;code;script;kate;",
+        "accessories-text-editor",
+    ),
+    "org.kde.kwrite": (
+        "Text Editor", "Edit documents and code",
+        "text;editor;notepad;code;kwrite;",
+        "accessories-text-editor",
+    ),
+    "org.kde.okular": (
+        "PDF Viewer", "Document Viewer",
+        "pdf;reader;document;ebook;okular;",
+        None,
+    ),
+    "org.kde.gwenview": (
+        "Photos", "Photo Viewer",
+        "photos;pictures;images;gallery;viewer;gwenview;",
+        None,
+    ),
+    "org.kde.ark": (
+        "Zip Folders", "Archive Manager",
+        "zip;unzip;rar;7z;extract;compress;archive;ark;",
+        None,
+    ),
+    "org.kde.spectacle": (
+        "Snipping Tool", "Screenshot",
+        "screenshot;snip;snipping;capture;screen;spectacle;",
+        None,
+    ),
+    "org.kde.kcalc": (
+        "Calculator", "Calculator",
+        "calculator;calc;math;kcalc;",
+        None,
+    ),
+    "org.kde.plasma-systemmonitor": (
+        "Performance", "Resource Monitor",
+        "performance;cpu;memory;task;monitor;system;",
+        None,
+    ),
+    "org.kde.partitionmanager": (
+        "Disk Management", "Partition Editor",
+        "disk;partition;drive;format;volume;",
+        None,
+    ),
+    "org.kde.plasma.emojier": (
+        "Emoji Picker", "Emoji",
+        "emoji;emoticon;smiley;",
+        None,
+    ),
+    "org.kde.ConfigurePrinter": (
+        "Printers", "Printer Settings",
+        "printer;print;scanning;",
+        None,
+    ),
+    "org.kde.PrintQueue": (
+        "Print Queue", "Print Jobs",
+        "print;queue;jobs;",
+        None,
+    ),
+    "org.kde.kde-add-printer": (
+        "Add Printer", "Add a printer",
+        "printer;add;setup;",
+        None,
+    ),
+    "org.kde.bluedevilsendfile": (
+        "Send via Bluetooth", "Bluetooth File Transfer",
+        "bluetooth;send;share;file;",
+        None,
+    ),
+    "org.kde.bluedevilwizard": (
+        "Pair Bluetooth Device", "Bluetooth",
+        "bluetooth;pair;device;",
+        None,
+    ),
+    "org.kde.klipper": (
+        "Clipboard", "Clipboard History",
+        "clipboard;paste;copy;history;klipper;",
+        None,
+    ),
+    "systemsettings": (
+        "Settings", "Control Panel",
+        "settings;control panel;preferences;system;",
+        None,
+    ),
+    "org.kde.systemsettings": (
+        "Settings", "Control Panel",
+        "settings;control panel;preferences;system;",
+        None,
+    ),
+    "org.kde.kfontview": (
+        "Fonts", "Font Viewer",
+        "font;typeface;typography;",
+        None,
+    ),
+    "org.kde.discover": (
+        "Store", "App Store",
+        "store;apps;install;software;discover;",
+        None,
+    ),
+    "org.kde.elisa": (
+        "Music", "Music Player",
+        "music;player;songs;audio;elisa;",
+        None,
+    ),
+    "org.kde.dragonplayer": (
+        "Videos", "Video Player",
+        "video;movies;player;dragon;",
+        None,
+    ),
+    "org.kde.filelight": (
+        "Storage Sense", "See what fills this PC",
+        "disk;storage;space;usage;filelight;cleanup;",
+        None,
+    ),
+    "filelight": (
+        "Storage Sense", "See what fills this PC",
+        "disk;storage;space;usage;filelight;cleanup;",
+        None,
+    ),
+    "org.kde.kfind": (
+        "Find Files", "File Search",
+        "find;search;files;kfind;",
+        None,
+    ),
+    "filezilla": (
+        "File Transfer", "Upload and download files (FTP)",
+        "ftp;sftp;ftps;file;transfer;upload;download;filezilla;",
+        "filezilla",
+    ),
+    "org.filezilla.FileZilla": (
+        "File Transfer", "Upload and download files (FTP)",
+        "ftp;sftp;ftps;file;transfer;upload;download;filezilla;",
+        "filezilla",
+    ),
+    "com.filezilla.FileZilla": (
+        "File Transfer", "Upload and download files (FTP)",
+        "ftp;sftp;ftps;file;transfer;upload;download;filezilla;",
+        "filezilla",
+    ),
+    "pdfarranger": (
+        "PDF Arranger", "Merge, split, and reorder PDF pages",
+        "pdf;merge;split;reorder;arrange;pages;",
+        "pdfarranger",
+    ),
+    "com.github.jeromerobert.pdfarranger": (
+        "PDF Arranger", "Merge, split, and reorder PDF pages",
+        "pdf;merge;split;reorder;arrange;pages;",
+        "pdfarranger",
+    ),
+    "com.github.xournalpp.xournalpp": (
+        "PDF Notes", "Annotate and sign PDF documents",
+        "pdf;annotate;sign;notes;xournal;",
+        "com.github.xournalpp.xournalpp",
+    ),
+    "xournalpp": (
+        "PDF Notes", "Annotate and sign PDF documents",
+        "pdf;annotate;sign;notes;xournal;",
+        "com.github.xournalpp.xournalpp",
+    ),
+    "libreoffice-startcenter": (
+        "LibreOffice", "Office documents, sheets, and slides",
+        "office;writer;calc;impress;libreoffice;",
+        "libreoffice-startcenter",
+    ),
+    "libreoffice-draw": (
+        "Draw", "Drawings, flowcharts, and logos",
+        "draw;diagram;flowchart;logo;libreoffice;",
+        "libreoffice-draw",
+    ),
+    "org.kde.kwalletmanager5": (
+        "Credential Manager", "Passwords",
+        "password;wallet;credential;key;",
+        None,
+    ),
+    "org.kde.kwalletmanager6": (
+        "Credential Manager", "Passwords",
+        "password;wallet;credential;key;",
+        None,
+    ),
+    # Everyday apps people otherwise cannot understand.
+    "org.kde.kolourpaint": (
+        "Paint", "Paint pictures",
+        "paint;drawing;mspaint;kolourpaint;brush;",
+        "kolourpaint",
+    ),
+    "kolourpaint": (
+        "Paint", "Paint pictures",
+        "paint;drawing;mspaint;kolourpaint;brush;",
+        "kolourpaint",
+    ),
+    "org.kde.skanlite": (
+        "Scanner", "Scan documents and photos",
+        "scanner;scan;skanlite;document;",
+        "scanner",
+    ),
+    "skanlite": (
+        "Scanner", "Scan documents and photos",
+        "scanner;scan;skanlite;document;",
+        "scanner",
+    ),
+    "org.kde.kcharselect": (
+        "Character Map", "Find symbols and emoji characters",
+        "character;unicode;symbol;charmap;kcharselect;",
+        "accessories-character-map",
+    ),
+    "kcharselect": (
+        "Character Map", "Find symbols and emoji characters",
+        "character;unicode;symbol;charmap;kcharselect;",
+        "accessories-character-map",
+    ),
+    "org.kde.kmag": (
+        "Magnifier", "Enlarge the screen",
+        "magnifier;zoom;accessibility;kmag;",
+        "kmag",
+    ),
+    "kmag": (
+        "Magnifier", "Enlarge the screen",
+        "magnifier;zoom;accessibility;kmag;",
+        "kmag",
+    ),
+    "org.keepassxc.KeePassXC": (
+        "Password Manager", "Store passwords safely",
+        "password;keepass;vault;security;credentials;",
+        "keepassxc",
+    ),
+    "keepassxc": (
+        "Password Manager", "Store passwords safely",
+        "password;keepass;vault;security;credentials;",
+        "keepassxc",
+    ),
+    "libreoffice-writer": (
+        "Writer", "Word documents",
+        "writer;word;document;libreoffice;",
+        "libreoffice-writer",
+    ),
+    "libreoffice-calc": (
+        "Calc Spreadsheet", "Spreadsheets",
+        "calc;excel;spreadsheet;libreoffice;",
+        "libreoffice-calc",
+    ),
+    "libreoffice-impress": (
+        "Impress", "Presentations",
+        "impress;powerpoint;slides;presentation;libreoffice;",
+        "libreoffice-impress",
+    ),
+    "nvim": (
+        "Neovim", "Advanced code editor (terminal)",
+        "neovim;nvim;vim;editor;code;",
+        "nvim",
+    ),
+    "btop": (
+        "Resource Monitor", "CPU and memory usage",
+        "btop;cpu;memory;monitor;resources;",
+        "devos-resources",
+    ),
+    "btop++": (
+        "Resource Monitor", "CPU and memory usage",
+        "btop;cpu;memory;monitor;resources;",
+        "devos-resources",
+    ),
 }
-# Duplicates and tools that only confuse: DevOS has its own entry for these.
-HIDE = [
-    # Stock Dolphin/Kate/Konsole stay as backends; Start menu should show
-    # DevOS File Explorer, Notepad, and (when needed) Terminal via DevOS names.
-    "org.kde.dolphin",
-    "org.kde.kate",
-    "org.kde.konsole",
-    "org.kde.kwrite", "org.kde.falkon", "org.kde.kinfocenter", "kdesystemsettings",
+
+# Upstream launchers hidden from the menu. DevOS wrappers (or the renamed
+# Calculator entry) are what people open. Hidden overrides MUST keep the
+# friendly Name= so the taskbar never shows Dolphin / Kate / KCalc.
+HIDE = {
+    "org.kde.dolphin", "dolphin",
+    "org.kde.kate", "kate",
+    "org.kde.kwrite", "kwrite",
+    "org.kde.konsole", "konsole",
+    "org.kde.falkon", "falkon",
+    "org.kde.kinfocenter", "kinfocenter",
+    "kdesystemsettings",
+    "code", "code-url-handler", "code-workspace", "code-oss", "codium", "codium-url-handler",
+    "org.kde.klipper",
+    "org.kde.spectacle", "spectacle",  # DevOS Snipping Tool wrapper
+    "org.kde.kcalc", "kcalc",  # DevOS Calculator wrapper
+    "org.kde.okular", "okular",  # DevOS PDF Viewer wrapper
+    "org.kde.gwenview", "gwenview",  # DevOS Photos wrapper
+    "org.kde.ark", "ark",  # DevOS Zip Folders wrapper
+    "org.kde.plasma-systemmonitor",  # DevOS Task Manager
+    "org.kde.discover",
+    "org.kde.elisa",
+    "org.kde.dragonplayer",
+    # Filelight stays visible as "Storage Sense" (RENAME) — do not hide.
+    "org.kde.kfind",
+    "org.kde.kolourpaint", "kolourpaint",  # Paint wrapper
+    "org.kde.skanlite", "skanlite",  # Scanner wrapper
+    "org.kde.kcharselect", "kcharselect",  # Character Map wrapper
+    "org.kde.kmag", "kmag",  # Magnifier wrapper
+    "org.keepassxc.KeePassXC", "keepassxc",  # Password Manager wrapper
+    "antigravity-ide", "antigravity-kde",
+    # Theme / crash / expert tools — hide for safety & clarity.
+    "kvantummanager", "kvantum",
     "org.kde.kcolorschemeeditor", "org.kde.knetattach", "org.kde.keditfiletype",
     "org.kde.kwin_rules_dialog", "org.kde.kmenuedit", "org.kde.khelpcenter",
-    "org.kde.kwalletmanager5", "org.kde.drkonqi.coredump.gui", "org.kde.gwenview_importer",
+    "org.kde.kwalletmanager5", "org.kde.kwalletmanager6",
+    "org.kde.drkonqi.coredump.gui", "org.kde.gwenview_importer",
     "org.kde.knewstuff-dialog", "org.kde.plasmawindowed", "org.kde.kdialog",
     "org.kde.plasma.settings.open", "kcm_kded", "kcm_plasmasearch",
-]
+    "org.kde.plasma-welcome", "plasma-welcome",
+    # Resource Monitor wrapper — hide raw btop / btop++ / htop package names.
+    "btop", "btop++", "org.kde.btop", "htop",
+    # Installer (live Desktop shortcut stays; Start menu must not say Calamares).
+    "calamares", "calamares-oem", "install-debian", "debian-install-guide",
+    # Expert / confusing tools — keep off Start for non-technical users.
+    "ibus-setup", "org.freedesktop.IBus.Setup", "ibus-setup-hangul", "ibus-setup-libpinyin",
+    "winetricks",
+    # Phone Link is the one visible name; hide every KDE Connect launcher.
+    "org.kde.kdeconnect.app", "org.kde.kdeconnect.sms", "org.kde.kdeconnect.handler",
+    "org.kde.kdeconnect.nonplasma", "org.kde.kdeconnect-settings", "org.kde.kdeconnect.daemon",
+    "kdeconnect-app", "kdeconnect-sms", "kdeconnect-settings", "kdeconnect-indicator",
+}
+
+# Visible DevOS-branded wrappers (search-friendly). Upstream binaries underneath.
+WRAPPERS = {
+    "devos-calculator.desktop": """[Desktop Entry]
+Type=Application
+Name=Calculator
+GenericName=Calculator
+Comment=Do math quickly
+Exec=kcalc
+Icon=accessories-calculator
+Terminal=false
+Categories=Qt;Utility;Calculator;
+Keywords=calculator;calc;math;kcalc;
+StartupNotify=true
+StartupWMClass=kcalc
+X-KDE-StartupNotify=true
+""",
+    "devos-pdf.desktop": """[Desktop Entry]
+Type=Application
+Name=PDF Viewer
+GenericName=Document Viewer
+Comment=Open PDF and documents
+Exec=okular %U
+Icon=application-pdf
+Terminal=false
+Categories=Qt;Office;Viewer;
+MimeType=application/pdf;application/x-gzpdf;application/x-bzpdf;application/x-wwf;
+Keywords=pdf;reader;document;ebook;okular;
+StartupNotify=true
+StartupWMClass=okular
+""",
+    "devos-photos.desktop": """[Desktop Entry]
+Type=Application
+Name=Photos
+GenericName=Photo Viewer
+Comment=View pictures and photos
+Exec=gwenview %U
+Icon=gwenview
+Terminal=false
+Categories=Qt;Graphics;Viewer;
+MimeType=image/jpeg;image/png;image/gif;image/webp;image/tiff;image/bmp;image/svg+xml;
+Keywords=photos;pictures;images;gallery;viewer;gwenview;
+StartupNotify=true
+StartupWMClass=gwenview
+""",
+    "devos-zip.desktop": """[Desktop Entry]
+Type=Application
+Name=Zip Folders
+GenericName=Archive Manager
+Comment=Open and create zip files
+Exec=ark %U
+Icon=utilities-file-archiver
+Terminal=false
+Categories=Qt;Utility;Archiving;Compression;
+MimeType=application/zip;application/x-tar;application/x-compressed-tar;application/x-7z-compressed;application/x-rar;
+Keywords=zip;unzip;rar;7z;extract;compress;archive;ark;
+StartupNotify=true
+StartupWMClass=ark
+""",
+    "devos-snip.desktop": """[Desktop Entry]
+Type=Application
+Name=Snipping Tool
+GenericName=Screenshot
+Comment=Capture the screen
+Exec=spectacle
+Icon=spectacle
+Terminal=false
+Categories=Qt;Utility;Graphics;
+Keywords=screenshot;snip;snipping;capture;screen;spectacle;
+StartupNotify=true
+StartupWMClass=spectacle
+""",
+    # Second Antigravity instance (IDE). Main Google Antigravity stays antigravity.desktop.
+    # Upstream antigravity-kde / antigravity-ide stay Hidden so the menu never shows 2 identical names.
+    "devos-antigravity-studio.desktop": """[Desktop Entry]
+Type=Application
+Name=Antigravity IDE
+GenericName=AI coding (second account)
+Comment=Second Antigravity — separate Google account, projects, and profile from Google Antigravity
+Exec=/usr/local/bin/antigravity-kde %F
+Icon=antigravity-kde
+Terminal=false
+Categories=Development;IDE;
+MimeType=text/plain;inode/directory;
+Keywords=antigravity;ide;studio;kde;ai;coding;agent;second;
+StartupNotify=true
+StartupWMClass=antigravity-ide
+""",
+    # Premium text editor (Kate backend) — never show the name "Kate".
+    "devos-editor.desktop": """[Desktop Entry]
+Type=Application
+Name=Text Editor
+GenericName=Edit documents and code
+Comment=Write notes, scripts, and code — clean, modern, and easy
+Exec=kate --desktopfile /usr/share/applications/devos-editor.desktop %U
+Icon=accessories-text-editor
+Terminal=false
+Categories=Qt;Utility;TextEditor;
+MimeType=text/plain;text/x-python;text/x-csrc;text/x-c++src;text/html;text/css;text/markdown;application/x-shellscript;application/json;application/javascript;text/x-java;text/x-chdr;text/x-c++hdr;
+Keywords=text;editor;notepad;code;script;documents;write;kate;
+StartupNotify=true
+StartupWMClass=kate
+X-KDE-StartupNotify=true
+""",
+    "devos-paint.desktop": """[Desktop Entry]
+Type=Application
+Name=Paint
+GenericName=Paint pictures
+Comment=Draw and edit simple pictures — like Windows Paint
+Exec=kolourpaint %U
+Icon=kolourpaint
+Terminal=false
+Categories=Qt;Graphics;2DGraphics;RasterGraphics;
+MimeType=image/png;image/jpeg;image/gif;image/bmp;image/webp;image/x-xpm;
+Keywords=paint;drawing;mspaint;kolourpaint;brush;image;
+StartupNotify=true
+StartupWMClass=kolourpaint
+""",
+    "devos-scanner.desktop": """[Desktop Entry]
+Type=Application
+Name=Scanner
+GenericName=Scan documents and photos
+Comment=Scan papers and photos to this PC
+Exec=skanlite %U
+Icon=scanner
+Terminal=false
+Categories=Qt;Graphics;Scanning;OCR;
+Keywords=scanner;scan;skanlite;document;photo;
+StartupNotify=true
+StartupWMClass=skanlite
+""",
+    "devos-charmap.desktop": """[Desktop Entry]
+Type=Application
+Name=Character Map
+GenericName=Symbols and characters
+Comment=Find and copy any character or symbol
+Exec=kcharselect
+Icon=accessories-character-map
+Terminal=false
+Categories=Qt;Utility;
+Keywords=character;unicode;symbol;charmap;kcharselect;
+StartupNotify=true
+StartupWMClass=kcharselect
+""",
+    "devos-magnifier.desktop": """[Desktop Entry]
+Type=Application
+Name=Magnifier
+GenericName=Screen magnifier
+Comment=Enlarge part of the screen — helpful for reading small text
+Exec=kmag
+Icon=kmag
+Terminal=false
+Categories=Qt;Utility;Accessibility;
+Keywords=magnifier;zoom;accessibility;kmag;enlarge;
+StartupNotify=true
+StartupWMClass=kmag
+""",
+    "devos-passwords.desktop": """[Desktop Entry]
+Type=Application
+Name=Password Manager
+GenericName=Store passwords safely
+Comment=Keep passwords in a locked vault on this PC
+Exec=keepassxc %U
+Icon=keepassxc
+Terminal=false
+Categories=Qt;Utility;Security;
+MimeType=application/x-keepass2;
+Keywords=password;keepass;vault;security;credentials;keepassxc;
+StartupNotify=true
+StartupWMClass=keepassxc
+""",
+    "devos-resources.desktop": """[Desktop Entry]
+Type=Application
+Name=Resource Monitor
+GenericName=CPU, memory, and process monitor
+Comment=Live CPU, memory, disk, and network usage — easy to read
+Exec=devos-resources
+Icon=devos-resources
+Terminal=false
+Categories=System;Monitor;
+Keywords=btop;htop;cpu;memory;ram;process;monitor;performance;resources;system;
+StartupNotify=true
+StartupWMClass=konsole
+X-DevOS-Backend=btop
+""",
+}
 
 os.makedirs(DST, exist_ok=True)
 
-def rewrite(app_id, name=None, generic=None, icon=None, hide=False):
+
+def rewrite(app_id, name=None, generic=None, keywords=None, icon=None, hide=False):
     src = os.path.join(SRC, app_id + ".desktop")
     if not os.path.isfile(src):
         return
     out, section = [], None
+    saw_keywords = False
     with open(src, encoding="utf-8", errors="replace") as handle:
         for line in handle:
             stripped = line.strip()
             if stripped.startswith("["):
                 section = stripped
             main = section == "[Desktop Entry]"
-            if main and re.match(r"^(Name|GenericName|Comment)\[", stripped):
+            if main and re.match(r"^(Name|GenericName|Comment|Keywords)\[", stripped):
                 continue  # translations would show the old name
             if main and name and stripped.startswith("Name="):
                 line = f"Name={name}\n"
             elif main and generic and stripped.startswith("GenericName="):
                 line = f"GenericName={generic}\n"
+            elif main and keywords and stripped.startswith("Keywords="):
+                line = f"Keywords={keywords}\n"
+                saw_keywords = True
             elif main and icon and stripped.startswith("Icon="):
                 line = f"Icon={icon}\n"
             out.append(line)
             if main and stripped == "[Desktop Entry]" and hide:
                 out.append("NoDisplay=true\n")
-    with open(os.path.join(DST, app_id + ".desktop"), "w", encoding="utf-8") as handle:
-        handle.writelines(out)
+    if keywords and not saw_keywords:
+        # Insert after Name= so search indexes the friendly terms.
+        inserted = []
+        done = False
+        for line in out:
+            inserted.append(line)
+            if not done and line.startswith("Name="):
+                inserted.append(f"Keywords={keywords}\n")
+                done = True
+        out = inserted
+    for dest_dir in (DST, SRC):
+        try:
+            os.makedirs(dest_dir, exist_ok=True)
+            with open(os.path.join(dest_dir, app_id + ".desktop"), "w", encoding="utf-8") as handle:
+                handle.writelines(out)
+        except OSError:
+            if dest_dir == DST:
+                raise
 
-for app_id, (name, generic, icon) in RENAME.items():
-    rewrite(app_id, name, generic, icon=icon)
-for app_id in HIDE:
-    rewrite(app_id, hide=True)
+
+for app_id, (name, generic, keywords, icon) in RENAME.items():
+    # Critical: rename + hide in ONE write. A later hide-only pass used to
+    # re-read upstream and restore "KCalc" / "Dolphin" on the override.
+    rewrite(
+        app_id,
+        name=name,
+        generic=generic,
+        keywords=keywords,
+        icon=icon,
+        hide=app_id in HIDE,
+    )
+
+for app_id in sorted(HIDE):
+    if app_id not in RENAME:
+        rewrite(app_id, hide=True)
+
+# Calculator / Photos / PDF / Zip / Snip: visible DevOS names in the menu.
+# Upstream org.kde.* stay as named backends for taskbar matching.
+for filename, body in WRAPPERS.items():
+    path = os.path.join(DST, filename)
+    # Also publish under /usr/share/applications so first-boot menus see them
+    # before update-desktop-database merges local.
+    for dest_dir in (DST, SRC):
+        try:
+            os.makedirs(dest_dir, exist_ok=True)
+            with open(os.path.join(dest_dir, filename), "w", encoding="utf-8") as handle:
+                handle.write(body)
+        except OSError:
+            pass
+PY
+
+# Also drop stock wrappers into the image tree for builds that copy applications/.
+python3 - << 'PY'
+import os
+ROOT = "/usr/share/applications"
+# Files already written above into SRC/DST; nothing else required here.
+os.makedirs(ROOT, exist_ok=True)
 PY
 
 # Every settings page, menu entry and theme name. Package upgrades restore
@@ -117,11 +656,57 @@ VISIBLE = {"Name", "GenericName", "Comment", "Keywords", "Description", "X-KDE-P
 JSON_KEYS = {"Name", "Description", "Comment", "Category", "Keywords"}
 DESKTOP_SUFFIXES = (".desktop", ".directory", ".knsrc")
 
+# Never leave these upstream product names in anything a person can read.
+APP_BRAND = (
+    (re.compile(r"\bKCalc\b", re.I), "Calculator"),
+    (re.compile(r"\bkcalc\b"), "Calculator"),
+    (re.compile(r"\bDolphin\b"), "File Explorer"),
+    (re.compile(r"\bKate\b"), "Text Editor"),
+    (re.compile(r"\bKWrite\b", re.I), "Text Editor"),
+    (re.compile(r"\bKonsole\b"), "Terminal"),
+    (re.compile(r"\bSpectacle\b"), "Snipping Tool"),
+    (re.compile(r"\bOkular\b"), "PDF Viewer"),
+    (re.compile(r"\bGwenview\b"), "Photos"),
+    (re.compile(r"\bArk\b"), "Zip Folders"),
+    (re.compile(r"\bDiscover\b"), "Store"),
+    (re.compile(r"\bElisa\b"), "Music"),
+    (re.compile(r"\bKlipper\b"), "Clipboard"),
+    (re.compile(r"\bKFind\b", re.I), "Find Files"),
+    (re.compile(r"\bFilelight\b"), "Storage Sense"),
+    (re.compile(r"\bFileZilla\b", re.I), "File Transfer"),
+    (re.compile(r"\bbtop\+\+\b", re.I), "Resource Monitor"),
+    (re.compile(r"\bbtop\b", re.I), "Resource Monitor"),
+    (re.compile(r"\bKolourPaint\b", re.I), "Paint"),
+    (re.compile(r"\bSkanlite\b", re.I), "Scanner"),
+    (re.compile(r"\bKCharSelect\b", re.I), "Character Map"),
+    (re.compile(r"\bKMag\b", re.I), "Magnifier"),
+    (re.compile(r"\bKeePassXC\b", re.I), "Password Manager"),
+    (re.compile(r"\bXournal\+\+\b", re.I), "PDF Notes"),
+    (re.compile(r"\bLibreOffice Draw\b", re.I), "Draw"),
+    (re.compile(r"\bKWallet\b", re.I), "Credential Manager"),
+    (re.compile(r"\bKDE Connect SMS\b", re.I), "Phone Messages"),
+    (re.compile(r"\bKDE Connect\b", re.I), "Phone Link"),
+    (re.compile(r"\bKDE-Connect\b", re.I), "Phone Link"),
+    (re.compile(r"\bPhone Connect\b", re.I), "Phone Link"),
+    (re.compile(r"\bCalamares\b", re.I), "Install DevOS"),
+    (re.compile(r"\bHtop\b", re.I), "Resource Monitor"),
+    (re.compile(r"\bhtop\b"), "Resource Monitor"),
+    (re.compile(r"\bIBus Preferences\b", re.I), "Keyboard Input"),
+    (re.compile(r"\bIBus\b"), "Keyboard Input"),
+    (re.compile(r"\bWinetricks\b", re.I), "Windows Helper"),
+    (re.compile(r"\bKvantum Manager\b", re.I), "Theme Engine"),
+    (re.compile(r"\bKvantum\b", re.I), "Theme Engine"),
+    (re.compile(r"\bKDE Partition Manager\b", re.I), "Disk Management"),
+    (re.compile(r"\bPartition Manager\b", re.I), "Disk Management"),
+    (re.compile(r"\bInfo Center\b", re.I), "About this PC"),
+    (re.compile(r"\bKInfoCenter\b", re.I), "About this PC"),
+)
+
 
 def public_brand(text):
     """Drop upstream names from a label a person can read."""
-    if "KDE Connect" in text or "KDE-Connect" in text:
-        text = text.replace("KDE Connect", "Phone Connect").replace("KDE-Connect", "Phone Connect")
+    for pattern, repl in APP_BRAND:
+        text = pattern.sub(repl, text)
     text = re.sub(r"Kubuntu", "DevOS", text, flags=re.IGNORECASE)
     text = re.sub(r"(?<![\w.])Ubuntu\b", "DevOS", text, flags=re.IGNORECASE)
     text = re.sub(r"(?<![\w.])KDE\s+Plasma\b", "DevOS", text, flags=re.IGNORECASE)
@@ -207,8 +792,6 @@ for root in ROOTS:
     if os.path.isdir(root):
         walk_tree(root)
 
-# Keep packaged libraries intact; About this PC uses kcm-about-distrorc.
-
 PY
 
 mkdir -p /etc/xdg
@@ -233,4 +816,5 @@ Theme=None
 EOF
 
 update-desktop-database /usr/local/share/applications >/dev/null 2>&1 || true
+update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
 exit 0

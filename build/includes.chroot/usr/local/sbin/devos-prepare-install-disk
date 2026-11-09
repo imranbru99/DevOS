@@ -82,22 +82,46 @@ partprobe "$disk" >/dev/null 2>&1 || true
 udevadm settle 2>/dev/null || true
 sleep 1
 
+# Clear NTFS hibernation / dirty flags that block wipe on dual-boot PCs.
+if command -v ntfsfix >/dev/null 2>&1; then
+    for part in $children; do
+        [ -b "$part" ] || continue
+        fstype="$(lsblk -no FSTYPE "$part" 2>/dev/null | head -n1)"
+        case "$fstype" in
+            ntfs|NTFS)
+                timeout -k 5 30 ntfsfix -d -m "$part" >/dev/null 2>&1 || true
+                ;;
+        esac
+    done
+fi
+
 # Final busy check — list anything still mounted from this disk.
 busy="$(lsblk -lnpo NAME,MOUNTPOINT "$disk" 2>/dev/null | awk 'NF>1{print}')"
 if [ -n "$busy" ]; then
     echo "Disk still has mounts after prepare:" >&2
     echo "$busy" >&2
-    # One more force pass
+    # Escalating force pass (plan B)
     while read -r name mp; do
         [ -n "$mp" ] || continue
         fuser -k -9 -m "$mp" 2>/dev/null || true
         umount -lf "$mp" 2>/dev/null || true
+        umount -R -lf "$mp" 2>/dev/null || true
     done < <(lsblk -lnpo NAME,MOUNTPOINT "$disk" 2>/dev/null)
+    # Drop leftover device-mapper children again.
+    if command -v dmsetup >/dev/null 2>&1; then
+        dmsetup remove_all --force 2>/dev/null || true
+    fi
+    wipefs -af "$disk" >/dev/null 2>&1 || true
+    sgdisk --zap-all "$disk" >/dev/null 2>&1 || true
+    blockdev --rereadpt "$disk" >/dev/null 2>&1 || true
+    partprobe "$disk" >/dev/null 2>&1 || true
     udevadm settle 2>/dev/null || true
-    sleep 1
+    sleep 2
     busy="$(lsblk -lnpo NAME,MOUNTPOINT "$disk" 2>/dev/null | awk 'NF>1{print}')"
     if [ -n "$busy" ]; then
         echo "$busy" >&2
+        # Plan C: report degraded but do not hard-block — caller may continue.
+        echo "==> $disk still busy; degraded prepare (partition will retry)" >&2
         exit 2
     fi
 fi

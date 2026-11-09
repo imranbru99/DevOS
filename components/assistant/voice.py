@@ -758,12 +758,13 @@ def plain_for_speech(md: str, limit: int = 480) -> str:
     return text
 
 
-# Spoken replies: stream neural audio while the answer is still typing.
-# Natural pace (+0%); gaps after .!? are hidden by prefetch + fast ffplay handoff.
-_TTS_RATE = "+0%"              # human-readable pace (not rushed)
-_GAP_BRIDGE_S = 0.30           # max wait after .!? before next phrase must start
-_FIRST_CHUNK_MIN = 12
-_CHUNK_SOFT_MIN = 36
+# Spoken replies: start voice as soon as text starts typing (never wait for the
+# full answer). Natural pace for a ~10-year-old — clear, not rushed.
+_TTS_RATE = "+0%"              # natural human pace (do not speed up)
+_GAP_BRIDGE_S = 0.22           # keep .!? handoff tight while staying smooth
+_FIRST_CHUNK_MIN = 6           # chars before an eager first cut is allowed
+_FIRST_WORDS = 2               # speak the first 2 whole words while typing continues
+_CHUNK_SOFT_MIN = 28
 _PLAY_PROCS: List["subprocess.Popen"] = []
 _PLAY_LOCK = threading.Lock()
 _WARM_STARTED = False
@@ -772,16 +773,52 @@ _FFPLAY_FAST = [
     "-fflags", "nobuffer", "-flags", "low_delay",
     "-probesize", "32", "-analyzeduration", "0",
 ]
+# Common openers — speak these the instant they land so voice tracks typing.
+_OPENER_RE = re.compile(
+    r"^(Sure|Okay|OK|Yes|Yeah|Yep|Hi|Hello|Hey|Alright|Of course|Absolutely|"
+    r"Right|Got it|No problem|Thanks|Thank you|Please|Well|"
+    r"হ্যাঁ|জি|আচ্ছা|ঠিক আছে|হ্যালো|নমস্কার|জি\s*আচ্ছা)"
+    r"([,.!।]|\s)",
+    re.IGNORECASE | re.UNICODE,
+)
+
+
+def ensure_tts_venv() -> bool:
+    """Create ~/.local/share/devos/tts-venv with edge-tts when missing (once).
+
+    Without this, voice-call replies fall back to espeak (or stay silent if
+    ffplay/espeak are unavailable). Chat call mode needs this for neural TTS.
+    """
+    py = os.path.join(_TTS_VENV, "bin", "python")
+    if os.path.isfile(py):
+        return True
+    if not shutil.which("python3"):
+        return False
+    try:
+        subprocess.run(
+            ["python3", "-m", "venv", _TTS_VENV],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120, check=True,
+        )
+        pip = os.path.join(_TTS_VENV, "bin", "pip")
+        subprocess.run(
+            [pip, "install", "-q", "edge-tts>=6.1.0"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300, check=True,
+        )
+        return os.path.isfile(py)
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return False
 
 
 def warm_tts(language: str = "en") -> None:
     """Start the edge-tts worker early (app open / mic ready) so the first reply is snappy."""
     global _WARM_STARTED
     _WARM_STARTED = True
-    threading.Thread(
-        target=lambda: _EdgePool.warm(language if language in ("en", "bn") else "en"),
-        daemon=True, name="devos-tts-warm",
-    ).start()
+
+    def _warm():
+        ensure_tts_venv()
+        _EdgePool.warm(language if language in ("en", "bn") else "en")
+
+    threading.Thread(target=_warm, daemon=True, name="devos-tts-warm").start()
 
 
 def _stop_speech():
@@ -852,6 +889,12 @@ if __name__ == "__main__":
 
     @classmethod
     def ensure(cls) -> bool:
+        with cls._lock:
+            if cls._proc is not None and cls._proc.poll() is None:
+                return True
+            need_venv = not cls._python()
+        if need_venv:
+            ensure_tts_venv()
         with cls._lock:
             if cls._proc is not None and cls._proc.poll() is None:
                 return True
@@ -1013,18 +1056,16 @@ def speak_reply(text: str, language: Optional[str] = None, stop_first: bool = Tr
 def _next_speak_cut(pending: str, force: bool = False, first: bool = False) -> Tuple[str, int]:
     """Return (ready_chunk, advance) — advance is how many chars of pending were consumed.
 
-    First phrase is eager (a few whole words) so voice starts while text is still
-    typing. Later phrases wait for sentence/comma boundaries so we don't cut
-    mid-thought.
+    First phrase is very eager (opener / 2 words) so voice starts the same moment
+    text starts typing. Later phrases wait for sentence/comma boundaries.
     """
     pending = pending or ""
     if not pending.strip():
         return "", 0
-    min_len = _FIRST_CHUNK_MIN if first else _CHUNK_SOFT_MIN
 
     # Sentence / line end — speak as soon as "Hello!" / "Hi!" lands.
     m = re.search(r"[.!?।؟](?:\s+|$)|[\n]", pending)
-    if m and m.end() >= 4:
+    if m and m.end() >= 3:
         cut = m.end()
         if cut > 160:
             for sep in (", ", "; ", " — ", " এবং "):
@@ -1039,17 +1080,25 @@ def _next_speak_cut(pending: str, force: bool = False, first: bool = False) -> T
         chunk = pending[:cut].strip()
         return (chunk, cut) if chunk else ("", 0)
 
-    # Eager first audio: speak the first few whole words while the model keeps typing.
+    # Eager first audio — voice must start with typing, not after the full reply.
     if first:
+        opener = _OPENER_RE.match(pending)
+        if opener and opener.end() >= 2:
+            cut = opener.end()
+            while cut < len(pending) and pending[cut].isspace():
+                cut += 1
+            chunk = pending[:cut].strip()
+            if chunk:
+                return chunk, cut
         words = pending.split()
-        if len(words) >= 4:
-            take = words[:4]
-            # Locate end of 4th word in the original string (preserve punctuation attach).
+        need = _FIRST_WORDS
+        # If we already have enough plain text for a short first beat, speak it.
+        if len(words) >= need and len(pending.strip()) >= _FIRST_CHUNK_MIN:
+            take = words[:need]
             pattern = r"\s+".join(re.escape(w) for w in take)
             mm = re.search(pattern, pending)
             if mm:
                 cut = mm.end()
-                # Include a following comma if present so we don't strand it.
                 if cut < len(pending) and pending[cut:cut + 1] in ",;":
                     cut += 1
                 while cut < len(pending) and pending[cut].isspace():
@@ -1068,7 +1117,7 @@ def _next_speak_cut(pending: str, force: bool = False, first: bool = False) -> T
                 chunk = pending[:cut].strip()
                 return (chunk, cut) if chunk else ("", 0)
 
-    if force and len(pending.strip()) >= 6:
+    if force and len(pending.strip()) >= 4:
         return pending.strip(), len(pending)
     return "", 0
 
@@ -1138,11 +1187,11 @@ def _speak_espeak(text: str, language: str) -> bool:
     if not bin_name:
         return False
     voice = "bn" if language == "bn" else "en"
-    # Keep local fallback brisk — users prefer fast over slow.
-    speed = "160" if language == "bn" else "200"
+    # Natural pace a ~10-year-old can follow (not rushed).
+    speed = "145" if language == "bn" else "155"
     try:
         proc = _track_proc(subprocess.Popen(
-            [bin_name, "-v", voice, "-s", speed, "-g", "2", text],
+            [bin_name, "-v", voice, "-s", speed, "-g", "4", text],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         ))
         try:
@@ -1214,15 +1263,15 @@ def _speak_stream_edge(text: str, language: str) -> bool:
 
 def _speak_chunk(text: str, language: str, out: Optional[str] = None,
                  edge_wait_s: float = 45.0) -> bool:
-    """Speak one phrase ASAP (streamed neural audio), never skip text."""
+    """Speak one phrase ASAP so voice tracks live typing — never skip text."""
     plain = (text or "").strip()
     if not plain:
         return True
-    # Prefer live stream so speech overlaps the still-typing answer.
-    if _speak_stream_edge(plain, language):
-        return True
     os.makedirs(_TTS_CACHE, exist_ok=True)
     path = out or os.path.join(_TTS_CACHE, "devos-assistant-tts-%d.mp3" % (int(time.time() * 1000) % 100000000))
+
+    # Warm edge-tts worker first (already imported + TLS). Spawning a fresh
+    # Python for live stream was adding 1–3s — voice then started after typing.
     box: Dict[str, object] = {}
 
     def _edge():
@@ -1230,13 +1279,16 @@ def _speak_chunk(text: str, language: str, out: Optional[str] = None,
 
     th = threading.Thread(target=_edge, daemon=True)
     th.start()
-    # Poll — play the moment the file is ready instead of waiting out the timeout.
-    deadline = time.time() + max(0.4, edge_wait_s)
+    # Short phrases (first opener / 2 words): play the instant the mp3 lands.
+    deadline = time.time() + (min(edge_wait_s, 8.0) if len(plain) < 90 else max(0.4, edge_wait_s))
     while time.time() < deadline:
         if box.get("ok"):
             break
-        th.join(timeout=0.05)
+        th.join(timeout=0.03)
     if box.get("ok") and _play_file(path):
+        return True
+    # Longer phrase / pool busy: live stream overlaps remaining synth latency.
+    if len(plain) >= 40 and _speak_stream_edge(plain, language):
         return True
     if not box.get("ok"):
         th.join(timeout=6)
@@ -1380,14 +1432,14 @@ class StreamSpeaker:
 
             th = threading.Thread(target=prefetch, daemon=True)
             th.start()
-            # First phrase: stream for quick start. Later: play prebuilt file if ready.
+            # First phrase: warm-pool synth (starts with typing). Later: prefetched file.
             if first and not current_path:
-                _speak_chunk(current, self._lang, edge_wait_s=10.0)
+                _speak_chunk(current, self._lang, edge_wait_s=6.0)
                 first = False
             elif current_path and _play_file(current_path):
                 first = False
             else:
-                _speak_chunk(current, self._lang, edge_wait_s=20.0)
+                _speak_chunk(current, self._lang, edge_wait_s=12.0)
                 first = False
             # Critical: do NOT wait out a long synth here — that was the 1–2s .!? gap.
             _wait_prefetch(nxt_box, th, _GAP_BRIDGE_S)

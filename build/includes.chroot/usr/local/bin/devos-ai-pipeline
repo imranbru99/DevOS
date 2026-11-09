@@ -1,2 +1,2 @@
 #!/usr/bin/env bash
-exec /usr/bin/python3 /usr/local/share/devos/components/ai-agent/pipeline_gui.py "$@"
+exec -a "$(basename "$0")" /usr/bin/python3 /usr/local/share/devos/components/ai-agent/pipeline_gui.py "$@"

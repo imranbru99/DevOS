@@ -1,0 +1,4 @@
+#!/bin/bash
+# Keep DevOS awake for multi-day AI coding agent runs (24–72h).
+exec -a "$(basename "$0")" /usr/bin/python3 \
+  /usr/local/share/devos/components/agent-endurance/endurance.py "$@"

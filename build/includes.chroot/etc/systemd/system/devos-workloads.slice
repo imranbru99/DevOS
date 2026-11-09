@@ -1,9 +1,13 @@
 [Unit]
-Description=DevOS optional resource-intensive services
+Description=DevOS optional resource-intensive services (AI, downloads)
 
 [Slice]
-CPUWeight=50
-IOWeight=50
+# Below app.slice / session.slice so Chrome and Plasma keep priority.
+CPUWeight=25
+IOWeight=25
+CPUQuota=40%
 MemoryAccounting=yes
+MemoryHigh=28%
+MemoryMax=35%
 ManagedOOMMemoryPressure=kill
-ManagedOOMMemoryPressureLimit=50%
+ManagedOOMMemoryPressureLimit=45%

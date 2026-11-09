@@ -1,10 +1,11 @@
-[Desktop Entry]
+﻿[Desktop Entry]
 Type=Application
 Name=DevOS Dashboard
-Comment=Hardware status, disks and PIN setup, in its own DevOS window
-Exec=python3 /usr/local/share/devos/components/dashboard/dashboard_server.py
-Icon=preferences-system
+GenericName=Dashboard
+Comment=DevOS status and setup
+Exec=devos-dashboard
+Icon=devos-dashboard
 Terminal=false
-Categories=System;Settings;Utility;
 StartupNotify=true
-StartupWMClass=DevOS-dashboard
+StartupWMClass=devos-dashboard
+Categories=System;

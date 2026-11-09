@@ -7,9 +7,13 @@ separate persistent user-data directory under
 browser process and profile. It does not eliminate system memory pressure, GPU
 driver failures, network failures, or remote Cloud PC problems.
 
-When the isolated profile (or a desktop shortcut) already has a PWA install for
-the portal, launches use `--app-id=…` and focus the existing window instead of
-opening another tab-like `--app=` chrome. Set `DEVOS_WINDOWS_APP_ID` to pin an id.
+Cloud PC uses `window.open()` inside the portal. That stays in the Windows App
+window only when launch uses an installed PWA (`--app-id`) plus Chrome's
+`PwaNavigationCapturing` flag. A plain `--app=URL` window sends Cloud PC into a
+normal Chrome tab — DevOS therefore prefers the everyday Chrome/Edge PWA (same
+path as other Features web apps via `devos-pwa`), and only falls back to the
+isolated profile when `DEVOS_WINDOWS_APP_ISOLATED=1`. Set `DEVOS_WINDOWS_APP_ID`
+to pin an id.
 
 The first launch of the isolated profile requires signing in. Existing browser
 profiles and active Cloud PC sessions are left intact; no cookies or credentials

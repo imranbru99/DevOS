@@ -193,14 +193,7 @@ var data = {
    "size_mb": 650,
    "windows": "Microsoft Office",
    "preinstalled": false,
-   "presets": [
-    "windows",
-    "student",
-    "developer",
-    "creator",
-    "gamer",
-    "islamic"
-   ],
+   "presets": [],
    "eula": "",
    "min_ram_gb": 3,
    "optin": false
@@ -382,10 +375,7 @@ var data = {
    "size_mb": 400,
    "windows": "Edge",
    "preinstalled": false,
-   "presets": [
-    "windows",
-    "islamic"
-   ],
+   "presets": [],
    "eula": "",
    "min_ram_gb": 4,
    "optin": false
@@ -462,11 +452,7 @@ var data = {
    "size_mb": 1,
    "windows": "Microsoft 365",
    "preinstalled": false,
-   "presets": [
-    "windows",
-    "student",
-    "islamic"
-   ],
+   "presets": [],
    "eula": "",
    "min_ram_gb": 0,
    "optin": false
@@ -479,10 +465,7 @@ var data = {
    "size_mb": 1,
    "windows": "Outlook",
    "preinstalled": false,
-   "presets": [
-    "windows",
-    "islamic"
-   ],
+   "presets": [],
    "eula": "",
    "min_ram_gb": 0,
    "optin": false
@@ -603,26 +586,6 @@ var data = {
    "presets": [],
    "eula": "",
    "min_ram_gb": 4,
-   "optin": false
-  },
-  {
-   "id": "kdeconnect",
-   "category": "chat",
-   "name": "Phone integration",
-   "about": "Notifications, clipboard and files with your phone, like Phone Link.",
-   "size_mb": 20,
-   "windows": "Phone Link",
-   "preinstalled": true,
-   "presets": [
-    "windows",
-    "student",
-    "developer",
-    "creator",
-    "gamer",
-    "islamic"
-   ],
-   "eula": "",
-   "min_ram_gb": 0,
    "optin": false
   },
   {
@@ -946,8 +909,8 @@ var data = {
   {
    "id": "antigravity",
    "category": "developer",
-   "name": "Google Antigravity AI",
-   "about": "Advanced agentic coding assistant and pair programming IDE by Google DeepMind. First of two independent Antigravity agent slots in the DevOS AI Pipeline.",
+   "name": "Google Antigravity",
+   "about": "Main Antigravity — primary Google account, projects, and Gemini profile. Independent from Antigravity IDE (second account). Pipeline slot: antigravity.",
    "size_mb": 500,
    "windows": "Antigravity",
    "preinstalled": true,
@@ -961,10 +924,10 @@ var data = {
   {
    "id": "antigravity-kde",
    "category": "developer",
-   "name": "Antigravity KDE (Studio)",
-   "about": "Second isolated Antigravity agent for Plasma with its own profile, hub, and pipeline slot. Shares the Antigravity binary; keeps a separate GEMINI_APP_DATA_DIR.",
+   "name": "Antigravity IDE",
+   "about": "Second Antigravity — separate Google login, projects, and profile (~/.config/Antigravity-KDE, GEMINI_APP_DATA_DIR=antigravity-kde). Runs beside Google Antigravity at the same time. Pipeline slot: antigravity-kde.",
    "size_mb": 50,
-   "windows": "Antigravity",
+   "windows": "Antigravity IDE",
    "preinstalled": true,
    "presets": [
     "developer"
@@ -2062,19 +2025,14 @@ var data = {
   }
  ],
  "defaults": [
-  "onlyoffice",
   "libreoffice",
   "officefonts",
   "msfonts",
   "pdftools",
   "chrome",
-  "edge",
   "thunderbird",
   "winapp",
-  "m365web",
-  "outlookweb",
   "whatsapp",
-  "kdeconnect",
   "vlc",
   "spotify",
   "webcam",

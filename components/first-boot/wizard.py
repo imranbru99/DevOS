@@ -37,10 +37,11 @@ class FirstBootWizard:
 
         default_choices = {
             "locale": "en_US.UTF-8",
-            "available_locales": ["en_US.UTF-8", "bn_BD.UTF-8"],
+            # Display language is always English; Bangla is typing-only (keyboard/IME).
+            "available_locales": ["en_US.UTF-8"],
             "keyboard": "us",
             "telemetry": False,  # Strict privacy constraint
-            "theme": "dark",
+            "theme": "light",
             "available_themes": ["dark", "light"],
             "ai_tier": tier["tier"],
             "enable_winlayer": True,

@@ -28,7 +28,12 @@ def test_antigravity_and_kde_have_install_hooks():
     assert ag["detect"]
     assert "antigravity.desktop" in (ag.get("builtin") or {}).get("desktop", [])
     assert kde["script"] == "/usr/local/sbin/devos-install-antigravity-kde"
-    assert "antigravity-kde.desktop" in (kde.get("builtin") or {}).get("desktop", [])
+    assert "devos-antigravity-studio.desktop" in (kde.get("builtin") or {}).get("desktop", [])
+    assert "antigravity-ide.desktop" not in (kde.get("builtin") or {}).get("desktop", [])
+    assert kde["name"] == "Antigravity IDE"
+    assert ag["name"] == "Google Antigravity"
+    # Both instances stay independent in the menu (distinct names, not two identical tiles).
+    assert ag["name"] != kde["name"]
 
 
 def test_cursor_agent_has_install_hook():
@@ -42,3 +47,26 @@ def test_features_catalog_js_mentions_new_agents():
     js = (ROOT / "build/includes.chroot/etc/calamares/branding/devos/features-catalog.js").read_text(encoding="utf-8")
     for fid in ("antigravity-kde", "cursor-agent", "antigravity", "cursor"):
         assert f'"id": "{fid}"' in js or f'"id":"{fid}"' in js
+
+
+def test_installer_shows_phone_link_once():
+    # KDE Connect stays in the ISO package list, but must not be a second
+    # "Phone Link" card next to DevOS Phone Link.
+    cat = (ROOT / "components/features/feature_catalog.py").read_text(encoding="utf-8")
+    js = (ROOT / "build/includes.chroot/etc/calamares/branding/devos/features-catalog.js").read_text(encoding="utf-8")
+    assert 'F("phonelink"' in cat or 'F("phonelink",' in cat
+    assert 'F("kdeconnect"' not in cat
+    assert '"id": "phonelink"' in js
+    assert '"id": "kdeconnect"' not in js
+    assert js.count('"windows": "Phone Link"') == 1
+
+
+def test_edge_and_microsoft_office_not_auto_checked():
+    # Users must tick Edge / Microsoft Office apps themselves.
+    defaults = set(catalog.default_ids())
+    for fid in ("edge", "m365web", "outlookweb", "onlyoffice"):
+        feat = _by_id(fid)
+        assert "windows" not in feat["presets"], fid
+        assert fid not in defaults, fid
+    # Offline LibreOffice on the ISO can stay included.
+    assert "libreoffice" in defaults

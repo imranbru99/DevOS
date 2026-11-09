@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/python3 /usr/local/share/devos/components/settings/hw_qualify.py "$@"
+exec -a "$(basename "$0")" /usr/bin/python3 /usr/local/share/devos/components/settings/hw_qualify.py "$@"

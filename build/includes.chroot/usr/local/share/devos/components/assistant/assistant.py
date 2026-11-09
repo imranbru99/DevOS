@@ -2443,7 +2443,7 @@ class VoiceSettingsDialog(QtWidgets.QDialog):
         self.lang = QtWidgets.QComboBox()
         self.lang.addItem("Match what I speak (recommended)", "auto")
         self.lang.addItem("Always English", "en")
-        self.lang.addItem("Always Bangla", "bn")
+        self.lang.addItem("Always Bangla (better Bangla listening)", "bn")
         cur = str(prefs.get("tts_language") or "auto")
         idx = max(0, self.lang.findData(cur))
         self.lang.setCurrentIndex(idx)
@@ -3745,6 +3745,7 @@ class AssistantWindow(QtWidgets.QWidget):
                 self.show_thinking("Working on it")
             self._handle = handle
             # Pure do-it actions from voice still should not be narrated ("Opening Chrome…").
+            # Call mode still resumes listening in _replies even when speak is False.
             if self._speak_reply and not plan.leftover and all(a.name in voice.SILENT_ACTIONS for a in actions):
                 self._speak_reply = False
             self._run(lambda w: self.assistant.run_actions(actions, text, plan.leftover, hist,
@@ -3821,7 +3822,13 @@ class AssistantWindow(QtWidgets.QWidget):
 
             self._run(lambda _w: voice.speak_reply(to_say), spoken_done, track_busy=False)
         elif self._call_active and speak and not streamed_speech:
+            # Voice turn with nothing to narrate (or speech already finished) —
+            # still keep the call open and listen again.
             QtCore.QTimer.singleShot(400, self._continue_call_listen)
+        elif self._call_active and not speak and not streamed_speech:
+            # Pure on-screen actions (open Chrome, etc.) stay quiet — but a call
+            # must resume listening or the next voice prompt never starts.
+            QtCore.QTimer.singleShot(500, self._continue_call_listen)
         self.input.setFocus()
 
     def _last_prompt(self):
@@ -3998,8 +4005,9 @@ class AssistantWindow(QtWidgets.QWidget):
             self.end_call(say=True)
             MicButton.pressed_at = 0.0
             return
-        # One-shot listen (not a call): finish this take.
+        # One-shot listen (not a call): cancel this take — don't show “didn't catch that”.
         if self.recorder is not None:
+            self._discard_voice_result = True
             self.stop_listening()
             MicButton.pressed_at = 0.0
             return
@@ -4042,6 +4050,10 @@ class AssistantWindow(QtWidgets.QWidget):
         self._call_active = False
         self._call_misses = 0
         self.mic_btn.set_in_call(False)
+        # Hang-up stops the in-flight recorder; ignore its empty/failed result so we
+        # don't flash “I didn't catch that…” right after “Call ended.”
+        if self.recorder is not None:
+            self._discard_voice_result = True
         self.stop_listening()
         if self._stream_speaker is not None:
             self._stream_speaker.stop()
@@ -4103,6 +4115,11 @@ class AssistantWindow(QtWidgets.QWidget):
 
         def done(res):
             self._listening_ui_off()
+            discard = bool(getattr(self, "_discard_voice_result", False))
+            self._discard_voice_result = False
+            self.recorder = None
+            if discard:
+                return
             if len(res) == 3:
                 text, problem, spoken_lang = res
             else:
@@ -4156,6 +4173,11 @@ class AssistantWindow(QtWidgets.QWidget):
 
         def fail(msg):
             self._listening_ui_off()
+            discard = bool(getattr(self, "_discard_voice_result", False))
+            self._discard_voice_result = False
+            self.recorder = None
+            if discard:
+                return
             if self._call_active:
                 QtCore.QTimer.singleShot(800, self._continue_call_listen)
             else:
@@ -4298,11 +4320,11 @@ def main(argv=None):
     app.setApplicationName(APP_TITLE)
     app.setApplicationDisplayName(APP_TITLE)
     app.setDesktopFileName("devos-chat")
-    from app_identity import apply as apply_identity
+    from app_identity import apply as apply_identity, show_window
     apply_identity(app, "devos-chat")
     apply_app_theme(app)
     win = AssistantWindow()
-    win.show()
+    show_window(win, "devos-chat")
     # "Open in DevOS AI" from the voice overlay: devos-chat --ask "what was said"
     if "--ask" in argv:
         i = argv.index("--ask")

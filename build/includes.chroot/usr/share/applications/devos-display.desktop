@@ -6,7 +6,8 @@ Comment=Change screen resolution, refresh rate, and layout scaling
 Exec=/usr/local/bin/devos-display
 Icon=devos-display
 Terminal=false
-Type=ApplicationStartupWMClass=devos-display
+Type=Application
+StartupWMClass=devos-display
 
 Categories=Settings;HardwareSettings;DesktopSettings;Qt;
 Keywords=display;screen;resolution;monitor;scale;1080p;tv;

@@ -1,11 +1,12 @@
 [Desktop Entry]
 Type=Application
-Name=DevOS Dashboard
-Comment=Hardware status, disks and PIN setup, in its own DevOS window
-Exec=/usr/local/bin/devos-run --desktop=devos-dashboard --name="DevOS Dashboard" /usr/local/share/devos/components/dashboard/dashboard_server.py
+Name=Dashboard
+GenericName=PC status overview
+Comment=Hardware status, disks, and setup for this PC
+Exec=/usr/local/bin/devos-run --desktop=devos-dashboard --name="Dashboard" /usr/local/share/devos/components/dashboard/dashboard_server.py
 Icon=devos-dashboard
 Terminal=false
 Categories=System;
-Keywords=dashboard;status;devos;disk;storage;
+Keywords=dashboard;status;devos;disk;storage;pin;
 StartupNotify=true
-StartupWMClass=DevOS-dashboard
+StartupWMClass=devos-dashboard

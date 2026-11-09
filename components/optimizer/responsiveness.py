@@ -10,13 +10,15 @@ import sys
 import uuid
 
 POLICIES = {
-    'session.slice': {'CPUWeight': '400', 'IOWeight': '200'},
+    'session.slice': {'CPUWeight': '400', 'IOWeight': '200', 'MemoryAccounting': 'yes',
+                      'MemoryLow': '8%'},
     'app.slice': {'CPUWeight': '100', 'IOWeight': '100', 'MemoryAccounting': 'yes',
-                  'MemoryHigh': '85%', 'ManagedOOMMemoryPressure': 'kill',
-                  'ManagedOOMMemoryPressureLimit': '50%', 'ManagedOOMSwap': 'kill'},
-    'background.slice': {'CPUWeight': '20', 'IOWeight': '20', 'MemoryAccounting': 'yes',
+                  'MemoryHigh': '92%', 'ManagedOOMMemoryPressure': 'auto',
+                  'ManagedOOMMemoryPressureLimit': '80%', 'ManagedOOMSwap': 'kill'},
+    'background.slice': {'CPUWeight': '10', 'IOWeight': '10', 'CPUQuota': '35%',
+                         'MemoryAccounting': 'yes', 'MemoryHigh': '18%', 'MemoryMax': '25%',
                          'ManagedOOMMemoryPressure': 'kill',
-                         'ManagedOOMMemoryPressureLimit': '40%', 'ManagedOOMSwap': 'kill'},
+                         'ManagedOOMMemoryPressureLimit': '35%', 'ManagedOOMSwap': 'kill'},
 }
 
 

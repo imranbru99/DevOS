@@ -1,0 +1,20 @@
+[Unit]
+Description=DevOS multi-day AI coding agent endurance
+Documentation=file:///usr/local/share/devos/components/agent-endurance/endurance.py
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/devos-agent-endurance daemon
+Restart=on-failure
+RestartSec=5
+# Watcher itself is tiny; agents it protects stay in app.slice / agents.slice.
+Slice=background.slice
+Nice=10
+CPUWeight=5
+MemoryMax=64M
+OOMPolicy=continue
+
+[Install]
+WantedBy=graphical-session.target

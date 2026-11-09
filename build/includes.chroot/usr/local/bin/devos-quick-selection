@@ -1,8 +1,8 @@
 #!/bin/bash
 # DevOS Quick Selection Bar: Smart floating selection action pill
 if [ -f /usr/local/share/devos/components/clipboard/quick_selection.py ]; then
-    exec /usr/bin/python3 /usr/local/share/devos/components/clipboard/quick_selection.py "$@"
+    exec -a "$(basename "$0")" /usr/bin/python3 /usr/local/share/devos/components/clipboard/quick_selection.py "$@"
 elif [ -f /home/imran/project/dev-os/components/clipboard/quick_selection.py ]; then
-    exec /usr/bin/python3 /home/imran/project/dev-os/components/clipboard/quick_selection.py "$@"
+    exec -a "$(basename "$0")" /usr/bin/python3 /home/imran/project/dev-os/components/clipboard/quick_selection.py "$@"
 fi
 

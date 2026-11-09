@@ -1401,7 +1401,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.current_title = cur_title or "Dev Os"
         self.current_path = cur_path or str(Path(self.pipeline.get_base_dir()) / self.current_slug)
 
-        self.setWindowTitle("DevOS AI Command Pipeline & Scheduler")
+        self.setWindowTitle("AI Pipeline")
         self.setObjectName("devos-ai-pipeline")
         self.setWindowFlags(self.windowFlags() | Qt.WindowMinMaxButtonsHint | Qt.WindowCloseButtonHint)
         icon = get_app_icon()
@@ -1454,7 +1454,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
         header_vbox = QtWidgets.QVBoxLayout()
         header_vbox.setSpacing(2)
-        title = QtWidgets.QLabel("DevOS AI Command Pipeline")
+        title = QtWidgets.QLabel("AI Pipeline")
         title.setObjectName("title")
         subtitle = QtWidgets.QLabel("Parallel agents · 1-by-1 per agent · Real 429 pauses shared Google quota")
         subtitle.setObjectName("subtitle")
@@ -3258,7 +3258,7 @@ def main():
     from app_identity import apply as apply_identity
     apply_identity(app, "devos-ai-pipeline")
     app.setApplicationName("devos-ai-pipeline")
-    app.setApplicationDisplayName("DevOS AI Command Pipeline")
+    app.setApplicationDisplayName("AI Pipeline")
     icon = get_app_icon()
     if not icon.isNull():
         app.setWindowIcon(icon)

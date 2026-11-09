@@ -1,5 +1,6 @@
 [Desktop Entry]
-Type=ApplicationStartupWMClass=devos-refresh
+Type=Application
+StartupWMClass=devos-refresh
 
 Name=Refresh Desktop
 Name[bn]=রিফ্রেশ

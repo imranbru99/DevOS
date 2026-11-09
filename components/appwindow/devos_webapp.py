@@ -225,10 +225,13 @@ def run_qt(args) -> int:
     from pathlib import Path as _DialogPath
     _dialog_sys.path.insert(0, str(_DialogPath(__file__).resolve().parent.parent))
     from devos_dialogs import install as _install_dialog_style
+    from app_identity import apply as apply_identity, show_window
     _install_dialog_style(app)
     app.setApplicationDisplayName(args.title)
     if hasattr(app, "setDesktopFileName"):
         app.setDesktopFileName(args.desktop_file)
+    if args.desktop_file:
+        apply_identity(app, args.desktop_file)
 
     # ---- single instance -------------------------------------------------
     name = instance_name(args.app_id)
@@ -347,6 +350,14 @@ def run_qt(args) -> int:
 
         # -- loading / offline ---------------------------------------------
         def load_finished(self, ok):
+            if ok and not self.offline and args.app_id == "dashboard":
+                marker = os.environ.pop("DEVOS_HOMEPAGE_READY_FILE", "")
+                if marker:
+                    try:
+                        with open(marker, "w", encoding="utf-8") as stream:
+                            stream.write("ok\n")
+                    except OSError as exc:
+                        print(f"Cannot record DevOS homepage startup: {exc}", file=sys.stderr)
             if ok or self.offline:
                 return
             if port_open(self.url):
@@ -476,7 +487,7 @@ def run_qt(args) -> int:
         item.accept()
     profile.downloadRequested.connect(on_download)
 
-    win.show()
+    show_window(win, args.desktop_file or None)
     rc = app.exec_()
     server.close()
     return rc

@@ -1,5 +1,6 @@
 [Desktop Entry]
-Type=ApplicationStartupWMClass=devos-chat
+Type=Application
+StartupWMClass=devos-chat
 
 Version=1.0
 Name=DevOS AI

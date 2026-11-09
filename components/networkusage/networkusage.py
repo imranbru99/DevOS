@@ -54,9 +54,10 @@ def run_gui():
     except Exception:
         prepare_identity = None  # type: ignore
     try:
-        from app_identity import apply as apply_identity
+        from app_identity import apply as apply_identity, show_window
     except Exception:
         apply_identity = None  # type: ignore
+        show_window = None  # type: ignore
 
     STYLE = """
     QWidget#root {
@@ -737,7 +738,10 @@ def run_gui():
     if not icon.isNull():
         app.setWindowIcon(icon)
     win = Main()
-    win.show()
+    if show_window:
+        show_window(win, "devos-network-usage")
+    else:
+        win.show()
     return app.exec_()
 
 

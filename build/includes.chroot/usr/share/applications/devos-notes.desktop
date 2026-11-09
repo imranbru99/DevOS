@@ -2,8 +2,8 @@
 Type=Application
 Version=1.0
 Name=Notes
-GenericName=Notes and sticky notes
-Comment=Notebooks, sticky notes on the desktop, voice notes and DevOS AI summaries; saved in Documents
+GenericName=Sticky notes & notebooks
+Comment=Sticky notes on the desktop, notebooks, and voice notes — not the same as Notepad
 Exec=/usr/local/bin/devos-run --desktop=devos-notes --name=Notes /usr/local/share/devos/components/notes/notes.py
 Icon=devos-notes
 Terminal=false

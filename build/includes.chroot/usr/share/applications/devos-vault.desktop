@@ -1,5 +1,6 @@
 [Desktop Entry]
-Type=ApplicationStartupWMClass=devos-vault
+Type=Application
+StartupWMClass=devos-vault
 
 Name=DevOS Vault
 GenericName=Encrypted folder

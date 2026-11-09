@@ -152,8 +152,26 @@ def wanted_files(choice: dict) -> list:
 
 def write_choice(choice: dict, path: str = catalog.CHOICE_FILE) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    merged = dict(choice)
+    # Preserve sleep policy from an existing conf (never drop idle_timeout/warmup).
+    try:
+        with open(path, encoding="utf-8") as handle:
+            for line in handle:
+                key, _, val = line.partition("=")
+                key, val = key.strip(), val.strip()
+                if key == "idle_timeout" and "idle_timeout" not in merged:
+                    try:
+                        merged["idle_timeout"] = int(val)
+                    except ValueError:
+                        pass
+                elif key in ("warmup", "warm_up", "preload") and "warmup" not in merged:
+                    merged["warmup"] = val.lower() in ("1", "yes", "true", "on")
+    except OSError:
+        pass
+    merged.setdefault("idle_timeout", 600)
+    merged.setdefault("warmup", False)
     with open(path, "w", encoding="utf-8") as handle:
-        handle.write(catalog.format_choice(choice))
+        handle.write(catalog.format_choice(merged))
     os.chmod(path, 0o644)
 
 

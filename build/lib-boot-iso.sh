@@ -190,7 +190,7 @@ set bootargs="boot=casper username=devos hostname=devos ignore_uuid nopersistent
 menuentry "Try DevOS / Install" {
     set gfxpayload=keep
     devos_root
-    linux /casper/vmlinuz ${bootargs} quiet splash plymouth.theme=devos ---
+    linux /casper/vmlinuz ${bootargs} quiet splash plymouth.theme=devos plymouth.use-simpledrm ---
     initrd /casper/initrd
 }
 
@@ -222,10 +222,34 @@ menuentry "Check disc for defects" {
 }
 GRUBEOF
 
-    # UEFI Secure Boot signed GRUB may look at /EFI/BOOT/grub.cfg first, depending
-    # on its compiled-in prefix. Provide the same file in the ESP as well.
-    mkdir -p "${stage}/EFI/BOOT"
-    cp -f "$out" "${stage}/EFI/BOOT/grub.cfg"
+    # UEFI signed GRUB often starts with prefix on the small FAT ESP, where the
+    # full menu (fonts/theme/casper paths) is wrong. Put a stub that finds the
+    # ISO root and chains to /boot/grub/grub.cfg — same pattern as installed
+    # systems (devos-install-efi-fallback). Avoids laptop drop to grub>.
+    mkdir -p "${stage}/EFI/BOOT" "${stage}/EFI/ubuntu" "${stage}/boot/grub"
+    cat > "${stage}/EFI/BOOT/grub.cfg" << 'EOF'
+insmod part_gpt
+insmod part_msdos
+insmod fat
+insmod iso9660
+insmod search
+insmod search_fs_file
+insmod search_label
+insmod configfile
+search --no-floppy --set=root --file /casper/vmlinuz
+if [ ! -f /casper/vmlinuz ]; then
+    search --no-floppy --set=root --label DEVOS_2604
+fi
+set prefix=($root)/boot/grub
+if [ -f $prefix/grub.cfg ]; then
+    configfile $prefix/grub.cfg
+fi
+echo "DevOS: boot menu not found. Reflash USB (Rufus DD / Etcher)."
+sleep 8
+EOF
+    cp -f "${stage}/EFI/BOOT/grub.cfg" "${stage}/EFI/ubuntu/grub.cfg"
+    # Ubuntu-style loopback helper for firmware that sources this name.
+    cp -f "${stage}/EFI/BOOT/grub.cfg" "${stage}/boot/grub/loopback.cfg"
 }
 
 # Build the BIOS El Torito boot image.
@@ -243,8 +267,23 @@ devos_eltorito_img() {
     rm -f "${stage}/boot/grub/i386-pc/eltorito.img"
 
     # Embedded config for the standalone image: chain to the canonical grub.cfg.
+    # File search first; label fallback covers odd USB/firmware layouts that
+    # otherwise drop users into the GRUB rescue shell (grub>).
     cat > "${tmp}/early_grub.cfg" << 'EOF'
+insmod search
+insmod search_fs_file
+insmod search_label
+insmod iso9660
+insmod part_gpt
+insmod part_msdos
 search --no-floppy --set=root --file /casper/vmlinuz
+if [ ! -f /casper/vmlinuz ]; then
+    search --no-floppy --set=root --label DEVOS_2604
+fi
+if [ ! -f /casper/vmlinuz ]; then
+    echo "DevOS: cannot find /casper/vmlinuz — reflash USB in DD/Etcher mode."
+    sleep 5
+fi
 set prefix=($root)/boot/grub
 configfile $prefix/grub.cfg
 EOF
@@ -325,11 +364,33 @@ devos_efi_files() {
         cp -fL "$ia32" "${stage}/EFI/BOOT/BOOTIA32.EFI"
     fi
 
-    # UEFI signed GRUB might look for its config relative to where it loaded from,
-    # so keep a copy in the ESP as well.
-    if [ -f "${stage}/boot/grub/grub.cfg" ]; then
-        cp -f "${stage}/boot/grub/grub.cfg" "${stage}/EFI/BOOT/grub.cfg"
+    # Keep EFI/BOOT/grub.cfg as the search+configfile stub written by
+    # devos_grub_cfg. Copying the full menu here made Secure Boot GRUB load a
+    # menu whose $prefix pointed at the tiny FAT ESP → laptop grub> shell.
+    if [ ! -f "${stage}/EFI/BOOT/grub.cfg" ] || grep -q 'menuentry' "${stage}/EFI/BOOT/grub.cfg" 2>/dev/null; then
+        cat > "${stage}/EFI/BOOT/grub.cfg" << 'EOF'
+insmod part_gpt
+insmod part_msdos
+insmod fat
+insmod iso9660
+insmod search
+insmod search_fs_file
+insmod search_label
+insmod configfile
+search --no-floppy --set=root --file /casper/vmlinuz
+if [ ! -f /casper/vmlinuz ]; then
+    search --no-floppy --set=root --label DEVOS_2604
+fi
+set prefix=($root)/boot/grub
+if [ -f $prefix/grub.cfg ]; then
+    configfile $prefix/grub.cfg
+fi
+echo "DevOS: boot menu not found. Reflash USB (Rufus DD / Etcher)."
+sleep 8
+EOF
     fi
+    mkdir -p "${stage}/EFI/ubuntu"
+    cp -f "${stage}/EFI/BOOT/grub.cfg" "${stage}/EFI/ubuntu/grub.cfg"
 }
 
 # Build a FAT ESP image from the ESP files placed under $stage/EFI.

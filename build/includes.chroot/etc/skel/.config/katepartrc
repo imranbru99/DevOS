@@ -1,11 +1,60 @@
 [KTextEditor Renderer]
-Color Theme=DevOS
-Font=JetBrains Mono,13,-1,5,50,0,0,0,0,0
+Animate Bracket Matching=true
+Auto Color Theme Selection=true
+Color Theme=Breeze Dark
+Font=JetBrains Mono,13,-1,5,57,0,0,0,0,0,Regular
+Line Height Multiplier=1.15
+Show Indentation Lines=true
 
 [KTextEditor View]
-Show Line Numbers=true
+Auto Brackets=true
+Auto Center Lines=0
+Automatic Completion Invocation=true
+Backspace Remove Composed Characters=true
+Dynamic Word Wrap=true
+Dynamic Word Wrap Align Indent=80
+Dynamic Word Wrap Indicators=1
+Fold First Line=false
+Icon Border=true
+Keyword Completion=true
+Line Numbers=true
+Maximum Search History Size=20
+Persistent Selection=false
+Scroll Past End=true
 Show Folding Markers=true
-Show Scrollbar Marks=true
-Show Scrollbar Mini Map=true
-Dynamic Word Wrap=false
-Show Word Count=false
+Show Line Modification=true
+Show Scrollbars=1
+Show Word Count=true
+Smart Home=true
+Tab Handling=true
+Word Completion=true
+Word Completion Minimal Word Length=2
+Word Wrap Marker=false
+
+[KTextEditor Document]
+Auto Detect Indent=true
+Auto Save=false
+Auto Save Interval=0
+Backup On Save Local=false
+BOM=false
+Encoding=UTF-8
+End Of Line=Unix
+Indent On Backspace=true
+Indent On Tab=true
+Indent On Text Paste=true
+Indentation Mode=normal
+Indentation Width=4
+Keep Extra Spaces=false
+Line Length Marker=0
+Newline At EOF=true
+OnTheFlySpellChecking=false
+Overwrite Mode=false
+PageUp Move Cursor=false
+Remove Spaces=1
+Replace Tabs=true
+Show Spaces=0
+Show Tabs=true
+Swap File=disable
+Tab Width=4
+Trailing Dynamic Wrap As Indent=false
+Word Wrap=false

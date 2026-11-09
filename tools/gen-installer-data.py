@@ -41,11 +41,14 @@ def aimodel_files():
              "# system; devos-ai-models.service downloads it once the PC is online.",
              "# Calamares names the global-storage key packagechooser_<id>; older builds",
              "# use the bare id, so both are listed.",
-             "---", "dontChroot: false", "timeout: 60"]
+             "# Soft-fail: a missing AI helper must never abort a finished OS install.",
+             "---", "dontChroot: false", "timeout: 120"]
     for key in ("packagechooser_aimodel", "aimodel"):
         lines.append(f"{key}:")
         for value in model_catalog.all_choice_values():
-            lines.append(f'    "{value}": "/usr/local/bin/devos-ai-models choose --value {value} --no-download"')
+            lines.append(
+                f'    "{value}": "/bin/bash -c \'/usr/local/bin/devos-ai-models choose --value {value} --no-download || true\'"'
+            )
     write("modules/contextualprocess_aimodel.conf", "\n".join(lines) + "\n")
 
 

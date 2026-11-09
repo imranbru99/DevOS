@@ -1,0 +1,19 @@
+[Desktop Entry]
+Type=Application
+Name=Antigravity IDE
+GenericName=AI coding (second account)
+Comment=Second Antigravity — separate Google account, projects, and profile from Google Antigravity
+Exec=/usr/local/bin/antigravity-kde %F
+Icon=antigravity-kde
+Terminal=false
+Categories=Development;IDE;
+MimeType=text/plain;inode/directory;
+Keywords=antigravity;ide;studio;kde;ai;coding;agent;second;
+StartupNotify=true
+StartupWMClass=antigravity-ide
+Actions=NewWindow;
+
+[Desktop Action NewWindow]
+Name=New Window
+Exec=/usr/local/bin/antigravity-kde --new-window %F
+Icon=antigravity-kde

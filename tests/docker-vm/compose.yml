@@ -11,11 +11,12 @@ services:
     container_name: devos-vm
     environment:
       BOOT_MODE: "${DEVOS_BOOT_MODE:-uefi}"   # uefi or legacy
-      RAM_SIZE: "6G"
-      CPU_CORES: "4"
+      RAM_SIZE: "${DEVOS_RAM_SIZE:-4G}"
+      CPU_CORES: "${DEVOS_CPU_CORES:-2}"
       DISK_SIZE: "40G"
+      # Nested KVM is often blocked on Windows Docker Desktop; TCG still shows the screen.
+      KVM: "${DEVOS_KVM:-N}"
     devices:
-      - /dev/kvm
       - /dev/net/tun
     cap_add:
       - NET_ADMIN

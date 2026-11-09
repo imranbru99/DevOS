@@ -1,5 +1,6 @@
 [Desktop Entry]
-Type=ApplicationStartupWMClass=devos-fingerprint
+Type=Application
+StartupWMClass=devos-fingerprint
 
 Name=Fingerprint sign-in
 GenericName=Windows Hello-style sign-in

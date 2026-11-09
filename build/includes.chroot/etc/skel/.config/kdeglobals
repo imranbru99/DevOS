@@ -1,5 +1,5 @@
 [General]
-ColorScheme=DevOS
+ColorScheme=DevOS-Light
 fixed=Liberation Mono,10,-1,5,50,0,0,0,0,0
 font=Inter,10,-1,5,50,0,0,0,0,0
 fontWeight=50
@@ -8,12 +8,35 @@ smallestReadableFont=Inter,9,-1,5,50,0,0,0,0,0
 toolBarFont=Inter,10,-1,5,50,0,0,0,0,0
 
 [Icons]
-Theme=Papirus-Dark
+Theme=Papirus
 
 [KDE]
 LookAndFeelPackage=org.devos.desktop
-widgetStyle=kvantum
+widgetStyle=Breeze
+AnimationDurationFactor=0.35
+
 
 [KFileDialog Settings]
 Automatically select filename extension=false
 
+# Inverted even for light desktops — Spectacle / lock / Global Theme dialogs.
+[Colors:Complementary]
+BackgroundAlternate=22,28,44
+BackgroundNormal=16,20,32
+DecorationFocus=56,189,248
+DecorationHover=56,189,248
+ForegroundActive=56,189,248
+ForegroundInactive=160,170,186
+ForegroundLink=125,211,252
+ForegroundNegative=252,165,165
+ForegroundNeutral=253,230,138
+ForegroundNormal=248,250,252
+ForegroundPositive=110,231,183
+ForegroundVisited=196,181,253
+
+[Locale]
+Country=us
+Language=en_US
+MonetaryDecimalSymbol=.
+DecimalSymbol=.
+ThousandsSeparator=,

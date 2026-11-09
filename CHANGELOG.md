@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- New 50-image homepage wallpaper collection, refreshed boot and installer previews, My Profile, About DevOS, Code setup and Agent Endurance.
 - Premium Calamares Summary (motion backdrop) with Restart/Shut down on the installer footer and a restyled Install confirmation dialog.
 - Graphical GRUB theme for the live USB menu and an animated Plymouth splash after boot entry selection.
 - `devosumount` job that releases busy `/tmp/calamares-root-*` mounts so a finished install is not reported as failed at ~97%.
@@ -21,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Desktop-user home/settings write checks during installation and at login, with distinct permission, read-only, full-disk, quota and I/O error reporting.
 
 ### Fixed
+- Install GRUB into the mounted target, require a valid target kernel/initramfs entry, and match UEFI boot registration to the selected ESP and loader. Leave the boot chain intact during the live USB reboot.
+- Record the homepage as opened after the dashboard page loads. Fix the desktop web app launcher on POSIX shells.
+- Let Chrome manage renderer scheduling, scale its tab discard threshold with RAM, and size zram at 50% of system RAM.
 - Stop apt-purging unticked apps during Calamares (~89% “Running shell process” hang); record choices with `installer-plan` and apply on first boot.
 - Mark install completion on the live `/run` (`dontChroot`) so the session watchdog does not relaunch Calamares after Finished.
 - Update new-account dialog fonts and migrate only exact old DevOS font defaults on login; preserve custom fonts and sizes.

@@ -10,7 +10,7 @@
 'use strict';
 importScripts('rules.js');
 
-const MAX_SIDE = 512;              // analysed image size (longest side, px)
+const MAX_SIDE = 720;              // analysed image size (longest side, px)
 const MAX_FETCH_BYTES = 25 << 20;  // ignore huge downloads (stay blurred)
 const MAX_PARALLEL_FETCHES = 4;
 const CACHE_LIMIT = 800;

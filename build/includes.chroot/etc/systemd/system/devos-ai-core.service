@@ -3,24 +3,34 @@ Description=DevOS Local AI Core
 After=network.target
 StartLimitIntervalSec=300
 StartLimitBurst=3
+# Do not hold RAM until a model is actually on disk.
+ConditionPathExistsGlob=/var/lib/DevOS/models/*.gguf
 
 [Service]
 Type=simple
 WorkingDirectory=/usr/local/share/devos/components/ai-core
 ExecStart=/usr/bin/python3 /usr/local/share/devos/components/ai-core/server.py
 Restart=on-failure
-RestartSec=3
-# Isolate optional AI work so it can yield resources to the desktop.
-Slice=devos-workloads.slice
+RestartSec=5
+# Sleep policy: no boot preload. Default unload after 30 minutes idle; while a
+# multi-day coding agent is active, endurance extends this to 4 hours.
+Environment=DEVOS_AI_WARMUP=0
+Environment=DEVOS_AI_IDLE_TIMEOUT=1800
+Slice=devos-agents.slice
 Nice=5
-CPUWeight=50
-IOWeight=50
+CPUWeight=80
+IOWeight=60
+CPUQuota=75%
 MemoryAccounting=yes
-MemoryHigh=60%
-MemoryMax=75%
-MemorySwapMax=1G
+# Headroom for a local coding model during 24–72h agent runs.
+MemoryHigh=40%
+MemoryMax=55%
+MemorySwapMax=2G
 LimitMEMLOCK=64M
-OOMPolicy=stop
+OOMPolicy=continue
+ManagedOOMPreference=omit
+IOSchedulingClass=best-effort
+IOSchedulingPriority=4
 
 [Install]
 WantedBy=multi-user.target

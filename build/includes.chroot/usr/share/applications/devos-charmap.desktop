@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Character Map
+GenericName=Symbols and characters
+Comment=Find and copy any character or symbol
+Exec=kcharselect
+Icon=accessories-character-map
+Terminal=false
+Categories=Qt;Utility;
+Keywords=character;unicode;symbol;charmap;kcharselect;
+StartupNotify=true
+StartupWMClass=kcharselect

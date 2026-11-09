@@ -3,8 +3,8 @@
 // and scrub dead pins — otherwise Plasma keeps Dolphin/Kate/Konsole defaults.
 
 var DESKTOP_WALLPAPER = "file:///usr/share/wallpapers/DevOS/DevOS-Default.png";
-var TASKBAR_LAUNCHERS = "applications:devos-search.desktop,applications:devos-taskman.desktop,applications:devos-windows.desktop,applications:google-chrome.desktop,applications:devos-thispc.desktop,applications:devos-chat.desktop,applications:devos-code.desktop,applications:systemsettings.desktop";
-var KICKOFF_FAVORITES = "applications:google-chrome.desktop,applications:devos-thispc.desktop,applications:devos-notepad.desktop,applications:devos-code.desktop,applications:devos-chat.desktop,applications:devos-dashboard.desktop,applications:devos-apps.desktop,applications:systemsettings.desktop";
+var TASKBAR_LAUNCHERS = "applications:devos-search.desktop,applications:devos-taskman.desktop,applications:devos-windows.desktop,applications:google-chrome.desktop,applications:devos-thispc.desktop,applications:devos-chat.desktop,applications:devos-code.desktop,applications:devos-settings.desktop";
+var KICKOFF_FAVORITES = "applications:google-chrome.desktop,applications:devos-thispc.desktop,applications:devos-notepad.desktop,applications:devos-code.desktop,applications:devos-chat.desktop,applications:devos-dashboard.desktop,applications:devos-apps.desktop,applications:devos-settings.desktop";
 
 function scrubLaunchers(raw) {
     if (!raw) {
@@ -100,6 +100,8 @@ if (panelList.length === 0) {
     var clock = panel.addWidget("org.kde.plasma.digitalclock");
     clock.currentConfigGroup = ["Appearance"];
     clock.writeConfig("use24hFormat", 0);
+    clock.writeConfig("dateFormat", "shortDate");
+    clock.writeConfig("showSeconds", false);
 } else {
     for (var p = 0; p < panelList.length; p++) {
         var widgets = panelList[p].widgets();
@@ -109,6 +111,10 @@ if (panelList.length === 0) {
                 configureKickoff(widget);
             } else if (widget.type === "org.kde.plasma.icontasks") {
                 configureTasks(widget);
+            } else if (widget.type === "org.kde.plasma.digitalclock") {
+                widget.currentConfigGroup = ["Appearance"];
+                widget.writeConfig("use24hFormat", 0);
+                widget.writeConfig("dateFormat", "shortDate");
             }
         }
     }

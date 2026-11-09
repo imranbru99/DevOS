@@ -1,5 +1,6 @@
 [Desktop Entry]
-Type=ApplicationStartupWMClass=devos-kids-mode
+Type=Application
+StartupWMClass=devos-kids-mode
 
 Name=Kids Mode
 Comment=Move the mouse to play while apps keep working

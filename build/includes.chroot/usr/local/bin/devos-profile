@@ -1,0 +1,8 @@
+#!/bin/bash
+# DevOS My Profile — PC owner name, email, bio, portfolio (for DevOS AI).
+export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}"
+COMPONENTS_DIR="/usr/local/share/devos/components"
+if [ -d "/home/imran/project/dev-os/components" ]; then
+    COMPONENTS_DIR="/home/imran/project/dev-os/components"
+fi
+exec -a "$(basename "$0")" /usr/bin/python3 "${COMPONENTS_DIR}/settings/owner_profile.py" "$@"

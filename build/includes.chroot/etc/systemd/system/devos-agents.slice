@@ -1,0 +1,17 @@
+[Unit]
+Description=DevOS long-running AI coding agents (24–72h)
+Documentation=file:///usr/local/share/devos/components/agent-endurance/endurance.py
+
+[Slice]
+# Above background downloads; enough CPU/RAM to keep a local model + agent alive
+# for multi-day runs without starving the interactive desktop.
+CPUAccounting=yes
+IOAccounting=yes
+MemoryAccounting=yes
+CPUWeight=100
+IOWeight=80
+CPUQuota=85%
+MemoryHigh=50%
+MemoryMax=65%
+ManagedOOMMemoryPressure=auto
+ManagedOOMMemoryPressureLimit=70%

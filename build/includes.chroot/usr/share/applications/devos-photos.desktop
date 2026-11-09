@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Photos
+GenericName=Photo Viewer
+Comment=View pictures and photos
+Exec=gwenview %U
+Icon=gwenview
+Terminal=false
+Categories=Qt;Graphics;Viewer;
+MimeType=image/jpeg;image/png;image/gif;image/webp;image/tiff;image/bmp;image/svg+xml;
+Keywords=photos;pictures;images;gallery;viewer;gwenview;
+StartupNotify=true
+StartupWMClass=gwenview

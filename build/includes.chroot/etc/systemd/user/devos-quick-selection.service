@@ -2,6 +2,7 @@
 Description=DevOS Quick Selection Bar
 PartOf=graphical-session.target
 After=graphical-session.target
+# Autostart desktop launches this; no wants symlink (avoid double start).
 
 [Service]
 Type=simple
@@ -9,10 +10,6 @@ ExecStart=/usr/local/bin/devos-quick-selection
 Restart=on-failure
 RestartSec=2
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
-Environment=DISPLAY=:1
-Environment=WAYLAND_DISPLAY=wayland-0
-Environment=QT_QPA_PLATFORM=xcb
-Environment=XDG_RUNTIME_DIR=/run/user/1000
 
 [Install]
 WantedBy=graphical-session.target

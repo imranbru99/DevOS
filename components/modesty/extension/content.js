@@ -7,7 +7,7 @@
 
   const R = globalThis.ModestyRules;
   const VIDEO_SAMPLE_MS = 750;
-  const PIXEL_MAX_SIDE = 384;
+  const PIXEL_MAX_SIDE = 640;
   const BG_BATCH_BUDGET_MS = 8;
   const BLUR_CSS = ''; // Regional SVG filters never blur a page container.
 

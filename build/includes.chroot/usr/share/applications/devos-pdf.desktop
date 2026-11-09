@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=PDF Viewer
+GenericName=Document Viewer
+Comment=Open PDF and documents
+Exec=okular %U
+Icon=application-pdf
+Terminal=false
+Categories=Qt;Office;Viewer;
+MimeType=application/pdf;application/x-gzpdf;application/x-bzpdf;application/x-wwf;
+Keywords=pdf;reader;document;ebook;okular;
+StartupNotify=true
+StartupWMClass=okular

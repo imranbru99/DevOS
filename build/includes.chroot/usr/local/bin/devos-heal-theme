@@ -1,0 +1,83 @@
+#!/bin/bash
+# Heal mixed light/dark stacks left by System Settings → Global Theme Apply.
+# Kvantum + light ColorScheme → black OK/Apply/Cancel. Dark Plasma with light
+# scheme → washed Settings. Run every login, after theme changes, and when
+# kdeglobals is rewritten by Global Theme Apply.
+set -u
+
+kw="$(command -v kwriteconfig6 || command -v kwriteconfig5 || true)"
+kr="$(command -v kreadconfig6 || command -v kreadconfig5 || true)"
+[ -n "${kw}" ] || exit 0
+[ -n "${kr}" ] || exit 0
+
+scheme="$("${kr}" --file kdeglobals --group General --key ColorScheme 2>/dev/null || true)"
+style="$("${kr}" --file kdeglobals --group KDE --key widgetStyle 2>/dev/null || true)"
+icons="$("${kr}" --file kdeglobals --group Icons --key Theme 2>/dev/null || true)"
+plasma="$("${kr}" --file plasmarc --group Theme --key name 2>/dev/null || true)"
+scheme_lc="$(printf '%s' "${scheme}" | tr '[:upper:]' '[:lower:]')"
+style_lc="$(printf '%s' "${style}" | tr '[:upper:]' '[:lower:]')"
+
+is_light=0
+case "${scheme_lc}" in
+    *light*|breeze|breezelight) is_light=1 ;;
+esac
+
+# Only dark Cupertino (WhiteSurDark) may keep Kvantum. Light WhiteSur / Liquid /
+# community Global Themes that flip widgetStyle to Kvantum cause black dialogs.
+keep_kvantum=0
+case "${scheme_lc}" in
+    whitesurdark) keep_kvantum=1 ;;
+esac
+
+# Complementary overlays must stay inverted (dark panel + light text) always.
+write_overlay() {
+    "${kw}" --file kdeglobals --group "Colors:Complementary" --key BackgroundNormal "16,20,32"
+    "${kw}" --file kdeglobals --group "Colors:Complementary" --key BackgroundAlternate "22,28,44"
+    "${kw}" --file kdeglobals --group "Colors:Complementary" --key ForegroundNormal "248,250,252"
+    "${kw}" --file kdeglobals --group "Colors:Complementary" --key ForegroundInactive "160,170,186"
+    "${kw}" --file kdeglobals --group "Colors:Complementary" --key ForegroundActive "56,189,248"
+    "${kw}" --file kdeglobals --group "Colors:Complementary" --key ForegroundLink "125,211,252"
+    "${kw}" --file kdeglobals --group "Colors:Complementary" --key ForegroundNegative "252,165,165"
+    "${kw}" --file kdeglobals --group "Colors:Complementary" --key ForegroundNeutral "253,230,138"
+    "${kw}" --file kdeglobals --group "Colors:Complementary" --key ForegroundPositive "110,231,183"
+    "${kw}" --file kdeglobals --group "Colors:Complementary" --key ForegroundVisited "196,181,253"
+    "${kw}" --file kdeglobals --group "Colors:Complementary" --key DecorationFocus "56,189,248"
+    "${kw}" --file kdeglobals --group "Colors:Complementary" --key DecorationHover "56,189,248"
+}
+
+write_overlay
+
+if [ "${keep_kvantum}" -eq 0 ]; then
+    if [ "${style_lc}" = "kvantum" ] || [ "${style_lc}" = "kvantum-dark" ] || [ -z "${style_lc}" ]; then
+        "${kw}" --file kdeglobals --group KDE --key widgetStyle Breeze
+    fi
+fi
+
+# Heal light ColorScheme paired with dark Plasma / dark icons.
+if [ "${is_light}" -eq 1 ]; then
+    case "${icons}" in
+        *Dark*|*dark*)
+            "${kw}" --file kdeglobals --group Icons --key Theme Papirus
+            ;;
+    esac
+    case "${plasma}" in
+        *dark*|*Dark*)
+            "${kw}" --file plasmarc --group Theme --key name breeze-light
+            if command -v plasma-apply-desktoptheme >/dev/null 2>&1; then
+                plasma-apply-desktoptheme breeze-light >/dev/null 2>&1 || true
+            fi
+            ;;
+    esac
+    # Prefer DevOS-Light when scheme is a generic Breeze light after Global Theme.
+    case "${scheme_lc}" in
+        breeze|breezelight)
+            "${kw}" --file kdeglobals --group General --key ColorScheme DevOS-Light
+            if command -v plasma-apply-colorscheme >/dev/null 2>&1; then
+                plasma-apply-colorscheme DevOS-Light >/dev/null 2>&1 || true
+            fi
+            write_overlay
+            ;;
+    esac
+fi
+
+exit 0

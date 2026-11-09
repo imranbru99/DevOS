@@ -1,20 +1,42 @@
 #!/bin/bash
-# Apply CPU and disk settings that match the hardware actually present.
+# Apply CPU and disk settings for best responsiveness under heavy Chrome / AI load.
+# On AC (or desktop with no battery): prefer performance clocks.
+# On battery: schedutil + balance_performance so laptops still last.
 set -u
+
+on_battery=0
+for supply in /sys/class/power_supply/*; do
+    [ -d "$supply" ] || continue
+    type="$(cat "$supply/type" 2>/dev/null || true)"
+    case "$type" in
+        Battery)
+            status="$(cat "$supply/status" 2>/dev/null || true)"
+            # Discharging / Not charging with capacity = on battery.
+            if [ "$status" = "Discharging" ]; then
+                on_battery=1
+                break
+            fi
+            ;;
+    esac
+done
 
 for gov_path in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
     [ -e "$gov_path" ] || continue
     available="$(cat "${gov_path%/*}/scaling_available_governors" 2>/dev/null || true)"
-    if printf '%s' "$available" | grep -qw schedutil; then
+    if [ "$on_battery" -eq 0 ] && printf '%s' "$available" | grep -qw performance; then
+        echo performance > "$gov_path" 2>/dev/null || true
+    elif printf '%s' "$available" | grep -qw schedutil; then
         echo schedutil > "$gov_path" 2>/dev/null || true
     elif printf '%s' "$available" | grep -qw ondemand; then
         echo ondemand > "$gov_path" 2>/dev/null || true
     fi
 done
 
+epp_value=performance
+[ "$on_battery" -eq 1 ] && epp_value=balance_performance
 for pref in /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference; do
     [ -e "$pref" ] || continue
-    echo balance_performance > "$pref" 2>/dev/null || true
+    echo "$epp_value" > "$pref" 2>/dev/null || true
 done
 
 if [ -f /sys/kernel/mm/transparent_hugepage/defrag ]; then
@@ -23,6 +45,11 @@ fi
 
 if [ -f /sys/kernel/mm/transparent_hugepage/enabled ]; then
     echo madvise > /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null || true
+fi
+
+# Prefer low-latency PCIe when on AC (helps NVMe + GPU under load).
+if [ "$on_battery" -eq 0 ] && [ -f /sys/module/pcie_aspm/parameters/policy ]; then
+    echo performance > /sys/module/pcie_aspm/parameters/policy 2>/dev/null || true
 fi
 
 for dev in /sys/block/*; do
@@ -38,6 +65,7 @@ for dev in /sys/block/*; do
     ahead=128
     if [[ "$name" == nvme* ]]; then
         choices="none mq-deadline"
+        ahead=256
     elif [ "$rot" != "0" ]; then
         choices="bfq mq-deadline"
         ahead=1024

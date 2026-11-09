@@ -3255,7 +3255,7 @@ def main():
     app = QtWidgets.QApplication(sys.argv)
     _install_dialog_style(app)
     app.setDesktopFileName("devos-ai-pipeline")
-    from app_identity import apply as apply_identity
+    from app_identity import apply as apply_identity, show_window
     apply_identity(app, "devos-ai-pipeline")
     app.setApplicationName("devos-ai-pipeline")
     app.setApplicationDisplayName("DevOS AI Command Pipeline")
@@ -3266,7 +3266,7 @@ def main():
     win = PipelineWindow()
     if not icon.isNull():
         win.setWindowIcon(icon)
-    win.show()
+    show_window(win, "devos-ai-pipeline")
     if "--run" in sys.argv:
         QtCore.QTimer.singleShot(0, win.toggle_runner)
     sys.exit(app.exec_())

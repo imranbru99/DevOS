@@ -7,7 +7,7 @@ X-KDE-Priority=TopLevel
 
 [Desktop Action OpenWithCode]
 Name=Open in DevOS Code
-Icon=kate
+Icon=devos-code
 Exec=devos-code "%f"
 
 [Desktop Action AnalyzeWinLayer]

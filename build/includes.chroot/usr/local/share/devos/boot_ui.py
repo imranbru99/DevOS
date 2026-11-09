@@ -38,8 +38,127 @@ LOG = "/tmp/devos-calamares.log"
 PREF_USERTYPE = "/run/devos-preferred-usertype"
 PREF_USERTYPE_FALLBACK = "/tmp/devos-preferred-usertype"
 SAFE_MODE_MARK = "/run/devos-installer-safe-mode"
+INSTALLED_MARK = "/run/devos-already-installed"
+# Only divert to the “unplug for sign-in” screen for a few days after Done.
+# After that (months/years, same version or not) the USB opens Try DevOS again.
+FRESH_INSTALL_SEC = 3 * 24 * 3600
 BRANDING = "/etc/calamares/branding/devos"
 BG_DIR = os.path.join(BRANDING, "bg")
+
+
+def _live_version_id() -> str:
+    try:
+        for line in open("/etc/os-release", encoding="utf-8", errors="replace"):
+            if line.startswith("VERSION_ID="):
+                return line.split("=", 1)[1].strip().strip('"')
+    except OSError:
+        pass
+    return "26.04"
+
+
+def _is_removable_sysblock(dev: str) -> bool:
+    base = os.path.basename(dev)
+    if "nvme" in base and "p" in base:
+        base = base.rsplit("p", 1)[0]
+    elif base[-1:].isdigit():
+        while base and base[-1].isdigit():
+            base = base[:-1]
+    path = f"/sys/block/{base}/removable"
+    try:
+        return open(path, encoding="utf-8").read().strip() == "1"
+    except OSError:
+        return False
+
+
+def _parse_install_marker(text: str) -> dict:
+    info = {"version": "", "installed_at": "", "fresh": False, "same_version": False}
+    for line in text.splitlines():
+        if "=" not in line:
+            continue
+        key, val = line.split("=", 1)
+        key, val = key.strip(), val.strip()
+        if key == "version":
+            info["version"] = val
+        elif key == "installed_at":
+            info["installed_at"] = val
+    live = _live_version_id()
+    info["same_version"] = bool(info["version"]) and info["version"] == live
+    # Legacy markers were just "ok\n" — treat as fresh only for this reboot path
+    # via /run cache; otherwise allow normal live boot.
+    stamp = info["installed_at"]
+    if stamp and stamp != "unknown":
+        try:
+            from datetime import datetime, timezone
+            when = datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+            age = (datetime.now(timezone.utc) - when).total_seconds()
+            info["fresh"] = 0 <= age <= FRESH_INSTALL_SEC
+        except Exception:
+            info["fresh"] = False
+    return info
+
+
+def probe_installed_devos() -> dict:
+    """Read ESP install marker from the internal disk (not the live USB).
+
+    Returns {} when nothing is installed. When found, includes version,
+    installed_at, same_version, and fresh (recent Done — nudge to sign-in).
+    """
+    empty = {}
+    if os.path.isfile(INSTALLED_MARK):
+        try:
+            cached = _parse_install_marker(open(INSTALLED_MARK, encoding="utf-8").read())
+            if cached.get("fresh"):
+                return cached
+        except OSError:
+            pass
+    try:
+        out = subprocess.check_output(
+            ["blkid", "-o", "device", "-t", "TYPE=vfat"],
+            text=True, stderr=subprocess.DEVNULL, timeout=8,
+        )
+    except Exception:
+        return empty
+    for dev in out.splitlines():
+        dev = dev.strip()
+        if not dev or _is_removable_sysblock(dev):
+            continue
+        mnt = f"/run/devos-esp-check-{os.path.basename(dev)}"
+        try:
+            os.makedirs(mnt, exist_ok=True)
+            subprocess.run(["mount", "-o", "ro", dev, mnt], check=False,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+            for rel in ("EFI/DevOS/.installed", "EFI/BOOT/.devos-installed"):
+                path = os.path.join(mnt, rel)
+                if not os.path.isfile(path):
+                    continue
+                try:
+                    raw = open(path, encoding="utf-8", errors="replace").read()
+                except OSError:
+                    continue
+                info = _parse_install_marker(raw)
+                try:
+                    open(INSTALLED_MARK, "w", encoding="utf-8").write(raw if raw.strip() else "version=\n")
+                except OSError:
+                    pass
+                subprocess.run(["umount", "-l", mnt], check=False,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return info
+        except Exception:
+            pass
+        finally:
+            subprocess.run(["umount", "-l", mnt], check=False,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            try:
+                os.rmdir(mnt)
+            except OSError:
+                pass
+    return empty
+
+
+def detect_installed_devos() -> bool:
+    """True only for a *fresh* install (few days) — not forever."""
+    info = probe_installed_devos()
+    return bool(info.get("fresh"))
 
 PHASES = (
     ("Starting DevOS", "Loading the live session and installer shell."),
@@ -324,6 +443,8 @@ class Chip(QFrame):
 
 class Starter(QWidget):
     CHOOSER_TIMEOUT_SEC = 12
+    # Plymouth FB splash is blank on some Intel TVs — real motion happens here in X11.
+    INTRO_SEC = 4.5
 
     def __init__(self):
         super().__init__()
@@ -336,9 +457,12 @@ class Starter(QWidget):
         self.failed = False
         self.safe_graphics = False
         self.auto_safe_retried = False
-        self.mode = "chooser"  # chooser | launching | failed
+        self.install_info = probe_installed_devos()
+        self.already_installed = bool(self.install_info.get("fresh"))
+        self.mode = "intro"  # intro | chooser | launching | failed | installed
         self.selected = OPTIONS[0]
         self.countdown = self.CHOOSER_TIMEOUT_SEC
+        self._intro_left = self.INTRO_SEC
         self._bgs = load_backgrounds()
         self._bg_index = 0
         self._bg_accum = 0.0
@@ -528,12 +652,12 @@ class Starter(QWidget):
         self.reboot_btn.setVisible(False)
         self.reboot_btn.setCursor(Qt.PointingHandCursor)
         self.reboot_btn.setStyleSheet(power_btn_style)
-        self.reboot_btn.clicked.connect(lambda: self.force_power("reboot"))
+        self.reboot_btn.clicked.connect(lambda: self.confirm_power("reboot"))
         self.poweroff_btn = QPushButton("Shut down")
         self.poweroff_btn.setVisible(False)
         self.poweroff_btn.setCursor(Qt.PointingHandCursor)
         self.poweroff_btn.setStyleSheet(power_btn_style)
-        self.poweroff_btn.clicked.connect(lambda: self.force_power("poweroff"))
+        self.poweroff_btn.clicked.connect(lambda: self.confirm_power("poweroff"))
 
         launch_layout.addWidget(self.status)
         launch_layout.addSpacing(6)
@@ -572,11 +696,17 @@ class Starter(QWidget):
         self._countdown_accum = 0.0
 
         self._update_countdown_label()
-        if self.cards:
-            self.cards[0].setFocus()
+        # Hide chooser during the X11 motion intro (alternative to broken Plymouth).
+        self.header_wrap.setVisible(False)
+        self.chooser_wrap.setVisible(False)
+        self.countdown_label.setVisible(False)
+        self.launch_wrap.setVisible(False)
         QTimer.singleShot(400, self.start_desktop)
 
         if self._cmdline_wants_safe():
+            # Skip intro — go straight into safe graphics install path.
+            self._intro_left = 0
+            self.show_chooser()
             self.on_option_chosen(OPTIONS[1])
 
     def _cmdline_wants_safe(self):
@@ -597,6 +727,9 @@ class Starter(QWidget):
         )
 
     def show_chooser(self):
+        if self.already_installed:
+            self.show_installed()
+            return
         self.mode = "chooser"
         self.failed = False
         self.countdown = self.CHOOSER_TIMEOUT_SEC
@@ -615,6 +748,149 @@ class Starter(QWidget):
         self.raise_()
         if self.cards:
             self.cards[0].setFocus()
+
+    def show_installed(self):
+        """Fresh install + USB still first — nudge to sign-in, keep reinstall path."""
+        self.mode = "installed"
+        self.failed = False
+        self.header_wrap.setVisible(False)
+        self.chooser_wrap.setVisible(False)
+        self.countdown_label.setVisible(False)
+        self.launch_wrap.setVisible(True)
+        self.retry.setVisible(False)
+        self.log.setVisible(False)
+        self.reboot_btn.setVisible(True)
+        self.poweroff_btn.setVisible(True)
+        self.back_to_options.setVisible(True)
+        self.back_to_options.setText("Use live USB / Reinstall")
+        try:
+            self.back_to_options.clicked.disconnect()
+        except TypeError:
+            pass
+        self.back_to_options.clicked.connect(self.continue_live_anyway)
+        ver = self.install_info.get("version") or _live_version_id()
+        same = self.install_info.get("same_version")
+        same_txt = "same version as this USB" if same else "on this PC"
+        self.status.setText("DevOS %s is already on this PC" % ver)
+        self.detail.setText(
+            "Install just finished, but this USB opened again instead of sign-in. "
+            "Unplug the USB, then Restart for the hard-disk login (%s)."
+            % same_txt
+        )
+        self.hint.setText(
+            "Want the live installer anyway? Choose “Use live USB / Reinstall”. "
+            "Months later this USB opens Try DevOS normally — the marker does not lock you out."
+        )
+        self.bar.setVisible(False)
+        self.showFullScreen()
+        self.raise_()
+        self.reboot_btn.setFocus()
+
+    def continue_live_anyway(self):
+        """User explicitly wants the live USB / reinstall even with DevOS on disk."""
+        self.already_installed = False
+        self.install_info = {}
+        try:
+            if os.path.isfile(INSTALLED_MARK):
+                os.remove(INSTALLED_MARK)
+        except OSError:
+            pass
+        try:
+            self.back_to_options.clicked.disconnect()
+        except TypeError:
+            pass
+        self.back_to_options.setText("Back to options")
+        self.back_to_options.clicked.connect(self.show_chooser)
+        self.show_chooser()
+
+    def confirm_power(self, op):
+        """Ask before reboot/poweroff as an in-window panel (not a separate dialog).
+
+        This starter is Frameless + WindowStaysOnTop + X11Bypass, so a normal
+        QMessageBox opens *under* it and looks like the confirmation never showed.
+        """
+        if getattr(self, "_power_confirm", None) is not None:
+            self._power_confirm.raise_()
+            return
+
+        title = "Restart this PC?" if op == "reboot" else "Shut down this PC?"
+        body = (
+            "This PC will restart now. Unsaved work in other windows will be lost."
+            if op == "reboot"
+            else "This PC will shut down now. Unsaved work in other windows will be lost."
+        )
+        yes_label = "Restart now" if op == "reboot" else "Shut down now"
+
+        scrim = QWidget(self)
+        scrim.setObjectName("powerConfirmScrim")
+        scrim.setStyleSheet("QWidget#powerConfirmScrim { background: rgba(2, 6, 23, 200); }")
+        scrim.setGeometry(self.rect())
+        scrim.raise_()
+
+        card = QFrame(scrim)
+        card.setObjectName("powerConfirmCard")
+        card.setStyleSheet(
+            "QFrame#powerConfirmCard { background: #0f172a; border: 1px solid #1e3a5f; "
+            "border-radius: 18px; }"
+            "QLabel { color: #e2e8f0; background: transparent; }"
+            "QPushButton { min-width: 120px; min-height: 36px; border-radius: 10px; "
+            "padding: 8px 14px; font-weight: 700; background: #141b2d; color: #e2e8f0; "
+            "border: 1px solid #334155; }"
+            "QPushButton#powerConfirmYes { background: #7f1d1d; border-color: #b91c1c; "
+            "color: #fecaca; }"
+        )
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(22, 22, 22, 18)
+        lay.setSpacing(12)
+        head = QLabel(title)
+        head.setStyleSheet("font-size: 18px; font-weight: 700; color: #f8fafc;")
+        detail = QLabel(body)
+        detail.setWordWrap(True)
+        detail.setStyleSheet("font-size: 14px; color: #94a3b8;")
+        lay.addWidget(head)
+        lay.addWidget(detail)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        cancel = QPushButton("Cancel")
+        yes = QPushButton(yes_label)
+        yes.setObjectName("powerConfirmYes")
+        row.addWidget(cancel)
+        row.addWidget(yes)
+        lay.addLayout(row)
+        card.adjustSize()
+        card.setFixedWidth(min(420, max(280, self.width() - 48)))
+        card.adjustSize()
+        card.move(
+            max(0, (scrim.width() - card.width()) // 2),
+            max(0, (scrim.height() - card.height()) // 2),
+        )
+
+        def _close():
+            self._power_confirm = None
+            scrim.deleteLater()
+
+        def _yes():
+            _close()
+            self.force_power(op)
+
+        cancel.clicked.connect(_close)
+        yes.clicked.connect(_yes)
+        self._power_confirm = scrim
+        scrim.show()
+        yes.setFocus()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        panel = getattr(self, "_power_confirm", None)
+        if panel is not None:
+            panel.setGeometry(self.rect())
+            for child in panel.findChildren(QFrame):
+                if child.objectName() == "powerConfirmCard":
+                    child.move(
+                        max(0, (panel.width() - child.width()) // 2),
+                        max(0, (panel.height() - child.height()) // 2),
+                    )
+                    break
 
     def force_power(self, op):
         """Force reboot/poweroff even when the session is stuck on this overlay."""
@@ -686,6 +962,9 @@ class Starter(QWidget):
             pass
 
     def launch_installer(self, force_safe=False):
+        if self.already_installed:
+            self.show_installed()
+            return
         retrying = self.failed or force_safe or self.safe_graphics
         self.failed = False
         self.alive_for = 0
@@ -864,6 +1143,13 @@ class Starter(QWidget):
         if self._bg_accum >= 4.5 and self._bgs:
             self._bg_accum = 0.0
             self._bg_index = (self._bg_index + 1) % len(self._bgs)
+        if self.mode == "intro":
+            self._intro_left -= 0.033
+            self.cover()
+            self.update()
+            if self._intro_left <= 0:
+                self.show_chooser()
+            return
         if self.mode == "chooser":
             self._countdown_accum += 0.033
             if self._countdown_accum >= 1.0:
@@ -926,6 +1212,9 @@ class Starter(QWidget):
             self.setGeometry(geo)
 
     def keyPressEvent(self, event):
+        if self.mode == "intro":
+            self.show_chooser()
+            return
         if self.mode == "chooser":
             key = event.key()
             if key in (Qt.Key_1, Qt.Key_2, Qt.Key_3, Qt.Key_4):
@@ -945,6 +1234,11 @@ class Starter(QWidget):
         painter.setRenderHint(QPainter.SmoothPixmapTransform)
         rect = self.rect()
         w, h = rect.width(), rect.height()
+
+        if self.mode == "intro":
+            self._paint_motion_intro(painter, rect, w, h)
+            painter.end()
+            return
 
         painter.fillRect(rect, QColor("#070a12"))
 
@@ -993,6 +1287,72 @@ class Starter(QWidget):
         vig.setColorAt(1.0, QColor(7, 10, 18, 136))
         painter.fillRect(rect, vig)
         painter.end()
+
+    def _paint_motion_intro(self, painter, rect, w, h):
+        """Fullscreen X11 motion splash — used because Plymouth FB often stays blank."""
+        breath = 0.5 + 0.5 * math.sin(self.phase * 2.4)
+        top = QColor(int(8 + 40 * breath), int(80 + 100 * breath), int(160 + 80 * breath))
+        bot = QColor(int(4 + 20 * breath), int(30 + 60 * breath), int(70 + 90 * breath))
+        wash = QLinearGradient(0, 0, 0, h)
+        wash.setColorAt(0.0, top)
+        wash.setColorAt(1.0, bot)
+        painter.fillRect(rect, wash)
+
+        for cx_f, cy_f, radius_f, rgba in (
+            (0.50 + 0.18 * math.sin(self.phase * 1.1), 0.42 + 0.10 * math.cos(self.phase * 0.9), 0.42, (56, 189, 248, 110)),
+            (0.22 + 0.12 * math.cos(self.phase * 1.3), 0.65 + 0.08 * math.sin(self.phase * 1.0), 0.30, (34, 211, 238, 90)),
+            (0.78 + 0.10 * math.sin(self.phase * 0.8), 0.28 + 0.12 * math.cos(self.phase * 1.2), 0.34, (125, 211, 252, 80)),
+        ):
+            cx, cy = w * cx_f, h * cy_f
+            rad = max(w, h) * radius_f
+            glow = QRadialGradient(cx, cy, rad)
+            glow.setColorAt(0.0, QColor(*rgba))
+            glow.setColorAt(1.0, QColor(0, 0, 0, 0))
+            painter.fillRect(rect, glow)
+
+        def _text_w(font, text):
+            metrics = QFontMetrics(font)
+            if hasattr(metrics, "horizontalAdvance"):
+                return metrics.horizontalAdvance(text)
+            return metrics.width(text)
+
+        # Brand
+        painter.setPen(QColor(255, 255, 255, 230))
+        font = QFont("Segoe UI", 54, QFont.Bold)
+        painter.setFont(font)
+        title = "DevOS"
+        tw = _text_w(font, title)
+        painter.drawText(int((w - tw) / 2), int(h * 0.42), title)
+
+        painter.setPen(QColor(125, 211, 252, 255))
+        mfont = QFont("Segoe UI", 22)
+        mfont.setWeight(QFont.Bold)
+        painter.setFont(mfont)
+        motion = "DevOS Motion"
+        mw = _text_w(mfont, motion)
+        slide = int(math.sin(self.phase * 2.0) * w * 0.08)
+        painter.drawText(int((w - mw) / 2) + slide, int(h * 0.50), motion)
+
+        # Animated hash bar
+        bar_font = QFont("Consolas", 18)
+        painter.setFont(bar_font)
+        filled = 1 + int((self.phase * 8) % 20)
+        bar = "[ " + "#" * filled + " " * (20 - filled) + " ]"
+        painter.setPen(QColor(186, 230, 253, 255))
+        bw = _text_w(bar_font, bar)
+        painter.drawText(int((w - bw) / 2), int(h * 0.58), bar)
+
+        painter.setPen(QColor(148, 163, 184, 220))
+        sfont = QFont("Segoe UI", 14)
+        painter.setFont(sfont)
+        status = "Starting DevOS..."
+        sw = _text_w(sfont, status)
+        painter.drawText(int((w - sw) / 2), int(h * 0.66), status)
+
+        hint = "Press any key to continue"
+        hw = _text_w(sfont, hint)
+        painter.setPen(QColor(100, 116, 139, 200))
+        painter.drawText(int((w - hw) / 2), int(h * 0.72), hint)
 
 
 def useful_log_lines(raw_lines, limit=18):

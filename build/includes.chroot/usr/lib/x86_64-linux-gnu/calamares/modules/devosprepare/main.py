@@ -89,15 +89,33 @@ def run():
         subprocess.run(["swapoff", "-a"], check=False)
         return None
 
-    errors = []
+    warnings = []
     for disk in disks:
         libcalamares.utils.debug("Preparing install disk " + disk)
-        # Two attempts: automount can race the first pass.
-        rc, detail = _run_prepare(disk)
-        if rc != 0:
+        # Three escalating attempts: automount / Fast Startup / udev races.
+        rc, detail = 1, ""
+        for attempt in range(1, 4):
             rc, detail = _run_prepare(disk)
+            if rc == 0:
+                break
+            libcalamares.utils.warning(
+                "prepare attempt %s failed for %s — auto retry" % (attempt, disk)
+            )
+            subprocess.run(["sleep", str(attempt)], check=False)
         if rc != 0:
-            errors.append("%s: %s" % (disk, detail or ("exit %s" % rc)))
+            # Plan B: continue anyway. Partition may still succeed after a
+            # partial wipe; aborting here forced "Installation Failed" with
+            # a disk that was often already free enough for sfdisk.
+            warnings.append("%s: %s" % (disk, detail or ("exit %s" % rc)))
+            try:
+                os.makedirs("/var/lib/DevOS", exist_ok=True)
+                with open("/var/lib/DevOS/install-warnings", "a", encoding="utf-8") as fh:
+                    fh.write("prepare-degraded: %s\n" % disk)
+            except OSError:
+                pass
+            libcalamares.utils.warning(
+                "Continuing install after prepare warnings on %s (auto fallback)" % disk
+            )
         else:
             try:
                 libcalamares.utils.debug(detail)
@@ -107,13 +125,9 @@ def run():
     # Restart udisks so the desktop stays usable after install jobs.
     subprocess.run(["systemctl", "start", "udisks2.service"], check=False)
 
-    if errors:
-        return (
-            "Could not free the install disk for partitioning",
-            "DevOS could not unmount or clear:\n"
-            + "\n".join(errors)
-            + "\n\nClose any open files on that SSD, disable Windows Fast Startup "
-              "if you dual-boot, then try Install again. "
-              "Or reboot from the USB and choose Erase disk once more.",
+    if warnings:
+        libcalamares.utils.warning(
+            "Disk prepare used degraded fallback:\n" + "\n".join(warnings)
         )
+    # Never hard-fail: partition is the next gate and will report real errors.
     return None

@@ -332,10 +332,13 @@ QScrollBar:vertical { background: transparent; width: 10px; margin: 2px; }
 QScrollBar::handle:vertical { background: #334155; border-radius: 4px; min-height: 30px; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
-QPushButton { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 7px 14px; }
-QPushButton:hover { border-color: #38bdf8; }
-QPushButton#primary { background: #0284c7; border-color: #38bdf8; color: white; }
+QPushButton { background: #1e293b; border: 1px solid #475569; border-radius: 8px; padding: 7px 14px; color: #f8fafc; }
+QPushButton:hover { border-color: #38bdf8; color: #ffffff; background: #243044; }
+QPushButton#primary { background: #0284c7; border-color: #38bdf8; color: #ffffff; }
+QPushButton#primary:hover { background: #0369a1; }
 QPushButton:disabled, QPushButton#primary:disabled { color: #64748b; background: #111827; border-color: #1e293b; }
+QPushButton#chip { background: #111827; border: 1px solid #334155; border-radius: 16px; padding: 6px 12px; color: #e2e8f0; }
+QPushButton#chip:hover { border-color: #38bdf8; color: #ffffff; }
 QProgressBar { background: #0f172a; border: 1px solid #1e293b; border-radius: 6px; text-align: center; }
 QProgressBar::chunk { background: #38bdf8; border-radius: 6px; }
 QLineEdit, QComboBox { background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 6px; }
@@ -351,13 +354,21 @@ QScrollArea { border: none; }
 def build_window(QtCore, QtWidgets):
     """The window class, built once PyQt5 is imported (keeps tests Qt-free)."""
 
-    class FeaturesWindow(QtWidgets.QWidget):
+    class FeaturesWindow(QtWidgets.QMainWindow):
         def __init__(self):
             super().__init__()
             self.setWindowTitle(APP_NAME)
             self.resize(980, 780)
             self.setMinimumSize(720, 560)
-            self.setStyleSheet(STYLE)
+            try:
+                from devos_appearance import adapt_stylesheet, current_mode
+                self.setStyleSheet(adapt_stylesheet(STYLE, current_mode()))
+            except Exception:
+                self.setStyleSheet(STYLE)
+            central = QtWidgets.QWidget()
+            self.setCentralWidget(central)
+            # Keep later layout code attaching to `self` via a host widget.
+            self._host = central
             self.installed = []
             self.selected = catalog.parse_selection(",".join(
                 f["id"] for f in catalog.FEATURES if f["preinstalled"]))
@@ -372,7 +383,7 @@ def build_window(QtCore, QtWidgets):
             self.was_outside = False
             self.checked_old_failures = False
 
-            root = QtWidgets.QVBoxLayout(self)
+            root = QtWidgets.QVBoxLayout(self._host)
             root.setContentsMargins(0, 0, 0, 0)
             root.setSpacing(0)
             self.tabs = QtWidgets.QTabWidget()
@@ -410,18 +421,30 @@ def build_window(QtCore, QtWidgets):
             intro.setWordWrap(True)
             head.addWidget(intro)
 
-            presets = QtWidgets.QHBoxLayout()
-            presets.setSpacing(8)
+            # Wrap chips so names are never clipped on narrow or laptop screens.
+            presets_wrap = QtWidgets.QWidget()
+            presets = QtWidgets.QGridLayout(presets_wrap)
+            presets.setContentsMargins(0, 0, 0, 0)
+            presets.setHorizontalSpacing(8)
+            presets.setVerticalSpacing(8)
             label = QtWidgets.QLabel("Quick picks:")
             label.setObjectName("muted")
-            presets.addWidget(label)
+            presets.addWidget(label, 0, 0)
+            col = 1
+            row = 0
+            max_cols = 4
             for pid, name, about in catalog.PRESETS:
                 button = QtWidgets.QPushButton(name.replace(" (recommended)", ""))
+                button.setObjectName("chip")
                 button.setToolTip(about)
+                button.setCursor(QtCore.Qt.PointingHandCursor)
                 button.clicked.connect(lambda _c=False, p=pid: self.use_preset(p))
-                presets.addWidget(button)
-            presets.addStretch(1)
-            head.addLayout(presets)
+                presets.addWidget(button, row, col)
+                col += 1
+                if col > max_cols:
+                    col = 0
+                    row += 1
+            head.addWidget(presets_wrap)
 
             self.search = QtWidgets.QLineEdit()
             self.search.setPlaceholderText("Search apps, e.g. word, photoshop, whatsapp…")
@@ -812,13 +835,18 @@ def main():
     prepare_identity("devos-features")
     app = QtWidgets.QApplication(sys.argv)
     _install_dialog_style(app)
+    try:
+        from devos_appearance import install as install_appearance
+        install_appearance(app)
+    except Exception:
+        pass
     app.setApplicationName("devos-features")
-    app.setApplicationDisplayName("DevOS Features")
+    app.setApplicationDisplayName("Features")
     app.setDesktopFileName("devos-features")
-    from app_identity import apply as apply_identity
+    from app_identity import apply as apply_identity, show_window
     apply_identity(app, "devos-features")
     window = build_window(QtCore, QtWidgets)()
-    window.show()
+    show_window(window, "devos-features")
     if os.environ.get("DEVOS_FEATURES_SCREENSHOT"):
         def grab():
             window.grab().save(os.environ["DEVOS_FEATURES_SCREENSHOT"])

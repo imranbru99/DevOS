@@ -1,12 +1,13 @@
 [Desktop Entry]
-Type=ApplicationStartupWMClass=devos-about
-
+Type=Application
+StartupWMClass=devos-about
+Version=1.0
 Name=About this PC
 GenericName=PC properties
-Comment=Processor, memory, graphics, and storage
-Exec=kinfocenter
+Comment=Processor, memory, graphics, and storage — visual overview
+Exec=devos-about
 Icon=devos-about
 Terminal=false
 Categories=Settings;System;
-Keywords=about;properties;processor;memory;graphics;storage;system;
+Keywords=about;properties;processor;memory;graphics;storage;system;info;kinfocenter;help;contact;
 StartupNotify=true

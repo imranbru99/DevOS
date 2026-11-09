@@ -1,5 +1,6 @@
 [Desktop Entry]
-Type=ApplicationStartupWMClass=devos-search
+Type=Application
+StartupWMClass=devos-search
 
 Name=Search
 GenericName=Find apps, files and settings

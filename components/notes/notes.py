@@ -1981,9 +1981,13 @@ def _load_gui():  # noqa: C901 - one place for all widget classes
         def show_window(self):
             if self.window is None:
                 self.window = NotesWindow(self)
-            self.window.show()
-            self.window.raise_()
-            self.window.activateWindow()
+            try:
+                from app_identity import show_window as show_branded
+                show_branded(self.window, "devos-notes")
+            except Exception:
+                self.window.show()
+                self.window.raise_()
+                self.window.activateWindow()
             return self.window
 
         def main_closed(self):

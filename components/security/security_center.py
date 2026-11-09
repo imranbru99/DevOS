@@ -1420,7 +1420,7 @@ def gui(page="overview"):
     app.setApplicationName("devos-security")
     app.setApplicationDisplayName(common.APP_NAME)
     app.setDesktopFileName("devos-security")
-    from app_identity import apply as apply_identity
+    from app_identity import apply as apply_identity, show_window
     apply_identity(app, "devos-security")
     font = QtGui.QFont("Inter")
     if not QtGui.QFontInfo(font).exactMatch():
@@ -1428,7 +1428,7 @@ def gui(page="overview"):
     font.setPointSize(10)
     app.setFont(font)
     win = Window(page)
-    win.show()
+    show_window(win, "devos-security")
     if os.environ.get("DEVOS_SECURITY_SCREENSHOT"):
         def shot():
             win.grab().save(os.environ["DEVOS_SECURITY_SCREENSHOT"])

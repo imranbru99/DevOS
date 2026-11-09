@@ -5,8 +5,8 @@ set -euo pipefail
 echo "==> Running DevOS 02-disable-services hook..."
 
 # 1. Disable / Mask unneeded systemd services
-# cups-browsed and avahi stay enabled so network printers can be found.
-# ModemManager stays masked: it delays boot on PCs with no mobile modem.
+# Printer discovery stays off at boot (local CUPS on demand). ModemManager
+# stays masked: it delays boot on PCs with no mobile modem.
 SERVICES_TO_MASK=(
     "ModemManager.service"
     "apport.service"
@@ -18,6 +18,13 @@ SERVICES_TO_MASK=(
     "snapd.seeded.service"
     "dnsmasq.service"
     "NetworkManager-wait-online.service"
+    # File indexer burns RAM for little gain; Start search still works without it.
+    "kde-baloo.service"
+    "baloo_file.service"
+    # Always-on mDNS / printer browse tax; enable from Print settings if needed.
+    "cups-browsed.service"
+    "avahi-daemon.service"
+    "avahi-daemon.socket"
 )
 
 for svc in "${SERVICES_TO_MASK[@]}"; do
@@ -29,10 +36,12 @@ done
 # Ensure NetworkManager-wait-online does not stall boot even when masked in chroot
 ln -sfn /dev/null /etc/systemd/system/NetworkManager-wait-online.service
 
-# Developer databases should start on-demand, not stall OS boot
-for db_svc in postgresql mariadb mysql php8.5-fpm; do
+# Developer databases / caches should start on-demand, not stall OS boot
+for db_svc in postgresql mariadb mysql redis-server redis php8.5-fpm php8.4-fpm php8.3-fpm php-fpm; do
     systemctl disable "${db_svc}" 2>/dev/null || true
 done
+ln -sfn /dev/null /etc/systemd/system/redis-server.service 2>/dev/null || true
+ln -sfn /dev/null /etc/systemd/system/redis.service 2>/dev/null || true
 # dnsmasq and systemd-resolved both want port 53. Keep resolved, and mask
 # dnsmasq even when systemctl cannot see the unit inside the build chroot.
 ln -sfn /dev/null /etc/systemd/system/dnsmasq.service
@@ -80,12 +89,10 @@ rm -f /etc/resolv.conf
 ln -s ../run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
 chmod 755 /etc/NetworkManager/dispatcher.d/99-devos-dns || true
 systemctl enable bluetooth.service || true
-# Older images masked these. Remove the mask so network printers can be found.
-rm -f /etc/systemd/system/avahi-daemon.service \
-    /etc/systemd/system/avahi-daemon.socket \
-    /etc/systemd/system/cups-browsed.service
-systemctl enable cups-browsed.service || true
-systemctl enable avahi-daemon.service || true
+# Keep printer discovery off by default (masked above). Local printing via
+# cups.socket / Print Manager still works when the user prints.
+systemctl disable cups-browsed.service avahi-daemon.service 2>/dev/null || true
+systemctl enable cups.socket 2>/dev/null || true
 chmod 755 /usr/local/sbin/devos-snapshot-pre-upgrade || true
 systemctl enable devos-rfkill.service || true
 systemctl enable devos-network.service || true
@@ -99,8 +106,10 @@ chmod 755 \
     /usr/local/bin/devos-install-gui \
     /usr/local/sbin/devos-bring-up-network \
     /usr/local/sbin/devos-install-finalize \
+    /usr/local/sbin/devos-postinstall-deferred \
     /usr/local/sbin/devos-set-boot-order \
     /usr/local/sbin/devos-force-installer-session \
+    /usr/local/sbin/devos-chrome-tune \
     || true
 
 # Live admin can start the installer without a password prompt.
@@ -112,7 +121,9 @@ chown root:root /etc/sudoers.d/devos
 chmod 440 /etc/sudoers.d/devos
 chmod 755 /usr/local/bin/dolphin /usr/local/bin/devos-files /usr/local/bin/devos-apps \
     /usr/local/bin/devos-ai-code-agent /usr/local/bin/devos-code-agent /usr/local/bin/devos-antigravity \
-    /usr/local/bin/devos-taskman /usr/local/bin/devos-power /usr/local/bin/devos-network-usage || true
+    /usr/local/bin/devos-taskman /usr/local/bin/devos-power /usr/local/bin/devos-network-usage \
+    /usr/local/bin/devos-about /usr/local/bin/kinfocenter /usr/local/bin/devos-profile \
+    /usr/local/bin/devos-resources || true
 # App history for Task Manager, for every account.
 mkdir -p /etc/systemd/user/timers.target.wants
 ln -sfn /usr/lib/systemd/user/devos-taskman-history.timer \
@@ -132,6 +143,11 @@ ln -sfn /etc/systemd/system/devos-force-installer.service \
 
 # 5. Local AI used by DevOS Code. It listens only on this computer.
 systemctl enable devos-ai-core.service || true
+# Multi-day AI coding agents (24–72h): keep sleep inhibited while they run.
+mkdir -p /etc/systemd/user/graphical-session.target.wants
+ln -sfn /etc/systemd/user/devos-agent-endurance.service \
+    /etc/systemd/user/graphical-session.target.wants/devos-agent-endurance.service
+systemctl --global enable devos-agent-endurance.service 2>/dev/null || true
 
 # Ubuntu's installer must not be available. DevOS uses Calamares only.
 apt-get purge -y ubuntu-desktop-bootstrap ubuntu-desktop-installer ubiquity ubiquity-frontend-gtk gnome-initial-setup subiquity subiquity-server curtin >/dev/null 2>&1 || true

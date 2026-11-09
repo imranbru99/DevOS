@@ -1,0 +1,23 @@
+#!/bin/bash
+# Re-run theme heal when System Settings rewrites kdeglobals (Global Theme Apply).
+# Idle cost is near-zero with inotify. Without inotify-tools, heal once and exit
+# (do not spin a 45s forever loop — that burned CPU on every login).
+set -u
+
+heal="/usr/local/bin/devos-heal-theme"
+[ -x "${heal}" ] || exit 0
+
+cfg="${XDG_CONFIG_HOME:-${HOME}/.config}/kdeglobals"
+mkdir -p "$(dirname "${cfg}")"
+[ -f "${cfg}" ] || printf '[General]\n' > "${cfg}"
+
+if ! command -v inotifywait >/dev/null 2>&1; then
+    "${heal}" >/dev/null 2>&1 || true
+    exit 0
+fi
+
+while true; do
+    inotifywait -q -e modify,close_write,move,create --format '%e' "${cfg}" >/dev/null 2>&1 || sleep 15
+    sleep 1.5
+    "${heal}" >/dev/null 2>&1 || true
+done

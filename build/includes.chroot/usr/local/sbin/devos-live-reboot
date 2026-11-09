@@ -1,0 +1,83 @@
+#!/bin/bash
+# The installed boot chain is prepared and verified before the target is
+# unmounted. Here only prompt for USB removal and reboot.
+set +e
+
+say() {
+    local line="$1" tty
+    for tty in /dev/tty1 /dev/console /dev/tty0; do
+        [ -w "$tty" ] || continue
+        printf '%s\n' "$line" >"$tty" 2>/dev/null || true
+    done
+    printf '%s\n' "$line" >&2
+}
+
+parent_disk() {
+    local base
+    base="$(basename "$1")"
+    if [[ "$base" =~ ^nvme[0-9]+n[0-9]+p[0-9]+$ ]]; then
+        printf '/dev/%s\n' "${base%p*}"
+    elif [[ "$base" =~ ^mmcblk[0-9]+p[0-9]+$ ]]; then
+        printf '/dev/%s\n' "${base%p*}"
+    elif [[ "$base" =~ ^[a-z]+[0-9]+$ ]]; then
+        printf '/dev/%s\n' "${base%%[0-9]*}"
+    else
+        printf '%s\n' "$1"
+    fi
+}
+
+live_usb_still_present() {
+    local src disk
+    src="$(findmnt -n -o SOURCE /cdrom 2>/dev/null || true)"
+    if [ -n "$src" ]; then
+        disk="$(parent_disk "$src")"
+        if [ -b "$src" ] || [ -b "$disk" ]; then
+            return 0
+        fi
+        return 1
+    fi
+    if command -v lsblk >/dev/null 2>&1; then
+        while read -r disk; do
+            [ -n "$disk" ] || continue
+            [ -b "$disk" ] || continue
+            return 0
+        done < <(lsblk -ndo NAME,TRAN,TYPE 2>/dev/null | awk '$2 ~ /^usb/ && $3=="disk" {print "/dev/"$1}')
+    fi
+    return 1
+}
+
+wait_for_usb_removal() {
+    local left=45
+    chvt 1 2>/dev/null || true
+    say ""
+    say "========================================"
+    say "  DevOS install complete"
+    say "  UNPLUG THE USB STICK NOW"
+    say "  Waiting until the stick is removed..."
+    say "  Do NOT press Del / F2 / F10"
+    say "  Next screen = DevOS sign-in / homepage"
+    say "========================================"
+    say ""
+    if ! live_usb_still_present; then
+        say "USB not detected — continuing to reboot."
+        sleep 2
+        return 0
+    fi
+    while [ "$left" -gt 0 ]; do
+        if ! live_usb_still_present; then
+            say "USB removed — rebooting to DevOS..."
+            sleep 2
+            return 0
+        fi
+        say "  Still seeing the USB — unplug it ($left s)..."
+        sleep 1
+        left=$((left - 1))
+    done
+    say "USB still present — reboot may reopen installer. Unplug, then Boot Override → DevOS."
+    sleep 3
+    return 0
+}
+
+wait_for_usb_removal
+sync
+systemctl reboot --force --force 2>/dev/null || reboot -f

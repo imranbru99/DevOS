@@ -1,12 +1,12 @@
 [Desktop Entry]
 Type=Application
-Name=DevOS AI Command Pipeline
-GenericName=AI Task Pipeline & Rate-Limit Scheduler
-Comment=Serial execution & auto-scheduling across ChatGPT, Antigravity, and Local AI
+Name=AI Pipeline
+GenericName=Run AI tasks in order
+Comment=Queue and schedule work across ChatGPT, Antigravity, and DevOS AI
 Exec=devos-ai-pipeline %F
 Icon=devos-ai-pipeline
 Terminal=false
 Categories=Development;Utility;System;
-Keywords=devos;ai;pipeline;scheduler;chatgpt;antigravity;queue;agent;rate-limit;serial;
+Keywords=devos;ai;pipeline;scheduler;chatgpt;antigravity;queue;agent;rate-limit;serial;command;
 StartupNotify=true
 StartupWMClass=devos-ai-pipeline

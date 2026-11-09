@@ -48,11 +48,11 @@ grub-efi-amd64-signed
 shim-signed
 efibootmgr
 
-# Performance & Memory Management
+# Performance & Memory Management (systemd-oomd is the OOM path; no earlyoom)
 zram-tools
-earlyoom
 
 # Minimal Plymouth for boot splash
 plymouth
 plymouth-themes
+plymouth-theme-spinner
 plymouth-label

@@ -1,15 +1,34 @@
 #!/usr/bin/env bash
-# Use the verified XWayland path for the Antigravity desktop hub.
-# Keep the vendor sandbox, profile, credentials and GPU acceleration intact.
+# Google Antigravity (main) — primary account / projects / Gemini profile.
+# Fully isolated from Antigravity IDE (antigravity-kde).
 set -euo pipefail
 unset ELECTRON_RUN_AS_NODE
 export GTK_MODULES=""
+export DONT_PROMPT_WSL_INSTALL=1
+export GEMINI_APP_DATA_DIR="antigravity"
+# Bypass host GNOME Keyring so logins stay in this profile only.
+export SSH_CLIENT="127.0.0.1 0 0"
+
 binary=/opt/antigravity/antigravity
 if [[ ! -x "$binary" ]]; then
-    printf '%s\n' 'Antigravity is not installed at /opt/antigravity/antigravity.' >&2
+    printf '%s\n' 'Google Antigravity is not installed at /opt/antigravity/antigravity.' >&2
     exit 127
 fi
-flags=(--ozone-platform=x11 --enable-gpu-rasterization --enable-zero-copy)
+
+DATA_DIR="${HOME}/.config/Antigravity"
+EXT_DIR="${HOME}/.antigravity/extensions"
+mkdir -p "$DATA_DIR" "$EXT_DIR"
+
+flags=(
+    --ozone-platform=x11
+    --enable-gpu-rasterization
+    --enable-zero-copy
+    --password-store=basic
+    --user-data-dir="${DATA_DIR}"
+    --extensions-dir="${EXT_DIR}"
+    --class=antigravity
+    --name=antigravity
+)
 if [[ "${1:-}" == --software-rendering ]]; then
     flags+=(--disable-gpu)
     shift

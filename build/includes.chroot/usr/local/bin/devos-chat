@@ -27,7 +27,7 @@ if [ -f "${AI_DIR}/server.py" ]; then
 fi
 
 if [ -f "${ASSISTANT}" ] && python3 -c 'import PyQt5.QtWidgets' >/dev/null 2>&1; then
-    exec python3 "${ASSISTANT}" "$@"
+    exec -a "$(basename "$0")" /usr/bin/python3 "${ASSISTANT}" "$@"
 fi
 
 START_CMD="python3 ${DASHBOARD} --no-browser --port ${PORT}"

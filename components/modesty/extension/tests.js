@@ -8,10 +8,10 @@
   }
   const S = (m, l) => R.effectiveSettings(m, l);
   const F = (gender, p, extra) => Object.assign({ score: .95, gender, genderProbability: p, age: 30, x: 10, y: 10, w: 80, h: 80 }, extra || {});
-  const P = (faceIndex) => ({ faceIndex, mask: 'mask', blurLayer: 'layer' });
-  const D = (faces, people) => ({ ok: true, faces, people: people || faces.map((_, i) => P(i)) });
+  const P = (faceIndex, extra) => Object.assign({ faceIndex, mask: 'mask', blurLayer: 'layer' }, extra || {});
+  const D = (faces, people) => ({ ok: true, height: 400, faces, people: people || faces.map((_, i) => P(i)) });
   const women = S({}, {}), people = S({}, { mode: 'people' });
-  eq('default adult women threshold', women.femaleThreshold, .75);
+  eq('default adult women threshold', women.femaleThreshold, .68);
   eq('adult woman body selected', R.decide(D([F('female', .95)]), women).blur, true);
   eq('male body stays clear', R.decide(D([F('male', .95)]), women).blur, false);
   eq('uncertain classification stays clear', R.decide(D([F('male', .6)]), women).blur, false);
@@ -22,6 +22,8 @@
   eq('small uncertain face ignored', R.decide(D([F('female', .99, { w: 12 })]), women).blur, false);
   eq('face without body mask is never whole-image blur', R.decide(D([F('female', .99)], []), women).blur, false);
   eq('unmatched body stays clear in women mode', R.decide(D([], [P(-1)]), women).blur, false);
+  eq('skin-heavy body with adult woman face is selected',
+    R.decide(D([F('female', .95, { y: 20 })], [P(-1, { skinRatio: .25, torsoY: 160 })]), women).blur, true);
   eq('strict people mode selects unmatched body', R.decide(D([], [P(-1)]), people).blur, true);
   eq('failed detection leaves text readable', R.decide({ ok: false }, women).blur, false);
   eq('missing detection has no whole-image fallback', R.decide(null, women).regions, []);
@@ -32,7 +34,13 @@
   const locked = S({ locked: true }, { enabled: false, mode: 'people', femaleThreshold: .9 });
   eq('lock stays enabled', locked.enabled, true);
   eq('lock can select people', locked.mode, 'people');
-  eq('lock cannot raise threshold', locked.femaleThreshold, .75);
+  eq('lock cannot raise threshold', locked.femaleThreshold, .68);
+  eq('torso fallback matches face above shoulders', R.matchFaceByTorso({
+    keypoints: [
+      { part: 'leftShoulder', score: .9, position: { x: 100, y: 120 } },
+      { part: 'rightShoulder', score: .9, position: { x: 160, y: 120 } },
+    ],
+  }, [F('female', .99, { x: 110, y: 20, w: 40, h: 50 })]), 0);
   eq('lock cannot weaken people mode', S({ locked: true, mode: 'people' }, { mode: 'women' }).mode, 'people');
   eq('old broad threshold cannot select uncertain men', R.decide(D([F('male', .6)]), S({ femaleThreshold: .35 }, {})).blur, false);
   eq('no body in text image', R.decide(D([], []), women).regions, []);

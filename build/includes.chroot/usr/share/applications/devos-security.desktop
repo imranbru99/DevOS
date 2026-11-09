@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
-Name=DevOS Security
+Name=Security
 GenericName=Virus and threat protection
-Comment=Virus protection, web protection, firewall, security updates and disk guard
+Comment=Virus protection, web protection, firewall, updates, and disk guard
 Exec=/usr/local/bin/devos-security gui
 Icon=devos-security
 Terminal=false

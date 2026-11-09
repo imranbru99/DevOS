@@ -1005,6 +1005,14 @@ def _load_gui():
                     self.restoreGeometry(QByteArray.fromBase64(geo.encode("ascii")))
                 except Exception:
                     pass
+            # Saved "maximized / borderless" sessions can cover the whole screen
+            # and hide min/max/close. Clamp to the usable screen before show.
+            try:
+                from app_identity import decorate_window, fit_to_screen
+                decorate_window(self)
+                fit_to_screen(self)
+            except Exception:
+                pass
 
         # ---------------------------------------------------------- layout
         def _build_ui(self):
@@ -1822,25 +1830,10 @@ def _load_gui():
                 pass
 
     def apply_theme(app):
+        # Author dark chrome as the source. devos_appearance converts it for
+        # light mode and keeps a matching QPalette so labels never go black-
+        # on-black or white-on-white when the user toggles theme.
         app.setStyle("Fusion")
-        pal = QPalette()
-        roles = {
-            QPalette.Window: C_WINDOW, QPalette.WindowText: C_TEXT,
-            QPalette.Base: C_EDITOR, QPalette.AlternateBase: C_PANEL,
-            QPalette.Text: C_TEXT, QPalette.Button: "#1f2937",
-            QPalette.ButtonText: C_TEXT, QPalette.Highlight: C_SELECT,
-            QPalette.HighlightedText: "#ffffff", QPalette.ToolTipBase: C_PANEL,
-            QPalette.ToolTipText: C_TEXT, QPalette.PlaceholderText: "#64748b",
-            QPalette.Link: C_ACCENT, QPalette.Light: "#334155",
-            QPalette.Midlight: "#273449", QPalette.Mid: "#1f2937",
-            QPalette.Dark: "#0b0f19", QPalette.Shadow: "#000000",
-        }
-        for role, color in roles.items():
-            pal.setColor(role, QColor(color))
-        pal.setColor(QPalette.Disabled, QPalette.Text, QColor("#475569"))
-        pal.setColor(QPalette.Disabled, QPalette.WindowText, QColor("#475569"))
-        pal.setColor(QPalette.Disabled, QPalette.ButtonText, QColor("#475569"))
-        app.setPalette(pal)
         ui = pick_family(["Inter", "Noto Sans", "DejaVu Sans", "Liberation Sans"], "sans-serif")
         f = QFont(ui)
         f.setPointSizeF(10)
@@ -1850,6 +1843,11 @@ def _load_gui():
             "sel": C_SELECT, "panel": C_PANEL, "border": C_BORDER, "accent": C_ACCENT,
             "check": make_check_icon(),
         })
+        try:
+            from devos_appearance import install as install_appearance
+            install_appearance(app)
+        except Exception:
+            pass
 
     class SingleInstance:
         """Forward file arguments to an already running Notepad."""
@@ -1957,9 +1955,9 @@ def create_app(argv=None, store=None):
     install_dialogs(app)
     app.setApplicationName("devos-notepad")
     app.setApplicationDisplayName("Notepad")
+    from app_identity import apply as apply_identity, show_window
     if hasattr(app, "setDesktopFileName"):
         app.setDesktopFileName("devos-notepad")
-        from app_identity import apply as apply_identity
         apply_identity(app, "devos-notepad")
     instance = gui["SingleInstance"]()
     if instance.forward(files):
@@ -1988,7 +1986,7 @@ def create_app(argv=None, store=None):
             signal.signal(getattr(signal, name), on_signal)
     app.aboutToQuit.connect(win.autosave)
     instance.listen(win)
-    win.show()
+    show_window(win, "devos-notepad")
     if files:
         win.bring_to_front()
     win.autosave()

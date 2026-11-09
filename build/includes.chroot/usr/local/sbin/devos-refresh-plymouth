@@ -1,0 +1,19 @@
+#!/bin/bash
+# Force DevOS motion splash into the running system's initrd.
+# Use on an already-installed disk (from live USB chroot) or after theme edits.
+set -euo pipefail
+THEME=/usr/share/plymouth/themes/devos
+if [ ! -f "$THEME/devos.plymouth" ] || [ ! -f "$THEME/devos.script" ]; then
+    echo "missing $THEME" >&2
+    exit 1
+fi
+sed -i 's/\r$//' "$THEME/devos.plymouth" "$THEME/devos.script"
+update-alternatives --install \
+    /usr/share/plymouth/themes/default.plymouth default.plymouth \
+    "$THEME/devos.plymouth" 200
+update-alternatives --set default.plymouth "$THEME/devos.plymouth"
+plymouth-set-default-theme -R devos 2>/dev/null || {
+    plymouth-set-default-theme devos 2>/dev/null || true
+    update-initramfs -u -k all
+}
+echo "DevOS plymouth refreshed. Reboot to see motion splash."

@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=My Profile
+GenericName=PC owner info
+Comment=Name, email, bio, and portfolio — DevOS AI uses this when asked who owns this PC
+Exec=devos-profile
+Icon=preferences-desktop-user
+Terminal=false
+Categories=Settings;System;
+Keywords=profile;owner;user;account;email;bio;portfolio;contact;about me;
+StartupNotify=true
+StartupWMClass=devos-profile

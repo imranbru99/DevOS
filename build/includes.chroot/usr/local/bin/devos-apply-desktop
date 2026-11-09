@@ -31,6 +31,10 @@ fi
 if [ -f /usr/local/share/devos/components/cloudpc/launchers.py ]; then
     python3 /usr/local/share/devos/components/cloudpc/launchers.py || true
 fi
+# Never show raw https://… Chrome apps or duplicate web companions in Start.
+if [ -f /usr/local/share/devos/components/browser/chrome_start_menu.py ]; then
+    python3 /usr/local/share/devos/components/browser/chrome_start_menu.py >/dev/null 2>&1 || true
+fi
 
 qdbus_bin=""
 for candidate in qdbus6 qdbus-qt6 qdbus qdbus-qt5; do
@@ -72,6 +76,36 @@ if [ -n "${kw_bin}" ]; then
     "${kw_bin}" --file kglobalshortcutsrc --group devos-kids-mode.desktop --key _launch "Meta+K,Meta+K,Kids Mode"
 fi
 
+# English menus/clock even if install region set bn_* formats.
+# Bangla numerals on the panel clock come from LC_TIME/plasma-localerc bn_BD.
+if [ -x /usr/local/sbin/devos-force-english-ui ]; then
+    /bin/bash /usr/local/sbin/devos-force-english-ui >/dev/null 2>&1 || true
+fi
+# Soft Chrome RAM ceiling (root/live only — no login password prompts).
+if [ "$(id -u)" = "0" ] && [ -x /usr/local/sbin/devos-chrome-tune ]; then
+    /bin/bash /usr/local/sbin/devos-chrome-tune >/dev/null 2>&1 || true
+fi
+export LANG=en_US.UTF-8
+export LANGUAGE=en_US:en
+export LC_TIME=en_US.UTF-8
+export LC_MESSAGES=en_US.UTF-8
+export LC_NUMERIC=en_US.UTF-8
+# Strip any leftover Bangla locale from the user's Plasma formats file.
+if [ -f "${HOME}/.config/plasma-localerc" ]; then
+    sed -i \
+        -e 's/=bn_BD\.UTF-8/=en_US.UTF-8/g' \
+        -e 's/=bn_BD/=en_US/g' \
+        -e 's/^LANGUAGE=.*/LANGUAGE=en_US:en/' \
+        "${HOME}/.config/plasma-localerc" 2>/dev/null || true
+fi
+if [ -n "${kw_bin}" ]; then
+    "${kw_bin}" --file plasma-localerc --group Formats --key LANG "en_US.UTF-8" || true
+    "${kw_bin}" --file plasma-localerc --group Formats --key LC_TIME "en_US.UTF-8" || true
+    "${kw_bin}" --file plasma-localerc --group Translations --key LANGUAGE "en_US" || true
+    "${kw_bin}" --file kdeglobals --group Locale --key Country "us" || true
+    "${kw_bin}" --file kdeglobals --group Locale --key Language "en_US" || true
+fi
+
 # Always keep Start favorites on DevOS apps and drop dead Install pins, even
 # when a panel already exists from skel (apply-ui used to skip that case).
 python3 - << 'PY' || true
@@ -85,13 +119,13 @@ if cfg.is_file():
         "applications:devos-search.desktop,applications:devos-taskman.desktop,"
         "applications:devos-windows.desktop,applications:google-chrome.desktop,"
         "applications:devos-thispc.desktop,applications:devos-chat.desktop,"
-        "applications:devos-code.desktop,applications:systemsettings.desktop"
+        "applications:devos-code.desktop,applications:devos-settings.desktop"
     )
     favorites = (
         "applications:google-chrome.desktop,applications:devos-thispc.desktop,"
         "applications:devos-notepad.desktop,applications:devos-code.desktop,"
         "applications:devos-chat.desktop,applications:devos-dashboard.desktop,"
-        "applications:devos-apps.desktop,applications:systemsettings.desktop"
+        "applications:devos-apps.desktop,applications:devos-settings.desktop"
     )
     dead = (
         "devos-install.desktop",
@@ -128,7 +162,9 @@ PY
 stamp="${HOME}/.config/devos-ui.stamp"
 # v2: favorites rewrite + scrub install pin (older stamp must re-run apply-ui).
 fav_stamp="${HOME}/.config/devos-ui-favorites-v2.stamp"
-if [ ! -f "${stamp}" ] || [ ! -f "${fav_stamp}" ] || [ "${1:-}" = "--force" ]; then
+# v5: light/dark both stay coherent; Complementary overlay always inverted.
+contrast_stamp="${HOME}/.config/devos-ui-contrast-v5.stamp"
+if [ ! -f "${stamp}" ] || [ ! -f "${fav_stamp}" ] || [ ! -f "${contrast_stamp}" ] || [ "${1:-}" = "--force" ]; then
     ready=0
     for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
         if [ -n "${qdbus_bin}" ] && "${qdbus_bin}" org.kde.plasmashell >/dev/null 2>&1; then
@@ -139,16 +175,69 @@ if [ ! -f "${stamp}" ] || [ ! -f "${fav_stamp}" ] || [ "${1:-}" = "--force" ]; t
     done
 
     if [ -n "${kw_bin}" ]; then
-        "${kw_bin}" --file kdeglobals --group General --key ColorScheme DevOS
-        "${kw_bin}" --file kdeglobals --group Icons --key Theme Papirus-Dark
-        "${kw_bin}" --file kdeglobals --group KDE --key widgetStyle kvantum
+        # Honor the user's Appearance choice (dark/light/mac). Only default to
+        # light when nothing is configured yet — never yank a dark desktop back.
+        user_theme=""
+        if [ -f "${HOME}/.config/devos/settings.json" ]; then
+            user_theme="$(sed -n 's/.*"theme"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "${HOME}/.config/devos/settings.json" 2>/dev/null | head -n1 | tr '[:upper:]' '[:lower:]')"
+        fi
+        scheme_now="$("${kw_bin}" --file kdeglobals --group General --key ColorScheme 2>/dev/null || true)"
+        case "${user_theme}" in
+            dark|mac) want_mode=dark ;;
+            light|mac-light) want_mode=light ;;
+            *)
+                case "${scheme_now}" in
+                    *Dark*|*dark*|DevOS) want_mode=dark ;;
+                    *) want_mode=light ;;
+                esac
+                ;;
+        esac
+
+        "${kw_bin}" --file kdeglobals --group KDE --key widgetStyle Breeze
         "${kw_bin}" --file kdeglobals --group KDE --key LookAndFeelPackage org.devos.desktop
         "${kw_bin}" --file kdeglobals --group "KFileDialog Settings" --key "Automatically select filename extension" false
-        "${kw_bin}" --file plasmarc --group Theme --key name breeze-dark
+        # Overlay Save/Cancel / lock / logout: light text on dark panel in both modes.
+        "${kw_bin}" --file kdeglobals --group "Colors:Complementary" --key BackgroundNormal "16,20,32"
+        "${kw_bin}" --file kdeglobals --group "Colors:Complementary" --key BackgroundAlternate "22,28,44"
+        "${kw_bin}" --file kdeglobals --group "Colors:Complementary" --key ForegroundNormal "248,250,252"
+        "${kw_bin}" --file kdeglobals --group "Colors:Complementary" --key ForegroundInactive "160,170,186"
+        "${kw_bin}" --file kdeglobals --group "Colors:Complementary" --key ForegroundActive "56,189,248"
+        "${kw_bin}" --file kdeglobals --group "Colors:Complementary" --key ForegroundLink "125,211,252"
+        "${kw_bin}" --file kdeglobals --group "Colors:Complementary" --key ForegroundNegative "252,165,165"
+        "${kw_bin}" --file kdeglobals --group "Colors:Complementary" --key ForegroundNeutral "253,230,138"
+        "${kw_bin}" --file kdeglobals --group "Colors:Complementary" --key ForegroundPositive "110,231,183"
+        "${kw_bin}" --file kdeglobals --group "Colors:Complementary" --key ForegroundVisited "196,181,253"
+        "${kw_bin}" --file kdeglobals --group "Colors:Complementary" --key DecorationFocus "56,189,248"
+        "${kw_bin}" --file kdeglobals --group "Colors:Complementary" --key DecorationHover "56,189,248"
+
+        if [ "${want_mode}" = "dark" ]; then
+            "${kw_bin}" --file kdeglobals --group General --key ColorScheme DevOS
+            "${kw_bin}" --file kdeglobals --group Icons --key Theme Papirus-Dark
+            "${kw_bin}" --file plasmarc --group Theme --key name breeze-dark
+            if command -v plasma-apply-colorscheme >/dev/null 2>&1; then
+                plasma-apply-colorscheme DevOS >/dev/null 2>&1 || true
+            fi
+            if command -v plasma-apply-desktoptheme >/dev/null 2>&1; then
+                plasma-apply-desktoptheme breeze-dark >/dev/null 2>&1 || true
+            fi
+        else
+            "${kw_bin}" --file kdeglobals --group General --key ColorScheme DevOS-Light
+            "${kw_bin}" --file kdeglobals --group Icons --key Theme Papirus
+            "${kw_bin}" --file plasmarc --group Theme --key name breeze-light
+            if command -v plasma-apply-colorscheme >/dev/null 2>&1; then
+                plasma-apply-colorscheme DevOS-Light >/dev/null 2>&1 || true
+            fi
+            if command -v plasma-apply-desktoptheme >/dev/null 2>&1; then
+                plasma-apply-desktoptheme breeze-light >/dev/null 2>&1 || true
+            fi
+        fi
+        # Re-assert overlay after colorscheme apply (tool may rewrite groups).
+        "${kw_bin}" --file kdeglobals --group "Colors:Complementary" --key BackgroundNormal "16,20,32"
+        "${kw_bin}" --file kdeglobals --group "Colors:Complementary" --key ForegroundNormal "248,250,252"
     fi
 
-    # Native KDE wallpaper tool (sets all screens)
-    if command -v plasma-apply-wallpaperimage >/dev/null 2>&1; then
+    # Native KDE wallpaper tool (sets all screens) — only when unset / first UI.
+    if [ ! -f "${stamp}" ] && command -v plasma-apply-wallpaperimage >/dev/null 2>&1; then
         plasma-apply-wallpaperimage /usr/share/wallpapers/DevOS/DevOS-Default.png >/dev/null 2>&1 || true
     fi
 
@@ -159,7 +248,48 @@ if [ ! -f "${stamp}" ] || [ ! -f "${fav_stamp}" ] || [ "${1:-}" = "--force" ]; t
         "${qdbus_bin}" org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript \
             "$(cat "$script")" >/dev/null 2>&1 || true
     fi
-    touch "${stamp}" "${fav_stamp}"
+    touch "${stamp}" "${fav_stamp}" "${contrast_stamp}"
+fi
+
+# Every login: keep system title-bar min / max / close on every window.
+# BorderlessMaximizedWindows=true removes the whole title bar when maximized
+# (Notepad and other DevOS apps looked "stuck" with no Close button).
+# Global Theme / WhiteSur Apply can flip ButtonsOnRight empty — reassert IAX.
+# Also keep Breeze widget style — Kvantum + light ColorScheme paints dark
+# OK/Apply/Cancel buttons with dark text (unreadable) in System Settings.
+if [ -n "${kw_bin}" ]; then
+    "${kw_bin}" --file kwinrc --group Windows --key BorderlessMaximizedWindows false
+    "${kw_bin}" --file kwinrc --group "org.kde.kdecoration2" --key ButtonsOnLeft M
+    "${kw_bin}" --file kwinrc --group "org.kde.kdecoration2" --key ButtonsOnRight IAX
+    "${kw_bin}" --file kwinrc --group "org.kde.kdecoration2" --key library org.kde.breeze
+    # Prefer Breeze decorations for readable min/max/close; Cupertino may set
+    # WhiteSur theme — still keep ButtonsOnRight=IAX so Close never vanishes.
+    scheme_btn="$("${kw_bin}" --file kdeglobals --group General --key ColorScheme 2>/dev/null || true)"
+    case "${scheme_btn}" in
+        *WhiteSur*|*whitesur*) ;;
+        *)
+            "${kw_bin}" --file kwinrc --group "org.kde.kdecoration2" --key theme Breeze
+            ;;
+    esac
+    # Full light/dark heal (Breeze for Settings dialogs, Complementary overlays,
+    # Papirus vs Papirus-Dark). Replaces the old WhiteSur-only skip that left
+    # light Global Theme Apply with black OK/Apply/Cancel.
+    if [ -x /usr/local/bin/devos-heal-theme ]; then
+        /usr/local/bin/devos-heal-theme >/dev/null 2>&1 || true
+    else
+        "${kw_bin}" --file kdeglobals --group KDE --key widgetStyle Breeze
+        "${kw_bin}" --file kdeglobals --group "Colors:Complementary" --key BackgroundNormal "16,20,32"
+        "${kw_bin}" --file kdeglobals --group "Colors:Complementary" --key ForegroundNormal "248,250,252"
+    fi
+fi
+# Keep a background healer so Global Theme Apply cannot leave black dialogs.
+if [ -x /usr/local/bin/devos-heal-theme-watch ]; then
+    if ! pgrep -f "devos-heal-theme-watch" >/dev/null 2>&1; then
+        (nohup /usr/local/bin/devos-heal-theme-watch >/dev/null 2>&1 &)
+    fi
+fi
+if [ -x /usr/local/sbin/devos-force-english-ui ]; then
+    /usr/local/sbin/devos-force-english-ui >/dev/null 2>&1 || true
 fi
 
 # Keep StatusNotifier / tray icons under Status & Notifications (^), not on the bar.
@@ -168,12 +298,33 @@ if [ -x /usr/local/bin/devos-tray-overflow ]; then
     /usr/local/bin/devos-tray-overflow >/dev/null 2>&1 || true
 fi
 
-# Hide duplicate Chrome secondary-profile PWA launchers (Profile 1, Profile 2...)
-for prof in "${HOME}/.local/share/applications"/chrome-*-Profile_*.desktop; do
-    if [ -f "$prof" ] && ! grep -q '^NoDisplay=' "$prof"; then
-        printf 'NoDisplay=true\n' >> "$prof"
-    fi
-done
+# File indexer burns disk on first days — keep it off unless the user turns it on.
+if [ -n "${kw_bin}" ]; then
+    "${kw_bin}" --file baloofilerc --group "Basic Settings" --key Indexing-Enabled false
+fi
+if command -v balooctl6 >/dev/null 2>&1; then
+    balooctl6 disable >/dev/null 2>&1 || true
+    balooctl6 stop >/dev/null 2>&1 || true
+elif command -v balooctl >/dev/null 2>&1; then
+    balooctl disable >/dev/null 2>&1 || true
+    balooctl stop >/dev/null 2>&1 || true
+fi
+# Drop leftover indexer processes so Task Manager memory stays light.
+pkill -x -u "$(id -u)" baloorunner 2>/dev/null || true
+pkill -x -u "$(id -u)" baloo_file 2>/dev/null || true
+pkill -x -u "$(id -u)" baloo_file_extr 2>/dev/null || true
+pkill -x -u "$(id -u)" baloo_file_extractor 2>/dev/null || true
+
+# Hide duplicate Chrome secondary-profile PWA launchers + URL-named apps.
+if [ -f /usr/local/share/devos/components/browser/chrome_start_menu.py ]; then
+    python3 /usr/local/share/devos/components/browser/chrome_start_menu.py >/dev/null 2>&1 || true
+elif [ -d "${HOME}/.local/share/applications" ]; then
+    for prof in "${HOME}/.local/share/applications"/chrome-*-Profile_*.desktop; do
+        if [ -f "$prof" ] && ! grep -q '^NoDisplay=' "$prof"; then
+            printf 'NoDisplay=true\n' >> "$prof"
+        fi
+    done
+fi
 
 # Apply user power configuration and start idle sleep daemon
 if command -v devos-power >/dev/null 2>&1; then

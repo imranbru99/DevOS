@@ -1034,10 +1034,10 @@ def run_gui(screenshot=None):
     app.setApplicationName("devos-islamic")
     app.setApplicationDisplayName("DevOS Islamic")
     app.setDesktopFileName("devos-islamic")
-    from app_identity import apply as apply_identity
+    from app_identity import apply as apply_identity, show_window
     apply_identity(app, "devos-islamic")
     window = IslamicWindow()
-    window.show()
+    show_window(window, "devos-islamic")
     if screenshot:
         def grab():
             window.grab().save(screenshot)

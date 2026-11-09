@@ -1,4 +1,4 @@
 #!/bin/bash
 # DevOS Task Manager (Ctrl+Shift+Esc).
 export QT_QPA_PLATFORM="xcb"
-exec /usr/bin/python3 /usr/local/share/devos/components/taskman/taskman.py "$@"
+exec -a "$(basename "$0")" /usr/bin/python3 /usr/local/share/devos/components/taskman/taskman.py "$@"

@@ -98,6 +98,17 @@ def dot(size=18) -> Image.Image:
     return img.filter(ImageFilter.GaussianBlur(0.8))
 
 
+def logo(size: int = 192) -> Image.Image:
+    """Bright cyan mark — readable on TVs even when filmed."""
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    m = size // 10
+    draw.ellipse((m, m, size - m, size - m), outline=(56, 189, 248, 255), width=max(6, size // 18))
+    draw.ellipse((size // 3, size // 3, size * 2 // 3, size * 2 // 3), fill=(125, 211, 252, 255))
+    glow = img.filter(ImageFilter.GaussianBlur(4))
+    return Image.alpha_composite(glow, img)
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     # 8 motion frames — render small then upscale (fast) for clear background motion.
@@ -112,9 +123,11 @@ def main():
     soft_orb(640, (34, 211, 238), peak=230).save(OUT / "orb_cyan.png", optimize=True)
     soft_orb(520, (14, 165, 233), peak=210).save(OUT / "orb_sky.png", optimize=True)
     soft_orb(480, (56, 189, 248), peak=180).save(OUT / "orb_glow.png", optimize=True)
-    track().save(OUT / "track.png", optimize=True)
-    thumb().save(OUT / "thumb.png", optimize=True)
-    dot().save(OUT / "dot.png", optimize=True)
+    track(w=480, h=14).save(OUT / "track.png", optimize=True)
+    thumb(w=150, h=14).save(OUT / "thumb.png", optimize=True)
+    dot(size=22).save(OUT / "dot.png", optimize=True)
+    logo(192).save(OUT / "logo.png", optimize=True)
+    logo(192).save(OUT / "watermark.png", optimize=True)
     print("Wrote Plymouth motion frames + assets to", OUT)
 
 

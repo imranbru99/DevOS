@@ -308,7 +308,7 @@ class TestUrls(unittest.TestCase):
 
     def test_browser_choice(self):
         url = "https://www.google.com/search?q=x"
-        self.assertEqual(tools.browser_command("chrome", url, fake_which()), ["google-chrome-stable", url])
+        self.assertEqual(tools.browser_command("chrome", url, fake_which()), ["devos-browser", url])
         self.assertEqual(tools.browser_command("chrome", url, fake_which({"devos-browser"})), ["devos-browser", url])
         self.assertEqual(tools.browser_command("default", url, fake_which(set())), ["xdg-open", url])
 
@@ -431,13 +431,13 @@ class TestToolsDryRun(unittest.TestCase):
 
     def test_users_sentence_dry_run_plan(self):
         res = self.run_action("please go the chrome and go the google and search hp latest laptop")
-        self.assertEqual(res[0].plan, [["google-chrome-stable", "https://www.google.com/search?q=hp+latest+laptop"]])
+        self.assertEqual(res[0].plan, [["devos-browser", "https://www.google.com/search?q=hp+latest+laptop"]])
         self.assertEqual(self.launched, [])
 
     def test_social_posting_dry_run_plan(self):
         res = self.run_action("go to facebook from chrome, then write a post about Dev OS what's the best feature of our Dev OS then publish")
         self.assertTrue(res[0].ok)
-        self.assertEqual(res[0].plan[0], ["google-chrome-stable", "https://www.facebook.com"])
+        self.assertEqual(res[0].plan[0], ["devos-browser", "https://www.facebook.com"])
         self.assertEqual(res[0].data["platform"], "facebook")
         self.assertIn("Dev OS", res[0].data["draft"])
         self.assertEqual(res[0].data["clipboard"], res[0].data["draft"])
@@ -729,6 +729,10 @@ class TestAboutDevOS(unittest.TestCase):
         self.assertIn("Imran Ahmed", _tools.ABOUT_TEXT)
         self.assertIn("https://imrandev.bd/", _tools.ABOUT_TEXT)
         self.assertIn("https://github.com/imranbru99/DevOS", _tools.ABOUT_TEXT)
+        self.assertIn("me@imrandev.bd", _tools.ABOUT_TEXT)
+        self.assertIn("https://imrandev.bd/contact", _tools.ABOUT_TEXT)
+        self.assertIn("https://wa.me/+8801576918420", _tools.ABOUT_TEXT)
+        self.assertIn("https://linkedin.com/in/imranbru99", _tools.ABOUT_TEXT)
 
     def test_websites_are_still_websites(self):
         import tools as _tools

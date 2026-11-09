@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=DevOS English UI
+Comment=Keep menus and clock formats in English
+Exec=/bin/bash /usr/local/sbin/devos-force-english-ui
+Icon=preferences-desktop-locale
+Terminal=false
+X-KDE-autostart-phase=0
+X-GNOME-Autostart-enabled=true
+OnlyShowIn=KDE;
+NoDisplay=true

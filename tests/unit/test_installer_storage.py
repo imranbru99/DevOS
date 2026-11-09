@@ -110,12 +110,12 @@ class InstallerStorageTests(unittest.TestCase):
             with patch.object(job.Path,'read_text',return_value=json.dumps([disk()])), patch.object(storage,'apply',side_effect=ValueError('drive changed')):
                 self.assertIsNone(job.run())
 
-    def test_data_drive_job_runs_after_user_creation_before_finalize(self):
+    def test_data_drive_job_runs_after_user_creation_and_bootloader(self):
         text=(ROOT/'build/includes.chroot/etc/calamares/settings.conf').read_text()
         sequence=text.split('- exec:')[1].split('- show:')[0]
         self.assertLess(sequence.index('- usersq'),sequence.index('- shellprocess@finalize'))
-        self.assertLess(sequence.index('- bootloader'),sequence.index('- devosstorage'))
-        self.assertLess(sequence.index('- bootloader'),sequence.index('- shellprocess@features-shell'))
+        self.assertLess(sequence.index('- devosbootloader'),sequence.index('- devosstorage'))
+        self.assertLess(sequence.index('- devosbootloader'),sequence.index('- shellprocess@features-shell'))
 
     def test_human_review_round_trips_abc_layout_and_scanned_identity(self):
         choice='Erase selected additional drives (ext4):<br/>/dev/sdb → Work A 100 GiB · B 150.5 GiB · C remaining<br/>OS and manually configured disks are excluded.'

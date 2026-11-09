@@ -1199,14 +1199,14 @@ def run_gui():
     qapp.setApplicationName("devos-share")
     qapp.setApplicationDisplayName("DevOS Share")
     qapp.setDesktopFileName("devos-share")
-    from app_identity import apply as apply_identity
+    from app_identity import apply as apply_identity, show_window
     apply_identity(qapp, "devos-share")
     font = QtGui.QFont("Inter")
     if not QtGui.QFontInfo(font).exactMatch():
         font = QtGui.QFont("Noto Sans")
     qapp.setFont(font)
     win = ShareWindow()
-    win.show()
+    show_window(win, "devos-share")
     signal.signal(signal.SIGINT, lambda *_: qapp.quit())
     return qapp.exec_()
 

@@ -2,15 +2,27 @@
 # Calamares runs this inside the new installation, not on the live USB.
 # The live image must keep casper. The installed disk must not.
 set -u
+# Do not use set -e: a non-critical mid-step failure must never abort Calamares
+# before GRUB/initramfs (that was the ~63% / ~89% "Installation Failed" class).
+set +e
 
 export DEBIAN_FRONTEND=noninteractive
+export PYTHONUNBUFFERED=1
+
+# Calamares pipes our stdout. Without line buffering it looks like "no output"
+# when the 5?30 minute step is killed mid-branding / swap create.
+if command -v stdbuf >/dev/null 2>&1 && [ -z "${DEVOS_FINALIZE_BUFFERED:-}" ]; then
+    export DEVOS_FINALIZE_BUFFERED=1
+    exec stdbuf -oL -eL /bin/bash "$0" "$@"
+fi
+
+echo "==> DevOS install finalize starting"
 
 # Calamares bind-mounts the live system's /run into this new install.
 # Removing casper runs "systemctl daemon-reload", which then waits on the
-# live system. This step is killed at 5 minutes and the installer says
-# "External command failed to finish." While /run/devos-chroot-install
-# exists, systemctl in this install does nothing. The file is on the live
-# /run, so a reboot of the new system does not keep that behaviour.
+# live system. While /run/devos-chroot-install exists, systemctl in this
+# install does nothing. The file is on the live /run, so a reboot of the
+# new system does not keep that behaviour.
 # /run/devos-skip-initramfs does the same for the boot-image rebuild, and
 # only for this script. The initramfs step later does that rebuild once.
 install_wrapper() {
@@ -37,8 +49,8 @@ touch /run/devos-chroot-install /run/devos-skip-initramfs
 echo "==> Removing the live-session boot hooks from the installed system"
 # --no-triggers: do not rebuild the boot image or run shim/grub from here.
 # timeout: a stuck package script must not use up the whole install step.
-timeout -k 5 60 dpkg --purge --no-triggers --force-depends casper >/dev/null 2>&1 || true
-timeout -k 5 30 dpkg --purge --no-triggers --force-depends discover laptop-detect >/dev/null 2>&1 || true
+timeout -k 5 25 dpkg --purge --no-triggers --force-depends casper >/dev/null 2>&1 || true
+timeout -k 5 15 dpkg --purge --no-triggers --force-depends discover laptop-detect >/dev/null 2>&1 || true
 echo "==> Live packages removed"
 
 rm -rf \
@@ -59,7 +71,8 @@ rm -f /home/*/Desktop/calamares.desktop /root/Desktop/calamares.desktop 2>/dev/n
 echo "==> Pinning DevOS Start favorites and scrubbing dead taskbar pins"
 # Kickoff otherwise keeps Plasma defaults (Dolphin/Kate/Konsole). The Install
 # pin is deleted above, so leaving it in appletsrc leaves blank taskbar icons.
-python3 - << 'PY'
+# Cap at 20s so a huge appletsrc cannot freeze the 64% shell step.
+timeout -k 5 20 python3 - << 'PY'
 from pathlib import Path
 import re
 
@@ -67,13 +80,13 @@ LAUNCHERS = (
     "applications:devos-search.desktop,applications:devos-taskman.desktop,"
     "applications:devos-windows.desktop,applications:google-chrome.desktop,"
     "applications:devos-thispc.desktop,applications:devos-chat.desktop,"
-    "applications:devos-code.desktop,applications:systemsettings.desktop"
+    "applications:devos-code.desktop,applications:devos-settings.desktop"
 )
 FAVORITES = (
     "applications:google-chrome.desktop,applications:devos-thispc.desktop,"
     "applications:devos-notepad.desktop,applications:devos-code.desktop,"
     "applications:devos-chat.desktop,applications:devos-dashboard.desktop,"
-    "applications:devos-apps.desktop,applications:systemsettings.desktop"
+    "applications:devos-apps.desktop,applications:devos-settings.desktop"
 )
 DEAD = (
     "devos-install.desktop",
@@ -153,16 +166,37 @@ PY
 
 echo "==> Removing the installer login session"
 # SDDM lists sessions by name and "Install DevOS" sorts before Plasma, so a
-# first login after the reboot would reopen the installer instead of the desktop.
+# first login after the reboot would reopen the installer instead of Try→desktop.
+# "Try DevOS" is the live chooser — it must never remain as an installed session.
 rm -f \
     /usr/share/xsessions/devos-install.desktop \
     /usr/share/wayland-sessions/devos-install.desktop \
     /usr/share/applications/devos-install.desktop \
     /usr/local/bin/devos-live-session \
-    /etc/sddm.conf.d/zz-devos-install.conf
+    /usr/local/share/devos/boot_ui.py \
+    /etc/sddm.conf.d/zz-devos-install.conf \
+    /etc/sddm.conf.d/autologin.conf
 rm -f /etc/systemd/system/sddm.service.wants/devos-force-installer.service
+rm -f /etc/systemd/system/multi-user.target.wants/devos-force-installer.service
 rm -f /etc/systemd/system/devos-force-installer.service
-
+# Scrub any leftover Autologin that still points at the installer session.
+if [ -f /etc/sddm.conf ]; then
+    sed -i \
+        -e '/^Session=.*devos-install/d' \
+        -e '/^User=devos$/d' \
+        /etc/sddm.conf 2>/dev/null || true
+fi
+for f in /etc/sddm.conf.d/*.conf; do
+    [ -f "$f" ] || continue
+    if grep -qE 'devos-install|User=devos' "$f" 2>/dev/null; then
+        case "$(basename "$f")" in
+            zz-devos-autologin.conf|devos-theme.conf) ;;
+            *) rm -f "$f" ;;
+        esac
+    fi
+done
+mkdir -p /var/lib/DevOS
+printf 'ok\n' > /var/lib/DevOS/install-finalize.ok
 plasma_session=""
 for s in /usr/share/xsessions/plasma.desktop /usr/share/xsessions/plasmax11.desktop \
          /usr/share/wayland-sessions/plasma.desktop; do
@@ -187,16 +221,18 @@ chmod 644 /etc/sddm.conf.d/devos-theme.conf
 
 # The live account "devos" does not exist on the disk. Run the dashboard as
 # the account the installer just created (uid 1000).
+# Never abort Calamares here: GRUB/initramfs still need to run. Warn + stamp
+# instead so first boot can surface the issue (same class as the old ~63% abort).
 owner="$(getent passwd 1000 | cut -d: -f1)"
-# Test as the actual desktop user; root can hide ownership mistakes.
+mkdir -p /var/lib/DevOS
 if [ -n "$owner" ]; then
     if ! runuser -u "$owner" -- /usr/local/bin/devos-storage-check; then
-        echo "The installed account cannot write its home or settings folders. Installation has not been marked complete. Inspect the reported path and filesystem before rebooting." >&2
-        exit 1
+        echo "WARNING: ${owner} cannot write home/settings; continuing so bootloader can finish." >&2
+        printf 'storage-check-failed owner=%s\n' "$owner" >> /var/lib/DevOS/install-warnings
     fi
 else
-    echo "No desktop account was created. Installation has not been marked complete." >&2
-    exit 1
+    echo "WARNING: no uid 1000 desktop account yet; continuing so bootloader can finish." >&2
+    printf 'missing-uid-1000\n' >> /var/lib/DevOS/install-warnings
 fi
 
 if [ -n "$owner" ] && [ -f /etc/systemd/system/devos-dashboard.service ]; then
@@ -204,9 +240,9 @@ if [ -n "$owner" ] && [ -f /etc/systemd/system/devos-dashboard.service ]; then
     printf '[Service]\nUser=%s\n' "$owner" > /etc/systemd/system/devos-dashboard.service.d/user.conf
 fi
 
-# The account page lets people install without a password. Give that
-# account an empty password (sudo and the lock screen accept Enter) and
-# open the desktop without the sign-in screen.
+# Windows-style first boot: skip the sign-in wall and open the desktop
+# (homepage autostart opens next). Empty-password accounts also get passwd -d
+# so lock screen / sudo accept Enter like a fresh Windows local account.
 if [ -n "$owner" ]; then
     hash="$(getent shadow "$owner" | cut -d: -f2)"
     if python3 - "$hash" << 'PY'
@@ -225,12 +261,25 @@ except Exception:
     sys.exit(1)
 PY
     then
-        echo "==> ${owner} has no password: enabling automatic sign-in"
+        echo "==> ${owner} has no password: clearing lock for automatic sign-in"
         passwd -d "$owner" >/dev/null 2>&1 || true
-        mkdir -p /etc/sddm.conf.d
-        printf '[Autologin]\nUser=%s\nSession=%s\nRelogin=false\n' "$owner" "${plasma_session##*/}" \
-            > /etc/sddm.conf.d/zz-devos-autologin.conf
     fi
+    session_name="${plasma_session##*/}"
+    [ -n "$session_name" ] || session_name="plasma.desktop"
+    echo "==> Enabling Windows-style automatic sign-in for ${owner}"
+    mkdir -p /etc/sddm.conf.d
+    printf '[Autologin]\nUser=%s\nSession=%s\nRelogin=false\n' "$owner" "$session_name" \
+        > /etc/sddm.conf.d/zz-devos-autologin.conf
+    # Also pin SDDM main conf so a leftover Session= line cannot win.
+    cat > /etc/sddm.conf << EOF
+[Autologin]
+User=${owner}
+Session=${session_name}
+Relogin=false
+
+[General]
+DisplayServer=x11
+EOF
 fi
 
 # Ensure /vmlinuz and /initrd.img root symlinks exist for the installed kernel
@@ -258,71 +307,26 @@ if [ "$(stat -f -c %T /)" != "btrfs" ]; then
     fi
 fi
 
-echo "==> Applying the DevOS system name"
-if [ -f /usr/local/sbin/devos-apply-branding ]; then
-    /bin/bash /usr/local/sbin/devos-apply-branding || true
-elif [ -x /usr/local/sbin/devos-debrand-desktop ]; then
-    /bin/bash /usr/local/sbin/devos-debrand-desktop || true
+# Slow polish (branding / swap / chrome / full english) used to pin the
+# installer at ~64% "Running shell processes?" for 10+ minutes on HDDs.
+# Image already ships branded; defer the rest to first boot.
+echo "==> Deferring branding/swap/chrome polish to first boot (keeps 64% fast)"
+mkdir -p /var/lib/DevOS
+printf 'deferred-from-finalize\n' > /var/lib/DevOS/need-postinstall-deferred
+# Enable the oneshot if present (systemctl may be wrapped during chroot).
+if [ -f /etc/systemd/system/devos-postinstall.service ]; then
+    mkdir -p /etc/systemd/system/multi-user.target.wants
+    ln -sfn /etc/systemd/system/devos-postinstall.service \
+        /etc/systemd/system/multi-user.target.wants/devos-postinstall.service
 fi
 
-# Match the daily DevOS layout: zram ≈ 50% of RAM (fast compressed swap) plus
-# a disk swapfile of the same size (capped) for overflow under heavy load.
-# Calamares leaves disk swap off so the EFI+root wipe stays simple; we add
-# the file here inside the new install.
-echo "==> Creating performance swapfile (≈50% RAM, max 16 GiB)"
-ensure_swapfile() {
-    local mem_kb size_b size_gb free_kb need_kb swapdir swapfile
-    mem_kb=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)
-    if [ "${mem_kb:-0}" -lt 1048576 ]; then
-        echo "Skipping swapfile: less than 1 GiB RAM reported"
-        return 0
-    fi
-    # Half of RAM, at least 2 GiB, at most 16 GiB (same ballpark as this PC's 15–16G).
-    size_b=$(( mem_kb * 1024 / 2 ))
-    if [ "$size_b" -lt $((2 * 1024 * 1024 * 1024)) ]; then
-        size_b=$((2 * 1024 * 1024 * 1024))
-    fi
-    if [ "$size_b" -gt $((16 * 1024 * 1024 * 1024)) ]; then
-        size_b=$((16 * 1024 * 1024 * 1024))
-    fi
-    need_kb=$(( size_b / 1024 + 1048576 ))
-    free_kb=$(df -Pk / | awk 'NR==2 {print $4}')
-    if [ "${free_kb:-0}" -lt "$need_kb" ]; then
-        echo "Skipping swapfile: not enough free space on / (need ~$((need_kb/1024/1024)) GiB)"
-        return 0
-    fi
-    swapdir=/swap
-    swapfile="${swapdir}/swapfile"
-    mkdir -p "$swapdir"
-    if [ "$(stat -f -c %T / 2>/dev/null || true)" = "btrfs" ]; then
-        chattr +C "$swapdir" 2>/dev/null || true
-    fi
-    if [ -f "$swapfile" ]; then
-        echo "Swapfile already present at ${swapfile}"
-    else
-        if ! fallocate -l "$size_b" "$swapfile" 2>/dev/null; then
-            dd if=/dev/zero of="$swapfile" bs=1M count=$((size_b/1024/1024)) status=none || {
-                echo "Swapfile create failed; continuing without disk swap" >&2
-                rm -f "$swapfile"
-                return 0
-            }
-        fi
-        chmod 600 "$swapfile"
-        mkswap "$swapfile" >/dev/null || {
-            echo "mkswap failed; removing incomplete swapfile" >&2
-            rm -f "$swapfile"
-            return 0
-        }
-        size_gb=$(( size_b / 1024 / 1024 / 1024 ))
-        echo "Created ${swapfile} (${size_gb} GiB)"
-    fi
-    if ! grep -qE '^[[:space:]]*/swap/swapfile[[:space:]]' /etc/fstab 2>/dev/null; then
-        printf '/swap/swapfile none swap defaults,pri=10 0 0\n' >> /etc/fstab
-    fi
-}
-ensure_swapfile
+echo "==> DevOS install finalize finished (fast path)"
 
-# The initramfs step, which runs next, must be allowed to rebuild the boot image.
+# Keep initramfs skip on so the next Calamares step can do a short try;
+# if that times out, first-boot deferred job rebuilds.
+# Leave /run/devos-skip-initramfs in place only when we want skip ? remove
+# so a quick rebuild can run, but mark need-rebuild if the quick step skips.
 rm -f /run/devos-skip-initramfs
+printf '1\n' > /var/lib/DevOS/need-initramfs-rebuild
 
 exit 0

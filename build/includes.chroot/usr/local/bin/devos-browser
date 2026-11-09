@@ -18,11 +18,13 @@ search_language() {
             | sed -n 's/^loc=//p' | tr -d '\r')
     fi
 
+    # Primary OS language is English — never put a secondary language first.
+    # Regional hints stay after en-US so search UI stays English.
     case "$loc" in
-        BD) lang="bn-BD,bn,en-US,en" ;;
-        IN) lang="hi-IN,hi,en-IN,en-US,en" ;;
-        PK) lang="ur-PK,ur,en-GB,en" ;;
-        NP) lang="ne-NP,ne,en-US,en" ;;
+        BD) lang="en-US,en,bn-BD,bn" ;;
+        IN) lang="en-IN,en-US,en,hi-IN,hi" ;;
+        PK) lang="en-GB,en-US,en,ur-PK,ur" ;;
+        NP) lang="en-US,en,ne-NP,ne" ;;
         GB|IE) lang="en-GB,en-US,en" ;;
         *) lang="en-US,en" ;;
     esac
@@ -124,8 +126,24 @@ lang=$(search_language)
 # where xdg_popup menus (bookmark folders, profile switcher, extension bubbles)
 # instantly dismiss upon click. Forcing --ozone-platform=x11 routes through XWayland,
 # making all bookmark dropdowns, profile switchers, and menus 100% stable.
-# --disable-dev-shm-usage prevents shared memory exhaustion deadlocks in renderers.
-args=(--accept-lang="$lang" --ozone-platform=x11 --disable-dev-shm-usage)
+args=(--accept-lang="$lang" --ozone-platform=x11)
+
+# Prefer /dev/shm; only spill to /tmp when shm is nearly empty (avoids filling
+# the 25–35% /tmp tmpfs under many Chrome windows).
+shm_free_kb=$(df -k /dev/shm 2>/dev/null | awk 'NR==2 {print $4}')
+if [ -n "${shm_free_kb:-}" ] && [ "$shm_free_kb" -lt 262144 ]; then
+    args+=(--disable-dev-shm-usage)
+fi
+
+ram_gb=$(awk '/^MemTotal:/ {printf "%d", $2/1048576}' /proc/meminfo 2>/dev/null || echo 8)
+# Shared disk cache budget across all windows (not 50-tab single-window bloat).
+disk_cache=$(( ram_gb * 48 * 1024 * 1024 ))
+[ "$disk_cache" -gt $((384 * 1024 * 1024)) ] && disk_cache=$((384 * 1024 * 1024))
+[ "$disk_cache" -lt $((96 * 1024 * 1024)) ] && disk_cache=$((96 * 1024 * 1024))
+# Chrome manages process isolation and background timers. The managed
+# Memory Saver policy releases memory from idle tabs across profiles.
+args+=("--disk-cache-size=${disk_cache}")
+
 # A virtual display (the test VM, and some other virtual PCs) makes Chrome's
 # graphics process quit immediately, so the window never appears. Draw in
 # software there. A normal graphics card is left alone, and the sandbox stays on.
@@ -147,21 +165,16 @@ elif [ -f "$user_sync_script" ]; then
     python3 "$user_sync_script" sync >/dev/null 2>&1 &
 fi
 
-# Check if guest mode or specific profile was requested
+# Windows-like profiles: each profile gets its own WM class (chrome-<slug>) so
+# Plasma shows a separate avatar icon — never one grouped Chrome blob.
 is_guest=0
 prof_dir=""
 has_class=0
 for arg in "$@"; do
     case "$arg" in
-        --guest)
-            is_guest=1
-            ;;
-        --profile-directory=*)
-            prof_dir="${arg#--profile-directory=}"
-            ;;
-        --class=*)
-            has_class=1
-            ;;
+        --guest) is_guest=1 ;;
+        --profile-directory=*) prof_dir="${arg#--profile-directory=}" ;;
+        --class=*) has_class=1 ;;
     esac
 done
 
@@ -180,13 +193,11 @@ if [ "$is_guest" -eq 1 ]; then
     exit 0
 fi
 
-# Assign profile class if not already explicitly specified
-if [ "$has_class" -eq 0 ]; then
-    if [ -n "$prof_dir" ]; then
-        # Map profile directory to safe slug
-        slug=$(echo "$prof_dir" | tr '[:upper:]' '[:lower:]' | tr -c '[:alnum:]' '-')
-        args+=(--class="chrome-${slug}")
-    fi
+if [ "$has_class" -eq 0 ] && [ -n "$prof_dir" ]; then
+    slug=$(echo "$prof_dir" | tr '[:upper:]' '[:lower:]' | tr -c '[:alnum:]' '-')
+    # Trim leading/trailing hyphens from tr
+    slug=$(echo "$slug" | sed 's/^-*//;s/-*$//')
+    [ -n "$slug" ] && args+=(--class="chrome-${slug}")
 fi
 
 chrome_cmd=("$chrome")

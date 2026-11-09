@@ -1326,10 +1326,25 @@ def main():
 
     # GUI Mode
     app = QApplication(sys.argv)
-    app.setApplicationName("Sound")
+    # Stable StatusNotifier Id so Plasma can hide this under ^ (not the panel).
+    app.setApplicationName("devos-sound")
     app.setApplicationDisplayName("Sound")
     if hasattr(app, "setDesktopFileName"):
         app.setDesktopFileName("devos-sound")
+    # Dark-authored chrome → light/dark via shared adapter (was stuck dark).
+    for components_dir in (
+        os.path.expanduser("~/.local/share/devos/components"),
+        "/usr/local/share/devos/components",
+    ):
+        if os.path.isfile(os.path.join(components_dir, "devos_appearance.py")):
+            if components_dir not in sys.path:
+                sys.path.insert(0, components_dir)
+            try:
+                from devos_appearance import install as install_appearance
+                install_appearance(app)
+            except Exception:
+                pass
+            break
     app.setQuitOnLastWindowClosed(not args.tray)
 
     if args.tray:
@@ -1341,7 +1356,16 @@ def main():
         except Exception:
             pass
         win = WindowsSoundSettingsWindow()
-        win.show()
+        try:
+            from app_identity import show_window
+            show_window(win, "devos-sound")
+        except Exception:
+            from PyQt5.QtCore import Qt
+            win.setWindowFlags(
+                Qt.Window | Qt.WindowTitleHint | Qt.WindowSystemMenuHint
+                | Qt.WindowMinMaxButtonsHint | Qt.WindowCloseButtonHint
+            )
+            win.show()
         sys.exit(app.exec_())
 
 

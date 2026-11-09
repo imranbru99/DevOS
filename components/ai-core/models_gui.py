@@ -39,16 +39,20 @@ QLineEdit { background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; 
 class ModelsWindow(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("DevOS AI Models")
+        self.setWindowTitle("AI Models")
         self.resize(720, 760)
-        self.setStyleSheet(STYLE)
+        try:
+            from devos_appearance import adapt_stylesheet, current_mode
+            self.setStyleSheet(adapt_stylesheet(STYLE, current_mode()))
+        except Exception:
+            self.setStyleSheet(STYLE)
         self.info = models_cli.hardware()
         self.choice = catalog.read_choice()
         self.proc = None
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(24, 20, 24, 20)
-        title = QtWidgets.QLabel("DevOS AI Models")
+        title = QtWidgets.QLabel("AI Models")
         title.setObjectName("title")
         layout.addWidget(title)
         facts = QtWidgets.QLabel(
@@ -207,14 +211,19 @@ def main():
     prepare_identity("devos-ai-models")
     app = QtWidgets.QApplication(sys.argv)
     _install_dialog_style(app)
+    try:
+        from devos_appearance import install as install_appearance
+        install_appearance(app)
+    except Exception:
+        pass
     app.setApplicationName("devos-ai-models")
-    app.setApplicationDisplayName("DevOS AI Models")
+    app.setApplicationDisplayName("AI Models")
+    from app_identity import apply as apply_identity, show_window
     if hasattr(app, "setDesktopFileName"):
         app.setDesktopFileName("devos-ai-models")
-        from app_identity import apply as apply_identity
         apply_identity(app, "devos-ai-models")
     window = ModelsWindow()
-    window.show()
+    show_window(window, "devos-ai-models")
     sys.exit(app.exec_())
 
 

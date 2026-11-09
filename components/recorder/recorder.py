@@ -1304,14 +1304,14 @@ def main():
     _install_dialog_style(app)
     app.setApplicationName("devos-screen-recorder")
     app.setApplicationDisplayName("Screen Recorder")
+    from app_identity import apply as apply_identity, show_window
     if hasattr(app, "setDesktopFileName"):
         app.setDesktopFileName("devos-screen-recorder")
-        from app_identity import apply as apply_identity
         apply_identity(app, "devos-screen-recorder")
     app.setWindowIcon(get_app_icon())
 
     window = DevOSRecorder()
-    window.show()
+    show_window(window, "devos-screen-recorder")
     sys.exit(app.exec_())
 
 

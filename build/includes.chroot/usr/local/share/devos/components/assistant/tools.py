@@ -796,7 +796,7 @@ def browser_command(browser: str, url: str, which: Callable) -> List[str]:
     if browser == "firefox":
         cands = ["firefox", "devos-browser", "google-chrome-stable", "google-chrome", "xdg-open"]
     elif browser == "chrome":
-        cands = ["google-chrome-stable", "google-chrome", "devos-browser", "chromium", "xdg-open"]
+        cands = ["devos-browser", "google-chrome-stable", "google-chrome", "chromium", "xdg-open"]
     else:
         cands = ["devos-browser", "google-chrome-stable", "google-chrome", "firefox", "xdg-open"]
     for c in cands:
@@ -1475,6 +1475,18 @@ def route_clause(c: str, ctx: Optional[ToolContext] = None, context: Optional[Li
             or _has(r"^what (?:can|do) you (?:do|help with)", c):
         return [Action("help", label="Show what I can do")]
 
+    # Who owns THIS PC (user profile) — not who made DevOS.
+    if not _has(r"^(?:open|go to|visit|launch)\b", c) and _has(
+            r"\bwho(?:'?s| is)? (?:the )?(?:owner|proprietor)\b"
+            r"|\bwho owns (?:this|the|my|our)\b"
+            r"|\bwhose (?:pc|computer|laptop|machine|desktop|device)\b"
+            r"|\bowner of (?:this|the|my|our)\b"
+            r"|\bwho (?:uses|owns|has) (?:this|the|my|our) (?:pc|computer|laptop|machine)\b"
+            r"|\b(?:pc|computer|laptop) owner\b"
+            r"|\bmy (?:profile|portfolio|bio|email)\b"
+            r"|\bowner(?:'?s)? (?:name|email|portfolio|bio|profile)\b", c):
+        return [Action("pc_owner", label="PC owner profile")]
+
     # Who made DevOS / DevOS AI: a fixed answer, the small model rambled.
     # ("devos" itself is stripped by normalize(), so "devos team whose?" arrives
     # as "team ... whose".) Plain "open github.com/..." stays a website.
@@ -1543,7 +1555,7 @@ def route_clause(c: str, ctx: Optional[ToolContext] = None, context: Optional[Li
             return [Action("close_app", {"name": name}, label=f"Close {name}")]
 
     if _has(r"^(?:open|launch|start|run|show)\s+(?:the\s+)?(?:devos\s+)?optimi[sz]er\b", c):
-        return [Action("open_tool", {"tool": "optimizer"}, label="Open DevOS Optimizer")]
+        return [Action("open_tool", {"tool": "optimizer"}, label="Open PC Optimizer")]
     if _has(r"\b(?:clean ?up|clean (?:my |the |this )?(?:pc|computer|laptop|disk|system|junk|cache|temp)|free up|junk|temp(?:orary)? files|clear (?:the )?cache|speed up|make (?:my |the |this )?(?:pc|computer|laptop) faster|slow pc|pc is slow|computer is slow)\b|ক্লিন", c):
         return [Action("cleanup_scan", label="Check what can be cleaned")]
 
@@ -1613,7 +1625,7 @@ def route_clause(c: str, ctx: Optional[ToolContext] = None, context: Optional[Li
     if _has(r"\b(?:emoji panel|emoji picker|open emoji|show emoji)\b", c) or c.strip() in ("emoji", "emojis"):
         return [Action("open_tool", {"tool": "emoji"}, label="Open emoji")]
     if _has(r"\b(?:broadband|dial\s*up|pppoe|onu(?:\s*connection|\s*network)?|connect\s*onu|ডায়াল|ডায়াল|ব্রডব্যান্ড|ওএনইউ)\b", c):
-        return [Action("open_tool", {"tool": "broadband"}, label="Open Broadband Dial-up")]
+        return [Action("open_tool", {"tool": "broadband"}, label="Open Internet Dial-up")]
     if _has(r"\b(?:kids?\s*mode|child(?:ren)?\s*mode|kid\s*play|start\s+kids?\s*mode|open\s+kids?\s*mode|turn\s+on\s+kids?\s*mode|run\s+kids?\s*mode)\b|বাচ্চাদের\s*মোড", c):
         return [Action("open_tool", {"tool": "kids"}, label="Start Kids Mode")]
 
@@ -1780,15 +1792,15 @@ def _note_action(text: str, app: str = "notepad", verb: str = "save") -> Optiona
     content = note_content(verb, text)
     if not content:
         return None
-    where = {"kate": "Text Editor", "writer": "LibreOffice Writer"}.get(app, "Notepad")
+    where = {"writer": "LibreOffice Writer"}.get(app, "Notepad")
     return Action("write_note", {"text": content, "app": app}, label=f"Save a note and open it in {where}")
 
 
 def _text_app_kind(app: str) -> str:
     a = app.lower().strip()
     if re.fullmatch(_TEXT_APPS, a):
-        if re.search(r"kate|kwrite|gedit|text editor|editor", a):
-            return "kate"
+        if re.search(r"kate|kwrite|gedit|text editor|editor|notepad", a):
+            return "notepad"
         if re.search(r"word|writer|office|document", a):
             return "writer"
         return "notepad"
@@ -1808,7 +1820,7 @@ def _write_into_app(app: str, verb: str, text: str, raw: str) -> Optional[List[A
         return None
     if verb.lower() in ("write", "type", "enter", "put") and _GENERATE.match(payload) and kind != "terminal":
         return None          # the model writes it; the router just opens the app (see route())
-    if kind in ("notepad", "kate", "writer"):
+    if kind in ("notepad", "writer"):
         a = _note_action(text, kind, verb)
         return [a] if a else None
     if kind in ("browser", "youtube"):
@@ -2386,21 +2398,37 @@ def _x_help(a, ctx, dry):
 ABOUT_TEXT = (
     "**DevOS** and **DevOS AI** are made by the DevOS team, led by **Imran Ahmed (Imran Dev)**.\n\n"
     "- Portfolio: https://imrandev.bd/\n"
-    "- DevOS is open source: https://github.com/imranbru99/DevOS\n\n"
+    "- DevOS is open source: https://github.com/imranbru99/DevOS\n"
+    "- Help Center on this PC: Start menu → Help Center\n\n"
     # The only contact details DevOS AI gives (same list as DEVOS_CONTACTS in
     # components/ai-core/server.py); the model once invented a LinkedIn URL.
-    "**Contact the DevOS team**\n"
-    "- Email: devos@imrandev.bd\n"
+    "**Contact / Help Center**\n"
     "- Contact form: https://imrandev.bd/contact\n"
-    "- WhatsApp: https://wa.me/+8801576918420\n"
+    "- Email: me@imrandev.bd\n"
+    "- LinkedIn: https://linkedin.com/in/imranbru99\n"
     "- GitHub: https://github.com/imranbru99\n"
-    "- LinkedIn: https://linkedin.com/in/imranbru99\n\n"
+    "- WhatsApp: https://wa.me/+8801576918420\n\n"
     "I run entirely on this PC, built on open-source language-model technology and tuned for DevOS."
 )
 
 
 def _x_about(a, ctx, dry):
     return ToolResult(ABOUT_TEXT)
+
+
+def _x_pc_owner(a, ctx, dry):
+    try:
+        from settings.owner_profile import owner_answer_text
+    except ImportError:
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+            from settings.owner_profile import owner_answer_text
+        except ImportError:
+            return ToolResult(
+                "I couldn't read the owner profile. Open **Start → My Profile** to add name, email, and portfolio.",
+                ok=False,
+            )
+    return ToolResult(owner_answer_text())
 
 
 def _x_web_search(a, ctx, dry):
@@ -2776,13 +2804,13 @@ def _x_open_tool(a, ctx, dry):
     py = sys.executable or "python3"
     if tool == "optimizer":
         argv = [py, OPTIMIZER_PY, "--cleanup"]
-        title = "DevOS Optimizer"
+        title = "PC Optimizer"
     elif tool == "apps":
         argv = [py, APPS_MANAGER_PY]
         title = "Apps"
     elif tool == "security":
         argv = [py, SECURITY_PY]
-        title = "DevOS Security"
+        title = "Security"
     elif tool == "clipboard":
         argv = [py, CLIPBOARD_PY]
         title = "Clipboard"
@@ -2794,7 +2822,7 @@ def _x_open_tool(a, ctx, dry):
         title = "Kids Mode"
     elif tool == "broadband":
         argv = [py, BROADBAND_PY]
-        title = "Broadband Dial-up"
+        title = "Internet Dial-up"
     else:
         return ToolResult("Unknown tool.", ok=False)
     ok = _launch(ctx, argv, dry)
@@ -2806,8 +2834,8 @@ def _x_cleanup_scan(a, ctx, dry):
     lines = []
     total = 0
     if opt is None:
-        return ToolResult("The cleanup scanner isn't available. Open DevOS Optimizer instead.", ok=False,
-                          buttons=[("Open DevOS Optimizer", Action("open_tool", {"tool": "optimizer"}))])
+        return ToolResult("The cleanup scanner isn't available. Open PC Optimizer instead.", ok=False,
+                          buttons=[("Open PC Optimizer", Action("open_tool", {"tool": "optimizer"}))])
     try:
         results = opt.public_scan(opt.scan_all())
     except Exception as exc:
@@ -2829,9 +2857,9 @@ def _x_cleanup_scan(a, ctx, dry):
     text = "\n".join([head] + lines)
     if disks:
         text += "\n\n⚠ Disk space is low. Uninstalling apps you don't use frees the most space."
-    text += "\n\nNothing has been deleted. Open DevOS Optimizer to review and clean."
+    text += "\n\nNothing has been deleted. Open PC Optimizer to review and clean."
     return ToolResult(text, data={"total": total},
-                      buttons=[("Open DevOS Optimizer", Action("open_tool", {"tool": "optimizer"}))])
+                      buttons=[("Open PC Optimizer", Action("open_tool", {"tool": "optimizer"}))])
 
 
 def _x_solve(a, ctx, dry):
@@ -2843,8 +2871,8 @@ def _x_solve(a, ctx, dry):
         import solve
         result = solve.answer(str(a.args.get("text") or ""))
     except Exception as exc:
-        return ToolResult(f"I couldn't finish the check ({exc}). Open DevOS Security.", ok=False,
-                          buttons=[("Open DevOS Security", Action("open_tool", {"tool": "security"}))])
+        return ToolResult(f"I couldn't finish the check ({exc}). Open Security.", ok=False,
+                          buttons=[("Open Security", Action("open_tool", {"tool": "security"}))])
     buttons = []
     for spec in result.get("buttons") or []:
         if spec.get("tool"):
@@ -3149,12 +3177,12 @@ def _x_write_note(a, ctx, dry):
         path = os.path.join(folder, f"{base} ({n}).txt")
         n += 1
     app = str(a.args.get("app", "notepad"))
-    if app == "kate" and ctx.which("kate"):
-        argv, where = ["kate", path], "Text Editor"
-    elif app == "writer" and ctx.which("libreoffice"):
+    if app == "writer" and ctx.which("libreoffice"):
         argv, where = ["libreoffice", "--writer", path], "LibreOffice Writer"
     elif os.path.isfile(NOTEPAD_PY):
         argv, where = [PYTHON, NOTEPAD_PY, path], "Notepad"
+    elif shutil.which("devos-code"):
+        argv, where = ["devos-code", path], "DevOS Code"
     else:
         argv, where = ["xdg-open", path], "the text editor"
     rel = "Documents/Notes/" + os.path.basename(path)
@@ -3625,7 +3653,8 @@ def _x_install_package(a, ctx, dry):
 
 _EXECUTORS = {
     "install_app": _x_install_app, "install_package": _x_install_package,
-    "help": _x_help, "about": _x_about, "web_search": _x_web_search, "open_url": _x_open_url, "open_app": _x_open_app,
+    "help": _x_help, "about": _x_about, "pc_owner": _x_pc_owner,
+    "web_search": _x_web_search, "open_url": _x_open_url, "open_app": _x_open_app,
     "open_search_result": _x_open_search_result, "open_web_page": _x_open_web_page,
     "system_info": _x_system_info, "count_apps": _x_count_apps, "list_apps": _x_list_apps,
     "open_settings": _x_open_settings, "open_folder": _x_open_folder, "volume": _x_volume,

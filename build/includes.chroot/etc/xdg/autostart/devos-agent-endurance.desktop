@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=DevOS Agent Endurance
+Comment=Keep the PC awake for multi-day AI coding agent runs
+Exec=/usr/local/bin/devos-agent-endurance daemon
+Icon=devos-ai-code-agent
+Terminal=false
+OnlyShowIn=KDE;
+X-KDE-autostart-phase=2
+# Prefer the systemd user unit; this is a session fallback if the unit is missing.
+X-GNOME-Autostart-enabled=false
+Hidden=true
+NoDisplay=true

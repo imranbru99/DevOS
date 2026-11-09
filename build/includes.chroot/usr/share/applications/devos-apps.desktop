@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=DevOS Apps
+Name=Apps
 GenericName=Installed apps & Store
 Comment=Uninstall apps, browse stores, and manage app data
 Exec=devos-apps %U

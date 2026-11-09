@@ -1,0 +1,22 @@
+#!/bin/bash
+# Build the initramfs for every installed kernel before declaring success.
+set -euo pipefail
+updater=/usr/sbin/update-initramfs
+[ ! -x "$updater.devos-real" ] || updater="$updater.devos-real"
+shopt -s nullglob
+kernels=(/boot/vmlinuz-*)
+if [ "${#kernels[@]}" -eq 0 ]; then
+    echo "No installed kernel found under /boot" >&2
+    exit 1
+fi
+for kernel in "${kernels[@]}"; do
+    version="${kernel#/boot/vmlinuz-}"
+    image="/boot/initrd.img-$version"
+    mode=-c
+    [ ! -s "$image" ] || mode=-u
+    echo "Building the installed initramfs for $version"
+    "$updater" "$mode" -k "$version"
+    test -s "$image"
+    lsinitramfs "$image" >/dev/null
+done
+rm -f /var/lib/DevOS/need-initramfs-rebuild

@@ -6,7 +6,7 @@
   <title>DevOS Dashboard</title>
   <link rel="stylesheet" href="style.css">
 </head>
-<body class="luxury-dark">
+<body class="luxury-dark" data-theme="light">
   <div class="ambient-glow glow-1"></div>
   <div class="ambient-glow glow-2"></div>
   <div class="ambient-glow glow-3"></div>
@@ -435,22 +435,22 @@
           <div class="wizard-step" id="wz-step-1">
             <div class="wizard-icon">✨</div>
             <h2>Make DevOS yours</h2>
-            <p>This only saves language.<span class="live-only"> It does not copy DevOS onto a disk. Use Install DevOS and format the old system, or removing the USB returns to the old operating system.</span></p>
+            <p>Menus, clock and dates stay in English. Bangla is for typing only.<span class="live-only"> This does not copy DevOS onto a disk. Use Install DevOS and format the old system, or removing the USB returns to the old operating system.</span></p>
 
             <div class="wizard-options">
               <div class="opt-group">
-                <label>System Language</label>
+                <label>Display language</label>
                 <select id="wz-lang" class="custom-select">
-                  <option value="en_US.UTF-8">English (United States)</option>
-                  <option value="bn_BD.UTF-8">Bengali / বাংলা (Bangladesh)</option>
+                  <option value="en_US.UTF-8" selected>English — menus, clock, dates</option>
                 </select>
+                <p class="muted" style="margin-top:8px;font-size:12px;opacity:.75;">Secondary languages never replace English on the desktop.</p>
               </div>
 
               <div class="opt-group">
-                <label>Keyboard Layout</label>
+                <label>Keyboard / typing</label>
                 <select id="wz-kb" class="custom-select">
                   <option value="us">English (US Standard)</option>
-                  <option value="bd">Bengali (Probhat / National)</option>
+                  <option value="bd">Bangla typing (Avro / Probhat)</option>
                 </select>
               </div>
 

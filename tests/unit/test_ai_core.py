@@ -122,31 +122,48 @@ if __name__ == "__main__":
 
 
 class TestIdleUnload(unittest.TestCase):
-    """The model held 1.6-2.7 GB forever; it must be freed when idle."""
+    """Model must sleep after 10 minutes with no chat — never sit at 5 GB idle."""
+
+    def test_default_idle_is_ten_minutes(self):
+        self.assertEqual(server.DEFAULT_IDLE_TIMEOUT_SECONDS, 600)
+        eng = server.DevOSAIEngine()
+        self.assertEqual(eng.idle_timeout_seconds, 600)
+        self.assertEqual(eng.last_activity, 0.0)
+        self.assertFalse(server.configured_warmup())
 
     def test_unloads_after_idle_and_not_before(self):
         import time as _time
         eng = server.DevOSAIEngine()
-        eng._llm = object()
+        eng.idle_timeout_seconds = 600
+        slot = eng._slots[0]
+        slot.llm = object()
+        slot.load_tried = True
         eng.is_loaded = True
-        eng.idle_timeout_seconds = 300
         eng.last_activity = _time.time()
         self.assertFalse(eng.unload_if_idle())
-        self.assertIsNotNone(eng._llm)
-        eng.last_activity = _time.time() - 301
+        self.assertIsNotNone(slot.llm)
+        eng.last_activity = _time.time() - 601
         self.assertTrue(eng.unload_if_idle())
-        self.assertIsNone(eng._llm)
-        self.assertFalse(eng._load_tried, "the next question loads it again")
+        self.assertIsNone(slot.llm)
+        self.assertFalse(slot.load_tried, "the next question loads it again")
+
+    def test_never_used_load_unloads_immediately(self):
+        """Mistaken preload with no chat must not keep RAM."""
+        eng = server.DevOSAIEngine()
+        eng.idle_timeout_seconds = 600
+        eng.last_activity = 0.0
+        slot = eng._slots[0]
+        slot.llm = object()
+        slot.load_tried = True
+        self.assertTrue(eng.unload_if_idle())
+        self.assertIsNone(slot.llm)
 
     def test_not_unloaded_while_answering(self):
         import time as _time
         eng = server.DevOSAIEngine()
-        eng._llm = object()
+        slot = eng._slots[0]
+        slot.llm = object()
+        slot.busy = True
         eng.last_activity = _time.time() - 999
-        with eng._lock:
-            import threading
-            result = []
-            t = threading.Thread(target=lambda: result.append(eng.unload_if_idle()))
-            t.start(); t.join()
-        self.assertEqual(result, [False])
-        self.assertIsNotNone(eng._llm)
+        self.assertFalse(eng.unload_if_idle())
+        self.assertIsNotNone(slot.llm)

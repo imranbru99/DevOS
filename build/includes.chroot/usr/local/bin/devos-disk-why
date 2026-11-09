@@ -1,0 +1,107 @@
+#!/bin/bash
+# Explain what is using disk space on an installed DevOS system.
+# Run:  devos-disk-why
+#   or: sudo devos-disk-why
+set -u
+
+human() {
+    if command -v numfmt >/dev/null 2>&1; then
+        numfmt --to=iec --suffix=B "$1"
+    else
+        echo "$1 bytes"
+    fi
+}
+
+echo "=========================================================="
+echo " DevOS disk usage — why install can reach 70–80 GB"
+echo "=========================================================="
+echo
+
+# Whole-disk view
+echo "== Volumes =="
+df -hT -x tmpfs -x devtmpfs -x squashfs 2>/dev/null || df -h
+echo
+
+echo "== Top directories under / (may need sudo for some paths) =="
+# One level under / — the usual story of a large install.
+sudo -n du -xhd1 / 2>/dev/null | sort -h || du -xhd1 / 2>/dev/null | sort -h || true
+echo
+
+echo "== Known DevOS / heavy paths =="
+paths=(
+    /usr
+    /var
+    /var/lib/DevOS
+    /var/lib/DevOS/models
+    /var/lib/waydroid
+    /var/lib/flatpak
+    /var/cache/apt
+    /var/log
+    /opt
+    /home
+    /snap
+)
+for p in "${paths[@]}"; do
+    if [ -e "$p" ]; then
+        sz="$(sudo -n du -shx "$p" 2>/dev/null | awk '{print $1}')"
+        [ -n "$sz" ] || sz="$(du -shx "$p" 2>/dev/null | awk '{print $1}')"
+        printf "  %-28s %s\n" "$p" "${sz:-?}"
+    fi
+done
+echo
+
+# Per-user Wine / Chrome / caches
+echo "== Per-user heavy folders =="
+for home in /home/*; do
+    [ -d "$home" ] || continue
+    user="$(basename "$home")"
+    for rel in \
+        .wine \
+        .local/share/waydroid \
+        .local/share/DevOS \
+        .local/share/DevOS/models \
+        .local/share/flatpak \
+        .cache \
+        .cache/google-chrome \
+        .config/google-chrome \
+        .var/app \
+        Downloads
+    do
+        p="$home/$rel"
+        if [ -e "$p" ]; then
+            sz="$(du -shx "$p" 2>/dev/null | awk '{print $1}')"
+            printf "  %-40s %s\n" "$user/$rel" "${sz:-?}"
+        fi
+    done
+done
+echo
+
+echo "== Package weight (installed) =="
+if command -v dpkg-query >/dev/null 2>&1; then
+    echo "  Largest installed packages:"
+    dpkg-query -Wf '${Installed-Size}\t${Package}\n' 2>/dev/null \
+        | sort -n | tail -n 20 \
+        | awk '{ printf "  %8.1f MB  %s\n", $1/1024, $2 }'
+fi
+echo
+
+echo "== Typical makeup of a 70–80 GB DevOS install =="
+cat << 'EOF'
+  ~12–18 GB   Base system (Plasma + DevOS apps from the ISO squashfs)
+  ~5–25 GB    Features you ticked in the installer (Office, Steam, Android
+              Studio, creator tools, … catalog can add ~20 GB if Premium)
+  ~2–8 GB     Local AI models under /var/lib/DevOS/models (or ~/.local/share)
+  ~2–15 GB    Android (Waydroid system image + apps) under /var/lib/waydroid
+  ~1–10 GB    Windows app layer / Wine prefixes (~/.wine, winapps)
+  ~1–5 GB     Flatpak apps + runtimes (/var/lib/flatpak)
+  ~1–10 GB    Browser profiles, Downloads, caches (~/.cache, Chrome)
+  ~1–5 GB     Logs, apt cache, old kernels (cleanable)
+
+  Tip: installer “Premium” / many Features + Android + AI is the usual
+  path to 70 GB+. A “Choose later” / minimal Features install stays closer
+  to ~15–25 GB used after first boot.
+EOF
+echo
+echo "Re-run with:  sudo devos-disk-why"
+echo "Clean apt cache:  sudo apt-get clean"
+echo "=========================================================="

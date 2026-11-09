@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
 Name=Cloud Backup
-GenericName=Back up to Google Drive or OneDrive
-Comment=Optional copy of Documents, Desktop, Pictures and Downloads in your cloud
+GenericName=Backup files to the cloud
+Comment=Copy Documents, Desktop, Pictures and Downloads to Google Drive or OneDrive
 Exec=/usr/local/bin/devos-run --desktop=devos-backup --name="Cloud Backup" /usr/local/share/devos/components/backup/cloud_backup.py gui
 Icon=devos-backup
 Terminal=false

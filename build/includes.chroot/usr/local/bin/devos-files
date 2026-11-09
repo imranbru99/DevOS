@@ -89,6 +89,7 @@ try:
         QMessageBox,
         QPlainTextEdit,
         QProgressBar,
+        QProgressDialog,
         QPushButton,
         QRadioButton,
         QRubberBand,
@@ -941,15 +942,27 @@ SKIP_FS = {"swap", "squashfs"}
 
 
 def _stat_mount(path):
+    """Return (total, free_for_user, used_by_files) in bytes.
+
+    Matches `df -h`:
+      total  = Size
+      free   = Avail  (f_bavail — what you can write)
+      used   = Used   (f_blocks - f_bfree — real file data)
+
+    Do NOT use (total - free) for the used bar: that adds ext4's ~5% root
+    reserve and makes This PC show ~66 GB used when df correctly shows ~43 GB.
+    """
     try:
         st = os.statvfs(path)
     except OSError:
         return None
-    total = st.f_blocks * st.f_frsize
-    free = st.f_bavail * st.f_frsize
+    fr = st.f_frsize
+    total = st.f_blocks * fr
+    free = st.f_bavail * fr
+    used = max(0, (st.f_blocks - st.f_bfree) * fr)
     if total <= 0:
         return None
-    return total, free
+    return total, free, used
 
 
 def list_drives():
@@ -994,7 +1007,7 @@ def list_drives():
 
     # Find root / system partition for C:
     root_stat = _stat_mount("/")
-    root_total, root_free = root_stat if root_stat else (0, 0)
+    root_total, root_free, root_used = root_stat if root_stat else (0, 0, 0)
     root_drive = {
         "letter": "C",
         "title": "DevOS (C:)",
@@ -1003,6 +1016,7 @@ def list_drives():
         "mount": "/",
         "total": root_total,
         "free": root_free,
+        "used": root_used,
         "removable": False,
         "is_system": True,
     }
@@ -1030,10 +1044,11 @@ def list_drives():
         seen_devices.add(path)
 
         free = None
+        used = None
         if mount:
             usage = _stat_mount(mount)
             if usage:
-                total, free = usage
+                total, free, used = usage
 
         letter = available_letters.pop(0) if available_letters else "Z"
         display_label = label or ("Local Disk" if not removable else "USB Drive")
@@ -1047,6 +1062,7 @@ def list_drives():
             "mount": mount,
             "total": total,
             "free": free,
+            "used": used,
             "removable": removable,
             "is_system": False,
             "fstype": (node.get("fstype") or "").lower(),
@@ -1246,8 +1262,13 @@ def prompt_name_dialog(parent, title: str, label: str, initial: str,
 
 
 def open_pc_properties():
-    """Open system properties (kinfocenter or settings)."""
-    for cmd in [["kinfocenter"], ["systemsettings"], ["gnome-control-center"]]:
+    """Open visual DevOS About this PC (falls back to classic tools)."""
+    for cmd in [
+        ["/usr/local/bin/devos-about"],
+        ["devos-about"],
+        ["kinfocenter"],
+        ["systemsettings"],
+    ]:
         try:
             subprocess.Popen(cmd)
             return
@@ -1661,12 +1682,17 @@ class DriveCard(QFrame):
 
         total = drive["total"] or 0
         free = drive["free"]
+        # Prefer real file usage (df Used). Fall back only if older callers omit it.
+        used_bytes = drive.get("used")
+        if used_bytes is None and free is not None and total > 0:
+            used_bytes = max(0, total - free)
         if total > 0 and free is not None:
-            used = max(0, min(100, int(round((total - free) * 100 / total))))
-            bar.setValue(used)
+            pct = max(0, min(100, int(round((used_bytes or 0) * 100 / total))))
+            bar.setValue(pct)
             # Red color if disk >= 90% full
-            if used >= 90:
+            if pct >= 90:
                 bar.setObjectName("driveBarFull")
+            # Same wording as Windows; numbers match df Avail / Size.
             space_text = f"{format_bytes(free)} free of {format_bytes(total)}"
         elif total > 0:
             bar.setValue(0)
@@ -2561,6 +2587,218 @@ class FolderSizeThread(QThread):
         self.finished.emit(total_size, file_count, dir_count)
 
 
+class FileOpWorker(QThread):
+    """Trash / delete / empty / restore off the UI thread so large trees do not freeze Explorer."""
+
+    progress = pyqtSignal(str)
+    finished_ok = pyqtSignal(list)  # error messages
+
+    def __init__(self, op, paths=None):
+        super().__init__()
+        self.op = op  # trash | delete | empty | restore
+        self.paths = list(paths or [])
+        self._cancel = False
+
+    def request_cancel(self):
+        self._cancel = True
+
+    def run(self):
+        errors = []
+        try:
+            if self.op == "trash":
+                errors = self._trash()
+            elif self.op == "delete":
+                errors = self._delete()
+            elif self.op == "empty":
+                errors = self._empty()
+            elif self.op == "restore":
+                errors = self._restore()
+        except Exception as exc:
+            errors.append(str(exc) or exc.__class__.__name__)
+        self.finished_ok.emit(errors)
+
+    def _trash(self):
+        trash_files = os.path.expanduser("~/.local/share/Trash/files")
+        trash_info = os.path.expanduser("~/.local/share/Trash/info")
+        try:
+            os.makedirs(trash_files, exist_ok=True)
+            os.makedirs(trash_info, exist_ok=True)
+        except OSError:
+            pass
+
+        errors = []
+        for p in self.paths:
+            if self._cancel:
+                break
+            if not os.path.exists(p):
+                continue
+            self.progress.emit(os.path.basename(p) or p)
+            deleted = False
+
+            for cmd in (["gio", "trash", p], ["kioclient5", "move", p, "trash:/"]):
+                if self._cancel:
+                    break
+                if not shutil.which(cmd[0]):
+                    continue
+                try:
+                    res = subprocess.run(
+                        cmd,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=3600,
+                    )
+                    if res.returncode == 0 and not os.path.exists(p):
+                        deleted = True
+                        break
+                except Exception:
+                    pass
+
+            if deleted or self._cancel or not os.path.exists(p):
+                continue
+
+            try:
+                base = os.path.basename(p)
+                stem, ext = os.path.splitext(base)
+                dst = os.path.join(trash_files, base)
+                counter = 2
+                while os.path.exists(dst):
+                    dst = os.path.join(trash_files, f"{stem} ({counter}){ext}")
+                    counter += 1
+
+                now_str = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+                info_content = f"[Trash Info]\nPath={os.path.abspath(p)}\nDeletionDate={now_str}\n"
+                info_path = os.path.join(trash_info, f"{os.path.basename(dst)}.trashinfo")
+                try:
+                    with open(info_path, "w", encoding="utf-8") as handle:
+                        handle.write(info_content)
+                except Exception:
+                    pass
+
+                # Same-disk rename is instant; cross-disk shutil.move copies then deletes.
+                try:
+                    if os.stat(p).st_dev == os.stat(trash_files).st_dev:
+                        os.rename(p, dst)
+                    else:
+                        shutil.move(p, dst)
+                except OSError:
+                    shutil.move(p, dst)
+            except Exception:
+                try:
+                    if os.path.isdir(p) and not os.path.islink(p):
+                        shutil.rmtree(p)
+                    else:
+                        os.remove(p)
+                except Exception as err:
+                    errors.append(f"{os.path.basename(p)}: {err}")
+        return errors
+
+    def _delete(self):
+        errors = []
+        info_dir = os.path.expanduser("~/.local/share/Trash/info")
+        for p in self.paths:
+            if self._cancel:
+                break
+            if not p or not os.path.lexists(p):
+                continue
+            self.progress.emit(os.path.basename(p) or p)
+            base = os.path.basename(p)
+            try:
+                if os.path.isdir(p) and not os.path.islink(p):
+                    shutil.rmtree(p, ignore_errors=True)
+                else:
+                    os.remove(p)
+            except Exception as err:
+                errors.append(f"{base}: {err}")
+            clean_base = re.sub(r"\s+\(\d+\)(\.[^.]+)?$", r"\1", base)
+            for info_path in (
+                os.path.join(info_dir, f"{base}.trashinfo"),
+                os.path.join(info_dir, f"{clean_base}.trashinfo"),
+            ):
+                if os.path.exists(info_path):
+                    try:
+                        os.remove(info_path)
+                    except OSError:
+                        pass
+        return errors
+
+    def _empty(self):
+        trash_dir = os.path.expanduser("~/.local/share/Trash/files")
+        trash_info = os.path.expanduser("~/.local/share/Trash/info")
+        if os.path.exists(trash_dir):
+            for item in os.listdir(trash_dir):
+                if self._cancel:
+                    break
+                fp = os.path.join(trash_dir, item)
+                self.progress.emit(item)
+                try:
+                    if os.path.isdir(fp) and not os.path.islink(fp):
+                        shutil.rmtree(fp, ignore_errors=True)
+                    else:
+                        os.remove(fp)
+                except Exception:
+                    pass
+        if os.path.exists(trash_info):
+            for item in os.listdir(trash_info):
+                if self._cancel:
+                    break
+                fp = os.path.join(trash_info, item)
+                try:
+                    os.remove(fp)
+                except Exception:
+                    pass
+        sizes_file = os.path.expanduser("~/.local/share/Trash/directorysizes")
+        if os.path.exists(sizes_file):
+            try:
+                os.remove(sizes_file)
+            except OSError:
+                pass
+        return []
+
+    def _restore(self):
+        restored_errors = []
+        info_dir = os.path.expanduser("~/.local/share/Trash/info")
+        for p in self.paths:
+            if self._cancel:
+                break
+            if not os.path.exists(p):
+                continue
+            base = os.path.basename(p)
+            self.progress.emit(base)
+            orig_path, _ = get_trash_info(p)
+            if not orig_path or is_recycle_bin_path(orig_path):
+                clean_name = re.sub(r"\s+\(\d+\)(\.[^.]+)?$", r"\1", base)
+                desktop = os.path.expanduser("~/Desktop")
+                if os.path.exists(desktop):
+                    orig_path = os.path.join(desktop, clean_name)
+                else:
+                    orig_path = os.path.expanduser(f"~/{clean_name}")
+            try:
+                dest_dir = os.path.dirname(orig_path)
+                if dest_dir:
+                    os.makedirs(dest_dir, exist_ok=True)
+                target = orig_path
+                if os.path.exists(target):
+                    stem, ext = os.path.splitext(target)
+                    c = 2
+                    while os.path.exists(target):
+                        target = f"{stem} (Restored {c}){ext}"
+                        c += 1
+                shutil.move(p, target)
+                clean_base = re.sub(r"\s+\(\d+\)(\.[^.]+)?$", r"\1", base)
+                for info_path in (
+                    os.path.join(info_dir, f"{base}.trashinfo"),
+                    os.path.join(info_dir, f"{clean_base}.trashinfo"),
+                ):
+                    if os.path.exists(info_path):
+                        try:
+                            os.remove(info_path)
+                        except OSError:
+                            pass
+            except Exception as err:
+                restored_errors.append(f"{base}: {err}")
+        return restored_errors
+
+
 class DrivePieWidget(QWidget):
     def __init__(self, used, free, parent=None):
         super().__init__(parent)
@@ -3054,7 +3292,12 @@ class WindowsDrivePropertiesDialog(QDialog):
         free = drive.get("free")
         if free is None:
             free = 0
-        used = max(0, total - free)
+        # Match df Used (file blocks), not total-free (which includes reserved).
+        used = drive.get("used")
+        if used is None:
+            used = max(0, total - free)
+        else:
+            used = max(0, int(used))
 
         space_grid = QGridLayout()
         space_grid.setHorizontalSpacing(12)
@@ -4917,9 +5160,20 @@ class WindowsFileExplorer(QMainWindow):
     SETTINGS_FILE = os.path.join(CONFIG_DIR, "explorer_settings.json")
 
     def _apply_appearance(self):
-        if not hasattr(self, "_base_style"):
-            self._base_style = self.property("_devosSourceStyle") or self.styleSheet()
-        self.setStyleSheet(self._base_style + """
+        # Author dark chrome once as the source of truth. Never capture an
+        # already light-adapted stylesheet as "_base_style" (that froze File
+        # Explorer dark-on-dark after Global Theme / light switches).
+        if getattr(self, "_appearance_locked", False):
+            app = QApplication.instance()
+            mgr = getattr(app, "_devos_appearance", None) if app else None
+            if mgr is not None:
+                try:
+                    mgr.style(self)
+                except Exception:
+                    pass
+            return
+        self._appearance_locked = True
+        self.setStyleSheet("""
             QMainWindow, QDialog { background: #0c131f; color: #f1f5f9; font-family: 'Segoe UI', 'Inter', sans-serif; }
             QWidget#tabContainer { background: #090e17; border-bottom: 1px solid #1a2638; }
             QTabBar#windowTabs { background: transparent; }
@@ -5106,6 +5360,13 @@ class WindowsFileExplorer(QMainWindow):
             QTabWidget#optionsTabs::pane { border: 1px solid #233247; background: #0e1624; border-radius: 8px; }
             QCheckBox, QRadioButton { color: #cbd5e1; spacing: 8px; }
         """)
+        app = QApplication.instance()
+        mgr = getattr(app, "_devos_appearance", None) if app else None
+        if mgr is not None:
+            try:
+                mgr.style(self)
+            except Exception:
+                pass
         self.table_view.verticalHeader().setDefaultSectionSize(28 if self._settings.get("compact", False) else 40)
         self.status.setVisible(self._settings.get("status_bar", True))
 
@@ -5748,7 +6009,8 @@ class WindowsFileExplorer(QMainWindow):
         self._loading_folder = False
         if self._view_mode == "icons":
             self._thumbnail_timer.start()
-        self.status_items_count.setText(f"{len(all_items)} items")
+        n = len(all_items)
+        self.status_items_count.setText("1 item" if n == 1 else f"{n} items")
         self.status_selected_info.setText("")
 
     def _prompt_trash_item_action(self, target):
@@ -6391,70 +6653,60 @@ class WindowsFileExplorer(QMainWindow):
             return
         self._trash_paths(paths)
 
+    def _start_file_op(self, title, op, paths, done_message=""):
+        """Run trash/delete/empty/restore in a worker so large folders do not freeze the UI."""
+        worker = getattr(self, "_file_op_worker", None)
+        if worker is not None and worker.isRunning():
+            QMessageBox.information(
+                self,
+                "Busy",
+                "Another file operation is still running. Wait for it to finish.",
+            )
+            return
+
+        dlg = QProgressDialog(title, "Cancel", 0, 0, self)
+        dlg.setWindowTitle("File Explorer")
+        dlg.setWindowModality(Qt.WindowModal)
+        dlg.setMinimumDuration(300)
+        dlg.setAutoClose(False)
+        dlg.setAutoReset(False)
+        dlg.setValue(0)
+        dlg.setLabelText(title)
+
+        worker = FileOpWorker(op, paths)
+        self._file_op_worker = worker
+
+        def on_progress(name):
+            dlg.setLabelText(f"{title}\n{name}")
+
+        def on_done(errors):
+            dlg.reset()
+            dlg.hide()
+            self.refresh()
+            if hasattr(self, "status") and done_message:
+                self.status.showMessage(done_message, 4000)
+            elif hasattr(self, "status_selected_info") and done_message:
+                self.status_selected_info.setText(done_message)
+            if errors:
+                QMessageBox.critical(
+                    self,
+                    "File operation",
+                    "Some items could not be processed:\n" + "\n".join(errors[:12]),
+                )
+            worker.deleteLater()
+            if getattr(self, "_file_op_worker", None) is worker:
+                self._file_op_worker = None
+
+        worker.progress.connect(on_progress)
+        worker.finished_ok.connect(on_done)
+        dlg.canceled.connect(worker.request_cancel)
+        worker.start()
+        dlg.show()
+
     def _trash_paths(self, paths):
-        trash_files = os.path.expanduser("~/.local/share/Trash/files")
-        trash_info = os.path.expanduser("~/.local/share/Trash/info")
-        try:
-            os.makedirs(trash_files, exist_ok=True)
-            os.makedirs(trash_info, exist_ok=True)
-        except OSError:
-            pass
-
-        errors = []
-        for p in paths:
-            if not os.path.exists(p):
-                continue
-            deleted = False
-
-            # 1. Try system trash command if available
-            for cmd in (["gio", "trash"], ["kioclient5", "move", p, "trash:/"]):
-                if shutil.which(cmd[0]):
-                    try:
-                        res = subprocess.run(cmd + ([p] if cmd[0] == "gio" else []),
-                                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                        if res.returncode == 0 and not os.path.exists(p):
-                            deleted = True
-                            break
-                    except Exception:
-                        pass
-
-            # 2. FreeDesktop Trash standard move
-            if not deleted and os.path.exists(p):
-                try:
-                    base = os.path.basename(p)
-                    stem, ext = os.path.splitext(base)
-                    dst = os.path.join(trash_files, base)
-                    counter = 2
-                    while os.path.exists(dst):
-                        dst = os.path.join(trash_files, f"{stem} ({counter}){ext}")
-                        counter += 1
-
-                    # Write .trashinfo file
-                    now_str = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-                    info_content = f"[Trash Info]\nPath={os.path.abspath(p)}\nDeletionDate={now_str}\n"
-                    info_path = os.path.join(trash_info, f"{os.path.basename(dst)}.trashinfo")
-                    try:
-                        with open(info_path, "w", encoding="utf-8") as f:
-                            f.write(info_content)
-                    except Exception:
-                        pass
-
-                    shutil.move(p, dst)
-                    deleted = True
-                except Exception as exc:
-                    # 3. Direct remove fallback
-                    try:
-                        if os.path.isdir(p):
-                            shutil.rmtree(p)
-                        else:
-                            os.remove(p)
-                        deleted = True
-                    except Exception as err:
-                        errors.append(f"{os.path.basename(p)}: {err}")
-
-        self.refresh()
-        if errors:
-            QMessageBox.critical(self, "Delete Error", "Could not delete:\n" + "\n".join(errors))
+        count = len(paths or [])
+        label = "Moving to Recycle Bin…" if count != 1 else f"Moving “{os.path.basename(paths[0])}” to Recycle Bin…"
+        self._start_file_op(label, "trash", paths, done_message=f"Moved {count} item(s) to Recycle Bin")
 
     def show_properties(self, target_path=None):
         """Open authentic Windows Properties dialog based on target type."""
@@ -6489,8 +6741,8 @@ class WindowsFileExplorer(QMainWindow):
         dlg.exec_()
 
     def show_system_properties(self):
-        dlg = WindowsSystemPropertiesDialog(self)
-        dlg.exec_()
+        # Visual About this PC — Energy, Audio, PCI, Firmware security, Sensors, …
+        open_pc_properties()
 
     def _open_manage(self):
         for cmd in [["/usr/local/bin/devos-disk-gui"], ["python3", "/usr/local/share/devos/components/settings/hardware_manager.py"], ["kinfocenter"]]:
@@ -6699,37 +6951,12 @@ class WindowsFileExplorer(QMainWindow):
         if reply != QMessageBox.Yes:
             return
 
-        # Empty files
-        if os.path.exists(trash_dir):
-            for item in os.listdir(trash_dir):
-                fp = os.path.join(trash_dir, item)
-                try:
-                    if os.path.isdir(fp) and not os.path.islink(fp):
-                        shutil.rmtree(fp, ignore_errors=True)
-                    else:
-                        os.remove(fp)
-                except Exception:
-                    pass
-
-        # Empty info
-        if os.path.exists(trash_info):
-            for item in os.listdir(trash_info):
-                fp = os.path.join(trash_info, item)
-                try:
-                    os.remove(fp)
-                except Exception:
-                    pass
-
-        sizes_file = os.path.expanduser("~/.local/share/Trash/directorysizes")
-        if os.path.exists(sizes_file):
-            try:
-                os.remove(sizes_file)
-            except OSError:
-                pass
-
-        self.refresh()
-        if hasattr(self, "status"):
-            self.status.showMessage("Recycle Bin emptied", 4000)
+        self._start_file_op(
+            "Emptying Recycle Bin…",
+            "empty",
+            [],
+            done_message="Recycle Bin emptied",
+        )
 
     def action_restore_selected(self):
         paths = self.get_selected_paths()
@@ -6760,65 +6987,13 @@ class WindowsFileExplorer(QMainWindow):
             self._restore_paths(items)
 
     def _restore_paths(self, paths):
-        restored = 0
-        failed = 0
-        info_dir = os.path.expanduser("~/.local/share/Trash/info")
-
-        for p in paths:
-            if not os.path.exists(p):
-                continue
-            base = os.path.basename(p)
-            orig_path, _ = get_trash_info(p)
-
-            # Strip any residual trash internal paths
-            if not orig_path or is_recycle_bin_path(orig_path):
-                clean_name = re.sub(r"\s+\(\d+\)(\.[^.]+)?$", r"\1", base)
-                desktop = os.path.expanduser("~/Desktop")
-                if os.path.exists(desktop):
-                    orig_path = os.path.join(desktop, clean_name)
-                else:
-                    orig_path = os.path.expanduser(f"~/{clean_name}")
-
-            try:
-                dest_dir = os.path.dirname(orig_path)
-                if dest_dir:
-                    os.makedirs(dest_dir, exist_ok=True)
-
-                target = orig_path
-                if os.path.exists(target):
-                    stem, ext = os.path.splitext(target)
-                    c = 2
-                    while os.path.exists(target):
-                        target = f"{stem} (Restored {c}){ext}"
-                        c += 1
-
-                shutil.move(p, target)
-
-                # Clean matching trashinfo files
-                info_path = os.path.join(info_dir, f"{base}.trashinfo")
-                if os.path.exists(info_path):
-                    try:
-                        os.remove(info_path)
-                    except OSError:
-                        pass
-                clean_base = re.sub(r"\s+\(\d+\)(\.[^.]+)?$", r"\1", base)
-                clean_info = os.path.join(info_dir, f"{clean_base}.trashinfo")
-                if os.path.exists(clean_info):
-                    try:
-                        os.remove(clean_info)
-                    except OSError:
-                        pass
-
-                restored += 1
-            except Exception:
-                failed += 1
-
-        self.refresh()
-        if hasattr(self, "status"):
-            msg = f"Restored {restored} item(s)"
-            if failed > 0:
-                msg += f" ({failed} failed)"
-            self.status.showMessage(msg, 4000)
+        count = len(paths or [])
+        self._start_file_op(
+            "Restoring items…",
+            "restore",
+            paths,
+            done_message=f"Restored {count} item(s)",
+        )
 
     def action_delete_permanently(self):
         paths = self.get_selected_paths()
@@ -6842,36 +7017,12 @@ class WindowsFileExplorer(QMainWindow):
         if reply != QMessageBox.Yes:
             return
 
-        deleted = 0
-        info_dir = os.path.expanduser("~/.local/share/Trash/info")
-        for p in paths:
-            base = os.path.basename(p)
-            try:
-                if os.path.isdir(p) and not os.path.islink(p):
-                    shutil.rmtree(p, ignore_errors=True)
-                else:
-                    os.remove(p)
-                deleted += 1
-            except Exception:
-                pass
-
-            info_file = os.path.join(info_dir, f"{base}.trashinfo")
-            if os.path.exists(info_file):
-                try:
-                    os.remove(info_file)
-                except OSError:
-                    pass
-            clean_base = re.sub(r"\s+\(\d+\)(\.[^.]+)?$", r"\1", base)
-            clean_info = os.path.join(info_dir, f"{clean_base}.trashinfo")
-            if os.path.exists(clean_info):
-                try:
-                    os.remove(clean_info)
-                except OSError:
-                    pass
-
-        self.refresh()
-        if hasattr(self, "status"):
-            self.status.showMessage(f"Permanently deleted {deleted} item(s)", 4000)
+        self._start_file_op(
+            "Deleting permanently…",
+            "delete",
+            paths,
+            done_message=f"Permanently deleted {count} item(s)",
+        )
 
     def _show_context_menu(self, pos):
         """Context menu for items or empty space in folder view."""
@@ -7253,7 +7404,19 @@ def main():
             picker_options["name"] = file_name
 
     window = WindowsFileExplorer(initial_path, picker_mode=picker_mode, picker_options=picker_options)
-    window.show()
+    # Always keep system min / max / close (never borderless-maximized chrome loss).
+    try:
+        from app_identity import show_window
+        show_window(window, "devos-thispc")
+    except Exception:
+        window.setWindowFlags(
+            Qt.Window
+            | Qt.WindowTitleHint
+            | Qt.WindowSystemMenuHint
+            | Qt.WindowMinMaxButtonsHint
+            | Qt.WindowCloseButtonHint
+        )
+        window.show()
     sys.exit(app.exec_())
 
 

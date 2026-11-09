@@ -383,6 +383,15 @@ def pcm_to_float(pcm: bytes):
 _NOISE = re.compile(r"\[[^\]]*\]|\([^)]*\)|\*[^*]*\*")       # [BLANK_AUDIO], (music), *cough*
 _BENGALI = re.compile(r"[ঀ-৿]")
 _OTHER_SCRIPT = re.compile(r"[^\x00-ɏঀ-৿ -⁯\s]")
+# Whisper often invents these on silence / noise when forced to a language.
+_HALLUCINATION = re.compile(
+    r"(?:thank you(?: for watching)?|thanks for watching|please subscribe|"
+    r"i am the one who has been born|"
+    r"字幕由|amara\.org|"
+    r"^[\s\"'“”]*you[\s\"'“”.]*$|"
+    r"^[\s\"'“”]*(?:the end|null|bye)[\s\"'“”.]*$)",
+    re.I,
+)
 
 
 def clean_segments(segments) -> str:
@@ -397,6 +406,40 @@ def guess_language(text: str) -> str:
     if _OTHER_SCRIPT.search(text):
         return "other"
     return "en"
+
+
+def _bn_score(text: str) -> int:
+    """Higher = more likely real Bangla speech (not English hallucination)."""
+    t = (text or "").strip()
+    if not t or _HALLUCINATION.search(t):
+        return -100
+    bn = len(_BENGALI.findall(t))
+    latin = len(re.findall(r"[A-Za-z]", t))
+    if bn == 0:
+        return -5 if latin > 8 else 0
+    return bn * 3 - max(0, latin - 2)
+
+
+def _en_score(text: str) -> int:
+    t = (text or "").strip()
+    if not t or _HALLUCINATION.search(t):
+        return -100
+    if _BENGALI.search(t):
+        return len(t) // 2
+    latin = len(re.findall(r"[A-Za-z]", t))
+    return latin if latin >= 2 else -5
+
+
+def _preferred_stt_language() -> str:
+    """User voice setting: 'bn' / 'en' / 'auto'."""
+    try:
+        import voice_prefs
+        pref = voice_prefs.tts_language_pref()
+        if pref in ("bn", "en"):
+            return pref
+    except Exception:
+        pass
+    return "auto"
 
 
 class Transcriber:
@@ -422,6 +465,8 @@ class Transcriber:
         with cls._lock:
             model = cls.load(path)
             text = clean_segments(model.transcribe(audio, language=language))
+            if text and _HALLUCINATION.search(text):
+                text = ""
             cls.last_language = language
         return text
 
@@ -438,23 +483,53 @@ class Transcriber:
             return ""
 
     @classmethod
+    def _pick_bn_en(cls, model, audio, prefer: str = "auto") -> Tuple[str, str]:
+        """Run bn + en passes and keep the better transcript (Bangla daily speech)."""
+        bn_text = clean_segments(model.transcribe(audio, language="bn"))
+        en_text = clean_segments(model.transcribe(audio, language="en"))
+        if bn_text and _HALLUCINATION.search(bn_text):
+            bn_text = ""
+        if en_text and _HALLUCINATION.search(en_text):
+            en_text = ""
+        bn_s, en_s = _bn_score(bn_text), _en_score(en_text)
+        if prefer == "bn":
+            bn_s += 4
+        elif prefer == "en":
+            en_s += 4
+        if bn_s > en_s and bn_text:
+            return bn_text, "bn"
+        if en_text:
+            return en_text, "en"
+        if bn_text:
+            return bn_text, "bn"
+        return "", prefer if prefer in LANGUAGES else "en"
+
+    @classmethod
     def transcribe(cls, pcm: bytes, path: str = None) -> str:
         audio = pcm_to_float(pcm)
+        prefer = _preferred_stt_language()
         with cls._lock:
             model = cls.load(path)
+            # Forced language from Voice settings.
+            if prefer in ("bn", "en"):
+                text, lang = cls._pick_bn_en(model, audio, prefer=prefer)
+                cls.last_language = lang
+                return text
             lang = cls.detect(model, audio)
-            if lang in LANGUAGES:
-                text = clean_segments(model.transcribe(audio, language=lang))
-            elif lang:
-                lang = "en"
-                text = clean_segments(model.transcribe(audio, language="en"))
+            # Tiny models often mis-label Bangla as hi/ur/as/en — dual-pass when unsure.
+            if lang in ("bn", "hi", "as", "ur", "ne") or lang not in LANGUAGES:
+                text, lang = cls._pick_bn_en(model, audio, prefer="auto")
+            elif lang == "en":
+                # Still try Bangla: detection frequently prefers English for Bangla speech.
+                text, lang = cls._pick_bn_en(model, audio, prefer="en")
             else:
                 text = clean_segments(model.transcribe(audio, language="auto"))
-                lang = guess_language(text)
+                if text and _HALLUCINATION.search(text):
+                    text = ""
+                lang = guess_language(text) if text else "en"
                 if lang not in LANGUAGES:
-                    lang = "en"
-                    text = clean_segments(model.transcribe(audio, language="en"))
-            cls.last_language = lang
+                    text, lang = cls._pick_bn_en(model, audio, prefer="auto")
+            cls.last_language = lang if lang in LANGUAGES else "en"
         return text
 
 
@@ -699,14 +774,42 @@ _FFPLAY_FAST = [
 ]
 
 
+def ensure_tts_venv() -> bool:
+    """Create ~/.local/share/devos/tts-venv with edge-tts when missing (once).
+
+    Without this, voice-call replies fall back to espeak (or stay silent if
+    ffplay/espeak are unavailable). Chat call mode needs this for neural TTS.
+    """
+    py = os.path.join(_TTS_VENV, "bin", "python")
+    if os.path.isfile(py):
+        return True
+    if not shutil.which("python3"):
+        return False
+    try:
+        subprocess.run(
+            ["python3", "-m", "venv", _TTS_VENV],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120, check=True,
+        )
+        pip = os.path.join(_TTS_VENV, "bin", "pip")
+        subprocess.run(
+            [pip, "install", "-q", "edge-tts>=6.1.0"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300, check=True,
+        )
+        return os.path.isfile(py)
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return False
+
+
 def warm_tts(language: str = "en") -> None:
     """Start the edge-tts worker early (app open / mic ready) so the first reply is snappy."""
     global _WARM_STARTED
     _WARM_STARTED = True
-    threading.Thread(
-        target=lambda: _EdgePool.warm(language if language in ("en", "bn") else "en"),
-        daemon=True, name="devos-tts-warm",
-    ).start()
+
+    def _warm():
+        ensure_tts_venv()
+        _EdgePool.warm(language if language in ("en", "bn") else "en")
+
+    threading.Thread(target=_warm, daemon=True, name="devos-tts-warm").start()
 
 
 def _stop_speech():
@@ -777,6 +880,12 @@ if __name__ == "__main__":
 
     @classmethod
     def ensure(cls) -> bool:
+        with cls._lock:
+            if cls._proc is not None and cls._proc.poll() is None:
+                return True
+            need_venv = not cls._python()
+        if need_venv:
+            ensure_tts_venv()
         with cls._lock:
             if cls._proc is not None and cls._proc.poll() is None:
                 return True

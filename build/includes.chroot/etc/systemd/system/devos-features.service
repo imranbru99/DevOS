@@ -11,9 +11,12 @@ StartLimitIntervalSec=0
 Type=oneshot
 ExecStart=/usr/local/bin/devos-features apply
 TimeoutStartSec=infinity
-Nice=10
+Slice=devos-workloads.slice
+Nice=15
+CPUWeight=20
+IOWeight=15
+CPUQuota=30%
 IOSchedulingClass=idle
-# Offline or a download failed: try again in a few minutes.
 Restart=on-failure
 RestartSec=300
 

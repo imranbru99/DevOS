@@ -5,6 +5,7 @@ Verifies magic-byte routing, malware detection (EICAR), APK permission flags, an
 
 import sys
 import os
+import tempfile
 import zipfile
 import unittest
 
@@ -21,13 +22,9 @@ from doctor import WinLayerDoctor
 class TestAppHubAndLayers(unittest.TestCase):
 
     def setUp(self):
-        self.test_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "tmp_test_files"))
-        os.makedirs(self.test_dir, exist_ok=True)
-
-    def tearDown(self):
-        import shutil
-        if os.path.exists(self.test_dir):
-            shutil.rmtree(self.test_dir)
+        fixture = tempfile.TemporaryDirectory(prefix="devos-apphub-test-")
+        self.addCleanup(fixture.cleanup)
+        self.test_dir = fixture.name
 
     def test_01_magic_byte_pe_routing(self):
         # Create a mock Windows PE file with MZ header

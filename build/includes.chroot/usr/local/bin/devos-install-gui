@@ -234,65 +234,18 @@ while true; do
     touch /run/devos-installer-safe-mode 2>/dev/null || true
 
     fails=$((fails + 1))
+    # Auto plan-B/C forever: never ask the user. Keep Safe Graphics + debug
+    # relaunches so the installer forces itself open on awkward GPUs.
     if [ "$fails" -ge 3 ]; then
-        echo "Calamares failed to start after $fails attempts. See $log" >>"$log"
-        
-        # NEVER exit the session! Display recovery interface or interactive terminal.
-        if command -v kdialog >/dev/null 2>&1; then
-            choice=$(kdialog --title "DevOS Installer Recovery" \
-                --menu "The graphical installer encountered a hardware display issue.\nHow would you like to proceed?" \
-                safe "Retry with Safe Graphics (Software Rendering)" \
-                term "Open Terminal / Shell" \
-                part "Open Disk Partition Manager" \
-                logs "View Installer Log" \
-                reboot "Restart Computer" 2>/dev/null || echo "safe")
-            case "$choice" in
-                safe)
-                    fails=1
-                    continue
-                    ;;
-                term)
-                    konsole 2>/dev/null || xterm 2>/dev/null || true
-                    fails=1
-                    continue
-                    ;;
-                part)
-                    partitionmanager 2>/dev/null || gparted 2>/dev/null || true
-                    fails=1
-                    continue
-                    ;;
-                logs)
-                    kdialog --textbox "$log" 800 600 2>/dev/null || true
-                    fails=1
-                    continue
-                    ;;
-                reboot)
-                    systemctl reboot -f 2>/dev/null || reboot
-                    ;;
-                *)
-                    fails=1
-                    continue
-                    ;;
-            esac
-        else
-            # Fallback if kdialog is unavailable: provide interactive diagnostic console
-            konsole -e bash -c '
-echo "=========================================================="
-echo "          DevOS Installer Recovery Console                "
-echo "=========================================================="
-echo "The installer encountered an issue starting on this hardware."
-echo "Last lines from log (/tmp/devos-calamares.log):"
-echo "----------------------------------------------------------"
-tail -n 25 /tmp/devos-calamares.log 2>/dev/null || true
-echo "----------------------------------------------------------"
-echo "Quick Commands:"
-echo "  sudo calamares -d     -> Run installer in debug mode"
-echo "  sudo partitionmanager -> Check 500GB SSD / disks"
-echo "=========================================================="
-exec bash
-' 2>/dev/null || konsole -e bash 2>/dev/null || xterm -e bash 2>/dev/null || sleep 10
-            fails=1
-        fi
+        echo "Calamares failed after $fails attempts — auto Safe Graphics retry (no prompt). See $log" >>"$log"
+        # Cap visible fail counter so we stay on the verbose safe path.
+        fails=2
+        export LIBGL_ALWAYS_SOFTWARE=1
+        export QT_QUICK_BACKEND=software
+        export QMLSCENE_DEVICE=softwarecontext
+        export QT_XCB_FORCE_SOFTWARE_OPENGL=1
+        # Brief pause so a crash-looping GPU driver can settle.
+        sleep 3
     fi
     sleep 2
 done

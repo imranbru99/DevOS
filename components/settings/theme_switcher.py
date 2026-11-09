@@ -47,6 +47,33 @@ def _run_cmd(cmd: list) -> bool:
         return False
 
 
+# Spectacle / lock / logout overlays always use Complementary. Keep it inverted
+# (dark panel + light text) in BOTH light and dark DevOS schemes.
+COMPLEMENTARY_OVERLAY = {
+    "BackgroundNormal": "16,20,32",
+    "BackgroundAlternate": "22,28,44",
+    "ForegroundNormal": "248,250,252",
+    "ForegroundInactive": "160,170,186",
+    "ForegroundActive": "56,189,248",
+    "ForegroundLink": "125,211,252",
+    "ForegroundNegative": "252,165,165",
+    "ForegroundNeutral": "253,230,138",
+    "ForegroundPositive": "110,231,183",
+    "ForegroundVisited": "196,181,253",
+    "DecorationFocus": "56,189,248",
+    "DecorationHover": "56,189,248",
+}
+
+
+def write_complementary_overlay(kwrite_bin: Optional[str] = None) -> None:
+    """Ensure Save/Cancel overlays stay readable in light and dark desktops."""
+    kw = kwrite_bin or shutil.which("kwriteconfig6") or shutil.which("kwriteconfig5")
+    if not kw:
+        return
+    for key, value in COMPLEMENTARY_OVERLAY.items():
+        _run_cmd([kw, "--file", "kdeglobals", "--group", "Colors:Complementary", "--key", key, value])
+
+
 class ThemeSwitcher:
     """Unified appearance manager for Dark and Light themes in DevOS."""
 
@@ -180,7 +207,8 @@ class ThemeSwitcher:
             except Exception:
                 pass
 
-        return "dark"
+        # Match ISO / skel default (DevOS-Light), not dark.
+        return "light"
 
     @classmethod
     def _update_ini_file(cls, path: str, section: str, values: Dict[str, str]):
@@ -266,7 +294,15 @@ class ThemeSwitcher:
             cls._strip_crashy_gtk_modules()
         if shutil.which("plasma-apply-desktoptheme"):
             _run_cmd(["plasma-apply-desktoptheme", spec["plasma_desktoptheme"]])
-        if shutil.which("kvantummanager"):
+        # Only touch Kvantum when Cupertino (mac) actually uses it as widgetStyle.
+        # Calling kvantummanager on light/dark leaves a latent engine that System
+        # Settings Global Theme can reactivate → black OK/Apply/Cancel.
+        mode_name = ""
+        for key, theme in cls.THEMES.items():
+            if theme is spec:
+                mode_name = key
+                break
+        if mode_name == "mac" and shutil.which("kvantummanager"):
             _run_cmd(["kvantummanager", "--set", spec["kvantum_theme"]])
         qdbus = shutil.which("qdbus6") or shutil.which("qdbus")
         if qdbus:
@@ -388,7 +424,10 @@ class ThemeSwitcher:
             if not shutil.which("plasma-apply-colorscheme"):
                 _run_cmd([kwrite_bin, "--file", "kdeglobals", "--group", "General", "--key", "ColorScheme", spec["kdeglobals_scheme"]])
             _run_cmd([kwrite_bin, "--file", "kdeglobals", "--group", "Icons", "--key", "Theme", spec["gtk_icon_theme"]])
-            _run_cmd([kwrite_bin, "--file", "kdeglobals", "--group", "KDE", "--key", "widgetStyle", "kvantum"])
+            # Breeze + ColorScheme keeps Settings/OK/Apply readable. Kvantum only
+            # for dark Cupertino — mac-light stays Breeze (black text on black).
+            style = "kvantum" if mode == "mac" else "Breeze"
+            _run_cmd([kwrite_bin, "--file", "kdeglobals", "--group", "KDE", "--key", "widgetStyle", style])
             # Keep DevOS look-and-feel for dark/light so branding/panel stay put.
             if mode in ("dark", "light"):
                 _run_cmd([kwrite_bin, "--file", "kdeglobals", "--group", "KDE", "--key", "LookAndFeelPackage", "org.devos.desktop"])
@@ -397,6 +436,9 @@ class ThemeSwitcher:
             _run_cmd([kwrite_bin, "--file", "kwinrc", "--group", "org.kde.kdecoration2", "--key", "ButtonsOnRight", spec.get("buttons_right", "IAX")])
             if "kdecoration_theme" in spec:
                 _run_cmd([kwrite_bin, "--file", "kwinrc", "--group", "org.kde.kdecoration2", "--key", "theme", spec["kdecoration_theme"]])
+            # Overlays (Spectacle Save/Cancel, lock, logout) stay light-on-dark
+            # whether the desktop itself is light or dark.
+            write_complementary_overlay(kwrite_bin)
         else:
             cls._update_ini_file(KDEGLOBALS_FILE, "General", {"ColorScheme": spec["kdeglobals_scheme"]})
             cls._update_ini_file(KDEGLOBALS_FILE, "Icons", {"Theme": spec["gtk_icon_theme"]})
@@ -411,10 +453,27 @@ class ThemeSwitcher:
 
         # 7. Live refresh (colors, plasma theme, kvantum, kwin) — no full LNF reset.
         cls._reload_desktop(spec)
+        # plasma-apply-colorscheme can wipe Complementary / widgetStyle — reassert.
+        kwrite_bin = shutil.which("kwriteconfig6") or shutil.which("kwriteconfig5")
+        if kwrite_bin:
+            style = "kvantum" if mode == "mac" else "Breeze"
+            _run_cmd([kwrite_bin, "--file", "kdeglobals", "--group", "KDE", "--key", "widgetStyle", style])
+            write_complementary_overlay(kwrite_bin)
         # GTK last again so portal/LNF helpers cannot leave crashy gtk-modules behind.
         cls._write_gtk_settings(spec)
 
         cls.apply_wallpaper(mode)
+        # Touch settings so running DevOS Qt apps (devos_appearance watcher) reload
+        # palette + stylesheets without a logout.
+        try:
+            path = SETTINGS_FILE
+            os.utime(path, None)
+        except OSError:
+            pass
+        # Re-heal in case plasma-apply / Global Theme helpers left Kvantum or
+        # light Complementary behind (black OK/Apply/Cancel).
+        if shutil.which("devos-heal-theme"):
+            _run_cmd(["devos-heal-theme"])
         return True
 
     @classmethod

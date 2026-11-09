@@ -3,6 +3,22 @@
 # Launches the DevOS AI Code Agent experience
 set -euo pipefail
 
+# Multi-day runs: ask endurance to keep the PC awake + model warm.
+if command -v devos-agent-endurance >/dev/null 2>&1; then
+    mkdir -p "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/devos" 2>/dev/null || true
+    # Soft enable for this session without sticky permanence unless already on.
+    python3 - <<'PY' >/dev/null 2>&1 || true
+from pathlib import Path
+import json, os, time
+base = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}") / "devos"
+base.mkdir(parents=True, exist_ok=True)
+(base / "agent-endurance.json").write_text(json.dumps({
+    "active": True, "reason": "devos-ai-code-agent", "agents": ["devos-ai-code-agent"],
+    "updated": int(time.time()), "idle_timeout_seconds": 14400,
+}) + "\n")
+PY
+fi
+
 # Ensure AI backend is accessible
 AI_DIRS=(
     "${HOME:-}/project/dev-os/components/ai-core"
@@ -30,7 +46,7 @@ else
 fi
 
 if [ $# -gt 0 ] && [ "$1" = "--cli" ]; then
-    exec /usr/bin/python3 "${DIR}/code_agent.py" "$@"
+    exec -a "$(basename "$0")" /usr/bin/python3 "${DIR}/code_agent.py" "$@"
 fi
 
 # Keep startup failures visible instead of silently disappearing from the desktop.

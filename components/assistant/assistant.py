@@ -3745,6 +3745,7 @@ class AssistantWindow(QtWidgets.QWidget):
                 self.show_thinking("Working on it")
             self._handle = handle
             # Pure do-it actions from voice still should not be narrated ("Opening Chrome…").
+            # Call mode still resumes listening in _replies even when speak is False.
             if self._speak_reply and not plan.leftover and all(a.name in voice.SILENT_ACTIONS for a in actions):
                 self._speak_reply = False
             self._run(lambda w: self.assistant.run_actions(actions, text, plan.leftover, hist,
@@ -3821,7 +3822,13 @@ class AssistantWindow(QtWidgets.QWidget):
 
             self._run(lambda _w: voice.speak_reply(to_say), spoken_done, track_busy=False)
         elif self._call_active and speak and not streamed_speech:
+            # Voice turn with nothing to narrate (or speech already finished) —
+            # still keep the call open and listen again.
             QtCore.QTimer.singleShot(400, self._continue_call_listen)
+        elif self._call_active and not speak and not streamed_speech:
+            # Pure on-screen actions (open Chrome, etc.) stay quiet — but a call
+            # must resume listening or the next voice prompt never starts.
+            QtCore.QTimer.singleShot(500, self._continue_call_listen)
         self.input.setFocus()
 
     def _last_prompt(self):
@@ -4077,6 +4084,13 @@ class AssistantWindow(QtWidgets.QWidget):
             return
         if self.recorder is not None:
             return
+        # Warm neural TTS while the user is still speaking so the reply can
+        # start talking the same moment text starts typing.
+        try:
+            pref = voice_prefs.tts_language_pref()
+            voice.warm_tts(pref if pref in ("en", "bn") else "en")
+        except Exception:
+            voice.warm_tts("en")
         rec = voice.Recorder(call_mode=bool(self._call_active))
         self.recorder = rec
         self._listening_ui_on()
@@ -4313,11 +4327,11 @@ def main(argv=None):
     app.setApplicationName(APP_TITLE)
     app.setApplicationDisplayName(APP_TITLE)
     app.setDesktopFileName("devos-chat")
-    from app_identity import apply as apply_identity
+    from app_identity import apply as apply_identity, show_window
     apply_identity(app, "devos-chat")
     apply_app_theme(app)
     win = AssistantWindow()
-    win.show()
+    show_window(win, "devos-chat")
     # "Open in DevOS AI" from the voice overlay: devos-chat --ask "what was said"
     if "--ask" in argv:
         i = argv.index("--ask")

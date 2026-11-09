@@ -1,0 +1,21 @@
+[Unit]
+Description=DevOS deferred post-install polish (branding, swap, initramfs)
+After=local-fs.target
+# Only after Calamares finalize stamped this (never on the live USB).
+ConditionPathExists=/var/lib/DevOS/need-postinstall-deferred
+ConditionPathExists=!/var/lib/DevOS/postinstall-deferred.done
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/devos-postinstall-deferred
+RemainAfterExit=yes
+TimeoutStartSec=900
+# First-boot polish is a background worker — never stall the desktop.
+Nice=10
+CPUWeight=25
+IOWeight=20
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6
+
+[Install]
+WantedBy=multi-user.target

@@ -318,11 +318,32 @@ def get_x11_idle_ms() -> Optional[int]:
     return None
 
 
+def agent_endurance_active() -> bool:
+    """True while a multi-day AI coding agent run must not be suspended."""
+    try:
+        from pathlib import Path
+        base = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+        marker = Path(base) / "devos" / "agent-endurance.json"
+        if not marker.is_file():
+            return False
+        data = json.loads(marker.read_text(encoding="utf-8"))
+        if not isinstance(data, dict) or not data.get("active"):
+            return False
+        updated = int(data.get("updated") or 0)
+        return (time.time() - updated) < 180
+    except Exception:
+        return False
+
+
 def run_sleep_daemon(check_interval: int = 15):
     """Background idle service that puts PC to sleep when sleep_timeout is reached."""
     print(f"[{APP_NAME}] Power and sleep daemon started (interval: {check_interval}s)")
     while True:
         try:
+            if agent_endurance_active():
+                # Multi-day AI coding agents (24–72h) must keep the machine awake.
+                time.sleep(check_interval)
+                continue
             cfg = load_config()
             pwr = get_power_source()
             sleep_timeout = cfg.get("sleep_timeout_battery" if pwr["has_battery"] and not pwr["charging"]
@@ -360,9 +381,9 @@ def run_gui() -> int:
         _install_dialog_style(app)
     app.setApplicationName("devos-power")
     app.setApplicationDisplayName("Power & sleep")
+    from app_identity import apply as apply_identity, show_window
     if hasattr(app, "setDesktopFileName"):
         app.setDesktopFileName("devos-power")
-        from app_identity import apply as apply_identity
         apply_identity(app, "devos-power")
 
     class WindowsCard(QtWidgets.QFrame):
@@ -757,7 +778,7 @@ def run_gui() -> int:
                 poweroff_pc()
 
     win = PowerDialog()
-    win.show()
+    show_window(win, "devos-power")
     return app.exec_()
 
 

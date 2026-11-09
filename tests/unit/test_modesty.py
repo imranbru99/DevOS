@@ -25,14 +25,14 @@ class ModestyPackageTests(unittest.TestCase):
             first = modesty.enable(temp, mode="women")
             key = root / modesty.DEVICE_KEY
             self.assertEqual(key.stat().st_mode & 0o777, 0o600)
-            self.assertEqual(first["version"], "1.1.0")
+            self.assertEqual(first["version"], "1.2.0")
             parsed = crx3.parse_crx3((root / modesty.INSTALL_DIR / modesty.CRX_NAME).read_bytes())
             with zipfile.ZipFile(io.BytesIO(parsed["zip"])) as archive:
                 names = archive.namelist()
                 self.assertIn("models/body-pix/model.json", names)
                 self.assertIn("models/body-pix/group1-shard1of1.bin", names)
                 self.assertIn("vendor/body-pix/body-pix.js", names)
-                self.assertEqual(json.loads(archive.read("manifest.json"))["version"], "1.1.0")
+                self.assertEqual(json.loads(archive.read("manifest.json"))["version"], "1.2.0")
             modesty.disable(temp)
             self.assertTrue(key.exists())
             second = modesty.enable(temp, mode="women")

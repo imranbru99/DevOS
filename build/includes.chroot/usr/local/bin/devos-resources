@@ -1,0 +1,25 @@
+#!/bin/bash
+# DevOS Resource Monitor — friendly launcher for btop (never show "btop++").
+set -euo pipefail
+TITLE="Resource Monitor"
+BIN=""
+for candidate in btop btop++ /usr/bin/btop /usr/bin/btop++; do
+  if command -v "$candidate" >/dev/null 2>&1; then
+    BIN="$(command -v "$candidate")"
+    break
+  elif [ -x "$candidate" ]; then
+    BIN="$candidate"
+    break
+  fi
+done
+if [ -z "$BIN" ]; then
+  echo "Resource Monitor (btop) is not installed." >&2
+  exit 127
+fi
+if command -v konsole >/dev/null 2>&1; then
+  exec konsole --hide-menubar -p tabtitle="$TITLE" -e "$BIN" "$@"
+fi
+if command -v x-terminal-emulator >/dev/null 2>&1; then
+  exec x-terminal-emulator -T "$TITLE" -e "$BIN" "$@"
+fi
+exec "$BIN" "$@"

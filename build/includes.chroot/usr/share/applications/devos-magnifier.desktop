@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Magnifier
+GenericName=Screen magnifier
+Comment=Enlarge part of the screen — helpful for reading small text
+Exec=kmag
+Icon=kmag
+Terminal=false
+Categories=Qt;Utility;Accessibility;
+Keywords=magnifier;zoom;accessibility;kmag;enlarge;
+StartupNotify=true
+StartupWMClass=kmag

@@ -7,5 +7,8 @@ Icon=preferences-system-performance
 Terminal=false
 OnlyShowIn=KDE;
 X-KDE-autostart-phase=2
-X-GNOME-Autostart-enabled=true
+# Tray is started once via systemd user unit (devos-optimizer.service).
+# Dual autostart wasted RAM/CPU every login.
+X-GNOME-Autostart-enabled=false
+Hidden=true
 NoDisplay=true

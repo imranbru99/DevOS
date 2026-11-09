@@ -1,114 +1,79 @@
 #!/bin/bash
-# Calamares runs this inside the new installation, right after GRUB is on the disk.
-# Firmware boots EFI/BOOT/BOOTX64.EFI when its own DevOS entry is missing:
-# NVRAM reset, a firmware update, or a PC that only trusts the fallback path.
-# That file must be shim (Microsoft-signed) so Secure Boot still accepts it,
-# with the signed GRUB and its config beside it.
-set -u
+# Stage a matching signed shim/GRUB pair and a target-specific config on the ESP.
+set -euo pipefail
+export LC_ALL=C
 
 esp=/boot/efi
+mountpoint -q "$esp"
+test -s /boot/grub/grub.cfg
 
-# Legacy BIOS installs have no EFI system partition.
-if [ ! -d "$esp" ] || [ ! -d "$esp/EFI" ]; then
-    echo "No $esp/EFI; BIOS install, nothing to do."
-    exit 0
+uuid="$(grub-probe --target=fs_uuid /boot/grub)"
+relative="$(grub-mkrelpath /boot/grub)"
+test -n "$uuid"
+test -n "$relative"
+abstraction="$(grub-probe --target=abstraction /boot/grub)"
+stub="$(mktemp)"
+trap 'rm -f "$stub"' EXIT
+if [[ " $abstraction " == *" cryptodisk "* ]]; then
+    crypt_uuids="$(grub-probe --target=cryptodisk_uuid /boot/grub)"
+    test -n "$crypt_uuids"
+    for crypt_uuid in $crypt_uuids; do
+        printf 'cryptomount -u %s\n' "$crypt_uuid" >> "$stub"
+    done
+fi
+printf "search --no-floppy --fs-uuid --set=root %s\nset prefix=(\$root)'%s'\nconfigfile \$prefix/grub.cfg\n" \
+    "$uuid" "$relative" >> "$stub"
+grub-script-check "$stub"
+
+shim=/usr/lib/shim/shimx64.efi.signed.latest
+[ -s "$shim" ] || shim=/usr/lib/shim/shimx64.efi.signed
+grub=/usr/lib/grub/x86_64-efi-signed/grubx64.efi.signed
+test -s "$shim"
+test -s "$grub"
+
+copy_verified() {
+    cp -fL -- "$1" "$2"
+    cmp -s -- "$1" "$2"
+}
+
+write_stamp() {
+    local version
+    version="$(. /etc/os-release; printf '%s' "$VERSION_ID")"
+    printf 'version=%s\ninstalled_at=%s\n' "$version" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$1"
+}
+
+vendor="$esp/EFI/DevOS"
+fallback="$esp/EFI/BOOT"
+mkdir -p "$vendor" "$fallback"
+copy_verified "$shim" "$vendor/shimx64.efi"
+copy_verified "$grub" "$vendor/grubx64.efi"
+copy_verified "$stub" "$vendor/grub.cfg"
+
+# Keep a foreign removable loader on a shared ESP. DevOS's own previous
+# fallback can be updated, and a fresh ESP receives a complete fallback.
+if [ ! -e "$fallback/BOOTX64.EFI" ] || [ -f "$fallback/.devos-fallback" ] ||
+        cmp -s "$shim" "$fallback/BOOTX64.EFI"; then
+    copy_verified "$shim" "$fallback/BOOTX64.EFI"
+    copy_verified "$grub" "$fallback/grubx64.efi"
+    copy_verified "$stub" "$fallback/grub.cfg"
+    touch "$fallback/.devos-fallback"
+    write_stamp "$fallback/.devos-installed"
 fi
 
-src="$esp/EFI/DevOS"
-mkdir -p "$src" "$esp/EFI/BOOT" "$esp/EFI/ubuntu"
-
-# Discover root/boot filesystem UUID with fallbacks
-uuid=""
-if command -v grub-probe >/dev/null 2>&1; then
-    uuid="$(timeout -k 5 15 grub-probe --target=fs_uuid /boot/grub 2>/dev/null || true)"
+# Ubuntu-signed GRUB can use its distro prefix. Supply its config on a fresh
+# ESP while preserving an existing Ubuntu installation.
+ubuntu="$esp/EFI/ubuntu"
+if [ ! -e "$ubuntu/grubx64.efi" ] && [ ! -e "$ubuntu/shimx64.efi" ]; then
+    mkdir -p "$ubuntu"
+    copy_verified "$stub" "$ubuntu/grub.cfg"
 fi
-if [ -z "$uuid" ] && command -v findmnt >/dev/null 2>&1 && command -v blkid >/dev/null 2>&1; then
-    src_dev="$(findmnt -n -o SOURCE -T /boot/grub 2>/dev/null || findmnt -n -o SOURCE / 2>/dev/null || true)"
-    if [ -n "$src_dev" ]; then
-        uuid="$(blkid -s UUID -o value "$src_dev" 2>/dev/null || true)"
+
+mok=/usr/lib/shim/mmx64.efi.signed
+if [ -s "$mok" ]; then
+    copy_verified "$mok" "$vendor/mmx64.efi"
+    if [ -f "$fallback/.devos-fallback" ]; then
+        copy_verified "$mok" "$fallback/mmx64.efi"
     fi
 fi
-if [ -z "$uuid" ] && command -v findmnt >/dev/null 2>&1; then
-    uuid="$(findmnt -n -o UUID -T /boot/grub 2>/dev/null || findmnt -n -o UUID / 2>/dev/null || true)"
-fi
-
-# Discover relative path inside the filesystem
-rel=""
-if command -v grub-mkrelpath >/dev/null 2>&1; then
-    rel="$(timeout -k 5 15 grub-mkrelpath /boot/grub 2>/dev/null || true)"
-fi
-if [ -z "$rel" ]; then
-    fstype="$(findmnt -n -o FSTYPE / 2>/dev/null || true)"
-    if [ "$fstype" = "btrfs" ]; then
-        rel="/@/boot/grub"
-    else
-        rel="/boot/grub"
-    fi
-fi
-
-# Build robust standalone stub grub.cfg including BTRFS and zstd modules
-stub_cfg=""
-if [ -n "$uuid" ] && [ -n "$rel" ]; then
-    stub_cfg="$(cat << EOF
-insmod part_gpt
-insmod part_msdos
-insmod fat
-insmod ext2
-insmod btrfs
-insmod zstd
-search.fs_uuid ${uuid} root
-set prefix=(\$root)'${rel}'
-configfile \$prefix/grub.cfg
-EOF
-)"
-fi
-
-if [ -n "$stub_cfg" ]; then
-    echo "$stub_cfg" > "$src/grub.cfg"
-    echo "$stub_cfg" > "$esp/EFI/BOOT/grub.cfg"
-    echo "$stub_cfg" > "$esp/EFI/ubuntu/grub.cfg"
-elif [ -f "$src/grub.cfg" ]; then
-    cp -f "$src/grub.cfg" "$esp/EFI/BOOT/grub.cfg"
-    cp -f "$src/grub.cfg" "$esp/EFI/ubuntu/grub.cfg"
-fi
-
-# Locate signed shim, grub, and mokmanager binaries
-shim_bin=""
-for f in "$src/shimx64.efi" "$esp/EFI/ubuntu/shimx64.efi" \
-         /usr/lib/shim/shimx64.efi.signed.latest /usr/lib/shim/shimx64.efi.signed; do
-    if [ -f "$f" ]; then shim_bin="$f"; break; fi
-done
-
-grub_bin=""
-for f in "$src/grubx64.efi" "$esp/EFI/ubuntu/grubx64.efi" \
-         /usr/lib/grub/x86_64-efi-signed/grubx64.efi.signed; do
-    if [ -f "$f" ]; then grub_bin="$f"; break; fi
-done
-
-mm_bin=""
-for f in "$src/mmx64.efi" "$esp/EFI/ubuntu/mmx64.efi" \
-         /usr/lib/shim/mmx64.efi.signed; do
-    if [ -f "$f" ]; then mm_bin="$f"; break; fi
-done
-
-# Synchronize across DevOS, ubuntu, and fallback BOOT directories
-if [ -n "$shim_bin" ] && [ -n "$grub_bin" ]; then
-    cp -f "$shim_bin" "$esp/EFI/BOOT/BOOTX64.EFI"
-    cp -f "$grub_bin" "$esp/EFI/BOOT/grubx64.efi"
-    cp -f "$shim_bin" "$src/shimx64.efi"
-    cp -f "$grub_bin" "$src/grubx64.efi"
-    cp -f "$shim_bin" "$esp/EFI/ubuntu/shimx64.efi"
-    cp -f "$grub_bin" "$esp/EFI/ubuntu/grubx64.efi"
-    if [ -n "$mm_bin" ]; then
-        cp -f "$mm_bin" "$esp/EFI/BOOT/mmx64.efi"
-        cp -f "$mm_bin" "$src/mmx64.efi"
-        cp -f "$mm_bin" "$esp/EFI/ubuntu/mmx64.efi"
-    fi
-elif [ -n "$grub_bin" ]; then
-    cp -f "$grub_bin" "$esp/EFI/BOOT/BOOTX64.EFI"
-    cp -f "$grub_bin" "$src/grubx64.efi"
-    cp -f "$grub_bin" "$esp/EFI/ubuntu/grubx64.efi"
-fi
-
-sync
-exit 0
+write_stamp "$vendor/.installed"
+sync -f "$esp"

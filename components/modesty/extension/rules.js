@@ -10,18 +10,21 @@
   const DEFAULTS = Object.freeze({
     enabled: true,
     mode: 'women',
-    // Require a confident adult-woman estimate before selecting a body mask.
-    femaleThreshold: 0.75,
+    // Adult-woman estimate before selecting a body mask (floor still 0.65).
+    femaleThreshold: 0.68,
     adultAge: 18,
     // Minimum tiny-face-detector score for something to count as a face.
-    // 0.55 ensures inanimate devices, routers, hardware, and text do not trigger false faces.
-    faceScore: 0.55,
+    // 0.50 keeps devices out while catching more real faces in photos.
+    faceScore: 0.50,
     // Faces smaller than this (px, in the analysed image) are too small for
     // the gender model to be trusted; in women mode these stay clear.
-    uncertainFacePx: 24,
+    uncertainFacePx: 20,
     // Images whose rendered or natural size is below this on both sides are
     // treated as icons and never blurred.
     minMediaPx: 64,
+    // Body skin share that, with an adult woman face in-frame, selects the mask
+    // even when nose/eye anchors failed to match (common on real photo crops).
+    bodySkinRatio: 0.12,
   });
 
   function clamp01(x, fallback) {
@@ -76,39 +79,80 @@
    * result: {ok: bool, faces: [{score, gender, genderProbability, w, h}], error?}
    * Returns {blur: bool, reason: string}.
    */
+  function isAdultWomanFace(face, s) {
+    return face && Number(face.score) >= s.faceScore &&
+      Number.isFinite(face.age) && face.age >= s.adultAge &&
+      Math.min(Number(face.w) || 0, Number(face.h) || 0) >= s.uncertainFacePx &&
+      femaleProbability(face) >= Math.max(0.65, s.femaleThreshold);
+  }
+
   function decide(result, settings) {
     const s = Object.assign({}, DEFAULTS, settings || {});
     if (!s.enabled) return { blur: false, reason: 'disabled', regions: [] };
     if (!result || !result.ok) return { blur: false, reason: 'not-checked', regions: [] };
     const faces = result.faces || [];
+    const adultWomen = faces
+      .map((face, index) => ({ face, index }))
+      .filter((row) => isAdultWomanFace(row.face, s));
     const regions = (result.people || []).filter((person) => {
       if (!person.mask || !person.blurLayer) return false;
       if (s.mode === 'people') return true;
-      const face = faces[person.faceIndex];
-      return face && Number(face.score) >= s.faceScore &&
-        Number.isFinite(face.age) && face.age >= s.adultAge &&
-        Math.min(Number(face.w) || 0, Number(face.h) || 0) >= s.uncertainFacePx &&
-        femaleProbability(face) >= Math.max(0.65, s.femaleThreshold);
+      // Preferred path: body matched to an adult woman face.
+      if (isAdultWomanFace(faces[person.faceIndex], s)) return true;
+      // Real photo crops often lose nose/eye anchors. If this body shows
+      // substantial skin and an adult woman face is in the same image above
+      // the torso, still blur that body (not the whole image).
+      const skin = Number(person.skinRatio) || 0;
+      if (skin < s.bodySkinRatio || adultWomen.length === 0) return false;
+      return adultWomen.some((row) => {
+        const f = row.face;
+        const faceMidY = f.y + f.h * 0.5;
+        // Face should sit in the upper portion of a standing/sitting figure.
+        return faceMidY <= (Number(person.torsoY) || Infinity) || faceMidY < (result.height || 1) * 0.55;
+      });
     });
     return { blur: regions.length > 0, reason: regions.length ? (s.mode === 'people' ? 'person' : 'adult-woman') : 'no-target-body', regions };
   }
 
   function matchFace(pose, faces, used) {
-    const anchors = (pose.keypoints || []).filter((k) => /^(nose|leftEye|rightEye)$/.test(k.part) && k.score >= 0.25);
-    const shoulders = (pose.keypoints || []).filter((k) => /^(leftShoulder|rightShoulder)$/.test(k.part) && k.score >= 0.25);
+    const anchors = (pose.keypoints || []).filter((k) => /^(nose|leftEye|rightEye)$/.test(k.part) && k.score >= 0.20);
+    const shoulders = (pose.keypoints || []).filter((k) => /^(leftShoulder|rightShoulder)$/.test(k.part) && k.score >= 0.20);
     const avgShoulderY = shoulders.length > 0 ? shoulders.reduce((acc, s) => acc + s.position.y, 0) / shoulders.length : null;
 
     let best = -1, distance = Infinity;
     faces.forEach((f, index) => {
       if (used && used.has(index)) return;
       // If shoulders are detected, human anatomy dictates that the face must be above the shoulder line
-      if (avgShoulderY !== null && (f.y + f.h * 0.5) > avgShoulderY + f.h * 0.3) return;
+      if (avgShoulderY !== null && (f.y + f.h * 0.5) > avgShoulderY + f.h * 0.35) return;
       for (const anchor of anchors) {
         const p = anchor.position;
-        if (p.x < f.x - f.w * 0.25 || p.x > f.x + f.w * 1.25 || p.y < f.y - f.h * 0.25 || p.y > f.y + f.h * 1.25) continue;
+        if (p.x < f.x - f.w * 0.35 || p.x > f.x + f.w * 1.35 || p.y < f.y - f.h * 0.35 || p.y > f.y + f.h * 1.35) continue;
         const d = Math.hypot(p.x - f.x - f.w / 2, p.y - f.y - f.h / 2) / Math.max(f.w, f.h, 1);
         if (d < distance) { best = index; distance = d; }
       }
+    });
+    return best;
+  }
+
+  // When nose/eyes are missing (common on real cropped photos), match a face
+  // that sits above the shoulders and overlaps the torso horizontally.
+  function matchFaceByTorso(pose, faces, used) {
+    const shoulders = (pose.keypoints || []).filter((k) => /^(leftShoulder|rightShoulder)$/.test(k.part) && k.score >= 0.20);
+    const hips = (pose.keypoints || []).filter((k) => /^(leftHip|rightHip)$/.test(k.part) && k.score >= 0.20);
+    if (!shoulders.length && !hips.length) return -1;
+    const pts = shoulders.length ? shoulders : hips;
+    const cx = pts.reduce((a, p) => a + p.position.x, 0) / pts.length;
+    const topY = pts.reduce((a, p) => a + p.position.y, 0) / pts.length;
+    const spread = Math.max(40, ...pts.map((p) => Math.abs(p.position.x - cx))) * 2.5;
+
+    let best = -1, distance = Infinity;
+    faces.forEach((f, index) => {
+      if (used && used.has(index)) return;
+      const fx = f.x + f.w / 2, fy = f.y + f.h / 2;
+      if (fy > topY + f.h * 0.4) return;
+      if (Math.abs(fx - cx) > spread + f.w) return;
+      const d = Math.hypot(fx - cx, fy - topY) / Math.max(f.w, f.h, 1);
+      if (d < distance) { best = index; distance = d; }
     });
     return best;
   }
@@ -151,5 +195,5 @@
     return false;
   }
 
-  root.ModestyRules = { MODES, DEFAULTS, effectiveSettings, decide, femaleProbability, isIconSized, stricterMode, matchFace, fitBox, cssLayers };
+  root.ModestyRules = { MODES, DEFAULTS, effectiveSettings, decide, femaleProbability, isIconSized, stricterMode, matchFace, matchFaceByTorso, fitBox, cssLayers };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

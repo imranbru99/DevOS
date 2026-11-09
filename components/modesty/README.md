@@ -9,9 +9,11 @@ detected people. Models and processing stay on this computer.
 
 The bundled face detector provides estimated age and gender. BodyPix provides
 separate person masks; face/pose matching selects only the corresponding body.
-The default threshold is 0.75 female probability and estimated age 18 or older.
-Unknown age, weak/small faces, unmatched bodies, and failed checks do not trigger
-a blanket blur. Older threshold settings cannot expand matching below 0.65.
+The default threshold is 0.68 female probability and estimated age 18 or older.
+Unknown age, weak/small faces, and failed checks do not trigger a blanket blur.
+Bodies with substantial visible skin can still be selected when an adult woman
+face is present in the same image (covers real photo crops that miss nose/eye
+anchors). Older threshold settings cannot expand matching below 0.65.
 
 Images and video use an SVG filter that merges the unchanged pixels outside the
 mask with blurred pixels inside it. A CSS background uses masked image layers
@@ -40,7 +42,7 @@ sudo devos-modesty status
 sudo devos-modesty disable
 ```
 
-Re-enabling repacks version 1.1.0 and refreshes browser policy. Restart or refresh
+Re-enabling repacks version 1.2.0 and refreshes browser policy. Restart or refresh
 browser policy to load the new extension. A signing key is created per device in
 `/var/lib/devos-modesty/key.pem`, preserved across disable/re-enable. An existing
 local legacy key is reused so its extension ID does not change.

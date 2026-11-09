@@ -239,6 +239,13 @@ def parse_choice(text: str) -> Dict:
                 choice["chat"] = value
             elif key in ("vision", "coder"):
                 choice[key] = value.lower() in ("1", "yes", "true", "on")
+            elif key == "idle_timeout":
+                try:
+                    choice["idle_timeout"] = max(60, int(value))
+                except ValueError:
+                    pass
+            elif key in ("warmup", "warm_up", "preload"):
+                choice["warmup"] = value.lower() in ("1", "yes", "true", "on")
         return choice
     parts = [p for p in text.split("+") if p]
     if parts and chat_model(parts[0]):
@@ -249,11 +256,18 @@ def parse_choice(text: str) -> Dict:
 
 
 def format_choice(choice: Dict) -> str:
+    # Always keep the sleep policy so model picks cannot reintroduce the
+    # "Server.py holds 5 GB forever" bug.
+    idle = int(choice.get("idle_timeout") or 600)
+    warmup = "1" if choice.get("warmup") in (True, 1, "1", "yes", "true", "on") else "0"
     return (
         "# DevOS AI models, chosen during install or in DevOS AI Models.\n"
         f"chat={choice['chat']}\n"
         f"vision={'yes' if choice.get('vision') else 'no'}\n"
         f"coder={'yes' if choice.get('coder') else 'no'}\n"
+        "# Sleep: unload local model after idle seconds; warmup=0 means no boot preload.\n"
+        f"idle_timeout={max(60, idle)}\n"
+        f"warmup={warmup}\n"
     )
 
 

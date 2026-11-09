@@ -1,5 +1,5 @@
 #!/bin/bash
-# Open the code editor and make sure the local DevOS model is listening.
+# DevOS Code — modern VS Code (or Codium), never the old Kate welcome screen.
 set -u
 
 AI_DIR="/usr/local/share/devos/components/ai-core"
@@ -10,13 +10,31 @@ if [ -f "${AI_DIR}/server.py" ]; then
     fi
 fi
 
-if command -v code >/dev/null 2>&1; then
-    exec code "$@"
+launch_editor() {
+    local bin="$1"
+    shift
+    # Keep the DevOS Code taskbar identity while using the real editor binary.
+    case "$bin" in
+        code|code-oss|codium)
+            exec "$bin" --no-sandbox "$@" 2>/dev/null || exec "$bin" "$@"
+            ;;
+        *)
+            exec "$bin" "$@"
+            ;;
+    esac
+}
+
+for candidate in code codium code-oss; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+        launch_editor "$candidate" "$@"
+    fi
+done
+
+# Kate is a stock KDE editor — never present it as DevOS Code.
+setup="/usr/local/share/devos/components/code/code_setup.py"
+if [ -f "$setup" ]; then
+    exec -a "$(basename "$0")" /usr/bin/python3 "$setup" "$@"
 fi
 
-if command -v kate >/dev/null 2>&1; then
-    exec kate "$@"
-fi
-
-echo "DevOS Code needs Kate. It is installed with the desktop package set." >&2
+echo "DevOS Code needs Visual Studio Code. Install it with: sudo devos-install-code" >&2
 exit 1

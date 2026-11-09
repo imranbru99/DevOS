@@ -34,7 +34,6 @@ import signal
 import sys
 import time
 import urllib.parse
-import urllib.request
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -101,17 +100,10 @@ def popen_detached(argv: List[str]) -> bool:
         return False
 
 
-def run_capture(argv: List[str], timeout: int = 8, input_text: Optional[str] = None) -> Tuple[int, str]:
+def run_capture(argv: List[str], timeout: int = 8) -> Tuple[int, str]:
     try:
-        p = subprocess.run(
-            argv,
-            input=input_text,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            timeout=timeout,
-            text=True,
-            errors="replace",
-        )
+        p = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           timeout=timeout, text=True, errors="replace")
         return p.returncode, p.stdout
     except (OSError, subprocess.TimeoutExpired) as exc:
         return 127, str(exc)
@@ -240,8 +232,6 @@ def normalize(text: str) -> str:
     t = re.sub(r"\bscreen shot\b", "screenshot", t)
     # "sing me X" / "sing the song X" → play (YouTube search), keep meaning
     t = re.sub(r"\bsing(?:ing)?(?:\s+me)?(?:\s+(?:the\s+)?song)?\b", "play", t)
-    # "go to youtube search X" / "youtube play X" (no comma) → split so tools fire
-    t = re.sub(r"\b(youtube|google|chrome)\s+(search|find|look\s*up|play|watch)\b", r"\1, \2", t)
     prev = None
     while prev != t:
         prev = t
@@ -522,85 +512,6 @@ def youtube_search_url(query: str) -> str:
     return "https://www.youtube.com/results?search_query=" + urllib.parse.quote_plus(query.strip())
 
 
-def youtube_watch_url(video_id: str) -> str:
-    return "https://www.youtube.com/watch?v=" + video_id + "&autoplay=1"
-
-
-def resolve_youtube_video(query: str) -> Optional[str]:
-    """First organic YouTube watch URL for a play request (not the search page)."""
-    q = (query or "").strip()
-    if not q or _is_play_ref(q):
-        return None
-    # Prefer yt-dlp when installed (most reliable).
-    for bin_name in ("yt-dlp", "youtube-dl"):
-        if shutil.which(bin_name):
-            try:
-                out = subprocess.check_output(
-                    [bin_name, "--get-id", "--no-playlist", f"ytsearch1:{q}"],
-                    stderr=subprocess.DEVNULL, timeout=18,
-                ).decode("utf-8", errors="ignore").strip()
-                vid = (out.splitlines() or [""])[0].strip()
-                if re.fullmatch(r"[A-Za-z0-9_-]{11}", vid):
-                    return youtube_watch_url(vid)
-            except Exception:
-                pass
-            break
-    # Scrape YouTube search HTML for the first few videoRenderers (skips ads).
-    try:
-        url = youtube_search_url(q)
-        req = urllib.request.Request(
-            url,
-            headers={
-                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                              "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Accept-Language": "en-US,en;q=0.9",
-            },
-        )
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            html = resp.read().decode("utf-8", errors="ignore")
-        found: List[str] = []
-        m = re.search(r"var ytInitialData\s*=\s*(\{.+?\});</script>", html)
-        if m:
-            data = json.loads(m.group(1))
-
-            def walk(node):
-                if len(found) >= 5:
-                    return
-                if isinstance(node, dict):
-                    if "adSlotRenderer" in node or "promotedVideoRenderer" in node \
-                            or "promotedSparklesWebRenderer" in node:
-                        return
-                    vr = node.get("videoRenderer")
-                    if isinstance(vr, dict):
-                        vid = vr.get("videoId")
-                        if isinstance(vid, str) and re.fullmatch(r"[A-Za-z0-9_-]{11}", vid) \
-                                and vid not in found:
-                            found.append(vid)
-                            return
-                    for v in node.values():
-                        walk(v)
-                        if len(found) >= 5:
-                            return
-                elif isinstance(node, list):
-                    for v in node:
-                        walk(v)
-                        if len(found) >= 5:
-                            return
-
-            walk(data)
-        if not found:
-            for vid in re.findall(r"watch\?v=([A-Za-z0-9_-]{11})", html):
-                if vid not in found:
-                    found.append(vid)
-                if len(found) >= 5:
-                    break
-        if found:
-            return youtube_watch_url(found[0])
-    except Exception:
-        pass
-    return None
-
-
 def normalize_url(raw: str) -> Optional[str]:
     """Return a safe http(s) URL or None. Only web URLs are accepted."""
     raw = (raw or "").strip().strip("\"'<>")
@@ -631,21 +542,6 @@ _TAIL = re.compile(r"\s+(?:on|in|at|using|with|from|via|through)\s+(?:the\s+)?" 
 _BN_SEARCH = re.compile(r"(সার্চ|খুঁজ|খোঁজ)")
 
 
-# STT often hears "and film it" / "and fill it" for "and play it".
-_STT_PLAY_TAIL = re.compile(
-    r"\s+and\s+(?:play|watch|film|fill|full)\s+(?:it|this|that|one)(?:\s+(?:on|in)\s+youtube)?$",
-    re.I)
-_PLAY_FOLLOW = re.compile(
-    r"^(?:play|watch|put on|sing|film|fill)\s+"
-    r"(?:it|this|that|one|the\s+(?:first|top|1st)\s*(?:one|result|video|song|link)?)"
-    r"(?:\s+(?:on|in)\s+youtube)?$",
-    re.I)
-_PLAY_REF_QUERY = re.compile(
-    r"^(?:it|this|that|one|the\s+(?:first|top|1st)\s*(?:one|result|video|song|link)?)"
-    r"(?:\s+(?:on|in)\s+youtube)?$",
-    re.I)
-
-
 def _clean_query(q: str) -> str:
     q = q.strip(" \"'.,?!")
     prev = None
@@ -653,12 +549,7 @@ def _clean_query(q: str) -> str:
         prev = q
         q = _LEAD.sub("", q).strip(" \"'.,?!")
         q = _TAIL.sub("", q).strip(" \"'.,?!")
-        q = _STT_PLAY_TAIL.sub("", q).strip(" \"'.,?!")
     return q
-
-
-def _is_play_ref(q: str) -> bool:
-    return bool(_PLAY_REF_QUERY.match((q or "").strip()))
 
 
 def _browser_for(t: str) -> str:
@@ -716,6 +607,7 @@ _QUERY_END = re.compile(
     r")\b)", re.I)
 MEDIA_PLAY_WORDS = re.compile(r"^(?:some |my |the )?(?:music|songs?|audio|playlist|my playlist|something|"
                               r"a song|some songs|my songs|my music)$")
+_BN_SEARCH = re.compile(r"(সার্চ|খুঁজ|খোঁজ)")
 
 
 def maps_search_url(query: str) -> str:
@@ -762,38 +654,32 @@ def parse_web_search(t: str) -> Optional[Tuple[List[str], Action, str]]:
         q = re.sub(r"\s+", " ", q).strip(" ।?.!")
         if q:
             return [], _search_action(engine, q, _browser_for(t)), ""
-    found = []      # (start, engine, query, rest, play)
+    found = []      # (start, engine, query)
     pos = 0
     while True:
         m = _SEARCH_RE.search(t, pos)
         if not m:
             break
-        raw_q = m.group("q")
-        # "search X and play/film it" → play X (do not leave a bare "play it")
-        want_play = bool(_STT_PLAY_TAIL.search(raw_q)) or bool(_PLAY_FOLLOW.match(_split_query(raw_q)[1].strip()))
-        q, rest = _split_query(raw_q)
+        q, rest = _split_query(m.group("q"))
         eng = _ENGINE_MAP.get(m.group("eng") or "", "")
         q = q.strip(" \"'.,?!:")
-        if want_play:
-            q = _STT_PLAY_TAIL.sub("", q).strip(" \"'.,?!:")
-            rest = ""
         if eng:
             # the engine was named up front: the rest is the query, word for word
             # ("search youtube for how to search on google")
+            tail_eng = ""
             if q and not _BROWSER_ONLY_CLAUSE.match(q):
-                found.append((m.start(), eng, q, rest, want_play and eng in ("", "youtube")))
+                found.append((m.start(), eng, q, rest))
                 break
         else:
             q, tail_eng = _tail_engine(q)
-            engine = eng or tail_eng
-            if m.group("verb") == "find" and not engine:
-                pos = m.start("verb") + 1      # "find my file" is not a web search
-                continue
-            q = _clean_query(q)
-            if q and not _BROWSER_ONLY_CLAUSE.match(q):
-                play = want_play and engine in ("", "youtube")
-                found.append((m.start(), engine, q, rest, play))
-                break
+        engine = eng or tail_eng
+        if m.group("verb") == "find" and not engine:
+            pos = m.start("verb") + 1      # "find my file" is not a web search
+            continue
+        q = _clean_query(q)
+        if q and not _BROWSER_ONLY_CLAUSE.match(q):
+            found.append((m.start(), engine, q, rest))
+            break
         pos = m.start("verb") + 1
     m = _PLAY_RE.search(t)
     if m:
@@ -803,40 +689,30 @@ def parse_web_search(t: str) -> Optional[Tuple[List[str], Action, str]]:
                 and (eng in ("", "youtube")):
             q2 = _clean_query(q2)
             if q2:
-                found.append((m.start(), "youtube", q2, rest, True))
+                found.append((m.start(), "youtube", q2, rest))
     m = _DIRECTIONS_RE.search(t)
     if m:
         dest = (m.group("q") or m.group("q2") or "").strip(" ?.!")
         if dest and not _URLISH.match(dest) and dest not in KNOWN_SITES:
             dest, _e = _tail_engine(dest)
-            found.append((m.start(), "directions", dest, "", False))
+            found.append((m.start(), "directions", dest, ""))
     m = _MAPS_RE.search(t)
     if m:
-        found.append((m.start(), "maps", m.group("q").strip(), "", False))
+        found.append((m.start(), "maps", m.group("q").strip(), ""))
     m = _WIKI_RE.search(t)
     if m:
         q = (m.group("q") or m.group("q2") or "").strip(" ?.!")
         if q:
-            found.append((m.start(), "wikipedia", q, "", False))
+            found.append((m.start(), "wikipedia", q, ""))
     if not found:
         return None
     # the earliest command wins; at the same place the more specific one
-    # Prefer play over a same-start search so "search X and play it" stays one play.
     order = {"directions": 0, "maps": 1, "wikipedia": 2, "youtube": 3, "google": 4, "": 5}
-    start, engine, q, rest, play = sorted(
-        found, key=lambda f: (f[0], 0 if f[4] else 1, order.get(f[1], 9)))[0]
+    start, engine, q, rest = sorted(found, key=lambda f: (f[0], order.get(f[1], 9)))[0]
     pre = t[:start]
     if not engine:
-        engine = "youtube" if _has(r"\byoutube\b", pre) or play else "google"
-    # "search … and play it" → play the search query on YouTube
-    if play or (rest and _PLAY_FOLLOW.match(rest.strip()) and engine in ("", "youtube")):
-        play = True
-        engine = "youtube"
-        rest = ""
-    if play and _is_play_ref(q):
-        # Bare "play it" — caller must fill query from prior search via route().
-        pass
-    return _prefix_clauses(pre), _search_action(engine, q, _browser_for(t), play=play), rest
+        engine = "youtube" if _has(r"\byoutube\b", pre) else "google"
+    return _prefix_clauses(pre), _search_action(engine, q, _browser_for(t)), rest
 
 
 def _prefix_clauses(pre: str) -> List[str]:
@@ -852,22 +728,13 @@ _ENGINE_LABEL = {"youtube": "YouTube", "google": "Google", "maps": "Maps", "dire
                  "wikipedia": "Wikipedia"}
 
 
-def _search_action(engine: str, query: str, browser: str, play: bool = False) -> Action:
+def _search_action(engine: str, query: str, browser: str) -> Action:
     url = {"youtube": youtube_search_url, "maps": maps_search_url, "directions": directions_url,
            "wikipedia": wikipedia_search_url}.get(engine, google_search_url)(query)
     where = _ENGINE_LABEL.get(engine, "Google")
     app = {"chrome": "Chrome", "firefox": "Firefox"}.get(browser, "the browser")
-    if play and engine == "youtube":
-        label = f"Play “{query}” on YouTube"
-    elif engine == "directions":
-        label = f"Directions to “{query}”"
-    else:
-        label = f"Search {where} for “{query}” in {app}"
-    return Action(
-        "web_search",
-        {"engine": engine, "query": query, "url": url, "browser": browser, "play": bool(play)},
-        label=label,
-    )
+    label = f"Directions to “{query}”" if engine == "directions" else f"Search {where} for “{query}” in {app}"
+    return Action("web_search", {"engine": engine, "query": query, "url": url, "browser": browser}, label=label)
 
 
 _PLAT_RE = r"(?:facebook|fb|twitter|x|linkedin|reddit|threads|instagram)"
@@ -929,7 +796,7 @@ def browser_command(browser: str, url: str, which: Callable) -> List[str]:
     if browser == "firefox":
         cands = ["firefox", "devos-browser", "google-chrome-stable", "google-chrome", "xdg-open"]
     elif browser == "chrome":
-        cands = ["google-chrome-stable", "google-chrome", "devos-browser", "chromium", "xdg-open"]
+        cands = ["devos-browser", "google-chrome-stable", "google-chrome", "chromium", "xdg-open"]
     else:
         cands = ["devos-browser", "google-chrome-stable", "google-chrome", "firefox", "xdg-open"]
     for c in cands:
@@ -1525,42 +1392,17 @@ _CLOSE_RE = re.compile(r"^(?:close|quit|exit|kill|terminate)\s+(?:the\s+|my\s+|a
                        r"(?:\s+(?:app|application|program|windows?|process))?$")
 
 
-_MEDIA_THING = (
-    r"(?:the\s+|this\s+|that\s+|my\s+|a\s+|an\s+)?"
-    r"(?:music|songs?|videos?|playback|player|media|audio|track|youtube|yt|"
-    r"playing(?:\s+(?:song|music|video|track))?)"
-)
-
-
 def _media_action(t: str) -> Optional[Action]:
     if _has(r"^(?:play|start|put on|open)\s+(?:some\s+|my\s+|the\s+)?(?:music|songs?|playlist|audio)(?:\s+for me)?$", t):
         return Action("media", {"op": "music"}, label="Play your music")
-    # Stop / pause — daily speech: "stop this song", "can you stop the music", "stop playing"
-    # Bangla: "গান বন্ধ করো", "গান থামাও", "ভিডিও বন্ধ"
-    if _has(r"^(?:pause|stop)(?:\s+" + _MEDIA_THING + r")?$"
-            r"|^stop\s+playing(?:\s+" + _MEDIA_THING + r")?$"
-            r"|^(?:pause|stop)\s+(?:it|that|this)$"
-            r"|^(?:turn\s+off|shut\s+off|kill)\s+(?:the\s+)?(?:music|song|songs|video|videos|playback|audio|youtube)$"
-            r"|^(?:make\s+it\s+stop|stop\s+it\s+please)$"
-            r"|^(?:গান|মিউজিক|গানটা|গানটি|ভিডিও|সাউন্ড|ইউটিউব)\s*(?:বন্ধ|থামা|স্টপ|পজ)\s*(?:করো|কর|করে\s*দাও|দাও)?"
-            r"|^(?:বন্ধ|থামা|স্টপ|পজ)\s*(?:করো|কর)?\s*(?:এই\s*)?(?:গান|মিউজিক|ভিডিও|সাউন্ড)", t):
-        op = "stop" if re.search(r"^(?:stop|turn\s+off|shut\s+off|kill|make\s+it\s+stop)\b|বন্ধ|থামা|স্টপ", t) else "pause"
-        return Action("media", {"op": op},
-                      label="Stop playback" if op == "stop" else "Pause playback")
-    if _has(r"^(?:resume|continue|unpause|play)(?:\s+" + _MEDIA_THING + r")?$"
-            r"|^(?:resume|continue|unpause|play)\s+(?:it|that|this)$"
-            r"|^(?:গান|মিউজিক|ভিডিও)\s*(?:চালু|প্লে|শুরু)\s*(?:করো|কর)?", t):
+    if _has(r"^(?:pause|stop)(?:\s+(?:the\s+)?(?:music|song|songs|video|playback|player|media|audio))?$", t):
+        return Action("media", {"op": "pause"}, label="Pause playback")
+    if _has(r"^(?:resume|continue|unpause|play)(?:\s+(?:the\s+)?(?:music|song|video|playback|media))?$", t):
         return Action("media", {"op": "play"}, label="Resume playback")
-    if _has(r"^(?:next|skip)(?:\s+(?:this\s+|the\s+|a\s+)?(?:song|track|video|one))?$"
-            r"|^(?:play\s+)?(?:the\s+)?next\s+(?:song|track|video)$"
-            r"|^skip\s+(?:this\s+|the\s+)?(?:one|song|track|video)$"
-            r"|^(?:পরের|নেক্সট)\s*(?:গান|ট্র্যাক|ভিডিও)", t):
+    if _has(r"^(?:next|skip)(?:\s+(?:this\s+)?(?:song|track|video))?$|^(?:play\s+)?(?:the\s+)?next\s+(?:song|track|video)$", t):
         return Action("media", {"op": "next"}, label="Next track")
-    if _has(r"^(?:previous|prev|last)\s+(?:song|track|video)$"
-            r"|^(?:play\s+)?(?:the\s+)?(?:previous|last)\s+(?:song|track|video)$"
-            r"|^go back a (?:song|track)$"
-            r"|^(?:previous|prev|back)\s+(?:one|track)?$"
-            r"|^(?:আগের|প্রিভিয়াস)\s*(?:গান|ট্র্যাক|ভিডিও)", t):
+    if _has(r"^(?:previous|prev|last)\s+(?:song|track|video)$|^(?:play\s+)?(?:the\s+)?(?:previous|last)\s+(?:song|track|video)$"
+            r"|^go back a (?:song|track)$", t):
         return Action("media", {"op": "previous"}, label="Previous track")
     return None
 
@@ -1633,6 +1475,18 @@ def route_clause(c: str, ctx: Optional[ToolContext] = None, context: Optional[Li
             or _has(r"^what (?:can|do) you (?:do|help with)", c):
         return [Action("help", label="Show what I can do")]
 
+    # Who owns THIS PC (user profile) — not who made DevOS.
+    if not _has(r"^(?:open|go to|visit|launch)\b", c) and _has(
+            r"\bwho(?:'?s| is)? (?:the )?(?:owner|proprietor)\b"
+            r"|\bwho owns (?:this|the|my|our)\b"
+            r"|\bwhose (?:pc|computer|laptop|machine|desktop|device)\b"
+            r"|\bowner of (?:this|the|my|our)\b"
+            r"|\bwho (?:uses|owns|has) (?:this|the|my|our) (?:pc|computer|laptop|machine)\b"
+            r"|\b(?:pc|computer|laptop) owner\b"
+            r"|\bmy (?:profile|portfolio|bio|email)\b"
+            r"|\bowner(?:'?s)? (?:name|email|portfolio|bio|profile)\b", c):
+        return [Action("pc_owner", label="PC owner profile")]
+
     # Who made DevOS / DevOS AI: a fixed answer, the small model rambled.
     # ("devos" itself is stripped by normalize(), so "devos team whose?" arrives
     # as "team ... whose".) Plain "open github.com/..." stays a website.
@@ -1650,17 +1504,14 @@ def route_clause(c: str, ctx: Optional[ToolContext] = None, context: Optional[Li
             r"|\b(?:team|developer|creator|imran)\b.*\b(?:linked ?in|e-?mail|phone|number|whats ?app)\b", c):
         return [Action("about", label="About DevOS")]
 
-    # power (always confirmed) — Bangla must name the PC (not "গান বন্ধ করো")
-    if _has(r"\b(?:shut ?down|power off|turn off (?:the |my |this )?(?:pc|computer|laptop|system))\b"
-            r"|(?:কম্পিউটার|পিসি|ল্যাপটপ|সিস্টেম|পিক সি)\s*বন্ধ\s*কর"
-            r"|বন্ধ\s*করে?\s*(?:দাও|দিন|দিও)?\s*(?:কম্পিউটার|পিসি|ল্যাপটপ)", c):
+    # power (always confirmed)
+    if _has(r"\b(?:shut ?down|power off|turn off (?:the |my |this )?(?:pc|computer|laptop|system))\b|বন্ধ কর", c):
         return [Action("power", {"op": "poweroff"}, confirm="Shut down this PC now? Unsaved work will be lost.",
                        label="Shut down the PC")]
     if _has(r"\b(?:restart|reboot)\b(?! (?:the |my )?(?:app|browser|chrome))|রিস্টার্ট", c):
         return [Action("power", {"op": "reboot"}, confirm="Restart this PC now? Unsaved work will be lost.",
                        label="Restart the PC")]
-    if _has(r"\b(?:go to sleep|sleep mode|suspend|put (?:the |my |this )?(?:pc|computer|laptop) to sleep)\b|^sleep$"
-            r"|ঘুম\s*পাড়া|স্লিপ\s*মোড", c):
+    if _has(r"\b(?:go to sleep|sleep mode|suspend|put (?:the |my |this )?(?:pc|computer|laptop) to sleep)\b|^sleep$", c):
         return [Action("power", {"op": "suspend"}, confirm="Put this PC to sleep now?", label="Sleep")]
 
     m = re.match(r"^(?P<guide>how\s+(?:to|do i|can i)\s+)?(?:please\s+)?"
@@ -1704,7 +1555,7 @@ def route_clause(c: str, ctx: Optional[ToolContext] = None, context: Optional[Li
             return [Action("close_app", {"name": name}, label=f"Close {name}")]
 
     if _has(r"^(?:open|launch|start|run|show)\s+(?:the\s+)?(?:devos\s+)?optimi[sz]er\b", c):
-        return [Action("open_tool", {"tool": "optimizer"}, label="Open DevOS Optimizer")]
+        return [Action("open_tool", {"tool": "optimizer"}, label="Open PC Optimizer")]
     if _has(r"\b(?:clean ?up|clean (?:my |the |this )?(?:pc|computer|laptop|disk|system|junk|cache|temp)|free up|junk|temp(?:orary)? files|clear (?:the )?cache|speed up|make (?:my |the |this )?(?:pc|computer|laptop) faster|slow pc|pc is slow|computer is slow)\b|ক্লিন", c):
         return [Action("cleanup_scan", label="Check what can be cleaned")]
 
@@ -1774,7 +1625,7 @@ def route_clause(c: str, ctx: Optional[ToolContext] = None, context: Optional[Li
     if _has(r"\b(?:emoji panel|emoji picker|open emoji|show emoji)\b", c) or c.strip() in ("emoji", "emojis"):
         return [Action("open_tool", {"tool": "emoji"}, label="Open emoji")]
     if _has(r"\b(?:broadband|dial\s*up|pppoe|onu(?:\s*connection|\s*network)?|connect\s*onu|ডায়াল|ডায়াল|ব্রডব্যান্ড|ওএনইউ)\b", c):
-        return [Action("open_tool", {"tool": "broadband"}, label="Open Broadband Dial-up")]
+        return [Action("open_tool", {"tool": "broadband"}, label="Open Internet Dial-up")]
     if _has(r"\b(?:kids?\s*mode|child(?:ren)?\s*mode|kid\s*play|start\s+kids?\s*mode|open\s+kids?\s*mode|turn\s+on\s+kids?\s*mode|run\s+kids?\s*mode)\b|বাচ্চাদের\s*মোড", c):
         return [Action("open_tool", {"tool": "kids"}, label="Start Kids Mode")]
 
@@ -1883,14 +1734,6 @@ _TYPE_RES = [
                _RF),
     re.compile(_P + r"(?:write|enter|put|insert)\s+[:,]?\s*(?P<text>.+?)\s+(?:here|in here|in this (?:window|box|field)|"
                r"where my cursor is|where the cursor is|in the (?:box|field|text box))$", _RF),
-    # Daily: "write a message …" / "send a message …" into the focused chat (WhatsApp, etc.)
-    re.compile(_P + r"(?:write|type|send|draft)\s+(?:a\s+|an\s+|the\s+|me\s+a\s+)?"
-               r"(?:quick\s+|short\s+)?(?:message|msg|text|chat|reply)\b"
-               r"(?:\s+(?:that\s+says|saying|which says|with|of))?\s*[:,\-–]?\s*(?P<text>.+)$", _RF),
-    # Bangla: "লিখো …" / "মেসেজ লিখো …" / "টাইপ করো …"
-    re.compile(r"^(?:দয়া করে|প্লিজ|একটু)?\s*"
-               r"(?:মেসেজ|মেসেজটি|বার্তা|টেক্সট)?\s*"
-               r"(?:লিখো|লেখো|লিখে\s*দাও|টাইপ\s*করো|টাইপ\s*করে\s*দাও|লেখ)\s*[:,\-–]?\s*(?P<text>.+)$"),
 ]
 # "write a poem about rain" asks the language model to compose something.
 _GENERATE = re.compile(r"^(?:me\s+)?(?:a|an|some|the|my)\s+(?:\w+\s+){0,2}?(?:poem|story|essay|letter|email|e-mail|song|"
@@ -1949,15 +1792,15 @@ def _note_action(text: str, app: str = "notepad", verb: str = "save") -> Optiona
     content = note_content(verb, text)
     if not content:
         return None
-    where = {"kate": "Text Editor", "writer": "LibreOffice Writer"}.get(app, "Notepad")
+    where = {"writer": "LibreOffice Writer"}.get(app, "Notepad")
     return Action("write_note", {"text": content, "app": app}, label=f"Save a note and open it in {where}")
 
 
 def _text_app_kind(app: str) -> str:
     a = app.lower().strip()
     if re.fullmatch(_TEXT_APPS, a):
-        if re.search(r"kate|kwrite|gedit|text editor|editor", a):
-            return "kate"
+        if re.search(r"kate|kwrite|gedit|text editor|editor|notepad", a):
+            return "notepad"
         if re.search(r"word|writer|office|document", a):
             return "writer"
         return "notepad"
@@ -1977,7 +1820,7 @@ def _write_into_app(app: str, verb: str, text: str, raw: str) -> Optional[List[A
         return None
     if verb.lower() in ("write", "type", "enter", "put") and _GENERATE.match(payload) and kind != "terminal":
         return None          # the model writes it; the router just opens the app (see route())
-    if kind in ("notepad", "kate", "writer"):
+    if kind in ("notepad", "writer"):
         a = _note_action(text, kind, verb)
         return [a] if a else None
     if kind in ("browser", "youtube"):
@@ -2321,24 +2164,9 @@ def _find_recent_query(context: Optional[List[str]]) -> str:
     for msg in reversed(context):
         if not msg:
             continue
-        try:
-            ws = parse_web_search(normalize(preprocess(msg)) or normalize(msg) or msg.lower())
-        except Exception:
-            ws = None
-        if ws:
-            _pre, act, _rest = ws
-            q = str(act.args.get("query") or "").strip()
-            if q and not _is_play_ref(q):
-                return q
-        m = re.search(
-            r"\b(?:search|google|look\s*up|lookup|find|play|watch)\b"
-            r"(?:\s+(?:(?:in|on)\s+)?(?:youtube|google))?"
-            r"(?:\s+(?:about|for|regarding))?\s*:?\s+(.+?)$",
-            msg, re.I)
+        m = re.search(r"\b(?:search|google|look up|lookup|find)\b.*?\b(?:about|for|regarding|in google)?\s*(?::\s*)?([a-zA-Z0-9_.-]+)", msg, re.I)
         if m:
-            q = _clean_query(_STT_PLAY_TAIL.sub("", m.group(1)).strip())
-            if q and not _is_play_ref(q) and not _BROWSER_ONLY_CLAUSE.match(q):
-                return q
+            return m.group(1).strip()
     return ""
 
 
@@ -2377,22 +2205,10 @@ def route_single_clause(c: str, ctx: Optional[ToolContext] = None, context: Opti
         return [Action("open_web_page", {"page": page, "website": site, "query": q, "browser": _browser_for(c)},
                        label=f"Go to the {page} page")]
 
-    # 2. Search / play
+    # 2. Search
     ws = parse_web_search(c)
     if ws:
         _pre, act, _rest = ws
-        if act.name == "web_search" and act.args.get("play") and _is_play_ref(str(act.args.get("query") or "")):
-            ref_q = (last_query or _find_recent_query(context) or "").strip()
-            if ref_q and not _is_play_ref(ref_q):
-                act = _search_action("youtube", ref_q, str(act.args.get("browser") or "default"), play=True)
-            else:
-                return None
-        if (act.name == "web_search" and not act.args.get("play") and _rest
-                and _PLAY_FOLLOW.match(_rest.strip())
-                and str(act.args.get("engine") or "") in ("youtube", "")):
-            act = _search_action(
-                "youtube", str(act.args.get("query") or ""),
-                str(act.args.get("browser") or "default"), play=True)
         return [act]
 
     # 2.5 Social Post
@@ -2454,34 +2270,12 @@ def route(text: str, ctx: Optional[ToolContext] = None, context: Optional[List[s
             r = route_clause(c, ctx)
             if r:
                 actions.extend(r)
-        # "play it" / "play that" → reuse this turn's search query or a prior one
-        if action.name == "web_search" and action.args.get("play") and _is_play_ref(str(action.args.get("query") or "")):
-            ref_q = (initial_query or _find_recent_query(context) or "").strip()
-            if ref_q and not _is_play_ref(ref_q):
-                action = _search_action("youtube", ref_q, str(action.args.get("browser") or "default"), play=True)
-            else:
-                # Avoid searching for the movie "It" when the user meant "play that result"
-                return RouteResult(leftover=text)
-        # "search X and play it" left as search+rest → one YouTube play of X
-        if (action.name == "web_search"
-                and not action.args.get("play")
-                and rest and _PLAY_FOLLOW.match(rest.strip())
-                and str(action.args.get("engine") or "") in ("youtube", "")):
-            action = _search_action(
-                "youtube", str(action.args.get("query") or ""),
-                str(action.args.get("browser") or "default"), play=True)
-            rest = ""
         actions.append(action)
         if rest:
             q = action.args.get("query", "")
             site = resolve_search_result(q, 1) if q else ""
             sub_res = route(rest, ctx, context, initial_query=q, initial_website=site)
             for sub_a in sub_res.actions:
-                if sub_a.name == "web_search" and sub_a.args.get("play") and _is_play_ref(str(sub_a.args.get("query") or "")):
-                    if q:
-                        sub_a = _search_action("youtube", q, str(sub_a.args.get("browser") or "default"), play=True)
-                    else:
-                        continue
                 if sub_a.name in ("open_search_result", "open_web_page") and not sub_a.args.get("query"):
                     sub_a.args["query"] = q
                 if sub_a.name == "open_web_page" and (not sub_a.args.get("website") or "google.com" in sub_a.args.get("website", "")):
@@ -2604,15 +2398,16 @@ def _x_help(a, ctx, dry):
 ABOUT_TEXT = (
     "**DevOS** and **DevOS AI** are made by the DevOS team, led by **Imran Ahmed (Imran Dev)**.\n\n"
     "- Portfolio: https://imrandev.bd/\n"
-    "- DevOS is open source: https://github.com/imranbru99/DevOS\n\n"
+    "- DevOS is open source: https://github.com/imranbru99/DevOS\n"
+    "- Help Center on this PC: Start menu → Help Center\n\n"
     # The only contact details DevOS AI gives (same list as DEVOS_CONTACTS in
     # components/ai-core/server.py); the model once invented a LinkedIn URL.
-    "**Contact the DevOS team**\n"
-    "- Email: devos@imrandev.bd\n"
+    "**Contact / Help Center**\n"
     "- Contact form: https://imrandev.bd/contact\n"
-    "- WhatsApp: https://wa.me/+8801576918420\n"
+    "- Email: me@imrandev.bd\n"
+    "- LinkedIn: https://linkedin.com/in/imranbru99\n"
     "- GitHub: https://github.com/imranbru99\n"
-    "- LinkedIn: https://linkedin.com/in/imranbru99\n\n"
+    "- WhatsApp: https://wa.me/+8801576918420\n\n"
     "I run entirely on this PC, built on open-source language-model technology and tuned for DevOS."
 )
 
@@ -2621,83 +2416,42 @@ def _x_about(a, ctx, dry):
     return ToolResult(ABOUT_TEXT)
 
 
+def _x_pc_owner(a, ctx, dry):
+    try:
+        from settings.owner_profile import owner_answer_text
+    except ImportError:
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+            from settings.owner_profile import owner_answer_text
+        except ImportError:
+            return ToolResult(
+                "I couldn't read the owner profile. Open **Start → My Profile** to add name, email, and portfolio.",
+                ok=False,
+            )
+    return ToolResult(owner_answer_text())
+
+
 def _x_web_search(a, ctx, dry):
-    query = str(a.args.get("query") or "")
-    engine = str(a.args.get("engine") or "google")
-    play = bool(a.args.get("play")) and engine == "youtube"
-    url = str(a.args.get("url") or "")
-    # "Play … on YouTube" must open a watch page, not stop on search results.
-    if play:
-        watch = resolve_youtube_video(query)
-        if watch:
-            url = watch
-            a.args["url"] = watch
-        elif not url:
-            url = youtube_search_url(query)
-    if not url:
-        url = youtube_search_url(query) if engine == "youtube" else google_search_url(query)
+    url = str(a.args["url"])
     argv = browser_command(str(a.args.get("browser", "default")), url, ctx.which)
     ok = _launch(ctx, argv, dry)
-    if play:
-        if "/watch" in url:
-            msg = f"Playing **{query}** on YouTube."
-        else:
-            msg = (f"I couldn't pick a video automatically — opening YouTube search for "
-                   f"**{query}** so you can choose one.")
-    else:
-        where = "YouTube" if engine == "youtube" else "Google"
-        msg = f"Searching {where} for **{query}** — the results are opening in your browser."
-    return _done(ok, msg, "I couldn't open the browser.", [argv], data={"url": url})
+    where = "YouTube" if a.args.get("engine") == "youtube" else "Google"
+    return _done(ok, f"Searching {where} for **{a.args['query']}** — the results are opening in your browser.",
+                 "I couldn't open the browser.", [argv], data={"url": url})
 
 
 def copy_to_clipboard(text: str, ctx: ToolContext) -> bool:
-    """Copies text to the system clipboard using xclip or wl-copy.
-
-    xclip stays alive to own the selection — we must not wait for it to exit.
-    """
+    """Copies text to the system clipboard using wl-copy or xclip if available."""
     if not text:
         return False
-    data = text.encode("utf-8", errors="replace")
-
-    def _xclip_set() -> bool:
-        if not ctx.which("xclip"):
-            return False
-        try:
-            p = subprocess.Popen(
-                ["xclip", "-i", "-selection", "clipboard"],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                close_fds=True,
-            )
-            assert p.stdin is not None
-            p.stdin.write(data)
-            p.stdin.close()
-            try:
-                p.wait(timeout=0.2)
-            except subprocess.TimeoutExpired:
-                pass  # still holding the clipboard — that is success
-            return True
-        except OSError:
-            return False
-
-    # Prefer xclip when DISPLAY is set (X11 / XWayland).
-    if (ctx.env.get("DISPLAY") or "").strip() and _xclip_set():
-        return True
     if ctx.which("wl-copy"):
-        try:
-            p = subprocess.run(
-                ["wl-copy", "--"],
-                input=data,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=2,
-            )
-            if p.returncode == 0:
-                return True
-        except (OSError, subprocess.TimeoutExpired):
-            pass
-    return _xclip_set()
+        rc, _ = ctx.runner(["wl-copy"], input_text=text, timeout=2.0)
+        if rc == 0:
+            return True
+    if ctx.which("xclip"):
+        rc, _ = ctx.runner(["xclip", "-i", "-selection", "clipboard"], input_text=text, timeout=2.0)
+        return rc == 0
+    return False
 
 
 def _x_social_post(a: Action, ctx: ToolContext, dry: bool) -> ToolResult:
@@ -3050,13 +2804,13 @@ def _x_open_tool(a, ctx, dry):
     py = sys.executable or "python3"
     if tool == "optimizer":
         argv = [py, OPTIMIZER_PY, "--cleanup"]
-        title = "DevOS Optimizer"
+        title = "PC Optimizer"
     elif tool == "apps":
         argv = [py, APPS_MANAGER_PY]
         title = "Apps"
     elif tool == "security":
         argv = [py, SECURITY_PY]
-        title = "DevOS Security"
+        title = "Security"
     elif tool == "clipboard":
         argv = [py, CLIPBOARD_PY]
         title = "Clipboard"
@@ -3068,7 +2822,7 @@ def _x_open_tool(a, ctx, dry):
         title = "Kids Mode"
     elif tool == "broadband":
         argv = [py, BROADBAND_PY]
-        title = "Broadband Dial-up"
+        title = "Internet Dial-up"
     else:
         return ToolResult("Unknown tool.", ok=False)
     ok = _launch(ctx, argv, dry)
@@ -3080,8 +2834,8 @@ def _x_cleanup_scan(a, ctx, dry):
     lines = []
     total = 0
     if opt is None:
-        return ToolResult("The cleanup scanner isn't available. Open DevOS Optimizer instead.", ok=False,
-                          buttons=[("Open DevOS Optimizer", Action("open_tool", {"tool": "optimizer"}))])
+        return ToolResult("The cleanup scanner isn't available. Open PC Optimizer instead.", ok=False,
+                          buttons=[("Open PC Optimizer", Action("open_tool", {"tool": "optimizer"}))])
     try:
         results = opt.public_scan(opt.scan_all())
     except Exception as exc:
@@ -3103,9 +2857,9 @@ def _x_cleanup_scan(a, ctx, dry):
     text = "\n".join([head] + lines)
     if disks:
         text += "\n\n⚠ Disk space is low. Uninstalling apps you don't use frees the most space."
-    text += "\n\nNothing has been deleted. Open DevOS Optimizer to review and clean."
+    text += "\n\nNothing has been deleted. Open PC Optimizer to review and clean."
     return ToolResult(text, data={"total": total},
-                      buttons=[("Open DevOS Optimizer", Action("open_tool", {"tool": "optimizer"}))])
+                      buttons=[("Open PC Optimizer", Action("open_tool", {"tool": "optimizer"}))])
 
 
 def _x_solve(a, ctx, dry):
@@ -3117,8 +2871,8 @@ def _x_solve(a, ctx, dry):
         import solve
         result = solve.answer(str(a.args.get("text") or ""))
     except Exception as exc:
-        return ToolResult(f"I couldn't finish the check ({exc}). Open DevOS Security.", ok=False,
-                          buttons=[("Open DevOS Security", Action("open_tool", {"tool": "security"}))])
+        return ToolResult(f"I couldn't finish the check ({exc}). Open Security.", ok=False,
+                          buttons=[("Open Security", Action("open_tool", {"tool": "security"}))])
     buttons = []
     for spec in result.get("buttons") or []:
         if spec.get("tool"):
@@ -3308,17 +3062,6 @@ def _x_modesty(a: Action, ctx: ToolContext, dry: bool) -> ToolResult:
 TYPING_X11_ONLY_TEXT = "Typing into other apps works only in the standard desktop session (not in this one)."
 TYPING_MISSING_TEXT = "Typing into other apps isn't available on this PC (a helper tool is missing)."
 CLICK_TO_TYPE_TEXT = "Click where to type, then say it again."
-# xdotool "type" cannot reliably emit Bangla / other Unicode — paste instead.
-_NEEDS_PASTE = re.compile(r"[^\x00-\x7F]")
-
-
-def _needs_unicode_paste(text: str) -> bool:
-    return bool(_NEEDS_PASTE.search(text or ""))
-
-
-def paste_command() -> List[str]:
-    """Ctrl+V via xdotool (works for X11 and most XWayland apps)."""
-    return ["xdotool", "key", "--clearmodifiers", "ctrl+v"]
 
 # Window classes of the apps we may type into (WM_CLASS, case-insensitive).
 APP_WMCLASS = {
@@ -3354,41 +3097,16 @@ def window_class_for(app: DesktopApp) -> str:
 
 
 def typing_problem(ctx: ToolContext) -> str:
-    """'' when we can type into other windows, else a message for the user.
-
-    Wayland: still allow typing when xdotool can reach XWayland windows (Chrome,
-    WhatsApp Web, etc.) — required for Bangla paste via clipboard.
-    """
+    """'' when we can type into other windows, else a message for the user."""
+    if (ctx.env.get("XDG_SESSION_TYPE") or "").lower() == "wayland":
+        return TYPING_X11_ONLY_TEXT
     if not ctx.which("xdotool"):
         return TYPING_MISSING_TEXT
-    session = (ctx.env.get("XDG_SESSION_TYPE") or "").lower()
-    if session == "wayland" and not (ctx.env.get("DISPLAY") or "").strip():
-        return TYPING_X11_ONLY_TEXT
     return ""
 
 
 def type_command(text: str) -> List[str]:
-    return ["xdotool", "type", "--delay", "12", "--clearmodifiers", "--", text]
-
-
-def insert_text(ctx: ToolContext, text: str, timeout: Optional[int] = None) -> Tuple[int, str, List[List[str]]]:
-    """Type or paste `text` into the focused window. Unicode → clipboard + Ctrl+V."""
-    plan: List[List[str]] = []
-    to = timeout if timeout is not None else max(10, len(text) // 20 + 10)
-    # Prefer paste for non-ASCII (Bangla) — xdotool type skips or garbles those glyphs.
-    if _needs_unicode_paste(text) or (ctx.env.get("XDG_SESSION_TYPE") or "").lower() == "wayland":
-        if copy_to_clipboard(text, ctx):
-            argv = paste_command()
-            plan.append(["clipboard", text[:80]])
-            plan.append(argv)
-            rc, out = ctx.runner(argv, timeout=6)
-            return rc, out, plan
-        if _needs_unicode_paste(text):
-            return 127, "clipboard unavailable for Bangla/Unicode text", plan
-    argv = type_command(text)
-    plan.append(argv)
-    rc, out = ctx.runner(argv, timeout=to)
-    return rc, out, plan
+    return ["xdotool", "type", "--delay", "15", "--", text]
 
 
 def _xdo_ids(ctx: ToolContext, cls: str) -> List[str]:
@@ -3459,12 +3177,12 @@ def _x_write_note(a, ctx, dry):
         path = os.path.join(folder, f"{base} ({n}).txt")
         n += 1
     app = str(a.args.get("app", "notepad"))
-    if app == "kate" and ctx.which("kate"):
-        argv, where = ["kate", path], "Text Editor"
-    elif app == "writer" and ctx.which("libreoffice"):
+    if app == "writer" and ctx.which("libreoffice"):
         argv, where = ["libreoffice", "--writer", path], "LibreOffice Writer"
     elif os.path.isfile(NOTEPAD_PY):
         argv, where = [PYTHON, NOTEPAD_PY, path], "Notepad"
+    elif shutil.which("devos-code"):
+        argv, where = ["devos-code", path], "DevOS Code"
     else:
         argv, where = ["xdg-open", path], "the text editor"
     rel = "Documents/Notes/" + os.path.basename(path)
@@ -3489,23 +3207,21 @@ def _x_type_text(a, ctx, dry):
         delay = max(0.0, min(5.0, float(a.args.get("delay", 1.0))))
     except (TypeError, ValueError):
         delay = 1.0
-    how = "paste" if _needs_unicode_paste(text) else "type"
-    plan_preview = [paste_command()] if how == "paste" else [type_command(text)]
+    argv = type_command(text)
     if dry:
-        return ToolResult("Typing your text into the window you were using.",
-                          plan=plan_preview, data={"delay": delay, "how": how})
+        return ToolResult("Typing your text into the window you were using.", plan=[argv], data={"delay": delay})
     problem = typing_problem(ctx)
     if problem:
-        return ToolResult(problem, ok=False, plan=plan_preview)
+        return ToolResult(problem, ok=False, plan=[argv])
     ctx.sleep(delay)
     wid = _active_window(ctx)
     avoid = str(a.args.get("avoid_window", "") or "")
     if not wid or (avoid and wid == avoid):
-        return ToolResult(CLICK_TO_TYPE_TEXT, ok=False, plan=plan_preview)
+        return ToolResult(CLICK_TO_TYPE_TEXT, ok=False, plan=[argv])
     if not settle_window(ctx, wid, timeout=1.5):
-        return ToolResult(CLICK_TO_TYPE_TEXT, ok=False, plan=plan_preview)
-    rc, _, plan = insert_text(ctx, text)
-    return _done(rc == 0, "Typed it.", "I couldn't type the text.", plan)
+        return ToolResult(CLICK_TO_TYPE_TEXT, ok=False, plan=[argv])
+    rc, _ = ctx.runner(argv, timeout=max(10, len(text) // 20 + 10))
+    return _done(rc == 0, "Typed it.", "I couldn't type the text.", [argv])
 
 
 def _x_open_app_and_type(a, ctx, dry):
@@ -3521,9 +3237,8 @@ def _x_open_app_and_type(a, ctx, dry):
                           data={"not_found": True})
     cls = window_class_for(app)
     launch = launch_command(app, ctx.which)
-    how = paste_command() if _needs_unicode_paste(text) else type_command(text)
     plan = [launch, ["xdotool", "search", "--sync", "--onlyvisible", "--class", cls],
-            ["xdotool", "windowactivate", "--sync", "<new window>"], how]
+            ["xdotool", "windowactivate", "--sync", "<new window>"], type_command(text)]
     data = {"desktop_id": app.desktop_id, "wmclass": cls}
     if dry:
         return ToolResult(f"Opening **{app.name}** and typing your text into it.", plan=plan, data=data)
@@ -3543,9 +3258,9 @@ def _x_open_app_and_type(a, ctx, dry):
     if not settle_window(ctx, wid):
         return ToolResult(f"I opened **{app.name}**, but it didn't come to the front, so I didn't type anything "
                           "(to be safe). " + CLICK_TO_TYPE_TEXT, ok=False, plan=plan, data=data)
-    rc, _, used = insert_text(ctx, text)
+    rc, _ = ctx.runner(type_command(text), timeout=max(10, len(text) // 20 + 10))
     return _done(rc == 0, f"Opened **{app.name}** and typed your text.",
-                 f"I opened {app.name}, but couldn't type the text.", plan + used, data=data)
+                 f"I opened {app.name}, but couldn't type the text.", plan, data=data)
 
 
 def _x_compose_email(a, ctx, dry):
@@ -3728,13 +3443,6 @@ MEDIA_OPS = {"play": ("play", "XF86AudioPlay", "Playing."), "pause": ("pause", "
              "previous": ("previous", "XF86AudioPrev", "Previous track."), "stop": ("stop", "XF86AudioStop", "Stopped.")}
 
 
-def _playerctl_status(ctx: ToolContext) -> str:
-    if not ctx.which("playerctl"):
-        return ""
-    rc, out = ctx.runner(["playerctl", "status"], timeout=3)
-    return (out or "").strip().lower() if rc == 0 else ""
-
-
 def _x_media(a, ctx, dry):
     op = str(a.args.get("op", ""))
     if op == "music":
@@ -3750,61 +3458,19 @@ def _x_media(a, ctx, dry):
     if op not in MEDIA_OPS:
         return ToolResult("Unknown media control.", ok=False)
     pc, key, msg = MEDIA_OPS[op]
-    # Chrome/YouTube MPRIS often ignores "stop" (returns ok, keeps playing).
-    # Prefer pause for stop/pause, and verify status when playerctl is available.
-    attempts: List[List[str]] = []
     if ctx.which("playerctl"):
-        if op in ("stop", "pause"):
-            attempts.append(["playerctl", "pause"])
-            attempts.append(["playerctl", "play-pause"])
-        else:
-            attempts.append(["playerctl", pc])
-            if op == "play":
-                attempts.append(["playerctl", "play-pause"])
-    if ctx.which("xdotool") and typing_problem(ctx) == "":
-        if op in ("stop", "pause", "play", "toggle"):
-            attempts.append(["xdotool", "key", "XF86AudioPlay"])
-        else:
-            attempts.append(["xdotool", "key", key])
-    if not attempts:
+        argv = ["playerctl", pc]
+    elif ctx.which("xdotool") and typing_problem(ctx) == "":
+        argv = ["xdotool", "key", key]      # the media key; the desktop passes it to the player
+    else:
         return ToolResult("Media controls aren't available on this PC yet. Use the player's own buttons.",
                           ok=False)
     if dry:
-        return ToolResult(msg, plan=attempts[:1])
-
-    want_paused = op in ("stop", "pause")
-    want_playing = op == "play"
-    status = _playerctl_status(ctx)
-    if want_paused and status == "paused":
-        return ToolResult("Already paused.", ok=True, plan=[])
-    if want_paused and status == "stopped":
-        return ToolResult("Nothing is playing right now.", ok=True, plan=[])
-    if not status and not attempts:
-        return ToolResult("Nothing is playing right now.", ok=False, plan=[])
-
-    used: List[List[str]] = []
-    last_out = ""
-    for argv in attempts:
-        rc, out = ctx.runner(argv, timeout=5)
-        used.append(argv)
-        last_out = out or last_out
-        if rc != 0:
-            if argv[0] == "playerctl" and "no players" in (out or "").lower():
-                continue
-            continue
-        # Verify MPRIS when we can — don't trust Chrome's fake-ok on "stop".
-        if ctx.which("playerctl") and (want_paused or want_playing):
-            st = _playerctl_status(ctx)
-            if want_paused and st in ("paused", "stopped"):
-                return ToolResult(msg, ok=True, plan=used)
-            if want_playing and st == "playing":
-                return ToolResult(msg, ok=True, plan=used)
-            continue
-        return ToolResult(msg, ok=True, plan=used)
-
-    if "no players" in last_out.lower() or not _playerctl_status(ctx):
-        return ToolResult("Nothing is playing right now.", ok=False, plan=used or attempts)
-    return ToolResult("I couldn't control the player.", ok=False, plan=used or attempts)
+        return ToolResult(msg, plan=[argv])
+    rc, out = ctx.runner(argv, timeout=5)
+    if rc != 0 and argv[0] == "playerctl" and "no players" in out.lower():
+        return ToolResult("Nothing is playing right now.", ok=False, plan=[argv])
+    return _done(rc == 0, msg, "I couldn't control the player.", [argv])
 
 
 def _proc_user_pids(ctx: ToolContext, exe: str, script: str = "") -> List[int]:
@@ -3987,7 +3653,8 @@ def _x_install_package(a, ctx, dry):
 
 _EXECUTORS = {
     "install_app": _x_install_app, "install_package": _x_install_package,
-    "help": _x_help, "about": _x_about, "web_search": _x_web_search, "open_url": _x_open_url, "open_app": _x_open_app,
+    "help": _x_help, "about": _x_about, "pc_owner": _x_pc_owner,
+    "web_search": _x_web_search, "open_url": _x_open_url, "open_app": _x_open_app,
     "open_search_result": _x_open_search_result, "open_web_page": _x_open_web_page,
     "system_info": _x_system_info, "count_apps": _x_count_apps, "list_apps": _x_list_apps,
     "open_settings": _x_open_settings, "open_folder": _x_open_folder, "volume": _x_volume,

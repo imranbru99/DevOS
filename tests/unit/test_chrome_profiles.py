@@ -12,11 +12,11 @@ import chrome_profiles
 
 
 class TestChromeProfiles(unittest.TestCase):
-    def test_get_chrome_profiles_default_fallback(self):
+    def test_get_chrome_profiles_empty_when_no_chrome_data(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             profiles = chrome_profiles.get_chrome_profiles(tmpdir)
-            self.assertIn("Default", profiles)
-            self.assertEqual(profiles["Default"], "Work")
+            # Do not invent Work/Guest menu apps before the user opens Chrome.
+            self.assertEqual(profiles, {})
 
     def test_get_chrome_profiles_from_local_state(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -79,6 +79,20 @@ class TestChromeProfiles(unittest.TestCase):
             self.assertTrue(any("chrome-mirza.desktop" in d for d in desktops))
             self.assertTrue(any("chrome-guest.desktop" in d for d in desktops))
 
+            main = os.path.join(tmp_home, ".local/share/applications/google-chrome.desktop")
+            self.assertTrue(os.path.isfile(main))
+            text = open(main, encoding="utf-8").read()
+            self.assertIn("StartupWMClass=google-chrome", text)
+            work = open(os.path.join(tmp_home, ".local/share/applications/chrome-work.desktop"), encoding="utf-8").read()
+            self.assertIn("StartupWMClass=chrome-work", work)
+            self.assertIn("--class=chrome-work", work)
+            self.assertIn("Icon=chrome-work", work)
+            # Profile launchers are for the taskbar only — never Start menu.
+            self.assertIn("NoDisplay=true", work)
+            guest = open(os.path.join(tmp_home, ".local/share/applications/chrome-guest.desktop"), encoding="utf-8").read()
+            self.assertIn("NoDisplay=true", guest)
+            self.assertNotIn("NoDisplay=true", text)
+
             # Verify policy file was created
             pol_file = os.path.join(tmp_home, ".config", "devos", "chrome-policies", "devos-familysafe.json")
             self.assertTrue(os.path.isfile(pol_file))
@@ -86,6 +100,41 @@ class TestChromeProfiles(unittest.TestCase):
                 pol = json.load(f)
             self.assertTrue(pol.get("BrowserGuestModeEnabled"))
             self.assertTrue(pol.get("BrowserAddPersonEnabled"))
+
+    def test_plasma_launchers_windows_style_profile_pins(self):
+        with tempfile.TemporaryDirectory() as tmp_home:
+            cfg_dir = os.path.join(tmp_home, ".config")
+            apps = os.path.join(tmp_home, ".local/share/applications")
+            os.makedirs(cfg_dir, exist_ok=True)
+            os.makedirs(apps, exist_ok=True)
+            for slug in ("work", "mirza"):
+                open(os.path.join(apps, f"chrome-{slug}.desktop"), "w", encoding="utf-8").write("[Desktop Entry]\n")
+            appletsrc = os.path.join(cfg_dir, "plasma-org.kde.plasma.desktop-appletsrc")
+            with open(appletsrc, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "[Containments][3][Applets][6]\n"
+                    "plugin=org.kde.plasma.icontasks\n"
+                    "\n"
+                    "[Containments][3][Applets][6][Configuration][General]\n"
+                    "launchers=applications:devos-search.desktop,applications:google-chrome.desktop\n"
+                    "groupingStrategy=1\n"
+                    "separateLaunchers=false\n"
+                )
+            # Open profiles → hide Chrome pin, show avatar pins.
+            ok = chrome_profiles.sync_plasma_profile_launchers(tmp_home, ["work", "mirza"])
+            self.assertTrue(ok)
+            text = open(appletsrc, encoding="utf-8").read()
+            self.assertIn("applications:chrome-work.desktop", text)
+            self.assertIn("applications:chrome-mirza.desktop", text)
+            self.assertNotIn("applications:google-chrome.desktop", text)
+            self.assertIn("separateLaunchers=true", text)
+            self.assertIn("applications:devos-search.desktop", text)
+            # All closed → restore Chrome pin.
+            ok = chrome_profiles.sync_plasma_profile_launchers(tmp_home, [])
+            self.assertTrue(ok)
+            text = open(appletsrc, encoding="utf-8").read()
+            self.assertIn("applications:google-chrome.desktop", text)
+            self.assertNotIn("chrome-work.desktop", text)
 
     def test_detect_window_profile_markers(self):
         profiles = {"Default": "Work", "Profile 1": "Mirza", "Profile 4": "Blog"}

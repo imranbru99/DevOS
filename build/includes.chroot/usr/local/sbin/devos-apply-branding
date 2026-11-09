@@ -135,6 +135,11 @@ if [ -x /usr/local/sbin/devos-debrand-desktop ]; then
     /bin/bash /usr/local/sbin/devos-debrand-desktop || true
 fi
 
+# English UI/formats on the image (installer region must not leave bn_* in the clock).
+if [ -x /usr/local/sbin/devos-force-english-ui ]; then
+    /bin/bash /usr/local/sbin/devos-force-english-ui || true
+fi
+
 # Refresh desktop database
 update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
 update-desktop-database /usr/local/share/applications >/dev/null 2>&1 || true

@@ -1,44 +1,12 @@
-# DevOS Premium · Home Collection
+# DevOS Premium · 50 Homepage Wallpapers
 
-Twenty original wallpapers designed for DevOS itself — cyan/sapphire/obsidian
-brand language, calm icon-safe zones, and compositions that crop cleanly on
-phones, tablets, laptops, ultrawide and 4K.
+Fifty ultra-premium wallpapers for the DevOS homepage and desktop — cyan/sapphire/obsidian brand language, calm icon-safe left zones, cinematic lighting meant to feel more premium than stock Windows Bloom.
 
-These replace the earlier generic sculpture/landscape set. Flagship entries:
+Open `gallery.html` to browse.
 
-| Id | Name | Role |
-|---|---|---|
-| 01 | Cyan Orbit | Dark default / boot motif |
-| 08 | Pearl Dawn | Light-mode pair |
-| 20 | Home Bloom | Dashboard homepage hero |
-
-Open `gallery.html` to compare the collection.
-
-## Multi-size packages
-
-Each Plasma package under
-`build/includes.chroot/usr/share/wallpapers/DevOS-Premium-*` includes:
-
-- `wallpaper.png` master
-- common landscape covers (`1366x768`, `1920x1080`, `2560x1440`, `3840x2160`, …)
-- portrait covers on Cyan Orbit, Pearl Dawn and Home Bloom (`720x1280`, `1080x1920`, …)
-
-Plasma picks the closest `WIDTHxHEIGHT.png`. The dashboard homepage switches
-between landscape and portrait heroes with CSS (`premium/home-bloom*.jpg`).
-
-## Use on this computer
+## Install on this PC
 
 ```sh
 python3 tools/wallpapers/premium-collection/install.py
-python3 tools/wallpapers/premium-collection/install.py --apply light   # Pearl Dawn
-python3 tools/wallpapers/premium-collection/install.py --apply dark    # Cyan Orbit
-python3 tools/wallpapers/premium-collection/install.py --select 20     # Home Bloom
+python3 tools/wallpapers/premium-collection/install.py --select 50
 ```
-
-## Rebuild packaging
-
-```sh
-python3 tools/wallpapers/premium-collection/package.py
-```
-
-Developer: [Imran Ahmed](https://imrandev.bd) <me@imrandev.bd>.

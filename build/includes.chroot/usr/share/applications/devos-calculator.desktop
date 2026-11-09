@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Calculator
+GenericName=Calculator
+Comment=Do math quickly
+Exec=kcalc
+Icon=accessories-calculator
+Terminal=false
+Categories=Qt;Utility;Calculator;
+Keywords=calculator;calc;math;kcalc;
+StartupNotify=true
+StartupWMClass=kcalc

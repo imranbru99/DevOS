@@ -1,6 +1,6 @@
 # DevOS current feature inventory
 
-Reviewed against the source tree on **November 8, 2026**. This inventory describes
+Reviewed against the source tree on **November 9, 2026**. This inventory describes
 implemented components and configured installation options. It is not a claim
 that every app, hardware device or installation path has been tested. The current
 source targets Ubuntu 26.04 LTS (Resolute), amd64. An older published ISO may not
@@ -14,12 +14,14 @@ contain these changes.
   login failure feedback, account and session selection, restart and shutdown,
   animated wallpaper Ken Burns pan/zoom with soft drifting color washes.
 - Calamares pages: welcome, location, keyboard, partitions, local account, AI model,
-  user type, app selection, summary, progress and finish. An online account is not required.
+  voice, user type, app selection, summary, progress and finish. An online account is not required.
 - Btrfs or ext4 installation, optional LUKS encryption, EFI partition setup,
   Btrfs subvolumes/compression and optional disk swap; zram is the normal swap path.
 - Hybrid BIOS/UEFI build and safe-graphics boot option; boot artifact verification
   checks the image structure. Secure Boot requires separate verification of the exact image.
-- First-boot dashboard with machine statistics, setup guidance, storage tools and runtimes.
+- Installed initramfs and GRUB validation before Calamares completes, target ESP selection, and a USB-removal prompt before reboot.
+- First-boot Plasma autologin and dashboard with machine statistics, setup guidance, storage tools and runtimes. The homepage marks completion after the page loads.
+- Chrome profile and Guest launchers, Memory Saver, RAM-scaled tab discard threshold and zram sized at 50% of RAM.
 - Animated installer backgrounds and persistent DevOS emblem; ext4 default, manual
   partitioning and optional explicitly confirmed ext4 A/B/C layouts on additional disks.
 - Shared Qt application dialogs with clearer delete actions and safe defaults;

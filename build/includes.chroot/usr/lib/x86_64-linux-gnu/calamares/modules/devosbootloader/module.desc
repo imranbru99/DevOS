@@ -1,0 +1,5 @@
+---
+type: job
+name: devosbootloader
+interface: python
+script: main.py

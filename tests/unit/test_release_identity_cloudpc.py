@@ -87,7 +87,7 @@ class IdentityTests(unittest.TestCase):
             self.assertTrue(stub.exists())
 
     def test_desktop_name_icon_and_wm_class(self):
-        self.assertEqual(desktop_metadata('devos-optimizer'),('DevOS Optimizer','devos-optimizer','devos-optimizer'))
+        self.assertEqual(desktop_metadata('devos-optimizer'),('PC Optimizer','devos-optimizer','devos-optimizer'))
         self.assertIsNone(desktop_metadata('../outside'))
 
     def test_upstream_identity_rejects_branded_or_old_base(self):

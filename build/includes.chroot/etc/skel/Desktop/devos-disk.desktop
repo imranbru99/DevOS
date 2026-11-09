@@ -1,10 +1,11 @@
-[Desktop Entry]
+﻿[Desktop Entry]
 Type=Application
 Name=Storage & Boot Doctor
 Comment=Visual MBR/GPT partition detector and disk repair tool
 Exec=/usr/local/bin/devos-disk-gui
-Icon=drive-harddisk
+Icon=devos-disk
 Terminal=false
 Categories=System;Settings;HardwareSettings;
 Keywords=disk;partition;mbr;gpt;storage;boot;format;
 StartupNotify=true
+StartupWMClass=devos-disk

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=DevOS Homepage
+Comment=Open the DevOS homepage after sign-in (Windows-style first desktop)
+Exec=/usr/local/bin/devos-open-homepage
+Icon=devos-dashboard
+Terminal=false
+OnlyShowIn=KDE;
+X-KDE-autostart-phase=2
+X-GNOME-Autostart-enabled=true
+StartupNotify=false

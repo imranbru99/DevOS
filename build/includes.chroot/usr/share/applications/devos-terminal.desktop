@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Name=Terminal
+GenericName=Command Prompt
+Comment=Command line terminal
+Exec=konsole
+Icon=utilities-terminal
+Terminal=false
+Type=Application
+StartupWMClass=konsole
+Categories=System;TerminalEmulator;
+StartupNotify=true
+Keywords=terminal;cmd;command;shell;console;prompt;cli;konsole;

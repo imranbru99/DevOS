@@ -99,6 +99,13 @@ _BANNED = [
     (r"apt-get", "installer"), (r"apt", "installer"), (r"dpkg", "installer"),
     (r"flatpak", "app store"), (r"waydroid", "Android"), (r"wine", "Windows support"),
     (r"ubuntu", "DevOS"), (r"plasma", "desktop"), (r"kde", ""),
+    (r"kcalc", "Calculator"), (r"dolphin", "File Explorer"), (r"kate", "Text Editor"),
+    (r"kwrite", "Text Editor"), (r"konsole", "Terminal"), (r"spectacle", "Snipping Tool"),
+    (r"gwenview", "Photos"), (r"okular", "PDF Viewer"), (r"ark", "Zip Folders"),
+    (r"kolourpaint", "Paint"), (r"skanlite", "Scanner"), (r"kcharselect", "Character Map"),
+    (r"kmag", "Magnifier"), (r"keepassxc", "Password Manager"), (r"kvantum", "Theme Engine"),
+    (r"okular", "PDF Viewer"), (r"gwenview", "Photos"), (r"ark", "Zip Folders"),
+    (r"discover", "Store"), (r"elisa", "Music"), (r"klipper", "Clipboard"),
 ]
 _BANNED_RE = re.compile(r"\b(" + "|".join(p for p, _ in _BANNED) + r")\b", re.IGNORECASE)
 _BANNED_MAP = {p: r for p, r in _BANNED}
@@ -375,9 +382,20 @@ def desktop_id_hidden(desktop_id: str) -> bool:
 def friendly_pwa_name(name: str) -> str:
     s = name.strip()
     if s.startswith("http://") or s.startswith("https://"):
+        try:
+            from browser.chrome_start_menu import friendly_url_name
+            titled = friendly_url_name(s)
+            if titled:
+                return titled
+        except Exception:
+            pass
         low = s.lower()
         if "onedrive" in low:
             return "OneDrive"
+        if "office.com" in low:
+            return "Microsoft 365"
+        if "youtube" in low or "youtu.be" in low:
+            return "YouTube"
         if "weather" in low:
             return "Weather"
         if "bing.com/maps" in low or "maps" in low:
@@ -1611,8 +1629,8 @@ def run_gui(focus: Optional[str] = None, discovery: Optional[AppDiscovery] = Non
             super().__init__()
             self.setObjectName("root")
             self.setWindowTitle("Apps")
-            self.setWindowIcon(QtGui.QIcon.fromTheme("preferences-desktop-apps",
-                                                     QtGui.QIcon.fromTheme("applications-all")))
+            self.setWindowIcon(QtGui.QIcon.fromTheme("devos-apps",
+                                                     QtGui.QIcon.fromTheme("preferences-desktop-apps")))
             self.resize(940, 760)
             self.apps: List[App] = []
             self.rows: Dict[str, AppRow] = {}
@@ -1916,10 +1934,15 @@ def run_gui(focus: Optional[str] = None, discovery: Optional[AppDiscovery] = Non
     qapp.setApplicationName("devos-apps")
     qapp.setApplicationDisplayName("DevOS Apps")
     qapp.setDesktopFileName("devos-apps")
-    from app_identity import apply as apply_identity
+    from app_identity import apply as apply_identity, show_window
     apply_identity(qapp, "devos-apps")
     if QtGui.QIcon.themeName() in ("", "hicolor"):
-        QtGui.QIcon.setThemeName("breeze-dark")
+        try:
+            from devos_appearance import current_mode
+            icon_theme = "Papirus" if current_mode() in ("light", "mac-light") else "Papirus-Dark"
+        except Exception:
+            icon_theme = "Papirus"
+        QtGui.QIcon.setThemeName(icon_theme)
     font = QtGui.QFont("Inter")
     if not QtGui.QFontInfo(font).exactMatch():
         font = QtGui.QFont("Noto Sans")
@@ -1927,7 +1950,7 @@ def run_gui(focus: Optional[str] = None, discovery: Optional[AppDiscovery] = Non
     qapp.setFont(font)
     qapp.setStyleSheet(STYLE)
     win = Window()
-    win.show()
+    show_window(win, "devos-apps")
     if os.environ.get("DEVOS_APPS_SMOKE"):
         QtCore.QTimer.singleShot(int(os.environ.get("DEVOS_APPS_SMOKE")), qapp.quit)
     return qapp.exec_()

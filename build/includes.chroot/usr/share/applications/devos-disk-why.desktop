@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Disk Space Report
+GenericName=Storage breakdown
+Comment=See why DevOS is using disk space
+Exec=konsole -e bash -lc 'devos-disk-why; echo; read -n1 -p "Press any key to close…"'
+Icon=devos-disk
+Terminal=false
+Categories=Qt;System;Filesystem;
+Keywords=disk;space;storage;usage;du;70gb;clean;
+StartupNotify=true
+StartupWMClass=devos-disk-why
+NoDisplay=false

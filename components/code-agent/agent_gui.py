@@ -2454,7 +2454,7 @@ def main(argv=None) -> int:
     app.setApplicationName("devos-ai-code-agent")
     app.setApplicationDisplayName("DevOS AI Code Agent")
     app.setDesktopFileName("devos-ai-code-agent")
-    from app_identity import apply as apply_identity
+    from app_identity import apply as apply_identity, show_window
     apply_identity(app, "devos-ai-code-agent")
     app.setWindowIcon(get_app_icon())
     folder = next((a for a in argv if not a.startswith("-")), "")
@@ -2463,7 +2463,7 @@ def main(argv=None) -> int:
     if not folder:
         folder = get_last_opened_folder()
     window = AgentWindow(folder)
-    window.show()
+    show_window(window, "devos-ai-code-agent")
     return app.exec_()
 
 

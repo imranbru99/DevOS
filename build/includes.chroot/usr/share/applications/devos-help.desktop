@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+StartupWMClass=devos-about
+Version=1.0
+Name=Help Center
+GenericName=Contact & support
+Comment=Contact Imran Dev — email, WhatsApp, LinkedIn, GitHub, and support form
+Exec=devos-about --help-center
+Icon=devos-about
+Terminal=false
+Categories=Help;System;Documentation;
+Keywords=help;support;contact;about;imran;email;whatsapp;linkedin;github;feedback;
+StartupNotify=true

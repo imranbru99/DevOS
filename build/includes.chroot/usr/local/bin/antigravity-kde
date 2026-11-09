@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
-# Antigravity Studio (KDE Edition) - isolated AI agent instance with shared extensions.
-# Profile/data stay separate; extensions reuse the primary Antigravity install when present
-# (old/shared extensions dir) instead of an empty per-KDE extensions tree.
-set -e
+# Antigravity IDE — second independent instance (own Google account + projects).
+# Isolated from Google Antigravity (main) via separate data dirs and WM class.
+set -euo pipefail
 
 IDE_BIN=""
-if [ -x "$HOME/.local/lib/antigravity-ide/antigravity-ide" ]; then
-    IDE_BIN="$HOME/.local/lib/antigravity-ide/antigravity-ide"
-elif [ -x "$HOME/.local/lib/antigravity-ide/bin/antigravity-ide" ]; then
-    IDE_BIN="$HOME/.local/lib/antigravity-ide/bin/antigravity-ide"
+if [ -x "${HOME}/.local/lib/antigravity-ide/antigravity-ide" ]; then
+    IDE_BIN="${HOME}/.local/lib/antigravity-ide/antigravity-ide"
+elif [ -x "${HOME}/.local/lib/antigravity-ide/bin/antigravity-ide" ]; then
+    IDE_BIN="${HOME}/.local/lib/antigravity-ide/bin/antigravity-ide"
 elif [ -x "/usr/local/share/devos/antigravity-ide/bin/antigravity-ide" ]; then
     IDE_BIN="/usr/local/share/devos/antigravity-ide/bin/antigravity-ide"
 elif [ -x "/opt/antigravity/antigravity" ]; then
@@ -16,46 +15,40 @@ elif [ -x "/opt/antigravity/antigravity" ]; then
 fi
 
 if [ -z "$IDE_BIN" ]; then
-    echo "Error: Antigravity IDE binary not found." >&2
+    echo "Error: Antigravity IDE binary not found. Install Google Antigravity or Antigravity IDE first." >&2
     exit 1
 fi
 
 unset ELECTRON_RUN_AS_NODE
 export DONT_PROMPT_WSL_INSTALL=1
 export GEMINI_APP_DATA_DIR="antigravity-kde"
-# Bypass host GNOME Keyring in language server to ensure full auth/session segregation
+# Separate keyring / auth from the main Antigravity instance.
 export SSH_CLIENT="127.0.0.1 0 0"
 
-# Prefer the primary Antigravity extensions (shared / "old") when available.
-# Fall back to the KDE-specific dir only when nothing else exists.
-SHARED_EXT=""
-for candidate in \
-    "${HOME}/.antigravity/extensions" \
-    "${HOME}/.config/Antigravity/extensions" \
-    "${HOME}/.vscode/extensions"
-do
-    if [ -d "$candidate" ]; then
-        SHARED_EXT="$candidate"
-        break
-    fi
-done
+DATA_DIR="${HOME}/.config/Antigravity-KDE"
+EXT_DIR="${HOME}/.antigravity-kde/extensions"
+mkdir -p "$DATA_DIR" "$EXT_DIR"
 
-KDE_EXT="${HOME}/.antigravity-kde/extensions"
-mkdir -p "$KDE_EXT"
-if [ -n "$SHARED_EXT" ]; then
-    EXT_DIR="$SHARED_EXT"
-else
-    EXT_DIR="$KDE_EXT"
+# Prefer this IDE's own extensions; fall back to shared only if empty.
+if [ -z "$(ls -A "$EXT_DIR" 2>/dev/null || true)" ]; then
+    for candidate in \
+        "${HOME}/.antigravity/extensions" \
+        "${HOME}/.config/Antigravity/extensions"
+    do
+        if [ -d "$candidate" ] && [ -n "$(ls -A "$candidate" 2>/dev/null || true)" ]; then
+            EXT_DIR="$candidate"
+            break
+        fi
+    done
 fi
 
-# Remove any stale timeout marker from previous tests
-rm -f "$HOME/.gemini/cache/antigravity-keyring-unavailable"
+rm -f "${HOME}/.gemini/cache/antigravity-keyring-unavailable"
 
 exec "$IDE_BIN" \
     --ozone-platform=x11 \
     --no-sandbox \
     --password-store=basic \
-    --user-data-dir="${HOME}/.config/Antigravity-KDE" \
+    --user-data-dir="${DATA_DIR}" \
     --extensions-dir="${EXT_DIR}" \
     --class=antigravity-ide \
     --name=antigravity-ide \

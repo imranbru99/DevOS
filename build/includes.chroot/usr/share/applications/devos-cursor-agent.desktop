@@ -1,5 +1,6 @@
 [Desktop Entry]
-Type=ApplicationStartupWMClass=devos-cursor-agent
+Type=Application
+StartupWMClass=devos-cursor-agent
 
 Version=1.0
 Name=Cursor Agent

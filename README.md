@@ -11,69 +11,75 @@
 
 <p align="center">
   <a href="https://drive.google.com/drive/folders/1RHM8niXwkPsqzOkiMxxp4tpf41bnyJ01?usp=sharing">
-    <img src="https://img.shields.io/badge/%E2%AC%87%EF%B8%8F_Published_ISO-Releases_(Google_Drive)-2563eb?style=for-the-badge&logo=googledrive&logoColor=white" alt="Download DevOS ISO">
+    <img src="https://img.shields.io/badge/%E2%AC%87%EF%B8%8F_Published_ISO-Releases_(Google_Drive)-2563eb?style=for-the-badge&logo=googledrive&logoColor=white" alt="Previously published DevOS ISOs on Google Drive">
   </a>
 </p>
 
 <p align="center">
   <img src="docs/images/devos_desktop.png" alt="DevOS Desktop Environment" width="950">
-  <br><em>DevOS Desktop featuring Sapphire Waves wallpaper, centered taskbar with AI Assistant, Start launcher, system tray, and Windows-familiar workflow.</em>
+  <br><em>Desktop screenshot from an earlier DevOS build with the Sapphire Waves wallpaper and centered Plasma taskbar.</em>
 </p>
 
 ---
 
-## Current source — November 8, 2026
+## Current source — November 9, 2026
 
-The source targets **Ubuntu 26.04 LTS (Resolute Raccoon), amd64**. Ubuntu's
-26.04.1 point release is available; standard support for the Ubuntu base runs
-through May 2031. That schedule does not extend automatically to DevOS tools or
-third-party apps. See [Ubuntu's release list](https://ubuntu.com/project/docs/release-team/list-of-releases/).
+DevOS targets **Ubuntu 26.04 LTS (Resolute), amd64**. The current source is
+for 64-bit Intel and AMD laptops, desktops and mini PCs. The build includes
+UEFI and legacy BIOS boot paths and a Safe Graphics option.
 
-Read the [complete current feature inventory](docs/FEATURES.md),
-[latest changes](CHANGELOG.md), [update guide](docs/UPDATES.md), and
-[download counts](docs/DOWNLOAD-STATS.md).
-Read the [October 26 release validation and remaining hardware checks](docs/RELEASE_VALIDATION_2026-10-26.md).
-See the [long-term maintenance guide](docs/LONG_TERM_MAINTENANCE.md) for recovery,
-storage, update coverage, and release-validation requirements.
-The Google Drive link is for previously published images; source screenshots and
-features below do not certify that an older download contains the latest changes.
-The default source-build filename is `out/devos-26.04-amd64.iso` (with matching `.sha256`).
-Verify the checksum and release validation notes before installing; file size alone does
-not establish readiness. Flash with Rufus in **DD** image mode for real hardware.
+The November 9 build produced `out/devos-26.04-amd64-final.iso` (5.2 GiB).
+The standard build writes `out/devos-26.04-amd64.iso` and a matching SHA-256
+file. The Google Drive folder above contains previously published images.
+Compare the checksum and build date before assuming a download contains these
+changes. [Build instructions](#build-the-iso-from-source)
 
-**Author:** [Imran Ahmed (Imran Dev)](https://imrandev.bd/) · GitHub [@imranbru99](https://github.com/imranbru99) · `me@imrandev.bd`
+**What changed**
 
-**Recently added and improved**
+- **Installer and first boot.** Calamares rebuilds the installed initramfs and
+  generates and validates GRUB on the mounted target. UEFI registration matches
+  the selected EFI partition and loader path. The restart screen prompts you
+  to remove the USB. The default first login opens Plasma and then the DevOS
+  homepage. The homepage records success after its dashboard page loads.
+- **Boot and setup visuals.** The live ISO has a graphical GRUB menu, a two-step
+  animated Plymouth splash, and a redesigned Try/Install screen. The Calamares
+  Summary reviews disk, account, voice, AI and app choices before installation.
+- **Browser workloads.** Chrome is bundled, with Guest and profile launchers.
+  The installer image uses Memory Saver, a RAM-based tab discard threshold and
+  zram sized at 50% of RAM. Chrome manages renderer isolation and background
+  scheduling with its own defaults. Tab reloads and throughput depend on the
+  sites, extensions, active profiles and hardware.
+- **Desktop and productivity.** Updated Start favorites, refreshed wallpapers,
+  This PC, Task Manager, Settings, My Profile and About DevOS. Voice Typing
+  supports offline Bangla and English and can be started with Win+Alt+A/H.
+- **Development and local AI.** Code setup, repository-aware AI tools and the
+  workflow queue support editor and agent workflows. Agent Endurance can
+  inhibit sleep during long-running coding sessions. Local model availability
+  depends on the installed or downloaded model.
 
-- **Installer completes cleanly:** app choices are recorded during install (no long apt purge
-  near ~89%); the final unmount step force-releases a busy target so a successful install is
-  not shown as “Installation Failed”; Restart / Shut down sit on the installer footer.
-- **Premium install preview:** motion backdrop Summary page with clearer disk/AI/voice/apps
-  cards, and a modern confirm dialog for Install Now.
-- **Graphical GRUB + motion splash:** themed live-USB boot menu, then animated Plymouth
-  “Just a moment…” splash (Safe Graphics still disables splash when needed).
-- **Screen-fit installer:** centered Try DevOS / Premium first screen, scrollable short
-  displays, and Next/Back kept on-screen on 1366×768 laptops.
-- **Voice Typing (Win+Alt+A / Win+Alt+H):** WhatsApp-style green mic for any text box
-  (WhatsApp, Chrome, Cursor, mail, Notepad…). Offline Bangla and English; stops on mouse
-  click or the hotkey again.
-- **Sign-in screen:** centered dark card, readable password field, show-password control,
-  account/session selection, clock/date, login feedback and restart/shutdown controls.
-- **Broadband Connection:** connect or disconnect a direct ONU/modem with ISP PPPoE
-  credentials; NetworkManager configuration prevents duplicate automatic wired profiles.
-- **Files and storage:** Windows-style This PC, tabs, properties, new file/folder dialogs,
-  ZIP/7z context menus, unformatted drive discovery and partition formatting in Storage Doctor.
-- **Desktop polish:** DevOS Start branding, compact taskbar, refreshed premium wallpapers,
-  dashboard onboarding, and Optimizer naming improvements.
+The final ISO passed its checksum and 38 boot-layout checks and reached the GRUB
+menu in BIOS and UEFI QEMU guests. A disposable virtual disk loaded its GRUB
+configuration without the ISO attached, including under Secure Boot. A complete
+install and desktop boot on the ASRock test machine and a 5–10-profile Chrome
+workload benchmark are still pending.
+
+[Feature inventory](docs/FEATURES.md) · [Changelog](CHANGELOG.md) ·
+[Update guide](docs/UPDATES.md) · [Maintenance guide](docs/LONG_TERM_MAINTENANCE.md) ·
+[Download counts](docs/DOWNLOAD-STATS.md)
 
 <p align="center">
-  <img src="docs/images/devos_login_preview.png" alt="Rendered preview of the DevOS dark sign-in screen" width="900">
-  <br><em>Rendered SDDM theme preview with sample account/session data; not an installed-system boot screenshot.</em>
+  <img src="docs/images/devos_boot_menu_2026-11-09.png" alt="DevOS final ISO graphical GRUB menu with Try or Install and Safe Graphics entries" width="900">
+  <br><em>Graphical boot menu captured from the November 9 ISO in QEMU.</em>
 </p>
 
 <p align="center">
-  <img src="tools/wallpapers/preview.jpg" alt="Preview grid of the DevOS wallpaper collection" width="900">
-  <br><em>DevOS wallpaper collection. Desktop and dashboard screenshots elsewhere in this README show earlier source builds.</em>
+  <img src="docs/images/devos_login_preview.png" alt="Rendered preview of the DevOS dark sign-in screen" width="900">
+  <br><em>Rendered SDDM theme preview with sample account and session data.</em>
+</p>
+
+<p align="center">
+  <img src="tools/wallpapers/premium-collection/originals/devos-home50-20-home-bloom.jpg" alt="Home Bloom from the new DevOS homepage wallpaper collection" width="900">
+  <br><em>Home Bloom from the new 50-image homepage wallpaper collection.</em>
 </p>
 
 ## Latest changes and daily-use guide
@@ -84,7 +90,7 @@ not establish readiness. Flash with Rufus in **DD** image mode for real hardware
 | AI on selected text | Select text, then **Win+Alt+Shift+A** for rewrite, grammar, shorten, translate, summarize or reply (local DevOS AI). |
 | Installer and SSD/HDD storage | Start **Install DevOS**. Choose **Manual partitioning** to create or resize a layout; **Erase disk** automatically formats the chosen system disk. **Data drives** optionally creates one, two, or three ext4 data volumes (A/B/C labels, custom sizes). Review every disk in Summary before Install. Drives you do not select are preserved. |
 | Modern dialogs | DevOS applications share spaced confirmation/input dialogs, readable labels, keyboard focus, and consistent buttons. Optimizer uses **Delete selected files** with **Cancel** as the default. The real KDE/Polkit password agent uses a dedicated DevOS Quick Controls style with a dark blue background, rounded larger password field, cyan focus outline and larger buttons; its authentication backend remains intact. |
-| Wallpapers and appearance | Open **Settings → Appearance** or the desktop wallpaper picker. The source includes 252 validated wallpaper images. Dark/light appearance and display scaling remain configurable. |
+| Wallpapers and appearance | Open **Settings → Appearance** or the desktop wallpaper picker. Browse the 50 new homepage designs in the [premium collection](tools/wallpapers/premium-collection/README.md). Dark/light appearance and display scaling remain configurable. |
 | Storage after installation | Open **This PC** for files or `devos disk` for Storage & Boot Doctor. Formatting deletes the selected volume; back up its contents first. A/B/C are volume labels, rather than Windows drive letters. See [storage instructions](docs/STORAGE_MANAGEMENT.md). |
 | Screen recording and editing | Run `devos recorder`. Select audio, turn on listening to inspect the live signal meter, then record. Use the recording toolbar/tray to stop and save. Open the clip editor to trim, copy or cut ranges, retain/mute sound, or replace/mix a voice track. Export creates a new MP4. [Recorder guide](docs/SCREEN_RECORDER.md). |
 | Optimizer and safe automatic cleanup | Open Optimizer from the tray or run `devos optimizer --cleanup`. Review sizes and categories before manual deletion. Toggle automatic cleanup in its tray menu; `devos optimizer --auto-scan` previews the bounded automatic policy. Automatic cleanup only targets aged disposable thumbnail/DevOS temporary caches; personal files, recordings, models, Trash and Downloads require separate choices. [Performance and cleanup guide](docs/HEAVY_LOAD_AND_STORAGE_OPTIMIZATION.md). |
@@ -205,11 +211,11 @@ DevOS exists to give people — especially Windows users and developers — **an
 
 ### 1. Installer
 - Guided Calamares installer: welcome, location, keyboard, disk, local account, additional data drives, AI model, user type, apps, summary and progress.
-- **Manual partitioning** is selected by default. Click **Next** to open the partition editor, switch between detected drives, and explicitly create, delete, or format partitions. Assign the DevOS system partition to `/`; for UEFI installations, assign a FAT32 EFI system partition to `/boot/efi` with the boot flag. Partitions you leave untouched retain their data. You can queue changes on multiple drives and review them in the summary before installation.
+- **Erase disk** is preselected and formats the selected disk. For an existing layout, choose **Manual partitioning** and click **Next** to open the partition editor, switch between detected drives, and explicitly create, delete, or format partitions. Assign the DevOS system partition to `/`; for UEFI installations, assign a FAT32 EFI system partition to `/boot/efi` with the boot flag. Partitions you leave untouched retain their data. You can queue changes on multiple drives and review them in the summary before installation.
 - **Erase disk** remains available for automatic installation: it wipes all partitions on the selected physical disk and creates an EFI partition plus an ext4 system by default (btrfs is also available). Other physical disks are left untouched. Full-disk encryption (LUKS) is available in automatic partitioning.
 - **Data drives:** optionally select all eligible additional SSDs/HDDs or specific ones, and plan one to three ext4 volumes with custom sizes. Formatting is off until explicitly confirmed and runs after **Install**. The installation disk and manual layouts are handled by the Partitions step; unselected disks remain unchanged. [Storage guide](docs/STORAGE_MANAGEMENT.md).
 - **A local account is created; no online account is needed.** Account details are pre-filled; leave the password empty and DevOS signs in automatically (you can add a password later).
-- Boots on **UEFI and legacy BIOS** PCs, from USB or DVD. After install it starts **straight to the desktop** — no boot menu wait (the menu still appears when Windows is installed alongside).
+- Boots on **UEFI and legacy BIOS** PCs, from USB or DVD. After a successful boot the default session signs in to Plasma automatically and opens the homepage.
 
 ### 2. Desktop that feels like Windows
 - Start menu with the DevOS logo, **icons-only taskbar** with separate entries for open windows, system tray and clock.
@@ -562,7 +568,7 @@ Shut down, restart and uninstall always ask for confirmation first.
   - **Account & device:** warns about admin accounts without a password, shows whether the disk is encrypted.
 
 ### 15. Islamic DevOS & family safety (optional — "Islamic family" preset)
-- **Prayer times, Quran & Hadith:** prayer reminders (Karachi method / Hanafi Asr by default, 100+ cities incl. all of Bangladesh), Hijri date, Qibla compass, and daily **authentic ayah and hadith from verified published datasets** (Arabic original + verified **মুহিউদ্দীন খান Bangla translation** + Saheeh International English, always with exact chapter & verse references). DevOS AI chat connects directly to this authentic offline dataset with zero AI hallucinations.
+- **Prayer times, Quran & Hadith:** prayer reminders (Karachi method / Hanafi Asr by default, 100+ cities incl. all of Bangladesh), Hijri date, Qibla compass, and daily **authentic ayah and hadith from verified published datasets** (Arabic original + verified **মুহিউদ্দীন খান Bangla translation** + Saheeh International English, always with exact chapter & verse references). DevOS AI chat connects directly to this authentic offline dataset for grounded lookup responses with source references.
 - **Family Safety:** blocks adult content for every app and browser, forces SafeSearch and YouTube Restricted mode, turns off private browsing, and stops DNS bypass tricks. Set a password on the parent account so children can't switch it off.
 - **Modesty filter (`devos-modesty`):** on-device computer vision in Chrome/Edge/Brave/Chromium masks detected body regions using local face and body models. Text-image exclusions reduce unwanted blurring, and an all-people mode is available. Age, gender and body estimates can be wrong or missed; the filter cannot guarantee complete or accurate coverage.
 
@@ -622,27 +628,27 @@ DevOS includes a dark dashboard for hardware status, storage tools, local runtim
 | | Minimum | Recommended |
 |---|---|---|
 | Processor | 64-bit (x86-64), 2 cores | 4+ cores |
-| Memory | 4 GB | **8 GB** (for Android apps + AI + browser at the same time) |
+| Memory | 4 GB | 8 GB or more for general use. Allow additional RAM for active Chrome profiles, Android and local AI. |
 | Storage | 32 GB | 64 GB+ SSD |
 | Firmware | UEFI or legacy BIOS | UEFI |
-| Graphics | Any | Intel or AMD (hardware-accelerated Android apps) |
+| Graphics | Hardware supported by the Linux graphics stack | Intel or AMD Mesa graphics for hardware-accelerated Android apps |
 
 ---
 
-## 💿 Download ISO & Easy Installation Guide (For Everyone)
+## Download, try and install DevOS
 
-You do **not** need to be a developer or Linux expert to install and run DevOS. Follow these 4 easy steps:
+The amd64 ISO requires an x86-64 PC. ARM laptops, Apple Silicon, Raspberry Pi and 32-bit PCs require a different build.
 
 ---
 
 ### Step 1: Download the DevOS ISO File
-- 🔗 **Google Drive Direct Download:** [**Click here to Download DevOS ISO (Google Drive)**](https://drive.google.com/drive/folders/1RHM8niXwkPsqzOkiMxxp4tpf41bnyJ01?usp=sharing)
+- 🔗 **Previous releases:** [Browse published DevOS ISOs on Google Drive](https://drive.google.com/drive/folders/1RHM8niXwkPsqzOkiMxxp4tpf41bnyJ01?usp=sharing)
 - **File size:** varies by release; use the size and checksum published with that ISO.
 - **What you need:** A USB flash drive (8 GB or larger). *Note: Back up any important files on the USB drive, as flashing will erase it.*
 
 ---
 
-### Step 2: Make a Bootable USB Flash Drive (Takes ~3 minutes)
+### Step 2: Flash the ISO to a USB drive
 
 Choose whichever tool is easiest for you:
 
@@ -669,31 +675,27 @@ Choose whichever tool is easiest for you:
 
 ### Step 3: Boot your PC from the USB
 
-1. **Turn off Secure Boot** in your PC's BIOS / UEFI settings:
-   - Restart your computer and press the BIOS key right as it powers on (usually **F2**, **F12**, **Del**, or **Esc** depending on your computer brand).
-   - Navigate to the **Security** or **Boot** tab, set **Secure Boot** to **Disabled**, then save and exit.
-2. **Open the Boot Menu**:
-   - Turn on your computer and immediately tap your brand's Boot Menu key:
-     - **Dell / Lenovo:** `F12`
-     - **HP:** `F9` or `Esc`
-     - **Asus / Acer:** `F8` or `F12`
-     - **MSI / Gigabyte:** `F11` or `F12`
-   - Select your **USB drive** from the list and press **Enter**.
+Open your PC's one-time boot menu and choose the USB drive. On a UEFI PC, choose
+the UEFI entry for the USB. The boot-menu key depends on the model.
+
+If the live session has display problems, try **DevOS · Safe Graphics**. Secure
+Boot compatibility depends on firmware trust and revocation settings. The current
+signed disk loader passed the Secure Boot test in QEMU.
 
 ---
 
 ### Step 4: Try or Install DevOS
 
-- **Try it first without touching your hard drive (Live Session):** DevOS boots directly to the desktop. You can test Wi-Fi, audio, the browser, and DevOS AI before installing.
+- **Try it first without touching your hard drive (Live Session):** Choose **Try DevOS** in the live menu. Check that DevOS sees the internal drive and that graphics, Wi-Fi, audio, touchpad and suspend work before installing.
 - **Install permanently to your PC:**
   1. The **DevOS Installer** opens automatically on the desktop.
-  2. Follow the friendly prompts: **Welcome → Location & Language → Keyboard → Partitions → Account → AI → User type → Apps → Summary**.
+  2. Follow the friendly prompts: **Welcome → Location & Language → Keyboard → Partitions → Account → Data drives → AI → Voice → User type → Apps → Summary**.
   3. Under *Partitions*, select:
-     - **Manual partitioning (default):** Click **Next** to see the partition editor. Select each drive from the storage selector, then create, delete, or edit its partitions. Enable formatting only for partitions you want erased. Assign `/` to the DevOS system partition and, for UEFI, `/boot/efi` to a FAT32 EFI partition with the boot flag. Leave other partitions unchanged to preserve them. You can edit multiple drives before proceeding.
-     - **Erase disk:** Automatically prepares the selected physical disk for DevOS; every partition on that disk is erased. Other disks retain their data. Back up existing data before changing partitions.
-  4. Create your account name (password is optional; if left blank, DevOS signs in automatically).
+     - **Manual partitioning:** Click **Next** to see the partition editor. Select each drive from the storage selector, then create, delete, or edit its partitions. Enable formatting only for partitions you want erased. Assign `/` to the DevOS system partition and, for UEFI, `/boot/efi` to a FAT32 EFI partition with the boot flag. Leave other partitions unchanged to preserve them. You can edit multiple drives before proceeding.
+     - **Erase disk (default):** Automatically prepares the selected physical disk for DevOS; every partition on that disk is erased. Other disks retain their data. Back up existing data before changing partitions.
+  4. Create your local account. The current installed image enables automatic desktop sign-in for the primary account.
   5. Review the summary, then click **Install**. Installation time depends on the drive, hardware and selected downloads.
-  6. When finished, restart your PC and remove the USB drive when the screen turns off.
+  6. When the installer finishes, restart and remove the USB when DevOS prompts you.
 
 ---
 
@@ -827,7 +829,7 @@ DevOS/
 
 ## Known limitations
 
-- **Secure Boot:** keep it disabled for this custom image unless that exact release has a verified signed boot chain. Including Ubuntu signed packages alone does not establish Secure Boot support.
+- **Secure Boot:** the signed EFI loader passed a disposable-disk test in QEMU. Firmware trust, revocation policy and full installed boot still need checking on each target machine.
 - **Android apps** need the one-time ~850 MB download and an installed system (not the live USB). Play Services are a separate first-time choice (`devos android setup-play`). ARM-only apps may not run.
 - **Windows apps:** most everyday programs work; games with kernel anti-cheat, drivers and some remote-control tools don't (DevOS offers native versions where they exist).
 - **DevOS AI's built-in model is small:** great for commands and PC questions, simpler for open conversation — turn on *Smarter DevOS AI* for better answers. Voice recognition quality depends on your microphone.

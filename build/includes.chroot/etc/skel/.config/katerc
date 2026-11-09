@@ -1,2 +1,41 @@
 [General]
-Startup Session=last
+Startup Session=new
+Show Full Path in Title=false
+Show welcome view for new window=true
+Show Status Bar=true
+Show Tab Bar=true
+Show Tabs Close Button=true
+Show Url Nav Bar=false
+Show Menu Bar=true
+Allow Tab Scrolling=true
+Auto Hide Tabs=false
+Close After Last=false
+Expand Tabs=false
+Tab Double Click New Document=true
+Tab Middle Click Close Document=true
+Stash new unsaved files=true
+Modified Notification=true
+Recent File List Entry Count=12
+Show text for left and right sidebar=false
+Icon size for left and right sidebar buttons=32
+
+[filetree]
+hidden=true
+
+[lspclient]
+Enabled=true
+AutoHover=true
+Completion=true
+Diagnostics=true
+Hover=true
+References=true
+SignatureHelp=true
+SymbolOutline=true
+
+[plugins]
+lspclientplugin=true
+tabswitcherplugin=true
+textfilterplugin=true
+katesearchplugin=true
+projectplugin=true
+katefilebrowserplugin=false

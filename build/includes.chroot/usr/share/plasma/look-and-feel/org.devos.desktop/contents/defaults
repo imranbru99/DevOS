@@ -1,20 +1,33 @@
 [kdeglobals][General]
-ColorScheme=DevOS
+ColorScheme=DevOS-Light
 font=Inter,9,-1,5,50,0,0,0,0,0
 
 [kdeglobals][Icons]
-Theme=Papirus-Dark
+Theme=Papirus
 
 [kdeglobals][KDE]
 LookAndFeelPackage=org.devos.desktop
-widgetStyle=kvantum
+widgetStyle=Breeze
 
 [kdeglobals][KFileDialog Settings]
 Automatically select filename extension=false
 
+[kdeglobals][Colors:Complementary]
+BackgroundAlternate=22,28,44
+BackgroundNormal=16,20,32
+DecorationFocus=56,189,248
+DecorationHover=56,189,248
+ForegroundActive=56,189,248
+ForegroundInactive=160,170,186
+ForegroundLink=125,211,252
+ForegroundNegative=252,165,165
+ForegroundNeutral=253,230,138
+ForegroundNormal=248,250,252
+ForegroundPositive=110,231,183
+ForegroundVisited=196,181,253
 
 [plasmarc][Theme]
-name=breeze-dark
+name=breeze-light
 
 [plasmarc][Wallpapers]
 usersWallpapers=/usr/share/wallpapers/DevOS/DevOS-Default.png

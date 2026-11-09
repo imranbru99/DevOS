@@ -1,32 +1,10 @@
-# DevOS boot splash — visible MOTION background (frame cycle + pan).
-# Do NOT Scale() every refresh — that freezes weak GPUs and leaves a flat color.
-# Safe Graphics (nomodeset) disables this splash; use "Try DevOS / Install".
-Window.SetBackgroundTopColor(0.02, 0.04, 0.09);
-Window.SetBackgroundBottomColor(0.01, 0.02, 0.05);
+# DevOS motion splash — DRM-safe, no method chaining, no backdrop plates.
+# Earlier theme aborted on some Intel TVs (Image().Scale / multi-PNG), leaving
+# only the plain title/status bar. This script stays dumb and loud.
+Window.SetBackgroundTopColor(0.05, 0.45, 0.85);
+Window.SetBackgroundBottomColor(0.02, 0.15, 0.40);
 
-bg0.image = Image("backdrop_0.png");
-bg1.image = Image("backdrop_1.png");
-bg2.image = Image("backdrop_2.png");
-bg3.image = Image("backdrop_3.png");
-bg4.image = Image("backdrop_4.png");
-bg5.image = Image("backdrop_5.png");
-bg6.image = Image("backdrop_6.png");
-bg7.image = Image("backdrop_7.png");
-
-# Two plates for crossfade; start oversized so pan has room (scaled once).
-bg_a.image = bg0.image.Scale(1920, 1080);
-bg_a.sprite = Sprite(bg_a.image);
-bg_a.sprite.SetZ(0);
-bg_b.image = bg1.image.Scale(1920, 1080);
-bg_b.sprite = Sprite(bg_b.image);
-bg_b.sprite.SetZ(1);
-
-bg_last_frame = -1;
-bg_frame_count = 8;
-bg_ready = 0;
-bg_tw = 1920;
-bg_th = 1080;
-
+# Optional glow orbs (never chained Scale). If Image fails, sprites stay empty.
 orb_a.image = Image("orb_cyan.png");
 orb_a.sprite = Sprite(orb_a.image);
 orb_a.sprite.SetZ(5);
@@ -35,58 +13,45 @@ orb_b.image = Image("orb_sky.png");
 orb_b.sprite = Sprite(orb_b.image);
 orb_b.sprite.SetZ(6);
 
-orb_c.image = Image("orb_glow.png");
-orb_c.sprite = Sprite(orb_c.image);
-orb_c.sprite.SetZ(4);
-
-logo.image = Image("logo.png").Scale(168, 168);
+logo.image = Image("logo.png");
 logo.sprite = Sprite(logo.image);
 logo.sprite.SetZ(20);
 
-dot0.image = Image("dot.png");
-dot0.sprite = Sprite(dot0.image); dot0.sprite.SetZ(18);
-dot1.image = Image("dot.png");
-dot1.sprite = Sprite(dot1.image); dot1.sprite.SetZ(18);
-dot2.image = Image("dot.png");
-dot2.sprite = Sprite(dot2.image); dot2.sprite.SetZ(18);
-dot3.image = Image("dot.png");
-dot3.sprite = Sprite(dot3.image); dot3.sprite.SetZ(18);
-dot4.image = Image("dot.png");
-dot4.sprite = Sprite(dot4.image); dot4.sprite.SetZ(18);
-dot5.image = Image("dot.png");
-dot5.sprite = Sprite(dot5.image); dot5.sprite.SetZ(18);
-dot6.image = Image("dot.png");
-dot6.sprite = Sprite(dot6.image); dot6.sprite.SetZ(18);
-dot7.image = Image("dot.png");
-dot7.sprite = Sprite(dot7.image); dot7.sprite.SetZ(18);
-
-eyebrow.image = Image.Text("WELCOME", 0.220, 0.740, 0.973, 1.0, "Sans 12", "center");
-eyebrow.sprite = Sprite(eyebrow.image);
-eyebrow.sprite.SetZ(30);
-
-title.image = Image.Text("DevOS", 0.973, 0.980, 0.996, 1.0, "Sans 40", "center");
-title.sprite = Sprite(title.image);
-title.sprite.SetZ(30);
-
-status.image = Image.Text("Starting DevOS", 0.490, 0.827, 0.988, 1.0, "Sans 18", "center");
-status.sprite = Sprite(status.image);
-status.sprite.SetZ(30);
-
 track.image = Image("track.png");
 track.sprite = Sprite(track.image);
-track.sprite.SetZ(15);
+track.sprite.SetZ(30);
 
 thumb.image = Image("thumb.png");
 thumb.sprite = Sprite(thumb.image);
-thumb.sprite.SetZ(16);
+thumb.sprite.SetZ(31);
+
+# Text-only layers — these are the motion the TV must show.
+eyebrow.image = Image.Text("WELCOME", 1, 1, 1, 1, "Sans 20");
+eyebrow.sprite = Sprite(eyebrow.image);
+eyebrow.sprite.SetZ(40);
+
+title.image = Image.Text("DevOS", 1, 1, 1, 1, "Sans 48");
+title.sprite = Sprite(title.image);
+title.sprite.SetZ(42);
+
+motion.image = Image.Text("DevOS Motion", 0.2, 1, 1, 1, "Sans 28");
+motion.sprite = Sprite(motion.image);
+motion.sprite.SetZ(43);
+
+status.image = Image.Text("Starting DevOS", 1, 1, 1, 1, "Sans 22");
+status.sprite = Sprite(status.image);
+status.sprite.SetZ(42);
+
+bar.image = Image.Text("[ #################### ]", 0.3, 0.95, 1, 1, "Sans 26");
+bar.sprite = Sprite(bar.image);
+bar.sprite.SetZ(44);
 
 boot_progress = 0;
-last_phrase = -1;
-last_dots = -1;
+last_tick = -1;
 
 fun tri(now, period) {
-    if (period < 0.1)
-        period = 0.1;
+    if (period < 1)
+        period = 1;
     t = now - Math.Int(now / period) * period;
     half = period / 2;
     if (t > half)
@@ -94,184 +59,148 @@ fun tri(now, period) {
     return t / half;
 }
 
+fun width_or(img, fallback) {
+    w = img.GetWidth();
+    if (w < 2)
+        return fallback;
+    return w;
+}
+
+fun height_or(img, fallback) {
+    h = img.GetHeight();
+    if (h < 2)
+        return fallback;
+    return h;
+}
+
+fun set_motion(step, breath) {
+    if (step == 0)
+        t = ">>> DevOS Motion <<<";
+    else if (step == 1)
+        t = ">>>> DevOS Motion <<<<";
+    else if (step == 2)
+        t = "> DevOS Motion <";
+    else
+        t = "DevOS Motion";
+    global.motion.image = Image.Text(t, 0.15 + breath * 0.85, 1, 1, 1, "Sans 28");
+    motion.sprite.SetImage(motion.image);
+}
+
+fun set_bar(step) {
+    if (step == 0)
+        t = "[ ##                  ]";
+    else if (step == 1)
+        t = "[ ######              ]";
+    else if (step == 2)
+        t = "[ ##########          ]";
+    else if (step == 3)
+        t = "[ ##############      ]";
+    else if (step == 4)
+        t = "[ ##################  ]";
+    else
+        t = "[ #################### ]";
+    global.bar.image = Image.Text(t, 0.25, 1, 1, 1, "Sans 26");
+    bar.sprite.SetImage(bar.image);
+}
+
 fun set_status(text) {
-    global.status.image = Image.Text(text, 0.490, 0.827, 0.988, 1.0, "Sans 18", "center");
+    global.status.image = Image.Text(text, 1, 1, 1, 1, "Sans 22");
     status.sprite.SetImage(status.image);
-}
-
-fun frame_image(frame) {
-    if (frame == 1) return bg1s.image;
-    if (frame == 2) return bg2s.image;
-    if (frame == 3) return bg3s.image;
-    if (frame == 4) return bg4s.image;
-    if (frame == 5) return bg5s.image;
-    if (frame == 6) return bg6s.image;
-    if (frame == 7) return bg7s.image;
-    return bg0s.image;
-}
-
-fun place_dot(sprite, cx, cy, radius, now, phase) {
-    tx = tri(now * 0.85 + phase, 2.8);
-    ty = tri(now * 0.85 + phase + 0.8, 2.8);
-    x = cx + Math.Int((tx * 2 - 1) * radius);
-    y = cy + Math.Int((ty * 2 - 1) * radius * 0.78);
-    sprite.SetX(x - 9);
-    sprite.SetY(y - 9);
-    sprite.SetOpacity(0.50 + tx * 0.50);
-}
-
-fun ensure_backdrop_size(screen_w, screen_h) {
-    # Scale every frame ONCE only — never inside the refresh loop.
-    need_w = Math.Int(screen_w * 1.28);
-    need_h = Math.Int(screen_h * 1.28);
-    if (need_w < 1280) need_w = 1280;
-    if (need_h < 720) need_h = 720;
-    if (bg_ready == 1 && need_w == bg_tw && need_h == bg_th)
-        return;
-    global.bg_tw = need_w;
-    global.bg_th = need_h;
-    global.bg0s.image = bg0.image.Scale(need_w, need_h);
-    global.bg1s.image = bg1.image.Scale(need_w, need_h);
-    global.bg2s.image = bg2.image.Scale(need_w, need_h);
-    global.bg3s.image = bg3.image.Scale(need_w, need_h);
-    global.bg4s.image = bg4.image.Scale(need_w, need_h);
-    global.bg5s.image = bg5.image.Scale(need_w, need_h);
-    global.bg6s.image = bg6.image.Scale(need_w, need_h);
-    global.bg7s.image = bg7.image.Scale(need_w, need_h);
-    bg_a.sprite.SetImage(bg0s.image);
-    bg_b.sprite.SetImage(bg1s.image);
-    global.bg_ready = 1;
-    global.bg_last_frame = 0;
-}
-
-fun place_backdrop(screen_w, screen_h, now) {
-    ensure_backdrop_size(screen_w, screen_h);
-
-    # ~5 fps frame swap — SetImage only (pre-scaled).
-    frame = Math.Int(now * 5) - Math.Int(Math.Int(now * 5) / bg_frame_count) * bg_frame_count;
-    if (frame != bg_last_frame) {
-        global.bg_last_frame = frame;
-        prev = frame - 1;
-        if (prev < 0)
-            prev = bg_frame_count - 1;
-        bg_a.sprite.SetImage(frame_image(prev));
-        bg_b.sprite.SetImage(frame_image(frame));
-    }
-
-    # Strong pan so motion is obvious on camera / TVs.
-    ox = Math.Int((tri(now, 3.8) * 2 - 1) * (bg_tw - screen_w) / 2);
-    oy = Math.Int((tri(now + 0.9, 4.4) * 2 - 1) * (bg_th - screen_h) / 2);
-    base_x = Window.GetX() + (screen_w - bg_tw) / 2;
-    base_y = Window.GetY() + (screen_h - bg_th) / 2;
-    bg_a.sprite.SetX(base_x + ox);
-    bg_a.sprite.SetY(base_y + oy);
-    bg_b.sprite.SetX(base_x + ox + Math.Int((tri(now, 2.6) * 2 - 1) * 18));
-    bg_b.sprite.SetY(base_y + oy);
-    fade = tri(now * 2.2, 1.0);
-    bg_a.sprite.SetOpacity(0.35 + fade * 0.25);
-    bg_b.sprite.SetOpacity(0.75 + (1 - fade) * 0.20);
 }
 
 fun place() {
     screen_w = Window.GetWidth();
     screen_h = Window.GetHeight();
-    if (screen_w < 64 || screen_h < 64)
+    if (screen_w < 64)
+        return;
+    if (screen_h < 64)
         return;
 
-    logo_w = logo.image.GetWidth();
-    logo_h = logo.image.GetHeight();
-    title_w = title.image.GetWidth();
-    title_h = title.image.GetHeight();
-    eyebrow_w = eyebrow.image.GetWidth();
-    eyebrow_h = eyebrow.image.GetHeight();
-    status_w = status.image.GetWidth();
-    status_h = status.image.GetHeight();
-    track_w = track.image.GetWidth();
-    thumb_w = thumb.image.GetWidth();
-    thumb_h = thumb.image.GetHeight();
-    orb_a_w = orb_a.image.GetWidth();
-    orb_a_h = orb_a.image.GetHeight();
-    orb_b_w = orb_b.image.GetWidth();
-    orb_b_h = orb_b.image.GetHeight();
-    orb_c_w = orb_c.image.GetWidth();
-    orb_c_h = orb_c.image.GetHeight();
-    if (logo_w < 2) logo_w = 168;
-    if (logo_h < 2) logo_h = 168;
-    if (title_w < 2) title_w = 200;
-    if (title_h < 2) title_h = 48;
-    if (eyebrow_w < 2) eyebrow_w = 100;
-    if (eyebrow_h < 2) eyebrow_h = 16;
-    if (status_w < 2) status_w = 240;
-    if (status_h < 2) status_h = 24;
-    if (track_w < 2) track_w = 420;
-    if (thumb_w < 2) thumb_w = 110;
-    if (thumb_h < 2) thumb_h = 12;
-    if (orb_a_w < 2) orb_a_w = 640;
-    if (orb_a_h < 2) orb_a_h = 640;
-    if (orb_b_w < 2) orb_b_w = 520;
-    if (orb_b_h < 2) orb_b_h = 520;
-    if (orb_c_w < 2) orb_c_w = 480;
-    if (orb_c_h < 2) orb_c_h = 480;
-
-    block = eyebrow_h + 10 + logo_h + 18 + title_h + 14 + status_h + 28 + thumb_h;
-    top = Window.GetY() + screen_h / 2 - block / 2;
-    mid = Window.GetX() + screen_w / 2;
     now = Plymouth.GetTime();
+    mid = Window.GetX() + screen_w / 2;
+    top = Window.GetY() + screen_h / 4;
+    bob = Math.Int((tri(now, 1.2) * 2 - 1) * 16);
+    slide = Math.Int((tri(now, 1.6) * 2 - 1) * screen_w * 16 / 100);
 
-    place_backdrop(screen_w, screen_h, now);
+    ew = width_or(eyebrow.image, 120);
+    eh = height_or(eyebrow.image, 22);
+    tw = width_or(title.image, 240);
+    th = height_or(title.image, 56);
+    mw = width_or(motion.image, 280);
+    mh = height_or(motion.image, 32);
+    sw = width_or(status.image, 260);
+    sh = height_or(status.image, 28);
+    bw = width_or(bar.image, 360);
 
-    drift_a = tri(now, 4.5);
-    drift_b = tri(now + 1.3, 5.5);
-    drift_c = tri(now + 2.4, 6.5);
-    orb_a.sprite.SetX(mid - orb_a_w / 2 + Math.Int((drift_a * 2 - 1) * screen_w * 0.18));
-    orb_a.sprite.SetY(top + logo_h / 2 - orb_a_h / 2 + Math.Int((drift_b * 2 - 1) * 90));
-    orb_b.sprite.SetX(mid - orb_b_w / 2 + Math.Int((drift_b * 2 - 1) * screen_w * 0.20));
-    orb_b.sprite.SetY(top + logo_h / 2 - orb_b_h / 2 + Math.Int((drift_a * 2 - 1) * 110));
-    orb_c.sprite.SetX(mid - orb_c_w / 2 + Math.Int((drift_c * 2 - 1) * screen_w * 0.14));
-    orb_c.sprite.SetY(top + logo_h / 2 - orb_c_h / 2 + Math.Int((drift_a * 2 - 1) * 70));
+    eyebrow.sprite.SetX(mid - ew / 2);
+    eyebrow.sprite.SetY(top + bob);
+    eyebrow.sprite.SetOpacity(1);
 
-    eyebrow.sprite.SetX(mid - eyebrow_w / 2);
-    eyebrow.sprite.SetY(top);
-
-    logo_y = top + eyebrow_h + 10;
-    logo.sprite.SetX(mid - logo_w / 2);
-    logo.sprite.SetY(logo_y);
-
-    radius = logo_w / 2 + 36;
-    cx = mid;
-    cy = logo_y + logo_h / 2;
-    place_dot(dot0.sprite, cx, cy, radius, now, 0.0);
-    place_dot(dot1.sprite, cx, cy, radius, now, 0.4);
-    place_dot(dot2.sprite, cx, cy, radius, now, 0.8);
-    place_dot(dot3.sprite, cx, cy, radius, now, 1.2);
-    place_dot(dot4.sprite, cx, cy, radius, now, 1.6);
-    place_dot(dot5.sprite, cx, cy, radius, now, 2.0);
-    place_dot(dot6.sprite, cx, cy, radius, now, 2.4);
-    place_dot(dot7.sprite, cx, cy, radius, now, 2.8);
-
-    title_y = logo_y + logo_h + 18;
-    title.sprite.SetX(mid - title_w / 2);
+    title_y = top + eh + 12 + bob;
+    title.sprite.SetX(mid - tw / 2);
     title.sprite.SetY(title_y);
+    title.sprite.SetOpacity(1);
 
-    status_y = title_y + title_h + 14;
-    status.sprite.SetX(mid - status_w / 2);
-    status.sprite.SetY(status_y);
+    motion.sprite.SetX(mid - mw / 2 + slide);
+    motion.sprite.SetY(title_y + th + 10);
+    motion.sprite.SetOpacity(1);
 
-    track_x = mid - track_w / 2;
-    track_y = status_y + status_h + 28;
-    track.sprite.SetX(track_x);
-    track.sprite.SetY(track_y + (thumb_h - 12) / 2);
+    status.sprite.SetX(mid - sw / 2);
+    status.sprite.SetY(title_y + th + mh + 18);
+    status.sprite.SetOpacity(1);
 
-    span = track_w - thumb_w;
-    if (span < 1)
-        span = 1;
-    travel = now * 160;
-    cycle = travel - (Math.Int(travel / (span * 2)) * span * 2);
-    offset = cycle;
-    if (cycle > span)
-        offset = span * 2 - cycle;
-    thumb.sprite.SetX(track_x + offset);
-    thumb.sprite.SetY(track_y);
+    bar.sprite.SetX(mid - bw / 2 - slide / 2);
+    bar.sprite.SetY(title_y + th + mh + sh + 28);
+    bar.sprite.SetOpacity(1);
+
+    # Orbs / logo — best effort, never required.
+    oa_w = width_or(orb_a.image, 1);
+    oa_h = height_or(orb_a.image, 1);
+    if (oa_w > 2) {
+        drift = tri(now, 2.2);
+        orb_a.sprite.SetX(mid - oa_w / 2 + Math.Int((drift * 2 - 1) * screen_w * 28 / 100));
+        orb_a.sprite.SetY(title_y - oa_h / 2);
+        orb_a.sprite.SetOpacity(0.8);
+    }
+
+    ob_w = width_or(orb_b.image, 1);
+    ob_h = height_or(orb_b.image, 1);
+    if (ob_w > 2) {
+        drift2 = tri(now + 0.7, 2.8);
+        orb_b.sprite.SetX(mid - ob_w / 2 + Math.Int((drift2 * 2 - 1) * screen_w * 32 / 100));
+        orb_b.sprite.SetY(title_y - ob_h / 2 + 40);
+        orb_b.sprite.SetOpacity(0.75);
+    }
+
+    lw = width_or(logo.image, 1);
+    lh = height_or(logo.image, 1);
+    if (lw > 2) {
+        logo.sprite.SetX(mid - lw / 2);
+        logo.sprite.SetY(title_y - lh - 12 + bob);
+        logo.sprite.SetOpacity(0.95);
+    }
+
+    trw = width_or(track.image, 1);
+    thw = width_or(thumb.image, 1);
+    thh = height_or(thumb.image, 1);
+    if (trw > 2) {
+        track_x = mid - trw / 2;
+        track_y = title_y + th + mh + sh + 70;
+        track.sprite.SetX(track_x);
+        track.sprite.SetY(track_y);
+        span = trw - thw;
+        if (span < 1)
+            span = 1;
+        travel = Math.Int(now * 340);
+        cycle = travel - Math.Int(travel / (span * 2)) * span * 2;
+        off = cycle;
+        if (cycle > span)
+            off = span * 2 - cycle;
+        thumb.sprite.SetX(track_x + off);
+        thumb.sprite.SetY(track_y);
+        thumb.sprite.SetOpacity(1);
+        track.sprite.SetOpacity(1);
+    }
 }
 
 fun boot_progress_callback(duration, progress) {
@@ -284,42 +213,40 @@ fun boot_progress_callback(duration, progress) {
 
 fun refresh_callback() {
     now = Plymouth.GetTime();
-    breath = tri(now, 2.0);
-    logo.sprite.SetOpacity(0.90 + breath * 0.10);
-    orb_a.sprite.SetOpacity(0.62 + breath * 0.28);
-    orb_b.sprite.SetOpacity(0.55 + breath * 0.25);
-    orb_c.sprite.SetOpacity(0.48 + breath * 0.22);
-    eyebrow.sprite.SetOpacity(0.82 + breath * 0.18);
+    breath = tri(now, 0.9);
 
-    phrase = Math.Int(now / 2.0);
-    dots_step = Math.Int(now * 2.8) - Math.Int(Math.Int(now * 2.8) / 4) * 4;
-    if (phrase != last_phrase || dots_step != last_dots) {
-        global.last_phrase = phrase;
-        global.last_dots = dots_step;
-        if (dots_step == 0)
-            ellipsis = "";
-        else if (dots_step == 1)
-            ellipsis = ".";
-        else if (dots_step == 2)
-            ellipsis = "..";
+    # Loud wash — must read as motion even with zero PNGs.
+    Window.SetBackgroundTopColor(0.02 + breath * 0.30, 0.30 + breath * 0.55, 0.55 + breath * 0.45);
+    Window.SetBackgroundBottomColor(0.01 + breath * 0.18, 0.10 + breath * 0.35, 0.28 + breath * 0.40);
+
+    tick = Math.Int(now * 6);
+    if (tick != last_tick) {
+        global.last_tick = tick;
+        step = tick - Math.Int(tick / 6) * 6;
+        set_motion(step - Math.Int(step / 4) * 4, breath);
+        set_bar(step);
+
+        phrase = Math.Int(now / 1.3);
+        p = phrase - Math.Int(phrase / 4) * 4;
+        dots = tick - Math.Int(tick / 4) * 4;
+        if (dots == 0)
+            e = "";
+        else if (dots == 1)
+            e = ".";
+        else if (dots == 2)
+            e = "..";
         else
-            ellipsis = "...";
-
-        if (boot_progress > 0.82)
-            set_status("Almost there" + ellipsis);
-        else {
-            step = phrase - (Math.Int(phrase / 5) * 5);
-            if (step == 0)
-                set_status("Welcome" + ellipsis);
-            else if (step == 1)
-                set_status("Starting DevOS" + ellipsis);
-            else if (step == 2)
-                set_status("Preparing the display" + ellipsis);
-            else if (step == 3)
-                set_status("Getting your desktop ready" + ellipsis);
-            else
-                set_status("Just a moment" + ellipsis);
-        }
+            e = "...";
+        if (boot_progress > 0.85)
+            set_status("Almost there" + e);
+        else if (p == 0)
+            set_status("Welcome" + e);
+        else if (p == 1)
+            set_status("Starting DevOS" + e);
+        else if (p == 2)
+            set_status("DevOS Motion" + e);
+        else
+            set_status("Loading desktop" + e);
     }
     place();
 }

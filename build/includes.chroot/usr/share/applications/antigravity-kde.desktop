@@ -1,19 +1,15 @@
 [Desktop Entry]
 Type=Application
-Name=Antigravity Studio
-GenericName=AI Development Studio (KDE Edition)
-Comment=Next-generation autonomous AI development studio with deep KDE Plasma integration
+NoDisplay=true
+Hidden=true
+Name=Antigravity IDE
+GenericName=AI coding (second account)
+Comment=Internal alias for Antigravity IDE
 Exec=/usr/local/bin/antigravity-kde %F
 Icon=antigravity-kde
 Terminal=false
-Categories=Development;IDE;TextEditor;
+Categories=Development;IDE;
 MimeType=text/plain;inode/directory;
-Keywords=antigravity;studio;kde;agent;ai;ide;coding;pair-programmer;
+Keywords=antigravity;ide;studio;kde;
 StartupNotify=true
-StartupWMClass=antigravity-kde
-Actions=NewWindow;
-
-[Desktop Action NewWindow]
-Name=New Window
-Exec=/usr/local/bin/antigravity-kde --new-window %F
-Icon=antigravity-kde
+StartupWMClass=antigravity-ide

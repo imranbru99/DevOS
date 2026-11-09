@@ -207,7 +207,7 @@ class TestTaskPipeline(unittest.TestCase):
         app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(["--platform", "offscreen"])
         win = pipeline_gui.PipelineWindow()
         self.assertIsNotNone(win)
-        self.assertIn("DevOS AI Command Pipeline", win.windowTitle())
+        self.assertIn("AI Pipeline", win.windowTitle())
         win.close()
 
     def test_to_slug_conversion(self):

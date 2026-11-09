@@ -19,7 +19,7 @@ class DevOSControlCenter:
 
     DEFAULT_SETTINGS = {
         "appearance": {
-            "theme": "dark",
+            "theme": "light",
             "taskbar_align": "center",
             "accent_color": "#3b82f6",
             "scaling": 1.0,

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=DevOS Theme Heal
+Comment=Keep light/dark coherent after System Settings Global Theme Apply
+Exec=/usr/local/bin/devos-heal-theme-watch
+X-KDE-autostart-phase=2
+X-GNOME-Autostart-enabled=true
+NoDisplay=true

@@ -1,5 +1,6 @@
 [Desktop Entry]
-Type=ApplicationStartupWMClass=devos-restore
+Type=Application
+StartupWMClass=devos-restore
 
 Name=Restore points
 GenericName=System restore

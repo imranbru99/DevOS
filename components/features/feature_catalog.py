@@ -98,7 +98,7 @@ FEATURES: List[Dict] = [
     # ---------------------------------------------------------------- office
     F("onlyoffice", "office", "ONLYOFFICE (Word, Excel, PowerPoint look-alike)",
       "Opens and saves .docx, .xlsx and .pptx exactly like Microsoft Office, with the same ribbon layout.",
-      650, win="Microsoft Office", flatpak=["org.onlyoffice.desktopeditors"], presets=EVERYONE,
+      650, win="Microsoft Office", flatpak=["org.onlyoffice.desktopeditors"], presets=(),
       roles={r: "org.onlyoffice.desktopeditors.desktop" for r in ("documents", "spreadsheets", "presentations")}, min_ram_gb=3),
     F("libreoffice", "office", "LibreOffice Writer, Calc, Impress",
       "Offline office suite on the ISO (Writer, Calc, Impress). Best for .odt/.ods and complex macros.",
@@ -133,7 +133,7 @@ FEATURES: List[Dict] = [
       script="/usr/local/sbin/devos-install-chrome", preinstalled=True, remove=["google-chrome-stable"],
       presets=EVERYONE, roles={"browser": "google-chrome.desktop"}),
     F("edge", "internet", "Microsoft Edge", "Edge with Microsoft account sync.", 400, win="Edge",
-      flatpak=["com.microsoft.Edge"], presets=("windows",), roles={"browser": "com.microsoft.Edge.desktop"}, min_ram_gb=4),
+      flatpak=["com.microsoft.Edge"], presets=(), roles={"browser": "com.microsoft.Edge.desktop"}, min_ram_gb=4),
     F("firefox", "internet", "Firefox", "Private, open-source browser.", 280, win="Firefox",
       flatpak=["org.mozilla.firefox"], roles={"browser": "org.mozilla.firefox.desktop"}),
     F("brave", "internet", "Brave", "Browser with built-in ad blocking.", 350, flatpak=["com.brave.Browser"],
@@ -152,11 +152,11 @@ FEATURES: List[Dict] = [
                                                                   "names": ["Windows App"]}),
     F("m365web", "internet", "Microsoft 365 (Word, Excel, PowerPoint online)",
       "Microsoft's own Office apps and OneDrive in their own window, with your Microsoft account.", 1,
-      win="Microsoft 365", presets=("windows", "student"),
+      win="Microsoft 365", presets=(),
       webapp={"url": "https://www.office.com/", "icon": "x-office-document",
               "names": ["Microsoft 365", "Office", "Microsoft Office"]}),
     F("outlookweb", "internet", "Outlook (Microsoft)", "Microsoft's own Outlook mail and calendar in its own window.",
-      1, win="Outlook", presets=("windows",), webapp={"url": "https://outlook.live.com/mail/",
+      1, win="Outlook", presets=(), webapp={"url": "https://outlook.live.com/mail/",
                                                       "icon": "internet-mail", "names": ["Outlook"]}),
     F("torrent", "internet", "qBittorrent", "Torrent downloads.", 30, apt=["qbittorrent"]),
 
@@ -170,9 +170,8 @@ FEATURES: List[Dict] = [
     F("discord", "chat", "Discord", "Voice and text chat.", 300, flatpak=["com.discordapp.Discord"], presets=("gamer",), min_ram_gb=4),
     F("slack", "chat", "Slack", "Team chat.", 350, flatpak=["com.slack.Slack"], presets=("professional",), min_ram_gb=4),
     F("signal", "chat", "Signal", "Private messaging.", 300, flatpak=["org.signal.Signal"], min_ram_gb=4),
-    F("kdeconnect", "chat", "Phone integration",
-      "Notifications, clipboard and files with your phone, like Phone Link.", 20, win="Phone Link",
-      apt=["kdeconnect"], preinstalled=True, presets=EVERYONE),
+    # KDE Connect stays in the ISO (package-lists/17-connect) as a backend, but
+    # is not a Features card — Start menu + installer show only "Phone Link".
 
     # ---------------------------------------------------------------- media
     F("vlc", "media", "VLC media player", "Plays every video and music format.", 60, win="Media Player",
@@ -227,20 +226,21 @@ FEATURES: List[Dict] = [
 
     # ---------------------------------------------------------------- developer
     # AI Coding Assistants & Agentic Pair Programmers
-    F("antigravity", "developer", "Google Antigravity AI",
-      "Advanced agentic coding assistant and pair programming IDE by Google DeepMind. "
-      "First of two independent Antigravity agent slots in the DevOS AI Pipeline.", 500,
+    F("antigravity", "developer", "Google Antigravity",
+      "Main Antigravity — primary Google account, projects, and Gemini profile. "
+      "Independent from Antigravity IDE (second account). Pipeline slot: antigravity.", 500,
       win="Antigravity", presets=("developer",), min_ram_gb=4,
       script="/usr/local/sbin/devos-install-antigravity",
       detect=["/opt/antigravity/antigravity", "/usr/local/bin/devos-antigravity"],
       builtin={"desktop": ["antigravity.desktop"]}),
-    F("antigravity-kde", "developer", "Antigravity KDE (Studio)",
-      "Second isolated Antigravity agent for Plasma with its own profile, hub, and pipeline slot. "
-      "Shares the Antigravity binary; keeps a separate GEMINI_APP_DATA_DIR.", 50,
-      win="Antigravity", presets=("developer",), min_ram_gb=4,
+    F("antigravity-kde", "developer", "Antigravity IDE",
+      "Second Antigravity — separate Google login, projects, and profile "
+      "(~/.config/Antigravity-KDE, GEMINI_APP_DATA_DIR=antigravity-kde). "
+      "Runs beside Google Antigravity at the same time. Pipeline slot: antigravity-kde.", 50,
+      win="Antigravity IDE", presets=("developer",), min_ram_gb=4,
       script="/usr/local/sbin/devos-install-antigravity-kde",
       detect=["/usr/local/bin/antigravity-kde"],
-      builtin={"desktop": ["antigravity-kde.desktop", "antigravity-ide.desktop"]}),
+      builtin={"desktop": ["devos-antigravity-studio.desktop"]}),
     F("cursor", "developer", "Cursor AI Code Editor",
       "AI-first code editor with deep codebase reasoning and interactive autocomplete.", 450,
       win="Cursor", flatpak=["com.cursor.Cursor"], presets=("developer",), min_ram_gb=4),
@@ -288,7 +288,7 @@ FEATURES: List[Dict] = [
       2, win="Calculator", apt=["kcalc"], preinstalled=True, presets=ESSENTIAL),
     F("notepad", "utilities", "Notepad",
       "A simple text editor, like Windows Notepad. Turning it off only hides it from the menu.",
-      1, win="Notepad", presets=ESSENTIAL, builtin={"desktop": ["org.kde.kate.desktop"]}),
+      1, win="Notepad", presets=ESSENTIAL, builtin={"desktop": ["devos-notepad.desktop"]}),
     F("snip", "utilities", "Snipping Tool",
       "Capture the screen or one area, like the Windows Snipping Tool.",
       5, win="Snipping Tool", apt=["kde-spectacle"], preinstalled=True, presets=ESSENTIAL),

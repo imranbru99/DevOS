@@ -1,14 +1,19 @@
 [Desktop Entry]
-Name=Antigravity
+Type=Application
+Name=Google Antigravity
+GenericName=AI coding (main account)
+Comment=Primary Antigravity — own Google account, projects, and Gemini profile
 Exec=/usr/local/bin/devos-antigravity %U
 Icon=antigravity
 Terminal=false
-Type=Application
 Categories=Development;IDE;
+MimeType=text/plain;inode/directory;
+Keywords=antigravity;google;ai;ide;coding;agent;main;
+StartupNotify=true
 StartupWMClass=antigravity
-
 Actions=SoftwareRendering;
 
 [Desktop Action SoftwareRendering]
 Name=Open with software rendering
 Exec=/usr/local/bin/devos-antigravity --software-rendering %U
+Icon=antigravity
