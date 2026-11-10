@@ -2,8 +2,9 @@
 
 Cloud PC connects with window.open() of /webclient/. Chromium only keeps that
 inside the Windows App window when the launch uses an installed PWA
-(--app-id) and PwaNavigationCapturing. A plain --app=URL window sends the
-Cloud PC into a normal Chrome tab — that is the failure users see.
+(--app-id) and PwaNavigationCapturing. A plain --app=URL window shows a URL
+bar on login.microsoftonline.com and can send Cloud PC into a normal tab —
+that is the failure users see. Match Windows: app chrome only, no omnibox.
 """
 from __future__ import annotations
 
@@ -17,15 +18,26 @@ import time
 
 URL = "https://windows.cloud.microsoft/"
 WM_CLASS = "chrome-windows.cloud.microsoft__-Default"
-# Keep window.open() / Cloud PC inside the same app container (not a browser tab).
+# Keep window.open() / Cloud PC / Microsoft login inside the same app container.
 PWA_NAV = "PwaNavigationCapturing:aux_context_keep_same_container/true"
 BASE_FEATURES = f"{PWA_NAV},PointerLockOptions,KeyboardLock,OverlayScrollbar"
 
 
 def browser_binary():
-    # Prefer Edge, then the diverted google-chrome wrapper (injects PWA_NAV for
-    # every Chrome start), and only then the raw chrome binary.
-    candidates = (
+    # Prefer Chrome (diverted wrapper injects PWA_NAV on every start). Edge is
+    # second — it has no equivalent divert and often falls back to --app=URL.
+    prefer = (os.environ.get("DEVOS_WINDOWS_APP_BROWSER") or "chrome").strip().lower()
+    chrome_first = (
+        ("chrome", shutil.which("google-chrome-stable")),
+        ("chrome", shutil.which("google-chrome")),
+        ("chrome", "/opt/google/chrome/google-chrome"),
+        ("chrome", "/opt/google/chrome/chrome"),
+        ("edge", "/opt/microsoft/msedge/msedge"),
+        ("edge", shutil.which("microsoft-edge-stable")),
+        ("edge", shutil.which("microsoft-edge")),
+        ("chromium", shutil.which("chromium")),
+    )
+    edge_first = (
         ("edge", "/opt/microsoft/msedge/msedge"),
         ("edge", shutil.which("microsoft-edge-stable")),
         ("edge", shutil.which("microsoft-edge")),
@@ -35,10 +47,11 @@ def browser_binary():
         ("chrome", "/opt/google/chrome/chrome"),
         ("chromium", shutil.which("chromium")),
     )
+    candidates = edge_first if prefer in ("edge", "msedge", "microsoft-edge") else chrome_first
     for family, candidate in candidates:
         if candidate and Path(candidate).is_file() and os.access(candidate, os.X_OK):
             return family, str(candidate)
-    raise OSError("Install Microsoft Edge or Google Chrome to open Windows App.")
+    raise OSError("Install Google Chrome or Microsoft Edge to open Windows App.")
 
 
 def profile_dir(family: str) -> Path:
@@ -53,11 +66,42 @@ def applications_dir() -> Path:
     return Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "applications"
 
 
+def everyday_browser_profiles() -> list[Path]:
+    home = Path.home()
+    return [
+        home / ".config/google-chrome",
+        home / ".config/chromium",
+        home / ".config/microsoft-edge",
+        home / ".config/microsoft-edge-stable",
+    ]
+
+
 def _app_id_from_desktop(text: str) -> str | None:
     if "windows.cloud.microsoft" not in text.lower() and "Windows App" not in text:
         return None
     m = re.search(r"--app-id=([a-z0-9]{32})", text)
     return m.group(1) if m else None
+
+
+def _app_id_from_preferences(profile: Path) -> str | None:
+    for name in ("Preferences", "Secure Preferences"):
+        pref = profile / "Default" / name
+        if not pref.is_file():
+            continue
+        try:
+            data = json.loads(pref.read_text(encoding="utf-8", errors="replace"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        blob = json.dumps(data)
+        if "windows.cloud.microsoft" not in blob:
+            continue
+        for m in re.finditer(r'"app_id"\s*:\s*"([a-z0-9]{32})"', blob):
+            return m.group(1)
+        for m in re.finditer(r'"([a-z0-9]{32})"[^}]{0,240}windows\.cloud\.microsoft', blob):
+            return m.group(1)
+        for m in re.finditer(r'windows\.cloud\.microsoft[^}]{0,240}"([a-z0-9]{32})"', blob):
+            return m.group(1)
+    return None
 
 
 def discover_app_id(profile: Path | None = None) -> str | None:
@@ -77,24 +121,30 @@ def discover_app_id(profile: Path | None = None) -> str | None:
             if found:
                 return found
 
-    if profile is None:
-        return None
+    candidates: list[Path] = []
+    if profile is not None:
+        candidates.append(profile)
+    else:
+        candidates.extend(everyday_browser_profiles())
+        for family in ("chrome", "edge", "chromium"):
+            candidates.append(
+                Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))
+                / "devos/windows-app"
+                / family
+            )
 
-    for name in ("Preferences", "Secure Preferences"):
-        pref = profile / "Default" / name
-        if not pref.is_file():
-            continue
+    seen: set[Path] = set()
+    for prof in candidates:
         try:
-            data = json.loads(pref.read_text(encoding="utf-8", errors="replace"))
-        except (OSError, json.JSONDecodeError):
+            key = prof.resolve()
+        except OSError:
+            key = prof
+        if key in seen or not prof.is_dir():
             continue
-        blob = json.dumps(data)
-        if "windows.cloud.microsoft" not in blob:
-            continue
-        for m in re.finditer(r'"app_id"\s*:\s*"([a-z0-9]{32})"', blob):
-            return m.group(1)
-        for m in re.finditer(r'"([a-z0-9]{32})"[^}]{0,200}windows\.cloud\.microsoft', blob):
-            return m.group(1)
+        seen.add(key)
+        found = _app_id_from_preferences(prof)
+        if found:
+            return found
     return None
 
 
@@ -136,8 +186,7 @@ def _chrome_extra() -> list[str]:
 
 def launch_via_default_pwa(app_id: str) -> list[str]:
     """Installed Windows App in the everyday Chrome profile — Cloud PC stays in-window."""
-    family, binary = browser_binary()
-    del family  # everyday profile; Edge/Chrome both accept --app-id
+    _family, binary = browser_binary()
     return [
         binary,
         *_chrome_extra(),
@@ -146,6 +195,14 @@ def launch_via_default_pwa(app_id: str) -> list[str]:
         f"--enable-features={BASE_FEATURES}",
         f"--app-id={app_id}",
     ]
+
+
+def allow_plain_app_url() -> bool:
+    return os.environ.get("DEVOS_WINDOWS_APP_ALLOW_PLAIN_APP", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
 
 
 def launch_command(app_id: str | None = None, *, isolated: bool = True):
@@ -157,7 +214,7 @@ def launch_command(app_id: str | None = None, *, isolated: bool = True):
         app_id = discover_app_id(None)
 
     # Prefer the everyday Chrome/Edge PWA when we have an id and isolation is
-    # not forced — that is the only reliable Cloud PC window path.
+    # not forced — that is the only reliable Cloud PC / login window path.
     force_isolated = os.environ.get("DEVOS_WINDOWS_APP_ISOLATED", "").strip() in ("1", "true", "yes")
     if app_id and not force_isolated:
         return launch_via_default_pwa(app_id)
@@ -181,13 +238,19 @@ def launch_command(app_id: str | None = None, *, isolated: bool = True):
 
     if app_id:
         cmd.append(f"--app-id={app_id}")
-    else:
-        # Last resort: tab risk remains until the PWA is installed.
+    elif allow_plain_app_url() or force_isolated:
+        # Setup / forced isolation only. Plain --app= shows a URL bar on
+        # login.microsoftonline.com — never use for normal launches.
         cmd.append(f"--app={URL}")
+    else:
+        # Caller must install the PWA first (open_isolated waits for --app-id).
+        cmd.append(f"--app-id=pending")
     return cmd
 
 
 def _spawn(cmd: list[str]):
+    if any(a == "--app-id=pending" for a in cmd):
+        raise OSError("Windows App PWA is not installed yet.")
     state = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "devos"
     state.mkdir(parents=True, exist_ok=True)
     fd = os.open(state / "windows-app-browser.log", os.O_CREAT | os.O_APPEND | os.O_WRONLY, 0o600)
@@ -208,7 +271,7 @@ def _spawn(cmd: list[str]):
         )
 
 
-def _wait_for_pwa_install(timeout_s: float = 30.0) -> str | None:
+def _wait_for_pwa_install(timeout_s: float = 45.0) -> str | None:
     """Chrome force-installs policy PWAs only while a real window is open."""
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
@@ -224,7 +287,6 @@ def open_via_devos_pwa() -> bool:
     pwa = shutil.which("devos-pwa")
     if not pwa:
         return False
-    # Only when Chrome/Edge exists; otherwise fall through.
     try:
         browser_binary()
     except OSError:
@@ -246,6 +308,19 @@ def open_via_devos_pwa() -> bool:
     return True
 
 
+def _notify(message: str) -> None:
+    if shutil.which("kdialog"):
+        subprocess.Popen(
+            ["kdialog", "--title", "Windows App", "--sorry", message],
+            start_new_session=True,
+        )
+    elif shutil.which("notify-send"):
+        subprocess.Popen(
+            ["notify-send", "-a", "DevOS", "Windows App", message],
+            start_new_session=True,
+        )
+
+
 def open_isolated():
     if focus_existing_window():
         return None
@@ -253,16 +328,27 @@ def open_isolated():
     force_isolated = os.environ.get("DEVOS_WINDOWS_APP_ISOLATED", "").strip() in ("1", "true", "yes")
     app_id = discover_app_id(None)
 
-    # Installed Windows App PWA → open as a real app window (Cloud PC stays here).
+    # Installed Windows App PWA → real app window (no URL bar on Microsoft login).
     if app_id and not force_isolated:
         return _spawn(launch_via_default_pwa(app_id))
 
-    # No PWA yet: use DevOS PWA installer (policy force-list + --app-id).
-    # This is what prevents Cloud PC from becoming "1 Chrome tab".
+    # No PWA yet: start installer, wait for --app-id, then open as PWA.
+    # Never leave the user on a plain --app=URL window for sign-in.
     if not force_isolated and open_via_devos_pwa():
+        installed = _wait_for_pwa_install(45.0)
+        if installed:
+            # Close temporary "Setting up" / plain --app windows if still open.
+            if shutil.which("wmctrl"):
+                subprocess.run(["wmctrl", "-c", "Setting up Windows App"], check=False, timeout=3)
+            return _spawn(launch_via_default_pwa(installed))
+        _notify(
+            "Windows App is still installing.\n\n"
+            "Keep Chrome online for a moment, then open Windows App again.\n"
+            "Sign-in must open without a browser address bar."
+        )
         return None
 
-    # Forced isolation or no devos-pwa: open a setup window, wait for install, relaunch.
+    # Forced isolation: setup window only long enough to install, then --app-id.
     family, binary = browser_binary()
     profile = profile_dir(family)
     setup = [
@@ -276,13 +362,15 @@ def open_isolated():
         "--window-size=1280,800",
     ]
     proc = _spawn(setup)
-    installed = _wait_for_pwa_install(30.0) or discover_app_id(profile)
+    installed = _wait_for_pwa_install(45.0) or discover_app_id(profile)
     if installed:
-        # Relaunch as PWA so the next Cloud PC connect stays in-window.
+        try:
+            proc.terminate()
+        except OSError:
+            pass
         if not force_isolated:
-            _spawn(launch_via_default_pwa(installed))
-        else:
-            _spawn(launch_command(installed, isolated=True))
+            return _spawn(launch_via_default_pwa(installed))
+        return _spawn(launch_command(installed, isolated=True))
     return proc
 
 

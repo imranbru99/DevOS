@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
+import stat
 import sys
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -25,6 +27,28 @@ OS_PARTITIONS = [{'device':'/dev/nvme0n1p2','mountPoint':'/'}]
 
 
 class InstallerStorageTests(unittest.TestCase):
+    def test_system_reserve_is_capped_only_on_the_new_mounted_ext4_device(self):
+        part = dict(OS_PARTITIONS[0], fs='ext4', claimed=True)
+        target = '/tmp/calamares-target'
+        info = 'Reserved block count: 6000000\nBlock size: 4096\n'
+        block = SimpleNamespace(st_mode=stat.S_IFBLK, st_rdev=123)
+        mount = SimpleNamespace(st_dev=123)
+        with patch.object(storage.os.path, 'realpath', return_value=target), \
+             patch.object(storage.os.path, 'ismount', return_value=True), \
+             patch.object(storage.os, 'stat', side_effect=[block, mount, block, mount, block, SimpleNamespace(st_dev=456)]), \
+             patch.object(storage.subprocess, 'check_output', side_effect=[info, info.replace('6000000', '200000')]) as read, \
+             patch.object(storage.subprocess, 'run') as write:
+            storage.cap_system_reserve(target, [dict(part, claimed=False)])
+            storage.cap_system_reserve(target, [dict(part, fs='btrfs')])
+            read.assert_not_called()
+            storage.cap_system_reserve(target, [part])
+            write.assert_called_once()
+            self.assertEqual(write.call_args.args[0], ['tune2fs', '-r', '1310720', part['device']])
+            storage.cap_system_reserve(target, [part])
+            with self.assertRaisesRegex(ValueError, 'does not match'):
+                storage.cap_system_reserve(target, [part])
+            write.assert_called_once()
+
     def test_unconfirmed_or_empty_plan_never_changes_disks(self):
         for raw in ('{}',selection([disk()],confirmed=False)):
             self.assertEqual(storage.prepare(raw,[disk()],OS_PARTITIONS),[])

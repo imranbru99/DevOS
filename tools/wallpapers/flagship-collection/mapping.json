@@ -1,0 +1,232 @@
+﻿{
+    "note":  "Reversible mapping. Originals preserved. Flagship packages are additive; legacy packages untouched.",
+    "version":  1,
+    "entries":  [
+                    {
+                        "id":  "home50-01",
+                        "original":  "tools/wallpapers/premium-collection/originals/devos-home50-01-cyan-orbit.jpg",
+                        "redesigned_master":  "tools/wallpapers/flagship-collection/redesigned/masters/devos-flagship-home50-01-cyan-orbit.jpg",
+                        "flagship_package":  "DevOS-Flagship-01-CyanOrbit",
+                        "legacy_package":  "DevOS-Home50-01-CyanOrbit",
+                        "reversible":  true
+                    },
+                    {
+                        "id":  "home50-02",
+                        "original":  "tools/wallpapers/premium-collection/originals/devos-home50-02-sapphire-vein.jpg",
+                        "redesigned_master":  "tools/wallpapers/flagship-collection/redesigned/masters/devos-flagship-home50-02-sapphire-vein.jpg",
+                        "flagship_package":  "DevOS-Flagship-02-SapphireVein",
+                        "legacy_package":  "DevOS-Home50-02-SapphireVein",
+                        "reversible":  true
+                    },
+                    {
+                        "id":  "home50-03",
+                        "original":  "tools/wallpapers/premium-collection/originals/devos-home50-03-glass-kernel.jpg",
+                        "redesigned_master":  "tools/wallpapers/flagship-collection/redesigned/masters/devos-flagship-home50-03-glass-kernel.jpg",
+                        "flagship_package":  "DevOS-Flagship-03-GlassKernel",
+                        "legacy_package":  "DevOS-Home50-03-GlassKernel",
+                        "reversible":  true
+                    },
+                    {
+                        "id":  "home50-04",
+                        "original":  "tools/wallpapers/premium-collection/originals/devos-home50-04-night-buffer.jpg",
+                        "redesigned_master":  "tools/wallpapers/flagship-collection/redesigned/masters/devos-flagship-home50-04-night-buffer.jpg",
+                        "flagship_package":  "DevOS-Flagship-04-NightBuffer",
+                        "legacy_package":  "DevOS-Home50-04-NightBuffer",
+                        "reversible":  true
+                    },
+                    {
+                        "id":  "home50-08",
+                        "original":  "tools/wallpapers/premium-collection/originals/devos-home50-08-pearl-dawn.jpg",
+                        "redesigned_master":  "tools/wallpapers/flagship-collection/redesigned/masters/devos-flagship-home50-08-pearl-dawn.jpg",
+                        "flagship_package":  "DevOS-Flagship-08-PearlDawn",
+                        "legacy_package":  "DevOS-Home50-08-PearlDawn",
+                        "reversible":  true
+                    },
+                    {
+                        "id":  "home50-09",
+                        "original":  "tools/wallpapers/premium-collection/originals/devos-home50-09-ink-horizon.jpg",
+                        "redesigned_master":  "tools/wallpapers/flagship-collection/redesigned/masters/devos-flagship-home50-09-ink-horizon.jpg",
+                        "flagship_package":  "DevOS-Flagship-09-InkHorizon",
+                        "legacy_package":  "DevOS-Home50-09-InkHorizon",
+                        "reversible":  true
+                    },
+                    {
+                        "id":  "home50-10",
+                        "original":  "tools/wallpapers/premium-collection/originals/devos-home50-10-prism-dock.jpg",
+                        "redesigned_master":  "tools/wallpapers/flagship-collection/redesigned/masters/devos-flagship-home50-10-prism-dock.jpg",
+                        "flagship_package":  "DevOS-Flagship-10-PrismDock",
+                        "legacy_package":  "DevOS-Home50-10-PrismDock",
+                        "reversible":  true
+                    },
+                    {
+                        "id":  "home50-11",
+                        "original":  "tools/wallpapers/premium-collection/originals/devos-home50-11-aurora-shell.jpg",
+                        "redesigned_master":  "tools/wallpapers/flagship-collection/redesigned/masters/devos-flagship-home50-11-aurora-shell.jpg",
+                        "flagship_package":  "DevOS-Flagship-11-AuroraShell",
+                        "legacy_package":  "DevOS-Home50-11-AuroraShell",
+                        "reversible":  true
+                    },
+                    {
+                        "id":  "home50-14",
+                        "original":  "tools/wallpapers/premium-collection/originals/devos-home50-14-graphite-halo.jpg",
+                        "redesigned_master":  "tools/wallpapers/flagship-collection/redesigned/masters/devos-flagship-home50-14-graphite-halo.jpg",
+                        "flagship_package":  "DevOS-Flagship-14-GraphiteHalo",
+                        "legacy_package":  "DevOS-Home50-14-GraphiteHalo",
+                        "reversible":  true
+                    },
+                    {
+                        "id":  "home50-18",
+                        "original":  "tools/wallpapers/premium-collection/originals/devos-home50-18-liquid-lens.jpg",
+                        "redesigned_master":  "tools/wallpapers/flagship-collection/redesigned/masters/devos-flagship-home50-18-liquid-lens.jpg",
+                        "flagship_package":  "DevOS-Flagship-18-LiquidLens",
+                        "legacy_package":  "DevOS-Home50-18-LiquidLens",
+                        "reversible":  true
+                    },
+                    {
+                        "id":  "home50-19",
+                        "original":  "tools/wallpapers/premium-collection/originals/devos-home50-19-void-ring.jpg",
+                        "redesigned_master":  "tools/wallpapers/flagship-collection/redesigned/masters/devos-flagship-home50-19-void-ring.jpg",
+                        "flagship_package":  "DevOS-Flagship-19-VoidRing",
+                        "legacy_package":  "DevOS-Home50-19-VoidRing",
+                        "reversible":  true
+                    },
+                    {
+                        "id":  "home50-20",
+                        "original":  "tools/wallpapers/premium-collection/originals/devos-home50-20-home-bloom.jpg",
+                        "redesigned_master":  "tools/wallpapers/flagship-collection/redesigned/masters/devos-flagship-home50-20-home-bloom.jpg",
+                        "flagship_package":  "DevOS-Flagship-20-HomeBloom",
+                        "legacy_package":  "DevOS-Home50-20-HomeBloom",
+                        "reversible":  true
+                    },
+                    {
+                        "id":  "home50-25",
+                        "original":  "tools/wallpapers/premium-collection/originals/devos-home50-25-ice-cathedral.jpg",
+                        "redesigned_master":  "tools/wallpapers/flagship-collection/redesigned/masters/devos-flagship-home50-25-ice-cathedral.jpg",
+                        "flagship_package":  "DevOS-Flagship-25-IceCathedral",
+                        "legacy_package":  "DevOS-Home50-25-IceCathedral",
+                        "reversible":  true
+                    },
+                    {
+                        "id":  "home50-30",
+                        "original":  "tools/wallpapers/premium-collection/originals/devos-home50-30-alpine-glass.jpg",
+                        "redesigned_master":  "tools/wallpapers/flagship-collection/redesigned/masters/devos-flagship-home50-30-alpine-glass.jpg",
+                        "flagship_package":  "DevOS-Flagship-30-AlpineGlass",
+                        "legacy_package":  "DevOS-Home50-30-AlpineGlass",
+                        "reversible":  true
+                    },
+                    {
+                        "id":  "home50-39",
+                        "original":  "tools/wallpapers/premium-collection/originals/devos-home50-39-ink-studio.jpg",
+                        "redesigned_master":  "tools/wallpapers/flagship-collection/redesigned/masters/devos-flagship-home50-39-ink-studio.jpg",
+                        "flagship_package":  "DevOS-Flagship-39-InkStudio",
+                        "legacy_package":  "DevOS-Home50-39-InkStudio",
+                        "reversible":  true
+                    },
+                    {
+                        "id":  "home50-41",
+                        "original":  "tools/wallpapers/premium-collection/originals/devos-home50-41-arc-line.jpg",
+                        "redesigned_master":  "tools/wallpapers/flagship-collection/redesigned/masters/devos-flagship-home50-41-arc-line.jpg",
+                        "flagship_package":  "DevOS-Flagship-41-ArcLine",
+                        "legacy_package":  "DevOS-Home50-41-ArcLine",
+                        "reversible":  true
+                    },
+                    {
+                        "id":  "home50-42",
+                        "original":  "tools/wallpapers/premium-collection/originals/devos-home50-42-soft-binary.jpg",
+                        "redesigned_master":  "tools/wallpapers/flagship-collection/redesigned/masters/devos-flagship-home50-42-soft-binary.jpg",
+                        "flagship_package":  "DevOS-Flagship-42-SoftBinary",
+                        "legacy_package":  "DevOS-Home50-42-SoftBinary",
+                        "reversible":  true
+                    },
+                    {
+                        "id":  "home50-47",
+                        "original":  "tools/wallpapers/premium-collection/originals/devos-home50-47-neon-filament.jpg",
+                        "redesigned_master":  "tools/wallpapers/flagship-collection/redesigned/masters/devos-flagship-home50-47-neon-filament.jpg",
+                        "flagship_package":  "DevOS-Flagship-47-NeonFilament",
+                        "legacy_package":  "DevOS-Home50-47-NeonFilament",
+                        "reversible":  true
+                    },
+                    {
+                        "id":  "home50-49",
+                        "original":  "tools/wallpapers/premium-collection/originals/devos-home50-49-north-glow.jpg",
+                        "redesigned_master":  "tools/wallpapers/flagship-collection/redesigned/masters/devos-flagship-home50-49-north-glow.jpg",
+                        "flagship_package":  "DevOS-Flagship-49-NorthGlow",
+                        "legacy_package":  "DevOS-Home50-49-NorthGlow",
+                        "reversible":  true
+                    },
+                    {
+                        "id":  "home50-50",
+                        "original":  "tools/wallpapers/premium-collection/originals/devos-home50-50-apex-bloom.jpg",
+                        "redesigned_master":  "tools/wallpapers/flagship-collection/redesigned/masters/devos-flagship-home50-50-apex-bloom.jpg",
+                        "flagship_package":  "DevOS-Flagship-50-ApexBloom",
+                        "legacy_package":  "DevOS-Home50-50-ApexBloom",
+                        "reversible":  true
+                    },
+                    {
+                        "id":  "master-flagship-dark",
+                        "original":  "tools/wallpapers/master_sources/devos_flagship_masterpiece_dark_1792973005707.jpg",
+                        "redesigned_master":  "tools/wallpapers/flagship-collection/redesigned/masters/devos-flagship-master-flagship-dark.jpg",
+                        "flagship_package":  "DevOS-Flagship-Master-GlassRibbon",
+                        "legacy_package":  "DevOS-CelestialBloom",
+                        "reversible":  true
+                    },
+                    {
+                        "id":  "master-alpine",
+                        "original":  "tools/wallpapers/master_sources/devos_alpine_lake_wildflowers_light_1792973108587.jpg",
+                        "redesigned_master":  "tools/wallpapers/flagship-collection/redesigned/masters/devos-flagship-master-alpine.jpg",
+                        "flagship_package":  "DevOS-Flagship-Master-AlpineLake",
+                        "legacy_package":  "DevOS-AlpineTerrace",
+                        "reversible":  true
+                    },
+                    {
+                        "id":  "master-prism-bloom",
+                        "original":  "tools/wallpapers/master_sources/devos_frosted_prism_bloom_light_1792973072171.jpg",
+                        "redesigned_master":  "tools/wallpapers/flagship-collection/redesigned/masters/devos-flagship-master-prism-bloom.jpg",
+                        "flagship_package":  "DevOS-Flagship-Master-PrismBloom",
+                        "legacy_package":  null,
+                        "reversible":  true
+                    },
+                    {
+                        "id":  "master-cosmic-orbit",
+                        "original":  "tools/wallpapers/master_sources/devos_cosmic_earth_orbit_1792973067991.jpg",
+                        "redesigned_master":  "tools/wallpapers/flagship-collection/redesigned/masters/devos-flagship-master-cosmic-orbit.jpg",
+                        "flagship_package":  "DevOS-Flagship-Master-CosmicOrbit",
+                        "legacy_package":  "DevOS-CosmicOrbit",
+                        "reversible":  true
+                    },
+                    {
+                        "id":  "home50-27",
+                        "original":  "tools/wallpapers/premium-collection/originals/devos-home50-27-silver-cascade.jpg",
+                        "redesigned_master":  "tools/wallpapers/flagship-collection/redesigned/masters/devos-flagship-home50-27-silver-cascade.jpg",
+                        "flagship_package":  "DevOS-Flagship-27-SilverCascade",
+                        "legacy_package":  "DevOS-Home50-27-SilverCascade",
+                        "reversible":  true
+                    },
+                    {
+                        "id":  "home50-32",
+                        "original":  "tools/wallpapers/premium-collection/originals/devos-home50-32-obsidian-pool.jpg",
+                        "redesigned_master":  "tools/wallpapers/flagship-collection/redesigned/masters/devos-flagship-home50-32-obsidian-pool.jpg",
+                        "flagship_package":  "DevOS-Flagship-32-ObsidianPool",
+                        "legacy_package":  "DevOS-Home50-32-ObsidianPool",
+                        "reversible":  true
+                    },
+                    {
+                        "id":  "home50-35",
+                        "original":  "tools/wallpapers/premium-collection/originals/devos-home50-35-lattice-dawn.jpg",
+                        "redesigned_master":  "tools/wallpapers/flagship-collection/redesigned/masters/devos-flagship-home50-35-lattice-dawn.jpg",
+                        "flagship_package":  "DevOS-Flagship-35-LatticeDawn",
+                        "legacy_package":  "DevOS-Home50-35-LatticeDawn",
+                        "reversible":  true
+                    },
+                    {
+                        "id":  "home50-48",
+                        "original":  "tools/wallpapers/premium-collection/originals/devos-home50-48-tidal-glass.jpg",
+                        "redesigned_master":  "tools/wallpapers/flagship-collection/redesigned/masters/devos-flagship-home50-48-tidal-glass.jpg",
+                        "flagship_package":  "DevOS-Flagship-48-TidalGlass",
+                        "legacy_package":  "DevOS-Home50-48-TidalGlass",
+                        "reversible":  true
+                    }
+                ],
+    "created_at":  "2026-11-09T16:54:51.1097516+06:00",
+    "native_master_resolution":  "1280x720 (GenerateImage output). Larger Plasma sizes are covers/upscales — not native 4K detail."
+}

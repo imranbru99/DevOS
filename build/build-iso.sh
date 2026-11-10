@@ -163,6 +163,7 @@ chroot "${CHROOT_DIR}" dpkg --add-architecture i386
 echo "==> Step 4: Installing package lists..."
 chroot "${CHROOT_DIR}" env DEBIAN_FRONTEND=noninteractive apt-get update -y
 
+OPTIONAL_PACKAGES="$(python3 "${SCRIPT_DIR}/optional-packages.py")"
 for listfile in $(ls -1 "${ROOT_DIR}/build/package-lists/"*.list.chroot 2>/dev/null | sort); do
     if [ -f "$listfile" ]; then
         echo "  Processing package list: $(basename "$listfile")"
@@ -170,6 +171,9 @@ for listfile in $(ls -1 "${ROOT_DIR}/build/package-lists/"*.list.chroot 2>/dev/n
         while IFS= read -r pkg || [ -n "$pkg" ]; do
             pkg_trimmed=$(echo "$pkg" | sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
             if [ -n "$pkg_trimmed" ]; then
+                case " $OPTIONAL_PACKAGES " in
+                    *" ${pkg_trimmed%%:*} "*) continue ;;
+                esac
                 PKG_BATCH="${PKG_BATCH} ${pkg_trimmed}"
             fi
         done < "$listfile"
@@ -188,6 +192,7 @@ for listfile in $(ls -1 "${ROOT_DIR}/build/package-lists/"*.list.chroot 2>/dev/n
         fi
     fi
 done
+python3 "${SCRIPT_DIR}/optional-packages.py" "${CHROOT_DIR}"
 
 # Copy a source tree into the image as root with sane modes. A checkout on a
 # Windows drive (Docker Desktop, WSL /mnt/c) reports every file as 0777, and
@@ -222,17 +227,6 @@ chmod 440 "${CHROOT_DIR}"/etc/sudoers.d/* 2>/dev/null || true
 chmod 600 "${CHROOT_DIR}"/etc/NetworkManager/system-connections/* 2>/dev/null || true
 chmod 600 "${CHROOT_DIR}"/etc/netplan/*.yaml 2>/dev/null || true
 
-# Chrome is a real system package. Its profile stays in the user home folder.
-if [ -f "${CHROOT_DIR}/usr/local/sbin/devos-install-chrome" ]; then
-    echo "==> Installing Google Chrome..."
-    chroot "${CHROOT_DIR}" /bin/bash /usr/local/sbin/devos-install-chrome || true
-fi
-
-if [ -f "${CHROOT_DIR}/usr/local/sbin/devos-install-code" ]; then
-    echo "==> Installing Visual Studio Code..."
-    chroot "${CHROOT_DIR}" /bin/bash /usr/local/sbin/devos-install-code || true
-fi
-
 if [ -f "${CHROOT_DIR}/usr/local/sbin/devos-install-llm" ]; then
     echo "==> Installing the local chat model..."
     # HuggingFace / CDN 504s must never abort the ISO. The assistant can
@@ -247,6 +241,7 @@ echo "==> Installing DevOS components and unified CLI..."
 if [ -d "${ROOT_DIR}/components" ]; then
     install_tree "${ROOT_DIR}/components" "${CHROOT_DIR}/usr/local/share/devos/components"
 fi
+systemctl --root="${CHROOT_DIR}" --global enable devos-audio-defaults.path devos-audio-defaults.service
 
 mkdir -p "${CHROOT_DIR}/usr/local/bin"
 cat << 'EOF' > "${CHROOT_DIR}/usr/local/bin/devos"
@@ -280,6 +275,14 @@ for hook in "${ROOT_DIR}/build/hooks/"*.hook.chroot; do
         rm -f "${CHROOT_DIR}/tmp/current_hook.sh"
     fi
 done
+
+# Full media carries the older optional apps as unopened packages. The target
+# installs only the features the user selected, including when it is offline.
+if [ "${DEVOS_BUNDLE_OPTIONAL_APPS:-0}" = 1 ]; then
+    python3 "${SCRIPT_DIR}/cache-optional-apps.py" "${CHROOT_DIR}"
+else
+    rm -rf "${CHROOT_DIR}/usr/local/share/devos/offline-apt"
+fi
 
 # Fail closed after branding and hooks: never edit packaged ELF binaries.
 python3 "${SCRIPT_DIR}/verify-package-binaries.py" --root "${CHROOT_DIR}"

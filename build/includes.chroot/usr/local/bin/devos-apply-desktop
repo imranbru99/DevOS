@@ -3,6 +3,13 @@
 # It applies the DevOS theme, icons, wallpaper, and taskbar once Plasma is up.
 export DISPLAY="${DISPLAY:-:0}"
 mkdir -p "${HOME}/.config"
+# Migrate only the stock desktop splash on existing DevOS accounts.
+if command -v kreadconfig6 >/dev/null 2>&1 && command -v kwriteconfig6 >/dev/null 2>&1; then
+    case "$(kreadconfig6 --file ksplashrc --group KSplash --key Theme)" in
+        Breeze|org.kde.breeze.desktop|org.kde.breezedark.desktop)
+            kwriteconfig6 --file ksplashrc --group KSplash --key Theme org.devos.desktop ;;
+    esac
+fi
 # Falkon must not open the KDE Wallet window. That window blocks the whole screen.
 cat > "${HOME}/.config/kwalletrc" << 'EOF'
 [Wallet]
@@ -27,6 +34,11 @@ if command -v kwriteconfig5 >/dev/null 2>&1 \
     done
 fi
 
+# One Windows App only: drop Features override duplicate of the ISO companion.
+if [ -f /usr/share/applications/devos-web-winapp.desktop ] \
+        && [ -f /usr/local/share/applications/devos-web-winapp.desktop ]; then
+    rm -f /usr/local/share/applications/devos-web-winapp.desktop 2>/dev/null || true
+fi
 # Repair only DevOS-owned legacy Windows App shortcut stubs.
 if [ -f /usr/local/share/devos/components/cloudpc/launchers.py ]; then
     python3 /usr/local/share/devos/components/cloudpc/launchers.py || true
@@ -110,9 +122,35 @@ fi
 # when a panel already exists from skel (apply-ui used to skip that case).
 python3 - << 'PY' || true
 from pathlib import Path
-import os, re
+import codecs, os, re, subprocess
 
 home = Path(os.path.expanduser("~"))
+desktop = home / "Desktop"
+try:
+    location = subprocess.check_output(["xdg-user-dir", "DESKTOP"], text=True, timeout=2).strip()
+    if location:
+        desktop = Path(location)
+except (OSError, subprocess.SubprocessError):
+    pass
+
+# Repair the five shipped shortcuts affected by the Windows UTF-8 BOM.
+for name in ("browser", "devos-apps", "devos-dashboard", "devos-disk", "notepad"):
+    shortcut = desktop / f"{name}.desktop"
+    try:
+        if shortcut.is_symlink() or not shortcut.is_file():
+            continue
+        original = shortcut.read_bytes()
+        if not original.startswith(codecs.BOM_UTF8 + b"[Desktop Entry]"):
+            continue
+        data = original.removeprefix(codecs.BOM_UTF8).replace(b"\r\n", b"\n")
+        data = re.sub(rb"(?m)^Exec=(devos-browser|devos-apps|devos-notepad)(?= |$)",
+                      rb"Exec=/usr/local/bin/\1", data)
+        if name == "devos-dashboard":
+            data = data.replace(b"\nExec=devos-dashboard\n", b"\nExec=/usr/local/bin/devos dashboard\n", 1)
+        shortcut.write_bytes(data)
+    except OSError:
+        pass
+
 cfg = home / ".config" / "plasma-org.kde.plasma.desktop-appletsrc"
 if cfg.is_file():
     launchers = (
@@ -122,7 +160,7 @@ if cfg.is_file():
         "applications:devos-code.desktop,applications:devos-settings.desktop"
     )
     favorites = (
-        "applications:google-chrome.desktop,applications:devos-thispc.desktop,"
+        "applications:devos-browser.desktop,applications:devos-thispc.desktop,"
         "applications:devos-notepad.desktop,applications:devos-code.desktop,"
         "applications:devos-chat.desktop,applications:devos-dashboard.desktop,"
         "applications:devos-apps.desktop,applications:devos-settings.desktop"
@@ -136,9 +174,20 @@ if cfg.is_file():
     )
     text = cfg.read_text(encoding="utf-8", errors="replace")
     original = text
+    disabled = set()
+    for name in ("google-chrome.desktop", "devos-code.desktop"):
+        try:
+            override = (Path("/usr/local/share/applications") / name).read_text(encoding="utf-8")
+            if "X-DevOS-Hidden=true" in override:
+                disabled.add(f"applications:{name}")
+        except OSError:
+            pass
+    launchers = ",".join(pin for pin in launchers.split(",") if pin not in disabled)
+    favorites = ",".join(pin for pin in favorites.split(",") if pin not in disabled)
 
     def scrub(value: str) -> str:
-        keep = [p.strip() for p in value.split(",") if p.strip() and not any(d in p for d in dead)]
+        keep = [p.strip() for p in value.split(",")
+                if p.strip() and p.strip() not in disabled and not any(d in p for d in dead)]
         return ",".join(keep) if keep else launchers
 
     text = re.sub(r"(?m)^(launchers=).*$", lambda m: m.group(1) + scrub(m.group(0).split("=", 1)[1]), text)

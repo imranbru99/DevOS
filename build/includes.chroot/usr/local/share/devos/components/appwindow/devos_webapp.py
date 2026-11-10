@@ -169,18 +169,35 @@ def offline_html(title: str, url: str, starting: bool = False) -> str:
         head = f"{t} is not running"
         text = "Nothing is answering at this address yet. Press Retry to start it again."
         button = f'<button id="retry" onclick="document.title=\'{RETRY_TITLE}\'">Retry</button>'
+    light = False
+    try:
+        from devos_appearance import current_mode
+        light = current_mode() in ("light", "mac-light")
+    except Exception:
+        pass
+    bg = "#f8fafc" if light else BACKGROUND
+    ink = "#0f172a" if light else "#e2e8f0"
+    muted = "#64748b" if light else "#94a3b8"
+    link = "#0369a1" if light else "#7dd3fc"
+    if light:
+        card_bg = "linear-gradient(160deg,#ffffff,#f1f5f9)"
+        card_border = "#cbd5e1"
+        card_shadow = "0 24px 60px rgba(15,23,42,.12)"
+    else:
+        card_bg = "linear-gradient(160deg,rgba(30,41,59,.72),rgba(15,23,42,.72))"
+        card_border = "rgba(148,163,184,.16)"
+        card_shadow = "0 24px 60px rgba(0,0,0,.45)"
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>{t}</title><style>
-html,body{{margin:0;height:100%;background:{BACKGROUND};color:#e2e8f0;
+html,body{{margin:0;height:100%;background:{bg};color:{ink};
 font-family:Inter,"Noto Sans","Liberation Sans",sans-serif}}
 .wrap{{height:100%;display:flex;align-items:center;justify-content:center}}
 .card{{max-width:460px;padding:36px 40px;border-radius:20px;text-align:center;
-background:linear-gradient(160deg,rgba(30,41,59,.72),rgba(15,23,42,.72));
-border:1px solid rgba(148,163,184,.16);box-shadow:0 24px 60px rgba(0,0,0,.45)}}
+background:{card_bg};border:1px solid {card_border};box-shadow:{card_shadow}}}
 .mark{{width:56px;height:56px;margin:0 auto 18px;border-radius:16px;
 background:linear-gradient(135deg,#00f2fe,#4facfe);display:flex;align-items:center;justify-content:center;
 font-weight:800;color:#041018;font-size:22px}}
-h1{{font-size:20px;margin:0 0 10px}} p{{color:#94a3b8;line-height:1.5;margin:0 0 6px}}
-code{{color:#7dd3fc;font-size:12px}}
+h1{{font-size:20px;margin:0 0 10px}} p{{color:{muted};line-height:1.5;margin:0 0 6px}}
+code{{color:{link};font-size:12px}}
 button{{margin-top:22px;border:0;border-radius:12px;padding:12px 30px;font:inherit;font-weight:700;
 color:#041018;background:linear-gradient(135deg,#00f2fe,#4facfe);cursor:pointer}}
 button:hover{{filter:brightness(1.08)}}
@@ -350,6 +367,14 @@ def run_qt(args) -> int:
 
         # -- loading / offline ---------------------------------------------
         def load_finished(self, ok):
+            if ok and not self.offline and args.app_id == "dashboard":
+                marker = os.environ.pop("DEVOS_HOMEPAGE_READY_FILE", "")
+                if marker:
+                    try:
+                        with open(marker, "w", encoding="utf-8") as stream:
+                            stream.write("ok\n")
+                    except OSError as exc:
+                        print(f"Cannot record DevOS homepage startup: {exc}", file=sys.stderr)
             if ok or self.offline:
                 return
             if port_open(self.url):

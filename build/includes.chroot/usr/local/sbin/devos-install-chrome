@@ -51,8 +51,37 @@ keep_cloud_pc_in_app() {
 
 keep_cloud_pc_in_app
 
+# Apt's google-chrome.desktop overwrites our ISO copy and would show a second
+# Start-menu tile next to /usr/local/share/.../google-chrome.desktop.
+hide_vendor_chrome_menu() {
+    local desk=/usr/share/applications/google-chrome.desktop
+    local alias=/usr/local/share/applications/com.google.Chrome.desktop
+    if [ -f "$desk" ] && ! grep -q '^NoDisplay=true' "$desk" 2>/dev/null; then
+        if grep -q '^NoDisplay=' "$desk"; then
+            sed -i 's/^NoDisplay=.*/NoDisplay=true/' "$desk"
+        else
+            sed -i '/^\[Desktop Entry\]/a NoDisplay=true' "$desk"
+        fi
+    fi
+    # Alias must stay hidden — a second desktop-id with the same Name= doubles Chrome in Kickoff.
+    cat > "$alias" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Google Chrome
+NoDisplay=true
+Hidden=true
+X-DevOS-Hidden=true
+Exec=/usr/local/bin/devos-browser %U
+Icon=google-chrome
+StartupWMClass=google-chrome
+Terminal=false
+Categories=Network;WebBrowser;
+EOF
+}
+
 if command -v google-chrome-stable >/dev/null 2>&1; then
     quiet_first_run
+    hide_vendor_chrome_menu
     echo "Google Chrome is already installed."
     echo "Bookmarks, passwords, and history stay in each user's ~/.config/google-chrome folder."
     exit 0
@@ -75,6 +104,7 @@ if [ -f /opt/google/chrome/chrome-sandbox ]; then
     chmod 4755 /opt/google/chrome/chrome-sandbox
 fi
 keep_cloud_pc_in_app
+hide_vendor_chrome_menu
 echo "Google Chrome is installed."
 echo "Open it from the menu. Your data stays in ~/.config/google-chrome and is kept after restart."
 echo "Install Chrome only after DevOS itself is installed on the hard disk. A live USB session forgets it on shutdown."

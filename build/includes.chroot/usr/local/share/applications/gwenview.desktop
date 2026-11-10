@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Photos
+GenericName=Photo Viewer
+Comment=Photo Viewer
+Icon=gwenview
+Exec=true
+Terminal=false
+NoDisplay=true
+X-DevOS-FriendlyAlias=true

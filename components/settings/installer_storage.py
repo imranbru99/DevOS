@@ -3,8 +3,11 @@ import json
 import re
 from pathlib import Path
 import shutil
+import os
+import stat
+import subprocess
 from disk_manager import DiskManager, parse_partition_parent
-from storage_layout import plan_layout
+from storage_layout import GIB, plan_layout
 
 
 def parse_choice(choice, snapshot):
@@ -103,6 +106,30 @@ def installed_owner(root_mount):
         if len(fields) >= 7 and fields[2].isdigit() and 1000 <= int(fields[2]) < 65534:
             return int(fields[2]), int(fields[3])
     raise ValueError('The installed desktop account is not available; data drives were left unchanged.')
+
+
+def cap_system_reserve(root_mount, partitions):
+    """Limit the existing ext4 reserve to 5 GiB on a newly formatted root."""
+    root = next((p for p in partitions or [] if p.get('mountPoint') == '/'), {})
+    if root.get('claimed') is not True or root.get('fs') != 'ext4':
+        return
+    if not root_mount or os.path.realpath(root_mount) == '/' or not os.path.ismount(root_mount):
+        raise ValueError('The new ext4 system mount could not be verified.')
+    device = root.get('device') or ''
+    if root.get('luksMapperName'):
+        device = '/dev/mapper/' + root['luksMapperName']
+    if not device.startswith('/dev/'):
+        raise ValueError('The new ext4 system device could not be identified.')
+    device_stat = os.stat(device)
+    if not stat.S_ISBLK(device_stat.st_mode) or device_stat.st_rdev != os.stat(root_mount).st_dev:
+        raise ValueError('The ext4 system device does not match the mounted target.')
+
+    env = dict(os.environ, LC_ALL='C')
+    info = subprocess.check_output(['tune2fs', '-l', device], text=True, env=env, timeout=15)
+    fields = dict(line.split(':', 1) for line in info.splitlines() if ':' in line)
+    limit = 5 * GIB // int(fields['Block size'])
+    if int(fields['Reserved block count']) > limit:
+        subprocess.run(['tune2fs', '-r', str(limit), device], check=True, env=env, timeout=15)
 
 
 def apply(raw, root_mount, partitions):

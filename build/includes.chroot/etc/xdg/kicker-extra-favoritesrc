@@ -1,5 +1,5 @@
 [General]
 # Replace Plasma's stock Dolphin/Kate/Konsole/Discover favorites with DevOS apps.
 IgnoreDefaults=true
-Prepend=google-chrome.desktop;devos-thispc.desktop;devos-notepad.desktop;devos-code.desktop;devos-chat.desktop;devos-dashboard.desktop;devos-apps.desktop;devos-settings.desktop
+Prepend=devos-browser.desktop;devos-thispc.desktop;devos-notepad.desktop;devos-code.desktop;devos-chat.desktop;devos-dashboard.desktop;devos-apps.desktop;devos-settings.desktop
 Append=

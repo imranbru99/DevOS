@@ -45,6 +45,20 @@ GLYPHS = {
     "ai-code-agent": '<path d="M20 22h24v20H20z"/><path d="M26 30h12 M26 36h8"/><path d="M32 14v8"/>',
     "ai-pipeline": '<path d="M14 32h10l6-10 8 20 6-10h10"/>',
     "logo": '<circle cx="32" cy="32" r="16"/><path d="M24 32h16 M32 24v16"/>',
+    "calculator": '<rect x="18" y="12" width="28" height="40" rx="4"/><path d="M24 20h16 M24 30h6 M34 30h6 M24 38h6 M34 38h6 M24 46h6 M34 46h6"/>',
+    "photos": '<rect x="12" y="18" width="40" height="28" rx="4"/><circle cx="24" cy="28" r="4"/><path d="M14 42l12-10 8 6 10-12 6 16z"/>',
+    "snip": '<rect x="14" y="16" width="28" height="22" rx="3"/><path d="M40 30l8 8-6 2 2-6z"/><path d="M18 22h12"/>',
+    "zip": '<rect x="18" y="12" width="28" height="40" rx="3"/><path d="M32 12v40 M28 20h8 M28 28h8 M28 36h8"/>',
+    "editor": '<rect x="16" y="12" width="32" height="40" rx="3"/><path d="M24 22h16 M24 30h16 M24 38h10"/><path d="M40 40l6 2-2 6z"/>',
+    "paint": '<path d="M18 40c0-10 8-18 18-18 4 0 8 2 10 5l6 8-12 4c-8 2-14-1-16-6z"/><circle cx="28" cy="28" r="2"/>',
+    "pdf": '<rect x="16" y="10" width="28" height="44" rx="3"/><path d="M32 10v12h12"/><path d="M22 34h16 M22 42h12"/>',
+    "scanner": '<rect x="12" y="28" width="40" height="16" rx="3"/><path d="M18 28V22h28v6 M20 36h24"/>',
+    "charmap": '<rect x="14" y="14" width="36" height="36" rx="4"/><path d="M24 24h4v16h-4z M34 24h6v4h-6z M34 32h6v8h-6z"/>',
+    "magnifier": '<circle cx="28" cy="28" r="12"/><path d="M37 37l10 10"/>',
+    "passwords": '<rect x="16" y="26" width="32" height="22" rx="4"/><path d="M24 26v-6a8 8 0 0 1 16 0v6"/><path d="M28 37h8"/>',
+    "terminal": '<rect x="12" y="16" width="40" height="32" rx="4"/><path d="M20 28l8 6-8 6 M32 40h12"/>',
+    "antigravity-studio": '<path d="M18 40L32 14l14 26z"/><path d="M26 40h12"/><circle cx="32" cy="30" r="3"/>',
+    "emoji": '<circle cx="32" cy="32" r="16"/><path d="M24 28h2 M38 28h2 M24 38q8 8 16 0"/>',
 }
 
 COLORS = [

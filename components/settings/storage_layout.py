@@ -88,10 +88,10 @@ def ownership_script(device, filesystem, owner):
             'umount "$volume_mount"\nrmdir "$volume_mount"\ntrap - EXIT\n')
 
 
-def mkfs_command(device, filesystem, label):
+def mkfs_command(device, filesystem, label, *, system=False):
     label = volume_label(label, filesystem)
     tool, flags = {
-        "ext4": ("mkfs.ext4", ["-F", "-L"]),
+        "ext4": ("mkfs.ext4", ["-F", *([] if system else ["-m", "0"]), "-L"]),
         "btrfs": ("mkfs.btrfs", ["-f", "-L"]),
         "ntfs": ("mkfs.ntfs", ["-f", "-L"]),
         "exfat": ("mkfs.exfat", ["-n"]),
@@ -171,5 +171,5 @@ def system_layout_script(device, filesystem, label, uefi):
                  shlex.join(['partprobe',device]), 'udevadm settle']
     if uefi:
         commands.append(mkfs_command(partition_device(device,1),'vfat','DEVOS_EFI'))
-    commands += [mkfs_command(partition_device(device,2),filesystem,label),'udevadm settle']
+    commands += [mkfs_command(partition_device(device,2),filesystem,label,system=True),'udevadm settle']
     return '\n'.join(commands)+'\n'

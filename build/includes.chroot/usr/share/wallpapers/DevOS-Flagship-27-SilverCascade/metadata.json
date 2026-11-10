@@ -1,0 +1,22 @@
+{
+    "KPlugin":  {
+                    "Website":  "https://imrandev.bd",
+                    "Name":  "DevOS Flagship · Silver Cascade",
+                    "Id":  "DevOS-Flagship-27-SilverCascade",
+                    "Authors":  [
+                                    {
+                                        "Email":  "me@imrandev.bd",
+                                        "Name":  "Imran Ahmed"
+                                    }
+                                ],
+                    "Description":  "DevOS flagship wallpaper (E/dark). Master 1280x720; larger sizes are covers."
+                },
+    "DevOSFlagship":  {
+                          "masterWidth":  1280,
+                          "masterHeight":  720,
+                          "native4k":  false,
+                          "sourceMaster":  "tools/wallpapers/flagship-collection/redesigned/masters/devos-flagship-home50-27-silver-cascade.jpg",
+                          "category":  "E",
+                          "theme":  "dark"
+                      }
+}

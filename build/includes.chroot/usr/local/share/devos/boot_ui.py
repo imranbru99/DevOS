@@ -330,7 +330,9 @@ class OptionCard(QPushButton):
         self._focus = False
         self.setCursor(Qt.PointingHandCursor)
         self.setFocusPolicy(Qt.StrongFocus)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        policy = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        policy.setHeightForWidth(True)
+        self.setSizePolicy(policy)
         self.setMinimumHeight(72)
         self.setMaximumWidth(640)
         self.clicked.connect(lambda: self.chosen.emit(self.option))
@@ -362,13 +364,18 @@ class OptionCard(QPushButton):
         super().keyPressEvent(event)
 
     def sizeHint(self):
-        bf = QFont("Segoe UI", 9, QFont.DemiBold)
-        subf = QFont("Segoe UI", 11)
-        sm = QFontMetrics(subf)
-        badge_w = QFontMetrics(bf).horizontalAdvance(self.option["badge"]) + 14
-        text_w = max(240, 640 - 90 - badge_w)
-        sub_h = sm.boundingRect(0, 0, text_w, 2000, Qt.TextWordWrap, self.option["subtitle"]).height()
-        return QSize(640, max(78, 46 + sub_h))
+        return QSize(640, self.heightForWidth(640))
+
+    def minimumSizeHint(self):
+        return QSize(0, 72)
+
+    def heightForWidth(self, width):
+        metrics = QFontMetrics(QFont("Segoe UI", 11))
+        text_width = max(1, width - 78)
+        text_height = metrics.boundingRect(
+            0, 0, text_width, 2000, Qt.TextWordWrap, self.option["subtitle"]
+        ).height()
+        return max(78, 46 + text_height)
 
     def paintEvent(self, _event):
         painter = QPainter(self)
@@ -686,11 +693,13 @@ class Starter(QWidget):
         col.addWidget(self.scroll, 1)
 
         root.addStretch(1)
-        root.addWidget(column, 0)
+        # The scroll area must claim available width before the side gutters.
+        root.addWidget(column, 100)
         root.addStretch(1)
 
         self.clock = QTimer(self)
         self.clock.timeout.connect(self.tick)
+        self._last_tick = time.monotonic()
         self.clock.start(33)
         self._next_window_check = 0.0
         self._countdown_accum = 0.0
@@ -1137,24 +1146,28 @@ class Starter(QWidget):
         return True
 
     def tick(self):
-        self.phase += 0.033
-        self._bg_accum += 0.033
+        now = time.monotonic()
+        elapsed = now - self._last_tick
+        self._last_tick = now
+        self.phase += elapsed
+        self._bg_accum += elapsed
         # Faster plate cross-switch so the background motion is obvious.
         if self._bg_accum >= 4.5 and self._bgs:
             self._bg_accum = 0.0
             self._bg_index = (self._bg_index + 1) % len(self._bgs)
         if self.mode == "intro":
-            self._intro_left -= 0.033
+            self._intro_left -= elapsed
             self.cover()
             self.update()
             if self._intro_left <= 0:
                 self.show_chooser()
             return
         if self.mode == "chooser":
-            self._countdown_accum += 0.033
+            self._countdown_accum += elapsed
             if self._countdown_accum >= 1.0:
-                self._countdown_accum = 0.0
-                self.countdown -= 1
+                seconds = int(self._countdown_accum)
+                self._countdown_accum -= seconds
+                self.countdown = max(0, self.countdown - seconds)
                 self._update_countdown_label()
                 if self.countdown <= 0:
                     self.on_option_chosen(OPTIONS[0])

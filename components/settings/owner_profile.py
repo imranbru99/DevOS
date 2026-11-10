@@ -248,7 +248,7 @@ QLabel#hint { color: #64748b; font-size: 12px; }
 QLabel#fieldLabel { color: #94a3b8; font-weight: 600; }
 QLineEdit, QTextEdit {
   background: #111827; color: #f8fafc; border: 1px solid #1f2937;
-  border-radius: 10px; padding: 10px 12px; selection-background-color: #0ea5e9;
+  border-radius: 10px; padding: 10px 12px; selection-background-color: #2563eb; selection-color: #ffffff;
 }
 QLineEdit:focus, QTextEdit:focus { border-color: #38bdf8; }
 QLineEdit:disabled { color: #64748b; background: #0f172a; }

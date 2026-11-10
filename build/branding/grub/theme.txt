@@ -19,7 +19,7 @@ message-color: "#94a3b8"
 }
 
 + label {
-  top = 17%
+  top = 20%
   left = 7%
   width = 70%
   height = 20

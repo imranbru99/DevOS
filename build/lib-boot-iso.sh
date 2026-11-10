@@ -165,19 +165,28 @@ elif loadfont $prefix/font.pf2 ; then
     true
 fi
 set gfxmode=auto
-set gfxpayload=keep
-if terminal_output gfxterm ; then
+if [ "$grub_platform" = pc ]; then
+    # Keep the BIOS path on the firmware text console through kernel loading.
+    # Switching away from gfxterm on entry can corrupt GRUB on legacy VGA.
+    set gfxpayload=text
+    terminal_output console serial
+elif terminal_output gfxterm ; then
+    set gfxpayload=keep
     if [ -f $prefix/themes/devos/theme.txt ]; then
         set theme=$prefix/themes/devos/theme.txt
         export theme
     fi
+    terminal_output --append serial
 else
     terminal_output console serial
 fi
-# Keep serial readable even when gfxterm is active.
-terminal_output --append serial
 
 function devos_root {
+    if [ -f /casper/vmlinuz ]; then
+        if [ -f /casper/initrd ]; then
+            return
+        fi
+    fi
     search --no-floppy --set=root --file /casper/vmlinuz
     if [ -f /casper/vmlinuz ]; then
         return
@@ -188,7 +197,9 @@ function devos_root {
 set bootargs="boot=casper username=devos hostname=devos ignore_uuid nopersistent fsck.mode=skip"
 
 menuentry "Try DevOS / Install" {
-    set gfxpayload=keep
+    clear
+    echo "Welcome to DevOS"
+    echo "Loading the live system from USB..."
     devos_root
     linux /casper/vmlinuz ${bootargs} quiet splash plymouth.theme=devos plymouth.use-simpledrm ---
     initrd /casper/initrd
@@ -232,6 +243,7 @@ insmod part_gpt
 insmod part_msdos
 insmod fat
 insmod iso9660
+insmod ntfs
 insmod search
 insmod search_fs_file
 insmod search_label
@@ -241,8 +253,12 @@ if [ ! -f /casper/vmlinuz ]; then
     search --no-floppy --set=root --label DEVOS_2604
 fi
 set prefix=($root)/boot/grub
-if [ -f $prefix/grub.cfg ]; then
-    configfile $prefix/grub.cfg
+if [ -f /casper/vmlinuz ]; then
+    if [ -f /casper/initrd ]; then
+        if [ -f $prefix/grub.cfg ]; then
+            configfile $prefix/grub.cfg
+        fi
+    fi
 fi
 echo "DevOS: boot menu not found. Reflash USB (Rufus DD / Etcher)."
 sleep 8
@@ -373,6 +389,7 @@ insmod part_gpt
 insmod part_msdos
 insmod fat
 insmod iso9660
+insmod ntfs
 insmod search
 insmod search_fs_file
 insmod search_label
@@ -382,8 +399,12 @@ if [ ! -f /casper/vmlinuz ]; then
     search --no-floppy --set=root --label DEVOS_2604
 fi
 set prefix=($root)/boot/grub
-if [ -f $prefix/grub.cfg ]; then
-    configfile $prefix/grub.cfg
+if [ -f /casper/vmlinuz ]; then
+    if [ -f /casper/initrd ]; then
+        if [ -f $prefix/grub.cfg ]; then
+            configfile $prefix/grub.cfg
+        fi
+    fi
 fi
 echo "DevOS: boot menu not found. Reflash USB (Rufus DD / Etcher)."
 sleep 8
@@ -398,15 +419,18 @@ devos_efi_img() {
     local stage="$1" tmp="$2"
     local efi_structure="${tmp}/efi_structure"
 
-    mkdir -p "${efi_structure}/EFI/BOOT"
-    cp -a "${stage}/EFI/BOOT/." "${efi_structure}/EFI/BOOT/"
+    mkdir -p "${efi_structure}/EFI" "${efi_structure}/boot/grub"
+    cp -a "${stage}/EFI/BOOT" "${stage}/EFI/ubuntu" "${efi_structure}/EFI/"
+    # GRUB can resolve its prefix against the FAT ESP itself. Place the same
+    # chainloader stub there as well so it can still find the actual live files.
+    cp "${stage}/EFI/BOOT/grub.cfg" "${efi_structure}/boot/grub/grub.cfg"
 
     # Fixed 16 MB ESP: large enough for signed shim + GRUB + MokManager + IA32
     # fallback, and universally accepted by UEFI firmware.
     rm -f "${stage}/boot/grub/efi.img"
     dd if=/dev/zero of="${stage}/boot/grub/efi.img" bs=1M count=16 status=none
     mkfs.vfat -F 16 "${stage}/boot/grub/efi.img" >/dev/null
-    mcopy -s -i "${stage}/boot/grub/efi.img" "${efi_structure}/EFI" ::
+    mcopy -s -i "${stage}/boot/grub/efi.img" "${efi_structure}/EFI" "${efi_structure}/boot" ::
 }
 
 # Write .disk metadata that casper and the signed GRUB expect.

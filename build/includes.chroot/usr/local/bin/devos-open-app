@@ -159,24 +159,38 @@ def open_android(path, name):
     return 0
 
 
-def main():
+def _argv_path():
     if len(sys.argv) < 2:
+        return None
+    raw = (sys.argv[1] or "").strip()
+    if not raw or raw in ("%f", "%F", "%u", "%U"):
+        return None
+    return os.path.abspath(raw)
+
+
+def main():
+    path = _argv_path()
+    if not path:
+        gui = "/usr/local/share/devos/components/apphub/apphub_gui.py"
+        if os.path.isfile(gui):
+            os.execv(sys.executable, [sys.executable, gui])
         if shutil.which("kdialog"):
             proc = subprocess.run(
-                ["kdialog", "--title", "WinLayer • Open Windows or Android Application",
+                ["kdialog", "--title", "DevOS App Hub",
                  "--getopenfilename", os.path.expanduser("~"),
-                 "Supported Applications (*.exe *.msi *.bat *.cmd *.apk *.xapk);;Windows Executables (*.exe *.msi *.bat *.cmd);;All files (*)"],
+                 "Supported Applications (*.exe *.msi *.bat *.cmd *.apk *.xapk *.deb *.AppImage);;Windows Executables (*.exe *.msi *.bat *.cmd);;All files (*)"],
                 capture_output=True, text=True
             )
             selected = proc.stdout.strip()
             if selected:
-                sys.argv.append(selected)
+                path = os.path.abspath(selected)
             else:
                 return 0
         else:
-            dialog("--sorry", "Choose an .exe, .msi or .apk file.")
+            dialog("--sorry", "Choose an .exe, .msi, .apk or .deb file.")
             return 1
-    path = os.path.abspath(sys.argv[1])
+    if not path:
+        return 0
     name = os.path.splitext(os.path.basename(path))[0]
     ext = os.path.splitext(path)[1].lower()
 
@@ -188,17 +202,14 @@ def main():
         # ClamAV found a threat (the file is now in quarantine) or the file is
         # inside the quarantine. There is no "open anyway" here: restoring it
         # in DevOS Security is the deliberate way back.
+        summary = report.get("ai_summary", "This file is dangerous.")
         if dialog("--warningcontinuecancel",
-                  f"{report.get('ai_summary', 'This file is dangerous.')}
-
-"
-                  "Open DevOS Security to review it?") == 0:
+                  f"{summary}\n\nOpen DevOS Security to review it?") == 0:
             subprocess.Popen(["/usr/local/bin/devos-security", "gui", "--page", "quarantine"])
         return 1
     if report.get("needs_confirmation"):
-        if dialog("--warningyesno", f"{report.get('ai_summary')}
-
-Open it anyway?") != 0:
+        if dialog("--warningyesno",
+                  f"{report.get('ai_summary')}\n\nOpen it anyway?") != 0:
             return 0
     elif not report.get("safe_to_run", True):
         if dialog("--warningyesno",

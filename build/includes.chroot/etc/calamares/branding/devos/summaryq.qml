@@ -7,6 +7,9 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.3
 
+import "features-catalog.js" as Cat
+import "aimodel-hw.js" as HW
+
 Page {
     id: page
     background: InstallerBackground {}
@@ -160,11 +163,91 @@ Page {
         t = t.replace(/^Install option:\s*/i, "")
         return t
     }
+    function featureName(id) {
+        var features = (Cat.data && Cat.data.features) || []
+        for (var i = 0; i < features.length; i++) {
+            if (features[i].id === id)
+                return features[i].name || id
+        }
+        return id
+    }
+    function prettyAi(raw, fallback) {
+        var t = String(raw || "").replace(/^\s+|\s+$/g, "")
+        if (!t.length)
+            return fallback || "Default AI pack"
+        var parts = t.split("+")
+        var labels = []
+        var models = (HW.hw && HW.hw.models) || []
+        var modelId = parts[0]
+        for (var i = 0; i < models.length; i++) {
+            if (models[i].id === modelId) {
+                labels.push(models[i].name + (models[i].params ? " (" + models[i].params + ")" : ""))
+                break
+            }
+        }
+        if (!labels.length && modelId.length)
+            labels.push(prettyChoice(modelId, modelId))
+        var extras = (HW.hw && HW.hw.extras) || []
+        for (var j = 1; j < parts.length; j++) {
+            var ex = parts[j]
+            var found = false
+            for (var k = 0; k < extras.length; k++) {
+                if (extras[k].id === ex) {
+                    labels.push(extras[k].name)
+                    found = true
+                    break
+                }
+            }
+            if (!found && ex.length)
+                labels.push(ex)
+        }
+        return labels.join(" · ") || (fallback || "Default AI pack")
+    }
+    function prettyVoice(raw, fallback) {
+        var t = String(raw || "").replace(/^\s+|\s+$/g, "")
+        if (!t.length)
+            return fallback || "Default voice"
+        if (t.indexOf("=") < 0)
+            return prettyChoice(t, fallback || "Default voice")
+        var map = {}
+        var pairs = t.split(";")
+        for (var i = 0; i < pairs.length; i++) {
+            var kv = pairs[i].split("=")
+            if (kv.length === 2)
+                map[kv[0]] = kv[1]
+        }
+        var bits = []
+        if (map.mira === "1" || map.mira === "true")
+            bits.push("Wake word on")
+        else if (map.mira === "0" || map.mira === "false")
+            bits.push("Wake word off")
+        if (map.gender === "female")
+            bits.push("Female voice")
+        else if (map.gender === "male")
+            bits.push("Male voice")
+        if (map.lang)
+            bits.push("Language: " + map.lang)
+        return bits.length ? bits.join(" · ") : prettyChoice(t, fallback || "Default voice")
+    }
+    function prettyUsertype(raw, fallback) {
+        var id = String(raw || "").replace(/^\s+|\s+$/g, "")
+        if (!id.length)
+            return fallback || "Recommended"
+        var types = (Cat.data && Cat.data.userTypes) || []
+        for (var i = 0; i < types.length; i++) {
+            if (types[i].id === id)
+                return types[i].name
+        }
+        return prettyChoice(id, fallback || "Recommended")
+    }
     function appsLine() {
-        var raw = firstGlobal(["packagechooser_features", "features"], "")
+        var raw = firstGlobal(["devos_selected_features"], "")
         if (!raw.length)
-            return "Recommended apps"
-        return raw.split(",").map(function (x) { return x.replace(/^\s+|\s+$/g, "") }).filter(function (x) { return x.length }).join(" · ")
+            return "No optional apps selected"
+        return raw.split(",").map(function (x) {
+            var id = x.replace(/^\s+|\s+$/g, "")
+            return id.length ? featureName(id) : ""
+        }).filter(function (x) { return x.length }).join(" · ")
     }
     function refreshChoice() {
         var disk = rootDisk() || "selected disk"
@@ -183,9 +266,9 @@ Page {
 
         ColumnLayout {
             id: form
-            x: Math.max(24, (page.width - width) / 2)
-            y: 24
-            width: Math.min(page.width - 48, 740)
+            x: Math.max(InstallerAppearance.pageMargin, (page.width - width) / 2)
+            y: InstallerAppearance.pageMargin
+            width: Math.min(page.width - InstallerAppearance.pageMargin * 2, InstallerAppearance.pageMaxWidth)
             spacing: 12
 
             PageIntro {
@@ -361,19 +444,19 @@ Page {
                 Layout.fillWidth: true
                 kicker: "DEVOS AI"
                 title: "Assistant"
-                body: prettyChoice(firstGlobal(["packagechooser_aimodel", "aimodel"], ""), "Default AI pack")
+                body: prettyAi(firstGlobal(["packagechooser_aimodel", "aimodel"], ""), "Default AI pack")
             }
             SummaryCard {
                 Layout.fillWidth: true
                 kicker: "VOICE"
                 title: "Voice"
-                body: prettyChoice(firstGlobal(["packagechooser_voice", "voice"], ""), "Default voice")
+                body: prettyVoice(firstGlobal(["packagechooser_voice", "voice"], ""), "Default voice")
             }
             SummaryCard {
                 Layout.fillWidth: true
                 kicker: "YOU"
                 title: "Profile"
-                body: prettyChoice(firstGlobal(["packagechooser_usertype", "usertype"], ""), "Recommended")
+                body: prettyUsertype(firstGlobal(["packagechooser_usertype", "usertype"], ""), "Recommended")
             }
             SummaryCard {
                 Layout.fillWidth: true

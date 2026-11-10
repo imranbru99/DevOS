@@ -83,6 +83,7 @@ class StorageLayoutTests(unittest.TestCase):
             self.assertNotIn('umount -f', script)
             self.assertNotIn('\\"', script)
             self.assertIn('chown 1000:1000', script)
+        self.assertIn('mkfs.ext4 -F -m 0 -L A /dev/sdb1', script)
 
         self.assertEqual(subprocess.run(['bash', '-n'], input=script, text=True, capture_output=True).returncode, 0)
 

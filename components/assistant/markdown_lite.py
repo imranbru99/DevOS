@@ -7,12 +7,31 @@ import re
 CODE_BG = "#0d1117"
 INLINE_CODE_BG = "#1a2130"
 LINK = "#7dd3fc"
+CODE_BG_LIGHT = "#f1f5f9"
+INLINE_CODE_BG_LIGHT = "#e2e8f0"
+LINK_LIGHT = "#0369a1"
+CODE_INK_LIGHT = "#0f172a"
+CODE_INK_DARK = "#e2e8f0"
 
 _URL = re.compile(r"(?<![\"'=(])\bhttps?://[^\s<>()]+[^\s<>().,;:!?'\"]")
 
 
-def _inline(text: str, link_color: str = LINK) -> str:
+def _theme_ink():
+    """Code / link colors that stay readable on light or dark chat chrome."""
+    try:
+        from devos_appearance import current_mode
+        if current_mode() in ("light", "mac-light"):
+            return CODE_BG_LIGHT, INLINE_CODE_BG_LIGHT, LINK_LIGHT, CODE_INK_LIGHT
+    except Exception:
+        pass
+    return CODE_BG, INLINE_CODE_BG, LINK, CODE_INK_DARK
+
+
+def _inline(text: str, link_color: str = None) -> str:
     codes = []
+    _code_bg, inline_bg, default_link, code_ink = _theme_ink()
+    if link_color is None:
+        link_color = default_link
 
     def keep_code(m):
         codes.append(m.group(1))
@@ -41,7 +60,7 @@ def _inline(text: str, link_color: str = LINK) -> str:
 
     def put_code(m):
         c = html.escape(codes[int(m.group(1))], quote=False)
-        return (f'<code style="background-color:{INLINE_CODE_BG}; color:#e2e8f0; font-size:13px; '
+        return (f'<code style="background-color:{inline_bg}; color:{code_ink}; font-size:13px; '
                 f'font-family:\'JetBrains Mono\',\'Noto Sans Mono\',monospace;">&nbsp;{c}&nbsp;</code>')
 
     return re.sub(r"\x00(\d+)\x00", put_code, text)
@@ -49,9 +68,10 @@ def _inline(text: str, link_color: str = LINK) -> str:
 
 def _code_html(code: str) -> str:
     code = html.escape(code, quote=False)
+    code_bg, _inline_bg, _link, code_ink = _theme_ink()
     return (f"<table width='100%' cellspacing='0' cellpadding='10' style='margin:2px 0 4px 0;'>"
-            f"<tr><td style='background-color:{CODE_BG};'><pre style=\"margin:0; white-space:pre-wrap; "
-            f"font-family:'JetBrains Mono','Noto Sans Mono',monospace; font-size:13px;\">{code}</pre>"
+            f"<tr><td style='background-color:{code_bg}; color:{code_ink};'><pre style=\"margin:0; white-space:pre-wrap; "
+            f"font-family:'JetBrains Mono','Noto Sans Mono',monospace; font-size:13px; color:{code_ink};\">{code}</pre>"
             f"</td></tr></table>")
 
 

@@ -1,0 +1,22 @@
+﻿{
+    "KPlugin":  {
+                    "Website":  "https://imrandev.bd",
+                    "Name":  "DevOS Flagship · Ink Horizon",
+                    "Id":  "DevOS-Flagship-09-InkHorizon",
+                    "Authors":  [
+                                    {
+                                        "Email":  "me@imrandev.bd",
+                                        "Name":  "Imran Ahmed"
+                                    }
+                                ],
+                    "Description":  "DevOS flagship wallpaper (C/dark). Master 1280x720; larger sizes are covers."
+                },
+    "DevOSFlagship":  {
+                          "masterWidth":  1280,
+                          "masterHeight":  720,
+                          "native4k":  false,
+                          "sourceMaster":  "tools/wallpapers/flagship-collection/redesigned/masters/devos-flagship-home50-09-ink-horizon.jpg",
+                          "category":  "C",
+                          "theme":  "dark"
+                      }
+}

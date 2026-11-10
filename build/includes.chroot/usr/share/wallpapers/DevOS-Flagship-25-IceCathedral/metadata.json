@@ -1,0 +1,22 @@
+﻿{
+    "KPlugin":  {
+                    "Website":  "https://imrandev.bd",
+                    "Name":  "DevOS Flagship · Ice Cathedral",
+                    "Id":  "DevOS-Flagship-25-IceCathedral",
+                    "Authors":  [
+                                    {
+                                        "Email":  "me@imrandev.bd",
+                                        "Name":  "Imran Ahmed"
+                                    }
+                                ],
+                    "Description":  "DevOS flagship wallpaper (D/dark). Master 1280x720; larger sizes are covers."
+                },
+    "DevOSFlagship":  {
+                          "masterWidth":  1280,
+                          "masterHeight":  720,
+                          "native4k":  false,
+                          "sourceMaster":  "tools/wallpapers/flagship-collection/redesigned/masters/devos-flagship-home50-25-ice-cathedral.jpg",
+                          "category":  "D",
+                          "theme":  "dark"
+                      }
+}

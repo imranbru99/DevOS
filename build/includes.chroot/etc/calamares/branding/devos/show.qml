@@ -2,7 +2,7 @@
    Calamares does not give the slideshow the install progress, so this page
    shows no steps or bar of its own: the real progress bar and the current
    task are directly below it. While files copy, it walks the apps ticked on
-   "Choose your apps" (global storage packagechooser_features) and shows each
+   "Choose your apps" (global storage devos_selected_features) and shows each
    one's best feature. If that list is missing, it falls back to the general tour. */
 import QtQuick 2.15
 import calamares.slideshow 1.0
@@ -50,14 +50,8 @@ Presentation {
     }
     // Ids ticked on the Apps page. Written when that page is left.
     function chosenIds() {
-        var keys = ["packagechooser_features", "features"]
-        var raw = ""
-        for (var i = 0; i < keys.length; i++) {
-            if (Core.Global.contains(keys[i])) {
-                raw = Core.Global.value(keys[i])
-                break
-            }
-        }
+        var raw = Core.Global.contains("devos_selected_features")
+            ? Core.Global.value("devos_selected_features") : ""
         if (raw === undefined || raw === null) return []
         var text = (typeof raw === "string") ? raw : String(raw)
         if (!text || text === "undefined") return []
@@ -136,8 +130,8 @@ Presentation {
           points: ["Microsoft-compatible fonts", "Merge, split & sign PDFs", "Thunderbird email"] },
         { tag: "PHONE LINK", icon: "☏", a: "#34d399", b: "#0ea5e9",
           title: "Control your PC from your phone",
-          body: "Scan a QR code: send files, use the clipboard, change volume, open apps, see the screen or ask DevOS AI. No app needed.",
-          points: ["Pair with a one-time code", "Files both ways", "Phone companion included"] },
+          body: "Optional. Tick Phone Link during setup (or add it later in DevOS Features), then scan a QR code to send files, use the clipboard, change volume, open apps or ask DevOS AI.",
+          points: ["Only if you tick it", "Pair with a one-time code", "Add anytime in Features"] },
         { tag: "DEVOS SHARE", icon: "◎", a: "#f472b6", b: "#8b5cf6",
           title: "Show your local app to the world",
           body: "Running a website on your PC? Click Make public and get an https link anyone can open. No domain, no router setup.",
@@ -180,6 +174,27 @@ Presentation {
         var picked = slidesForPicks()
         if (picked.length > 0) {
             cards = picked
+            current = 0
+        } else {
+            // No optional apps ticked: keep the general tour, but never market an
+            // unticked app as part of this install.
+            var ids = chosenIds()
+            var want = {}
+            for (var i = 0; i < ids.length; i++) want[ids[i]] = true
+            var gated = {
+                "PHONE LINK": "phonelink",
+                "DEVOS SHARE": "share",
+                "CLOUD BACKUP": "backup",
+                "DEVOS CODE AGENT": "codeagent",
+                "ISLAMIC DEVOS": "islamic"
+            }
+            var next = []
+            for (var j = 0; j < cards.length; j++) {
+                var need = gated[cards[j].tag]
+                if (need && !want[need]) continue
+                next.push(cards[j])
+            }
+            if (next.length) cards = next
             current = 0
         }
         rotator.running = true

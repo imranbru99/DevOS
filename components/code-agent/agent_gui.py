@@ -449,19 +449,31 @@ def message_html(text: str, is_generating: bool = False) -> str:
     return "".join(out)
 
 
+def _chat_ink() -> Tuple[str, str, str]:
+    """Heading, body, and code ink for chat HTML — follows DevOS light/dark."""
+    try:
+        from devos_appearance import current_mode
+        if current_mode() in ("light", "mac-light"):
+            return "#0f172a", "#334155", "#4338ca"
+    except Exception:
+        pass
+    return "#ffffff", "#e4e4ea", "#c4cbff"
+
+
 def _inline(escaped: str) -> str:
     """`code` and **bold** in already-escaped text. Code spans are set aside first, so a '*' inside one
     never pairs up with a bold marker."""
     spans: List[str] = []
+    heading, _body, code_ink = _chat_ink()
 
     def stash(m):
         spans.append(m.group(1))
         return f"\x00{len(spans) - 1}\x00"
 
     text = re.sub(r"`([^`\n]+)`", stash, escaped)
-    text = re.sub(r"\*\*([^*\n]+)\*\*", r"<b style='color:#ffffff;'>\1</b>", text)
+    text = re.sub(r"\*\*([^*\n]+)\*\*", rf"<b style='color:{heading};'>\1</b>", text)
     return re.sub(r"\x00(\d+)\x00", lambda m: (
-        f'<span style="background-color:{RAISED}; color:#c4cbff; font-family:{MONO}; font-size:12px;">&nbsp;'
+        f'<span style="background-color:{RAISED}; color:{code_ink}; font-family:{MONO}; font-size:12px;">&nbsp;'
         f'{spans[int(m.group(1))]}&nbsp;</span>'), text)
 
 
@@ -473,6 +485,7 @@ def _prose(text: str) -> str:
     clean_text = re.sub(r'\[Attached image: [^\]]+\]', '', text).strip()
     rendered = ""
     if clean_text:
+        ink_heading, ink_body, _code = _chat_ink()
         paras = []
         for line in clean_text.splitlines():
             esc = html.escape(line.rstrip())
@@ -481,7 +494,10 @@ def _prose(text: str) -> str:
             if not esc.strip():
                 paras.append("<div style='font-size:6px;'>&nbsp;</div>")
             elif heading:
-                paras.append(f"<div style='font-size:14.5px; font-weight:600; color:#ffffff; margin-top:4px;'>{_inline(heading.group(1))}</div>")
+                paras.append(
+                    f"<div style='font-size:14.5px; font-weight:600; color:{ink_heading}; margin-top:4px;'>"
+                    f"{_inline(heading.group(1))}</div>"
+                )
             elif bullet:
                 marker = bullet.group(3) or "•"
                 left = 6 + (18 if len(bullet.group(1)) >= 2 else 0)
@@ -489,7 +505,7 @@ def _prose(text: str) -> str:
                              f"{_inline(bullet.group(4))}</div>")
             else:
                 paras.append(f"<div>{_inline(esc)}</div>")
-        rendered = f"<div style='line-height:150%; color:#e4e4ea;'>{''.join(paras)}</div>"
+        rendered = f"<div style='line-height:150%; color:{ink_body};'>{''.join(paras)}</div>"
     if img_matches:
         img_html = ""
         for m in img_matches:
@@ -1797,9 +1813,10 @@ class AgentWindow(QtWidgets.QMainWindow):
         else:
             rows = (f'<tr><td align="center"><a href="action:open" style="color:{ACCENT_HOVER}; text-decoration:none;">'
                     f'Open folder…</a></td></tr>')
+        ink, _body, _code = _chat_ink()
         return (f'<table width="100%" cellspacing="0" cellpadding="0"><tr><td height="40"></td></tr>'
                 f'<tr><td align="center" style="color:{ACCENT}; font-size:26px;">◆</td></tr>'
-                f'<tr><td align="center" style="color:#ffffff; font-size:22px; font-weight:600; padding:8px 0 4px 0;">What should we build?</td></tr>'
+                f'<tr><td align="center" style="color:{ink}; font-size:22px; font-weight:600; padding:8px 0 4px 0;">What should we build?</td></tr>'
                 f'<tr><td align="center" style="color:{MUTED}; font-size:12.5px; padding-bottom:22px;">{sub}</td></tr></table>'
                 f'<table width="78%" align="center" cellspacing="0" cellpadding="0">{rows}</table>')
 
@@ -1816,6 +1833,7 @@ class AgentWindow(QtWidgets.QMainWindow):
                     f'&nbsp;&nbsp;<a href="action:edit:{p_idx}" style="color:{MUTED}; text-decoration:none; font-size:11px;">Edit</a></td></tr></table>'
                     f'{_prose(shown)}</td></tr></table>' + _gap(14))
         if role == "error":
+            # Error cards keep a dark wash in both themes — white ink stays readable.
             return (f'<table width="100%" cellspacing="0" cellpadding="0"><tr><td bgcolor="{BAD_BG}" '
                     f'style="background-color:{BAD_BG}; border:1px solid #5a232b; padding:10px 14px; color:#ffc9ce;">'
                     f'<b style="color:{BAD};">Something went wrong</b><br>{html.escape(text)}<br>'
@@ -1823,9 +1841,10 @@ class AgentWindow(QtWidgets.QMainWindow):
                     f'</td></tr></table>' + _gap(10))
         if role == "note":
             if text.startswith("Phase "):
+                ink, _body, _code = _chat_ink()
                 return (_gap(6) + f'<table width="100%" cellspacing="0" cellpadding="0"><tr>'
                         f'<td width="22" style="color:{ACCENT}; font-size:12px;">◆</td>'
-                        f'<td style="color:#ffffff; font-weight:600; font-size:13px; border-top:1px solid {LINE}; padding-top:8px;">'
+                        f'<td style="color:{ink}; font-weight:600; font-size:13px; border-top:1px solid {LINE}; padding-top:8px;">'
                         f'{html.escape(text)}</td></tr></table>' + _gap(6))
             return (f'<table width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" '
                     f'style="color:{SUBTLE}; font-size:11.5px; padding:4px 0;">{html.escape(text)}</td></tr></table>' + _gap(6))

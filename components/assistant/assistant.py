@@ -694,7 +694,7 @@ class MicButton(QtWidgets.QAbstractButton):
         if self.unavailable and not on and not self.in_call:
             self.setToolTip(self.unavailable)
         elif on or self.in_call:
-            self.setToolTip("End call — tap ■ (or Esc / say “Mira stop”). Pause while talking to auto-send.")
+            self.setToolTip("End call — tap ■ (or Esc / say “Mira stop”). Speak, then pause to send.")
         else:
             self.setToolTip("Start voice call (tap) · or say “Mira”")
         if on or self.in_call:
@@ -2880,6 +2880,7 @@ class AssistantWindow(QtWidgets.QWidget):
         self.attachments = []
         self.chips = {}
         self.workers = set()
+        self._closing = False
         self.rows = []
         self.thinking = None
         self.recorder = None
@@ -3197,8 +3198,9 @@ class AssistantWindow(QtWidgets.QWidget):
                 voice.warm_tts("en")
 
     def _voice_usable(self):
-        if self._voice_ok is None:          # first click before the background check finished
-            self._apply_voice(*voice.VOICE_CHECK.status())
+        # Re-check on click when previously unavailable so a just-plugged USB mic is seen.
+        if self._voice_ok is None or not self._voice_ok:
+            self._apply_voice(*voice.VOICE_CHECK.status(force=True))
         return self._voice_ok
 
     # -- helpers ------------------------------------------------------------
@@ -3269,6 +3271,8 @@ class AssistantWindow(QtWidgets.QWidget):
                     self._stream_speaker = voice.StreamSpeaker()
                     self._stream_speaker.start(language=lang)
                 self._stream_speaker.feed_delta_total(self._stream_text)
+                if self._call_active:
+                    self._set_call_status("speaking", wave=False)
             if self._stream_row is None:
                 preview = engine.stream_preview(self._stream_text)
                 if not preview:
@@ -3408,6 +3412,8 @@ class AssistantWindow(QtWidgets.QWidget):
     def show_thinking(self, text="Thinking"):
         self.hide_thinking()
         self.thinking = self._add_row(ThinkingRow(text))
+        if self._call_active:
+            self._set_call_status("understanding", wave=False)
 
     def hide_thinking(self):
         if self.thinking is not None:
@@ -3418,6 +3424,8 @@ class AssistantWindow(QtWidgets.QWidget):
             self.thinking = None
 
     def _run(self, job, on_done, on_fail=None, track_busy=True, on_progress=None, on_level=None, on_delta=None):
+        if self._closing:
+            return None
         w = Worker(job, self)
         self.workers.add(w)
         if track_busy:
@@ -3664,11 +3672,16 @@ class AssistantWindow(QtWidgets.QWidget):
         if self._stream_speaker is not None:
             self._stream_speaker.stop()
             self._stream_speaker = None
-        # Warm TTS immediately on mic turns so speech doesn't wait 3–5s after text.
+        # Warm TTS + start stream speaker before the first token so call voice
+        # begins the same moment typing appears (not after the full answer).
         if from_voice:
             spoken = getattr(self, "_last_spoken_lang", None) or voice.Transcriber.last_language
             lang = voice_prefs.resolve_reply_language(spoken, text or "")
             self._voice_reply_lang = lang
+            try:
+                voice.warm_tts(lang if lang in ("en", "bn") else "en")
+            except Exception:
+                pass
             self._stream_speaker = voice.StreamSpeaker()
             self._stream_speaker.start(language=lang)
         else:
@@ -4014,6 +4027,29 @@ class AssistantWindow(QtWidgets.QWidget):
         self.start_call()
         MicButton.pressed_at = 0.0
 
+    def _set_call_status(self, state, wave=False):
+        """Keep call presence in the composer: Listening / Thinking / Speaking / End."""
+        if not self._call_active:
+            return
+        labels = {
+            "listening": "Call · Listening — speak, then pause · ■ End call",
+            "hearing": "Call · Hearing you… — pause to send · ■ End call",
+            "understanding": "Call · Thinking… — ■ End call",
+            "speaking": "Call · Speaking… — ■ End call",
+            "waiting": "Call · Waiting for you… — ■ End call",
+        }
+        self.input.hide()
+        self.rec_bar.show()
+        self.rec_bar.label.setText(labels.get(state, labels["waiting"]))
+        if wave:
+            if not self.rec_bar.timer.isActive():
+                self.rec_bar.start()
+        else:
+            self.rec_bar.set_level(0)
+            self.rec_bar.wave.stop()
+            self.rec_bar.dot.timer.stop()
+            self.rec_bar.timer.stop()
+
     def _listening_ui_on(self):
         self.mic_btn.set_recording(True)
         self.mic_btn.set_in_call(self._call_active)
@@ -4021,7 +4057,7 @@ class AssistantWindow(QtWidgets.QWidget):
         self.rec_bar.show()
         self.rec_bar.start()
         if self._call_active:
-            self.rec_bar.label.setText("Call · waiting for you to speak…")
+            self._set_call_status("waiting", wave=True)
 
     def start_call(self):
         """Phone-style voice call: listen → Mira speaks → listen again until hang-up."""
@@ -4032,15 +4068,36 @@ class AssistantWindow(QtWidgets.QWidget):
         self._call_active = True
         self._call_misses = 0
         self.mic_btn.set_in_call(True)
+        # Prefetch TTS + keep the chat model warm so the first reply word is instant.
+        try:
+            pref = voice_prefs.tts_language_pref()
+            voice.warm_tts(pref if pref in ("en", "bn") else "en")
+        except Exception:
+            try:
+                voice.warm_tts("en")
+            except Exception:
+                pass
+
+        def _warm_llm():
+            try:
+                model = engine.LocalModel()
+                health = model.health(timeout=1.0) or {}
+                if not health.get("model_loaded"):
+                    model.chat([{"role": "user", "content": "ok"}], max_tokens=1, temperature=0)
+            except Exception:
+                pass
+
+        threading.Thread(target=_warm_llm, daemon=True, name="devos-llm-warm").start()
         # Free the mic: pause the always-on Mira daemon while this call owns it.
         try:
             listen.save_config(paused=True)
         except Exception:
             pass
         name = voice_prefs.wake_name()
+        self._set_call_status("waiting", wave=True)
         self.toast.show_for(
             self.mic_btn,
-            f"Call started — speak, then pause to send. Tap ■ to hang up (or say “{name} stop”).",
+            f"Call started — speak, then pause to send. Tap ■ to End call (or say “{name} stop”).",
             above=self.composer,
         )
         self.start_listening()
@@ -4106,17 +4163,20 @@ class AssistantWindow(QtWidgets.QWidget):
 
         def level(v):
             if v < 0:
-                self.rec_bar.label.setText("Understanding…")
+                if self._call_active:
+                    self._set_call_status("understanding", wave=False)
+                else:
+                    self.rec_bar.label.setText("Understanding…")
                 self.rec_bar.set_level(0)
                 self.mic_btn.set_level(0)
                 return
             if self._call_active:
                 if v >= 0.35:
-                    self.rec_bar.label.setText("Call · hearing you… (pause to send · ■ hang up)")
+                    self._set_call_status("hearing", wave=True)
                 elif v >= 0.12:
-                    self.rec_bar.label.setText("Call · listening…")
+                    self._set_call_status("listening", wave=True)
                 else:
-                    self.rec_bar.label.setText("Call · speak now, then pause · ■ to hang up")
+                    self._set_call_status("waiting", wave=True)
             self.rec_bar.set_level(v)
             self.mic_btn.set_level(v)
 
@@ -4173,10 +4233,10 @@ class AssistantWindow(QtWidgets.QWidget):
             self._last_spoken_lang = spoken_lang or voice.guess_language(text)
             # Always answer this turn, then (_replies) starts listening again.
             if self._call_active:
-                self.rec_bar.hide()
-                self.input.show()
+                self._set_call_status("understanding", wave=False)
             self.input.setPlainText(text)
-            QtCore.QTimer.singleShot(150, lambda t=text: self.send(t, from_voice=True))
+            # No artificial delay — start the reply (and stream TTS) immediately.
+            self.send(text, from_voice=True)
 
         def fail(msg):
             self._listening_ui_off()
@@ -4273,6 +4333,10 @@ class AssistantWindow(QtWidgets.QWidget):
         if not self._call_active:
             self.mic_btn.set_in_call(False)
         self.mic_btn.set_level(0)
+        if self._call_active:
+            # Stay in call chrome (Thinking/Speaking) — do not flash the text box.
+            self._set_call_status("understanding", wave=False)
+            return
         self.rec_bar.stop()
         self.rec_bar.hide()
         self.input.show()
@@ -4305,9 +4369,21 @@ class AssistantWindow(QtWidgets.QWidget):
             self.input.setFocus()
 
     def closeEvent(self, e):
-        self.end_call(say=False)
-        if self.history.messages:
-            self.history.save()
+        if not self._closing:
+            self._closing = True
+            self.status_timer.stop()
+            self.end_call(say=False)
+            if self._handle is not None:
+                self._handle.stop()
+            if self.history.messages:
+                self.history.save()
+        if any(worker.isRunning() for worker in self.workers):
+            # A running QThread cannot be destroyed with its parent window.
+            # Hide promptly while startup probes or a cancelled reply finish.
+            e.ignore()
+            self.hide()
+            QtCore.QTimer.singleShot(100, self.close)
+            return
         super().closeEvent(e)
 
 
@@ -4354,18 +4430,24 @@ def apply_app_theme(app):
     font.setPixelSize(FS_BODY)
     font.setHintingPreference(QtGui.QFont.PreferNoHinting)
     app.setFont(font)
-    app.setStyle("Fusion")
-    pal = app.palette()
-    for role, color in ((QtGui.QPalette.Window, BG), (QtGui.QPalette.Base, SURFACE),
-                        (QtGui.QPalette.AlternateBase, SURFACE_HI),
-                        (QtGui.QPalette.Text, TEXT), (QtGui.QPalette.WindowText, TEXT),
-                        (QtGui.QPalette.Button, SURFACE), (QtGui.QPalette.ButtonText, TEXT),
-                        (QtGui.QPalette.Highlight, SELECTION), (QtGui.QPalette.HighlightedText, "#ffffff"),
-                        (QtGui.QPalette.PlaceholderText, FAINT), (QtGui.QPalette.ToolTipBase, SURFACE),
-                        (QtGui.QPalette.ToolTipText, TEXT), (QtGui.QPalette.Link, LINK),
-                        (QtGui.QPalette.Mid, BORDER), (QtGui.QPalette.Dark, BG), (QtGui.QPalette.Light, BORDER)):
-        pal.setColor(role, QtGui.QColor(color))
-    app.setPalette(pal)
+    # Palette follows DevOS Appearance (light/dark). Do not force dark chrome
+    # after install_appearance — that left Fusion controls dark in light mode.
+    try:
+        from devos_appearance import apply_palette, current_mode
+        apply_palette(app, current_mode())
+    except Exception:
+        app.setStyle("Fusion")
+        pal = app.palette()
+        for role, color in ((QtGui.QPalette.Window, BG), (QtGui.QPalette.Base, SURFACE),
+                            (QtGui.QPalette.AlternateBase, SURFACE_HI),
+                            (QtGui.QPalette.Text, TEXT), (QtGui.QPalette.WindowText, TEXT),
+                            (QtGui.QPalette.Button, SURFACE), (QtGui.QPalette.ButtonText, TEXT),
+                            (QtGui.QPalette.Highlight, SELECTION), (QtGui.QPalette.HighlightedText, "#ffffff"),
+                            (QtGui.QPalette.PlaceholderText, FAINT), (QtGui.QPalette.ToolTipBase, SURFACE),
+                            (QtGui.QPalette.ToolTipText, TEXT), (QtGui.QPalette.Link, LINK),
+                            (QtGui.QPalette.Mid, BORDER), (QtGui.QPalette.Dark, BG), (QtGui.QPalette.Light, BORDER)):
+            pal.setColor(role, QtGui.QColor(color))
+        app.setPalette(pal)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Search
+GenericName=Search
+Comment=Search
+Icon=system-search
+Exec=true
+Terminal=false
+NoDisplay=true
+X-DevOS-FriendlyAlias=true

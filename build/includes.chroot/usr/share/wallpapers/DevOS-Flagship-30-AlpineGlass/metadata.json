@@ -1,0 +1,22 @@
+﻿{
+    "KPlugin":  {
+                    "Website":  "https://imrandev.bd",
+                    "Name":  "DevOS Flagship · Alpine Glass",
+                    "Id":  "DevOS-Flagship-30-AlpineGlass",
+                    "Authors":  [
+                                    {
+                                        "Email":  "me@imrandev.bd",
+                                        "Name":  "Imran Ahmed"
+                                    }
+                                ],
+                    "Description":  "DevOS flagship wallpaper (H/dark). Master 1280x720; larger sizes are covers."
+                },
+    "DevOSFlagship":  {
+                          "masterWidth":  1280,
+                          "masterHeight":  720,
+                          "native4k":  false,
+                          "sourceMaster":  "tools/wallpapers/flagship-collection/redesigned/masters/devos-flagship-home50-30-alpine-glass.jpg",
+                          "category":  "H",
+                          "theme":  "dark"
+                      }
+}

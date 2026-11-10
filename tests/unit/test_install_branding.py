@@ -352,12 +352,17 @@ class TestInstalledSystemBoot(unittest.TestCase):
         self.assertIn("Name=About this PC", read("build/includes.chroot/usr/share/applications/devos-about.desktop"))
         help_desktop = read("build/includes.chroot/usr/share/applications/devos-help.desktop")
         self.assertIn("Name=Help Center", help_desktop)
-        self.assertIn("Exec=devos-about --help-center", help_desktop)
+        self.assertIn("Exec=/usr/local/bin/devos-about --help-center", help_desktop)
         editor = read("build/includes.chroot/usr/share/applications/devos-editor.desktop")
         self.assertIn("Name=Text Editor", editor)
         self.assertNotRegex(editor, r"(?i)^Name=Kate\b")
         studio = read("build/includes.chroot/usr/share/applications/devos-antigravity-studio.desktop")
         self.assertIn("Name=Antigravity IDE", studio)
+        self.assertIn("NoDisplay=true", studio)
+        self.assertIn("TryExec=/opt/antigravity/antigravity", studio)
+        ag = read("build/includes.chroot/usr/share/applications/antigravity.desktop")
+        self.assertIn("NoDisplay=true", ag)
+        self.assertIn("TryExec=/opt/antigravity/antigravity", ag)
         ide = read("build/includes.chroot/usr/share/applications/antigravity-ide.desktop")
         self.assertIn("Hidden=true", ide)
         self.assertIn("NoDisplay=true", ide)
@@ -697,10 +702,13 @@ class TestInstalledSystemBoot(unittest.TestCase):
         self.assertIn('"org.kde.klipper"', debrand)
         self.assertIn("fonts-jetbrains-mono", read("build/package-lists/30-developer.list.chroot"))
         self.assertIn("11434", code)
-        # .exe opens through the same friendly opener as .apk (it runs Wine itself).
+        # .exe opens directly. App Hub sends a chosen .apk to the same opener.
         self.assertIn("/usr/local/bin/devos-open-app", win)
         self.assertIn("wine32:i386", read("build/package-lists/50-wine.list.chroot"))
-        self.assertIn("/usr/local/bin/devos-open-app", apk)
+        self.assertIn("Exec=/usr/local/bin/devos-apphub %f", apk)
+        hub = read("build/includes.chroot/usr/local/bin/devos-apphub")
+        self.assertIn('OPEN="/usr/local/bin/devos-open-app"', hub)
+        self.assertIn('exec "$OPEN" "$@"', hub)
         self.assertNotIn("/usr/lib/devos", win)
         self.assertNotIn("/usr/lib/devos", apk)
 
@@ -767,6 +775,11 @@ class TestDevOSIdentity(unittest.TestCase):
         self.assertIn("Scanner", debrand)
         self.assertIn("Character Map", debrand)
         self.assertIn("kvantummanager", debrand)
+        # Settings → General Behavior must not say "Plasma" to normal people.
+        self.assertIn("brand_settings_qml", debrand)
+        self.assertIn("Allow the desktop to show:", debrand)
+        self.assertIn('i18nc("@title:group", "Desktop")', debrand)
+        self.assertIn(r'(?<![\w.])Plasma\b", "Desktop"', debrand)
 
     def test_english_ui_forced_systemwide(self):
         force = read("build/includes.chroot/usr/local/sbin/devos-force-english-ui")

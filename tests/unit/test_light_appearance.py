@@ -19,6 +19,34 @@ def test_light_surfaces_text_and_action_contrast():
     assert 'color: #ffffff' in result
 
 
+def test_pastel_primary_keeps_dark_ink():
+    # Sky cyan buttons are authored dark-on-pastel; light mode must not force white.
+    result = light_stylesheet(
+        'QPushButton#primary { background: #38bdf8; color: #0b0f19; }'
+    )
+    assert 'background: #38bdf8' in result
+    assert 'color: #ffffff' not in result
+    assert '#0b0f19' in result or '#0f172a' in result
+
+
+def test_hex8_wash_does_not_force_white_labels():
+    from devos_appearance import normalize_stylesheet_colors, adapt_stylesheet
+    raw = 'QPushButton#contactBtn:hover { background: #0ea5e914; color: #38bdf8; }'
+    normalized = normalize_stylesheet_colors(raw)
+    assert 'rgba(14, 165, 233' in normalized
+    light = adapt_stylesheet(raw, 'light')
+    assert 'color: #ffffff' not in light
+    assert '38bdf8' in light.lower() or '0ea5e9' in light.lower() or '14, 165, 233' in light
+
+
+def test_white_glass_becomes_slate_glass_in_light():
+    result = light_stylesheet(
+        'QPushButton#ghost { background: rgba(255,255,255,0.08); color: #f8fafc; }'
+    )
+    assert 'rgba(15, 23, 42' in result
+    assert 'color: #0f172a' in result or 'color: #334155' in result
+
+
 def test_dark_stylesheet_inverts_light_authored_chrome():
     light='QWidget {background:#f4f7fb;color:#0f172a;} QLineEdit {background:#ffffff;color:#0f172a;}'
     assert sheet_looks_light(light)

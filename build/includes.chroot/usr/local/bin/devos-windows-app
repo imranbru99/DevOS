@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # Prefer an explicitly configured or local development component directory.
 if [ -n "${DEVOS_COMPONENTS_DIR:-}" ] && [ -f "$DEVOS_COMPONENTS_DIR/cloudpc/cloudpc.py" ]; then
     component="$DEVOS_COMPONENTS_DIR/cloudpc/cloudpc.py"

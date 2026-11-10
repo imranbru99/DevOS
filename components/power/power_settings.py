@@ -393,8 +393,8 @@ def run_gui() -> int:
             self.setObjectName("WindowsCard")
             self.setStyleSheet("""
                 QFrame#WindowsCard {
-                    background-color: #2b2b2b;
-                    border: 1px solid #383838;
+                    background-color: #111827;
+                    border: 1px solid #1f2937;
                     border-radius: 8px;
                 }
             """)
@@ -407,6 +407,7 @@ def run_gui() -> int:
             super().__init__(parent)
             self.mode_id = mode_id
             self.selected = False
+            self.setObjectName("modeCard")
             self.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
             self.setFixedHeight(72)
 
@@ -415,21 +416,29 @@ def run_gui() -> int:
             layout.setSpacing(12)
 
             icon_lbl = QtWidgets.QLabel(icon_symbol)
+            icon_lbl.setObjectName("modeIcon")
             icon_lbl.setStyleSheet("font-size: 22px; background: transparent;")
             layout.addWidget(icon_lbl)
 
             text_layout = QtWidgets.QVBoxLayout()
             text_layout.setSpacing(2)
             self.title_lbl = QtWidgets.QLabel(title)
-            self.title_lbl.setStyleSheet("font-size: 13px; font-weight: 600; color: #ffffff; background: transparent;")
+            self.title_lbl.setObjectName("modeTitle")
+            self.title_lbl.setStyleSheet(
+                "font-size: 13px; font-weight: 600; color: #f8fafc; background: transparent;"
+            )
             self.sub_lbl = QtWidgets.QLabel(subtitle)
-            self.sub_lbl.setStyleSheet("font-size: 11px; color: #a0a0a0; background: transparent;")
+            self.sub_lbl.setObjectName("modeSub")
+            self.sub_lbl.setStyleSheet(
+                "font-size: 11px; color: #94a3b8; background: transparent;"
+            )
             text_layout.addWidget(self.title_lbl)
             text_layout.addWidget(self.sub_lbl)
             layout.addLayout(text_layout)
             layout.addStretch()
 
             self.indicator = QtWidgets.QLabel()
+            self.indicator.setObjectName("modeIndicator")
             self.indicator.setFixedSize(18, 18)
             layout.addWidget(self.indicator)
 
@@ -440,35 +449,40 @@ def run_gui() -> int:
             self.update_style()
 
         def update_style(self):
+            # Use QFrame#modeCard — Python class names are not valid Qt selectors.
             if self.selected:
                 self.setStyleSheet("""
-                    ModeCard {
-                        background-color: #333333;
-                        border: 2px solid #0078d4;
+                    QFrame#modeCard {
+                        background-color: #334155;
+                        border: 2px solid #0284c7;
                         border-radius: 6px;
                     }
                 """)
                 self.indicator.setStyleSheet("""
-                    background-color: #0078d4;
-                    border: 4px solid #ffffff;
-                    border-radius: 9px;
+                    QLabel#modeIndicator {
+                        background-color: #0284c7;
+                        border: 4px solid #f8fafc;
+                        border-radius: 9px;
+                    }
                 """)
             else:
                 self.setStyleSheet("""
-                    ModeCard {
-                        background-color: #262626;
-                        border: 1px solid #383838;
+                    QFrame#modeCard {
+                        background-color: #1e293b;
+                        border: 1px solid #334155;
                         border-radius: 6px;
                     }
-                    ModeCard:hover {
-                        background-color: #2f2f2f;
-                        border: 1px solid #484848;
+                    QFrame#modeCard:hover {
+                        background-color: #273449;
+                        border: 1px solid #475569;
                     }
                 """)
                 self.indicator.setStyleSheet("""
-                    background-color: transparent;
-                    border: 2px solid #5a5a5a;
-                    border-radius: 9px;
+                    QLabel#modeIndicator {
+                        background-color: transparent;
+                        border: 2px solid #64748b;
+                        border-radius: 9px;
+                    }
                 """)
 
         def mousePressEvent(self, ev):
@@ -488,28 +502,28 @@ def run_gui() -> int:
             self.setMinimumSize(680, 560)
             self.setStyleSheet("""
                 QMainWindow {
-                    background-color: #1e1e1e;
+                    background-color: #0b1220;
                 }
                 QWidget {
-                    color: #ffffff;
-                    font-family: 'Segoe UI', 'Ubuntu', sans-serif;
+                    color: #f8fafc;
+                    font-family: 'Inter', 'Segoe UI', 'Noto Sans', sans-serif;
                 }
                 QScrollArea {
                     background: transparent;
                     border: none;
                 }
                 QComboBox {
-                    background-color: #383838;
-                    color: #ffffff;
-                    border: 1px solid #484848;
-                    border-radius: 4px;
+                    background-color: #1e293b;
+                    color: #f8fafc;
+                    border: 1px solid #334155;
+                    border-radius: 6px;
                     padding: 6px 12px;
                     font-size: 13px;
                     min-width: 200px;
                 }
                 QComboBox:hover {
-                    background-color: #424242;
-                    border-color: #585858;
+                    background-color: #273449;
+                    border-color: #475569;
                 }
                 QComboBox::drop-down {
                     subcontrol-origin: padding;
@@ -518,28 +532,28 @@ def run_gui() -> int:
                     border-left: none;
                 }
                 QComboBox QAbstractItemView {
-                    background-color: #2b2b2b;
-                    color: #ffffff;
-                    selection-background-color: #0078d4;
+                    background-color: #111827;
+                    color: #f8fafc;
+                    selection-background-color: #0284c7;
                     selection-color: #ffffff;
-                    border: 1px solid #383838;
+                    border: 1px solid #1f2937;
                     outline: none;
                 }
                 QPushButton {
-                    background-color: #333333;
-                    border: 1px solid #444444;
+                    background-color: #1e293b;
+                    border: 1px solid #334155;
                     border-radius: 6px;
                     padding: 8px 16px;
                     font-size: 13px;
                     font-weight: 500;
-                    color: #ffffff;
+                    color: #f8fafc;
                 }
                 QPushButton:hover {
-                    background-color: #3d3d3d;
-                    border-color: #555555;
+                    background-color: #273449;
+                    border-color: #475569;
                 }
                 QPushButton:pressed {
-                    background-color: #282828;
+                    background-color: #0f172a;
                 }
             """)
 
@@ -557,15 +571,15 @@ def run_gui() -> int:
             header_layout = QtWidgets.QHBoxLayout()
             header_layout.setSpacing(14)
             icon_lbl = QtWidgets.QLabel("⚡")
-            icon_lbl.setStyleSheet("font-size: 28px; color: #0078d4;")
+            icon_lbl.setStyleSheet("font-size: 28px; color: #38bdf8;")
             header_layout.addWidget(icon_lbl)
 
             titles_layout = QtWidgets.QVBoxLayout()
             titles_layout.setSpacing(2)
             title = QtWidgets.QLabel("Power & sleep")
-            title.setStyleSheet("font-size: 22px; font-weight: 700; color: #ffffff;")
+            title.setStyleSheet("font-size: 22px; font-weight: 700; color: #f8fafc;")
             subtitle = QtWidgets.QLabel("Screen and sleep timeouts, power modes, and energy controls")
-            subtitle.setStyleSheet("font-size: 12px; color: #a0a0a0;")
+            subtitle.setStyleSheet("font-size: 12px; color: #94a3b8;")
             titles_layout.addWidget(title)
             titles_layout.addWidget(subtitle)
             header_layout.addLayout(titles_layout)
@@ -573,8 +587,8 @@ def run_gui() -> int:
 
             # Power Source Badge
             badge = QtWidgets.QLabel(self.pwr["status"])
-            badge_bg = "#1b3a24" if self.pwr["charging"] else "#383838"
-            badge_color = "#4ade80" if self.pwr["charging"] else "#cccccc"
+            badge_bg = "#064e3b" if self.pwr["charging"] else "#1e293b"
+            badge_color = "#34d399" if self.pwr["charging"] else "#cbd5e1"
             badge.setStyleSheet(f"""
                 background-color: {badge_bg};
                 color: {badge_color};
@@ -582,14 +596,14 @@ def run_gui() -> int:
                 font-weight: 600;
                 padding: 6px 12px;
                 border-radius: 12px;
-                border: 1px solid #484848;
+                border: 1px solid #334155;
             """)
             header_layout.addWidget(badge)
             main_layout.addLayout(header_layout)
 
             # 2. Screen & Sleep Section
             sec_title1 = QtWidgets.QLabel("Screen and sleep")
-            sec_title1.setStyleSheet("font-size: 15px; font-weight: 600; color: #ffffff; margin-top: 6px;")
+            sec_title1.setStyleSheet("font-size: 15px; font-weight: 600; color: #f8fafc; margin-top: 6px;")
             main_layout.addWidget(sec_title1)
 
             card_sleep = WindowsCard()
@@ -601,9 +615,9 @@ def run_gui() -> int:
             row1 = QtWidgets.QHBoxLayout()
             row1_info = QtWidgets.QVBoxLayout()
             lbl_scr = QtWidgets.QLabel("Turn off my screen after")
-            lbl_scr.setStyleSheet("font-size: 13px; font-weight: 500; color: #ffffff;")
+            lbl_scr.setStyleSheet("font-size: 13px; font-weight: 500; color: #f8fafc;")
             lbl_scr_sub = QtWidgets.QLabel("Display powers down into energy-saving standby mode")
-            lbl_scr_sub.setStyleSheet("font-size: 11px; color: #8c8c8c;")
+            lbl_scr_sub.setStyleSheet("font-size: 11px; color: #94a3b8;")
             row1_info.addWidget(lbl_scr)
             row1_info.addWidget(lbl_scr_sub)
             row1.addLayout(row1_info)
@@ -627,9 +641,9 @@ def run_gui() -> int:
             row2 = QtWidgets.QHBoxLayout()
             row2_info = QtWidgets.QVBoxLayout()
             lbl_slp = QtWidgets.QLabel("Put my device to sleep after")
-            lbl_slp.setStyleSheet("font-size: 13px; font-weight: 500; color: #ffffff;")
+            lbl_slp.setStyleSheet("font-size: 13px; font-weight: 500; color: #f8fafc;")
             lbl_slp_sub = QtWidgets.QLabel("Saves open apps and state to RAM; wakes instantly on keypress")
-            lbl_slp_sub.setStyleSheet("font-size: 11px; color: #8c8c8c;")
+            lbl_slp_sub.setStyleSheet("font-size: 11px; color: #94a3b8;")
             row2_info.addWidget(lbl_slp)
             row2_info.addWidget(lbl_slp_sub)
             row2.addLayout(row2_info)
@@ -650,7 +664,7 @@ def run_gui() -> int:
 
             # 3. Power Mode Section
             sec_title2 = QtWidgets.QLabel("Power mode")
-            sec_title2.setStyleSheet("font-size: 15px; font-weight: 600; color: #ffffff; margin-top: 6px;")
+            sec_title2.setStyleSheet("font-size: 15px; font-weight: 600; color: #f8fafc; margin-top: 6px;")
             main_layout.addWidget(sec_title2)
 
             card_modes = WindowsCard()
@@ -678,7 +692,7 @@ def run_gui() -> int:
 
             # 4. Power Controls & Actions (Power off, Restart, Sleep, Screen Off)
             sec_title3 = QtWidgets.QLabel("Power controls")
-            sec_title3.setStyleSheet("font-size: 15px; font-weight: 600; color: #ffffff; margin-top: 6px;")
+            sec_title3.setStyleSheet("font-size: 15px; font-weight: 600; color: #f8fafc; margin-top: 6px;")
             main_layout.addWidget(sec_title3)
 
             card_actions = WindowsCard()
@@ -720,14 +734,14 @@ def run_gui() -> int:
 
             # Status footer
             self.status_lbl = QtWidgets.QLabel("Settings saved automatically.")
-            self.status_lbl.setStyleSheet("font-size: 11px; color: #6e6e6e; margin-top: 4px;")
+            self.status_lbl.setStyleSheet("font-size: 11px; color: #64748b; margin-top: 4px;")
             main_layout.addWidget(self.status_lbl)
 
         def _make_divider(self):
             div = QtWidgets.QFrame()
             div.setFrameShape(QtWidgets.QFrame.HLine)
             div.setFrameShadow(QtWidgets.QFrame.Plain)
-            div.setStyleSheet("color: #383838; background-color: #383838; height: 1px; border: none;")
+            div.setStyleSheet("color: #334155; background-color: #334155; height: 1px; border: none;")
             return div
 
         def on_screen_timeout_changed(self, idx):
@@ -756,7 +770,7 @@ def run_gui() -> int:
 
         def show_toast(self, msg: str):
             self.status_lbl.setText(f"✓ {msg}")
-            self.status_lbl.setStyleSheet("font-size: 12px; color: #0078d4; font-weight: 500;")
+            self.status_lbl.setStyleSheet("font-size: 12px; color: #38bdf8; font-weight: 500;")
 
         def action_sleep(self):
             suspend_pc()

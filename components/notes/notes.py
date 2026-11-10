@@ -578,6 +578,17 @@ pre { background-color: #0b1220; padding: 8px; }
 blockquote { color: #94a3b8; margin-left: 12px; }
 """
 
+PREVIEW_CSS_LIGHT = """
+h1 { font-size: 24px; color: #0f172a; margin: 4px 0 10px 0; }
+h2 { font-size: 19px; color: #1e293b; margin: 14px 0 6px 0; }
+h3 { font-size: 16px; color: #334155; }
+p, li { color: #334155; line-height: 150%; }
+a { color: #0369a1; }
+code { background-color: #e2e8f0; color: #9d174d; font-family: 'JetBrains Mono', 'Noto Sans Mono', monospace; }
+pre { background-color: #f1f5f9; padding: 8px; }
+blockquote { color: #64748b; margin-left: 12px; }
+"""
+
 PRINT_CSS = """
 body { color: #0f172a; font-family: 'Inter', 'Noto Sans', 'Noto Sans Bengali', sans-serif; }
 h1 { font-size: 22pt; color: #0b0f1a; } h2 { font-size: 16pt; } h3 { font-size: 13pt; }
@@ -585,6 +596,17 @@ p, li { font-size: 11pt; line-height: 140%; } a { color: #0369a1; }
 code { background-color: #f1f5f9; font-family: 'JetBrains Mono', 'Noto Sans Mono', monospace; }
 blockquote { color: #475569; }
 """
+
+
+def preview_css() -> str:
+    """Markdown preview ink that matches DevOS light/dark chrome."""
+    try:
+        from devos_appearance import current_mode
+        if current_mode() in ("light", "mac-light"):
+            return PREVIEW_CSS_LIGHT
+    except Exception:
+        pass
+    return PREVIEW_CSS
 
 
 def _socket_name() -> str:
@@ -1486,7 +1508,7 @@ def _load_gui():  # noqa: C901 - one place for all widget classes
             self.preview = QtWidgets.QTextBrowser()
             self.preview.setObjectName("preview")
             self.preview.setOpenExternalLinks(True)
-            self.preview.document().setDefaultStyleSheet(PREVIEW_CSS)
+            self.preview.document().setDefaultStyleSheet(preview_css())
             self.split.addWidget(self.editor)
             self.split.addWidget(self.preview)
             self.split.setStretchFactor(0, 1)
@@ -1820,7 +1842,7 @@ def _load_gui():  # noqa: C901 - one place for all widget classes
             if self.mode == "edit" or self.current is None:
                 return
             sb = self.preview.verticalScrollBar().value()
-            self.preview.document().setDefaultStyleSheet(PREVIEW_CSS)
+            self.preview.document().setDefaultStyleSheet(preview_css())
             self.preview.setMarkdown(self.editor.toPlainText())
             self.preview.verticalScrollBar().setValue(sb)
 

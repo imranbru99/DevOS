@@ -74,7 +74,7 @@ plugin=org.kde.plasma.kickoff
 
 [Containments][3][Applets][5][Configuration][General]
 icon=devos-logo
-favorites=applications:google-chrome.desktop,applications:devos-thispc.desktop,applications:devos-notepad.desktop,applications:devos-code.desktop,applications:devos-chat.desktop,applications:devos-dashboard.desktop,applications:devos-apps.desktop,applications:devos-settings.desktop
+favorites=applications:devos-browser.desktop,applications:devos-thispc.desktop,applications:devos-notepad.desktop,applications:devos-code.desktop,applications:devos-chat.desktop,applications:devos-dashboard.desktop,applications:devos-apps.desktop,applications:devos-settings.desktop
 favoritesDisplay=0
 favoritesPortedToKAstats=false
 systemFavorites=hibernate,reboot,shutdown
@@ -84,7 +84,7 @@ immutability=1
 plugin=org.kde.plasma.icontasks
 
 [Containments][3][Applets][6][Configuration][General]
-launchers=applications:devos-search.desktop,applications:devos-taskman.desktop,applications:devos-windows.desktop,applications:google-chrome.desktop,applications:devos-thispc.desktop,applications:devos-chat.desktop,applications:devos-code.desktop,applications:devos-settings.desktop
+launchers=applications:devos-search.desktop,applications:devos-taskman.desktop,applications:devos-windows.desktop,applications:devos-browser.desktop,applications:devos-thispc.desktop,applications:devos-chat.desktop,applications:devos-code.desktop,applications:devos-settings.desktop
 groupingStrategy=1
 groupInline=false
 # Windows-like: keep the pinned icon in place and show the open indicator under it

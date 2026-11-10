@@ -1,10 +1,9 @@
 [Unit]
-Description=DevOS — watch PipeWire runtime for new audio devices
+Description=DevOS — watch Linux sound devices for USB audio reconnects
 
 [Path]
-# When PipeWire socket appears / refreshes after plug-in
-PathExists=/run/user/%U/pipewire-0
-PathChanged=/run/user/%U/pipewire-0
+# PipeWire's socket does not change when a USB device is plugged in.
+PathChanged=/dev/snd
 Unit=devos-audio-defaults.service
 
 [Install]

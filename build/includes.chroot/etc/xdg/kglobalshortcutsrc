@@ -73,13 +73,8 @@ _launch=Meta+V
 _k_friendly_name=Clipboard
 _launch=Meta+V,none,Clipboard
 
-# Emoji panel, same keys as Windows
-[services][devos-emoji.desktop]
-_launch=Meta+.
-
-[devos-emoji.desktop]
-_k_friendly_name=Emoji
-_launch=Meta+.,none,Emoji
+# Emoji Meta+. is registered only when the Emoji feature is chosen
+# (desktop file carries X-KDE-Shortcuts=Meta+.).
 
 [services][devos-kids-mode.desktop]
 _launch=Meta+K

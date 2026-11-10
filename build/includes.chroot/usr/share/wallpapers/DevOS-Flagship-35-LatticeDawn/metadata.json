@@ -1,0 +1,22 @@
+{
+    "KPlugin":  {
+                    "Website":  "https://imrandev.bd",
+                    "Name":  "DevOS Flagship · Lattice Dawn",
+                    "Id":  "DevOS-Flagship-35-LatticeDawn",
+                    "Authors":  [
+                                    {
+                                        "Email":  "me@imrandev.bd",
+                                        "Name":  "Imran Ahmed"
+                                    }
+                                ],
+                    "Description":  "DevOS flagship wallpaper (F/light). Master 1280x720; larger sizes are covers."
+                },
+    "DevOSFlagship":  {
+                          "masterWidth":  1280,
+                          "masterHeight":  720,
+                          "native4k":  false,
+                          "sourceMaster":  "tools/wallpapers/flagship-collection/redesigned/masters/devos-flagship-home50-35-lattice-dawn.jpg",
+                          "category":  "F",
+                          "theme":  "light"
+                      }
+}

@@ -22,13 +22,15 @@
 
 ---
 
-## Current source — November 9, 2026
+## Current source — November 10, 2026
 
 DevOS targets **Ubuntu 26.04 LTS (Resolute), amd64**. The current source is
 for 64-bit Intel and AMD laptops, desktops and mini PCs. The build includes
 UEFI and legacy BIOS boot paths and a Safe Graphics option.
 
-The November 9 build produced `out/devos-26.04-amd64-final.iso` (5.2 GiB).
+The November 10 full build produced `out/devos-26.04-amd64-final-2026-11-10-usb.iso`
+and a matching SHA-256 file. The full image includes an offline archive for
+selected optional apps.
 The standard build writes `out/devos-26.04-amd64.iso` and a matching SHA-256
 file. The Google Drive folder above contains previously published images.
 Compare the checksum and build date before assuming a download contains these
@@ -39,29 +41,45 @@ changes. [Build instructions](#build-the-iso-from-source)
 - **Installer and first boot.** Calamares rebuilds the installed initramfs and
   generates and validates GRUB on the mounted target. UEFI registration matches
   the selected EFI partition and loader path. The restart screen prompts you
-  to remove the USB. The default first login opens Plasma and then the DevOS
-  homepage. The homepage records success after its dashboard page loads.
-- **Boot and setup visuals.** The live ISO has a graphical GRUB menu, a two-step
-  animated Plymouth splash, and a redesigned Try/Install screen. The Calamares
+  to remove the USB. If you turn off automatic sign-in in the installer, DevOS
+  displays the sign-in screen at startup. Plasma opens the DevOS homepage after
+  sign-in. The homepage records success after its dashboard page loads.
+- **Boot and setup visuals.** GRUB displays a DevOS welcome message while it loads
+  the live system. Plymouth then shows the animated DevOS splash before the
+  Try/Install screen. Plasma starts
+  with the DevOS session splash. The Calamares
   Summary reviews disk, account, voice, AI and app choices before installation.
-- **Browser workloads.** Chrome is bundled, with Guest and profile launchers.
+- **Browser workloads.** DevOS Browser is built in, with an always-visible New tab
+  button, a picker for open tabs, and keyboard shortcuts to open, switch, close,
+  and reopen tabs. Optional Google Chrome adds Guest and profile launchers.
+- **Audio devices.** Sound Settings can check the USB connection, Linux capture
+  input, and PipeWire source. DevOS restores selected USB microphones and speakers
+  on reconnect without changing mute or gain. Pair Bluetooth audio devices in
+  Settings before choosing them as an input or output.
+- **Default wallpaper.** Fresh desktops use Glass Ribbon from the DevOS
+  Flagship collection, with a 3840 × 2160 desktop image.
   The installer image uses Memory Saver, a RAM-based tab discard threshold and
   zram sized at 50% of RAM. Chrome manages renderer isolation and background
   scheduling with its own defaults. Tab reloads and throughput depend on the
   sites, extensions, active profiles and hardware.
 - **Desktop and productivity.** Updated Start favorites, refreshed wallpapers,
-  This PC, Task Manager, Settings, My Profile and About DevOS. Voice Typing
+  This PC, Task Manager, Settings, My Profile and About DevOS. The image includes
+  28 Flagship wallpaper packages with 720p masters and larger display variants. Voice Typing
   supports offline Bangla and English and can be started with Win+Alt+A/H.
+- **Storage.** New ext4 data drives use a 0% system reserve. Newly formatted ext4
+  system volumes keep up to 5 GiB for privileged writes. File Explorer separates
+  used, available, and reserved space.
 - **Development and local AI.** Code setup, repository-aware AI tools and the
   workflow queue support editor and agent workflows. Agent Endurance can
   inhibit sleep during long-running coding sessions. Local model availability
   depends on the installed or downloaded model.
 
-The final ISO passed its checksum and 38 boot-layout checks and reached the GRUB
-menu in BIOS and UEFI QEMU guests. A disposable virtual disk loaded its GRUB
-configuration without the ISO attached, including under Secure Boot. A complete
-install and desktop boot on the ASRock test machine and a 5–10-profile Chrome
-workload benchmark are still pending.
+The final ISO passed its checksum and 38 boot-layout checks. QEMU reached the
+DevOS boot menu in BIOS and with the image attached as a UEFI USB drive.
+The offline BIOS guest continued to the Calamares Welcome screen.
+The installer, branding, storage, and UI checks passed 92 targeted tests.
+A complete install and desktop boot on the ASRock test machine and a
+5–10-profile Chrome workload benchmark are still pending.
 
 [Feature inventory](docs/FEATURES.md) · [Changelog](CHANGELOG.md) ·
 [Update guide](docs/UPDATES.md) · [Maintenance guide](docs/LONG_TERM_MAINTENANCE.md) ·
@@ -219,7 +237,7 @@ DevOS exists to give people — especially Windows users and developers — **an
 
 ### 2. Desktop that feels like Windows
 - Start menu with the DevOS logo, **icons-only taskbar** with separate entries for open windows, system tray and clock.
-- Desktop shortcuts: Apps, Chrome, DevOS AI, DevOS Code, Documents, Notepad, Settings, Terminal, This PC, VLC and more.
+- Desktop shortcuts include Apps, DevOS Browser, DevOS AI, Documents, Notepad, Settings, Terminal and This PC. Optional apps appear after you select and enable them.
 - **Files & This PC (`devos-files`, `devos-archive`)**: Windows-style drive overview, multi-tab navigation, quick access, breadcrumb path bar, properties dialog, and one-click ZIP/7z context menu archive creation & extraction.
 - **Windows keyboard shortcuts**
 
@@ -381,7 +399,12 @@ Shut down, restart and uninstall always ask for confirmation first.
   <br><em>DevOS Features: Windows-style optional components, bundled app selection, and default application associations in one view.</em>
 </p>
 
-**Availability:** preset selections are not an offline bundle. Apps in the tables below download after installation unless explicitly identified as built in. Chrome and VS Code are fetched during the build, with online installation helpers available if absent. Web-app shortcuts require internet and their provider accounts. The [feature inventory](docs/FEATURES.md) lists delivery for every catalog entry.
+Optional apps start unchecked. Choose a preset or select individual apps before continuing. The standard ISO downloads selected apps after first boot. DevOS Browser is available in the base installation. Web apps require internet and may require a provider account. The [feature inventory](docs/FEATURES.md) lists delivery for each entry.
+
+The full ISO carries an offline package archive for Chrome, VS Code, and optional
+Debian packages from the original image. The archive supplies selected apps
+after first boot. Apps outside the archive and Android system images still
+download when needed. Build this edition with `DEVOS_BUNDLE_OPTIONAL_APPS=1`.
 
 **Office**
 
@@ -402,7 +425,7 @@ Shut down, restart and uninstall always ask for confirmation first.
 
 | Feature | What it does | Included with |
 |---|---|---|
-| Google Chrome | Chrome with Google sign-in. Build-time download; online helper if absent | Every everyday preset |
+| Google Chrome | Chrome with Google sign-in and separate profile launchers. Online download after installation | Every everyday preset |
 | Microsoft Edge | Edge with a Microsoft account | Windows-like (4 GB RAM) |
 | Firefox | Private, open-source browser | Add in DevOS Features |
 | Brave | Browser with built-in ad blocking | Add in DevOS Features (4 GB RAM) |
@@ -659,7 +682,9 @@ Choose whichever tool is easiest for you:
    - Under **Device**, select your USB drive.
    - Under **Boot selection**, click **SELECT** and choose the downloaded `devos-26.04-amd64.iso` file.
    - Click the **START** button at the bottom.
-   - If a prompt asks for write mode, choose **"Write in DD Image mode"** and click **OK**.
+   - If a prompt asks for write mode, choose **Write in DD Image mode**. This
+     preserves the ISO's boot partitions. Rufus ISO mode extracts the files and
+     has caused some laptops to open the `grub>` prompt instead of the installer.
 4. Wait until the progress bar reaches 100% and displays **Ready**.
 
 #### Option B: balenaEtcher (Windows, Mac, or Linux)
@@ -676,7 +701,9 @@ Choose whichever tool is easiest for you:
 ### Step 3: Boot your PC from the USB
 
 Open your PC's one-time boot menu and choose the USB drive. On a UEFI PC, choose
-the UEFI entry for the USB. The boot-menu key depends on the model.
+the UEFI entry for the USB. On many HP laptops, press **Esc** at power-on and then
+**F9** for Boot Device Options. If the USB opens a `grub>` prompt, rewrite it in
+Rufus DD Image mode or with balenaEtcher, then choose the USB entry again.
 
 If the live session has display problems, try **DevOS · Safe Graphics**. Secure
 Boot compatibility depends on firmware trust and revocation settings. The current
@@ -693,7 +720,7 @@ signed disk loader passed the Secure Boot test in QEMU.
   3. Under *Partitions*, select:
      - **Manual partitioning:** Click **Next** to see the partition editor. Select each drive from the storage selector, then create, delete, or edit its partitions. Enable formatting only for partitions you want erased. Assign `/` to the DevOS system partition and, for UEFI, `/boot/efi` to a FAT32 EFI partition with the boot flag. Leave other partitions unchanged to preserve them. You can edit multiple drives before proceeding.
      - **Erase disk (default):** Automatically prepares the selected physical disk for DevOS; every partition on that disk is erased. Other disks retain their data. Back up existing data before changing partitions.
-  4. Create your local account. The current installed image enables automatic desktop sign-in for the primary account.
+  4. Create your local account and choose whether to sign in automatically.
   5. Review the summary, then click **Install**. Installation time depends on the drive, hardware and selected downloads.
   6. When the installer finishes, restart and remove the USB when DevOS prompts you.
 

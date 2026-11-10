@@ -4,9 +4,12 @@ Each of these broke a real-hardware boot once: the live session landed on a
 bare terminal instead of the installer.
 """
 
+import ast
+import configparser
 import re
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[2]
 CHROOT = ROOT / "build" / "includes.chroot"
@@ -18,6 +21,48 @@ def read(path):
 
 
 class InstallerBootTests(unittest.TestCase):
+    def test_security_setup_does_not_hold_up_live_or_installed_boot(self):
+        unit = configparser.ConfigParser()
+        unit.read(CHROOT / "etc/systemd/system/devos-security-firstboot.service")
+        self.assertEqual(unit["Unit"]["ConditionKernelCommandLine"], "!boot=casper")
+        self.assertEqual(unit["Service"]["Type"], "exec")
+
+    def test_live_chooser_advances_after_elapsed_time_on_slow_graphics(self):
+        path = CHROOT / "usr/local/share/devos/boot_ui.py"
+        source = ast.parse(read(path))
+        starter = next(node for node in source.body if isinstance(node, ast.ClassDef) and node.name == "Starter")
+        tick = next(node for node in starter.body if isinstance(node, ast.FunctionDef) and node.name == "tick")
+        clock = iter((105.0, 112.0, 117.0))
+        choices = []
+        namespace = {"time": SimpleNamespace(monotonic=lambda: next(clock)), "OPTIONS": ("try",)}
+        exec(compile(ast.Module(body=[tick], type_ignores=[]), str(path), "exec"), namespace)
+        view = SimpleNamespace(_last_tick=100.0, phase=0.0, _bg_accum=0.0, _bgs=(),
+                               mode="intro", _intro_left=4.5, _countdown_accum=0.0,
+                               countdown=12, cover=lambda: None, update=lambda: None,
+                               _update_countdown_label=lambda: None, on_option_chosen=choices.append)
+        view.show_chooser = lambda: setattr(view, "mode", "chooser")
+        namespace["tick"](view)
+        self.assertEqual(view.mode, "chooser")
+        namespace["tick"](view)
+        self.assertEqual(view.countdown, 5)
+        namespace["tick"](view)
+        self.assertEqual(choices, ["try"])
+
+    def test_desktop_shortcuts_have_parseable_headers_and_bundled_branding(self):
+        desktop = CHROOT / "etc/skel/Desktop"
+        icons = CHROOT / "usr/share/icons/hicolor/scalable/apps"
+        shortcuts = list(desktop.glob("*.desktop"))
+        self.assertTrue(shortcuts)
+        for path in shortcuts:
+            with self.subTest(shortcut=path.name):
+                data = path.read_bytes()
+                self.assertTrue(data.startswith(b"[Desktop Entry]\n"))
+                fields = dict(re.findall(r"^(Name|Exec|Icon)=(.+)$", data.decode("utf-8"), re.M))
+                self.assertEqual(set(fields), {"Name", "Exec", "Icon"})
+                if fields["Icon"].startswith("devos-"):
+                    self.assertTrue((icons / (fields["Icon"] + ".svg")).is_file())
+        self.assertIn("Exec=/usr/local/bin/devos dashboard\n", read(desktop / "devos-dashboard.desktop"))
+
     def test_sddm_session_is_one_existing_file(self):
         # SDDM takes one session name, not a comma list; an unknown name leaves
         # autologin without a session.

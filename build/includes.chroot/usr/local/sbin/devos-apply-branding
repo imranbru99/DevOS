@@ -135,6 +135,12 @@ if [ -x /usr/local/sbin/devos-debrand-desktop ]; then
     /bin/bash /usr/local/sbin/devos-debrand-desktop || true
 fi
 
+# Recent Files: turn /usr/bin/spectacle and bare agent ids into desktop names
+# that resolve to clear labels (Snipping Tool, File Explorer, Search, …).
+if [ -x /usr/local/sbin/devos-normalize-recent-agents ]; then
+    /bin/bash /usr/local/sbin/devos-normalize-recent-agents || true
+fi
+
 # English UI/formats on the image (installer region must not leave bn_* in the clock).
 if [ -x /usr/local/sbin/devos-force-english-ui ]; then
     /bin/bash /usr/local/sbin/devos-force-english-ui || true

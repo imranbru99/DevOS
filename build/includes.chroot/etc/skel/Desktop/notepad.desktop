@@ -1,9 +1,9 @@
-﻿[Desktop Entry]
+[Desktop Entry]
 Version=1.0
 Name=Notepad
 GenericName=Simple notes
 Comment=Write and edit notes and plain text
-Exec=devos-notepad %F
+Exec=/usr/local/bin/devos-notepad %F
 Icon=devos-notepad
 Terminal=false
 Type=Application

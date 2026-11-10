@@ -25,10 +25,13 @@ def test_antigravity_and_kde_have_install_hooks():
     ag = _by_id("antigravity")
     kde = _by_id("antigravity-kde")
     assert ag["script"] == "/usr/local/sbin/devos-install-antigravity"
-    assert ag["detect"]
+    assert ag["detect"] == ["/opt/antigravity/antigravity"]
     assert "antigravity.desktop" in (ag.get("builtin") or {}).get("desktop", [])
+    assert (ag.get("builtin") or {}).get("optin") is True
     assert kde["script"] == "/usr/local/sbin/devos-install-antigravity-kde"
     assert "devos-antigravity-studio.desktop" in (kde.get("builtin") or {}).get("desktop", [])
+    assert (kde.get("builtin") or {}).get("optin") is True
+    assert "/usr/local/bin/antigravity-kde" not in kde["detect"]
     assert "antigravity-ide.desktop" not in (kde.get("builtin") or {}).get("desktop", [])
     assert kde["name"] == "Antigravity IDE"
     assert ag["name"] == "Google Antigravity"

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=File Explorer
+GenericName=Files
+Comment=Files
+Icon=system-file-manager
+Exec=true
+Terminal=false
+NoDisplay=true
+X-DevOS-FriendlyAlias=true

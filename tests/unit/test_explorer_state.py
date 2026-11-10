@@ -2,9 +2,12 @@
 import os
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 import runpy
+import stat
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 MODULE = runpy.run_path(str(ROOT / 'build/includes.chroot/usr/local/bin/devos-files'))
@@ -33,6 +36,45 @@ class ExplorerStateTests(unittest.TestCase):
         w = self.cls(*args, **kwargs)
         self.windows.append(w)
         return w
+
+    def test_drive_properties_distinguish_reserved_space_from_usage(self):
+        drive = dict(title="Data (D:)", letter="D", label="Data", path="/dev/sdb1",
+                     mount=self.temp.name, fstype="ext4", total=916 * 2**30,
+                     free=869 * 2**30, used=2**30)
+        dialog = MODULE["WindowsDrivePropertiesDialog"](drive)
+        labels = [label.text() for label in dialog.findChildren(MODULE["QLabel"])]
+        self.assertIn("EXT4", labels)
+        self.assertIn("Available space:", labels)
+        self.assertIn("System reserved:", labels)
+        pie = dialog.findChild(MODULE["DrivePieWidget"])
+        self.assertEqual((pie.used, pie.free, pie.reserved), (2**30, 869 * 2**30, 46 * 2**30))
+        dialog.close()
+
+    def test_only_the_root_owned_recovery_directory_is_protected(self):
+        recovery = MODULE["is_volume_recovery_folder"]
+        path = self.temp.name + "/lost+found"
+        protected = SimpleNamespace(st_mode=stat.S_IFDIR | 0o700, st_uid=0)
+        with patch("os.path.ismount", return_value=True), patch("os.stat", return_value=protected):
+            self.assertTrue(recovery(path))
+            self.assertFalse(recovery(self.temp.name + "/ordinary"))
+        with patch("os.path.ismount", return_value=False):
+            self.assertFalse(recovery(path))
+        protected.st_uid = 1000
+        with patch("os.path.ismount", return_value=True), patch("os.stat", return_value=protected):
+            self.assertFalse(recovery(path))
+
+    def test_recycle_bin_failure_leaves_the_source_in_place(self):
+        source = Path(self.temp.name) / "keep.txt"
+        source.write_text("keep me")
+        worker = MODULE["FileOpWorker"]("trash", [str(source)])
+        with (
+            patch("os.path.expanduser", side_effect=lambda path: path.replace("~", self.temp.name)),
+            patch("shutil.which", return_value=None),
+            patch("os.rename", side_effect=PermissionError("blocked")),
+        ):
+            errors = worker._trash()
+        self.assertTrue(errors)
+        self.assertEqual(source.read_text(), "keep me")
 
     def test_picker_resumes_explorer_but_explicit_folder_wins(self):
         folder = Path(self.temp.name) / 'chosen'

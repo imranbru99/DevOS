@@ -12,3 +12,7 @@ StartupWMClass=devos-emoji
 Categories=Utility;
 Keywords=emoji;emoticon;smile;sticker;
 X-KDE-Shortcuts=Meta+.
+# Off until chosen in the installer / DevOS Features (BASE no longer forces emoji).
+Hidden=true
+NoDisplay=true
+X-DevOS-Hidden=true

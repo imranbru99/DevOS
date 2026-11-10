@@ -2,6 +2,8 @@
 
 Fifty ultra-premium wallpapers for the DevOS homepage and desktop — cyan/sapphire/obsidian brand language, calm icon-safe left zones, cinematic lighting meant to feel more premium than stock Windows Bloom.
 
+**Flagship redesign (batch in progress):** see `../flagship-collection/` — additive `DevOS-Flagship-*` packages, originals preserved, resume via `progress-summary.json`.
+
 Open `gallery.html` to browse.
 
 ## Install on this PC

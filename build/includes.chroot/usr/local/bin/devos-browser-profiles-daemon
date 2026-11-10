@@ -1,2 +1,19 @@
 #!/bin/bash
-exec -a "$(basename "$0")" /usr/bin/python3 /usr/local/share/devos/components/browser/chrome_profiles.py watch
+# Keep Chrome profile windows as separate footer icons with avatar badges.
+# Pull DISPLAY from the live graphical session when systemd did not pass it.
+set -u
+
+if [ -z "${DISPLAY:-}" ]; then
+    # Prefer the seat's active X display over a stale hardcoded :1.
+    for sock in /tmp/.X11-unix/X[0-9]*; do
+        [ -e "$sock" ] || continue
+        export DISPLAY=":${sock##*/X}"
+        break
+    done
+fi
+if [ -z "${XAUTHORITY:-}" ] && [ -f "${HOME}/.Xauthority" ]; then
+    export XAUTHORITY="${HOME}/.Xauthority"
+fi
+
+exec -a "$(basename "$0")" /usr/bin/python3 \
+    /usr/local/share/devos/components/browser/chrome_profiles.py watch

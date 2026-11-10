@@ -55,6 +55,26 @@ def _defaults() -> Dict[str, object]:
     }
 
 
+def _normalize_prefs(data: Dict[str, object]) -> Dict[str, object]:
+    data["wake_name"] = normalize_wake_name(str(data.get("wake_name") or DEFAULT_WAKE_NAME))
+    gender = str(data.get("tts_gender") or DEFAULT_GENDER).lower()
+    data["tts_gender"] = gender if gender in ("female", "male") else DEFAULT_GENDER
+    lang = str(data.get("tts_language") or DEFAULT_TTS_LANG).lower()
+    data["tts_language"] = lang if lang in ("auto", "en", "bn") else DEFAULT_TTS_LANG
+    data["hands_free"] = bool(data.get("hands_free", False))
+    data["paused"] = bool(data.get("paused", False))
+    return data
+
+
+def _write_prefs(path: str, data: Dict[str, object]) -> None:
+    """Atomic write without calling load/save (avoids first-login recursion)."""
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=1, ensure_ascii=False)
+    os.replace(tmp, path)
+
+
 def load(path: str = CONFIG_PATH) -> Dict[str, object]:
     data = dict(_defaults())
     # First login: seed from installer system prefs if user file is missing.
@@ -64,7 +84,11 @@ def load(path: str = CONFIG_PATH) -> Dict[str, object]:
                 sys_data = json.load(fh)
             if isinstance(sys_data, dict):
                 data.update({k: sys_data[k] for k in _defaults() if k in sys_data})
-                save(path, **{k: data[k] for k in _defaults()})
+                data = _normalize_prefs(data)
+                try:
+                    _write_prefs(path, {k: data[k] for k in _defaults()})
+                except OSError:
+                    pass
                 return data
         except (OSError, ValueError):
             pass
@@ -75,13 +99,7 @@ def load(path: str = CONFIG_PATH) -> Dict[str, object]:
             data.update(raw)
     except (OSError, ValueError):
         pass
-    data["wake_name"] = normalize_wake_name(str(data.get("wake_name") or DEFAULT_WAKE_NAME))
-    gender = str(data.get("tts_gender") or DEFAULT_GENDER).lower()
-    data["tts_gender"] = gender if gender in ("female", "male") else DEFAULT_GENDER
-    lang = str(data.get("tts_language") or DEFAULT_TTS_LANG).lower()
-    data["tts_language"] = lang if lang in ("auto", "en", "bn") else DEFAULT_TTS_LANG
-    data["hands_free"] = bool(data.get("hands_free", False))
-    return data
+    return _normalize_prefs(data)
 
 
 def save(path: str = CONFIG_PATH, **updates) -> Dict[str, object]:
@@ -95,12 +113,9 @@ def save(path: str = CONFIG_PATH, **updates) -> Dict[str, object]:
         lang = str(updates["tts_language"] or "").lower()
         updates["tts_language"] = lang if lang in ("auto", "en", "bn") else data["tts_language"]
     data.update(updates)
+    data = _normalize_prefs(data)
     try:
-        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        tmp = path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, indent=1, ensure_ascii=False)
-        os.replace(tmp, path)
+        _write_prefs(path, data)
     except OSError:
         pass
     return data

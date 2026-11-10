@@ -1,0 +1,13 @@
+#!/bin/bash
+# DevOS App Hub — friendly GUI by default; pass a file path to install directly.
+COMPONENTS="/usr/local/share/devos/components"
+GUI="${COMPONENTS}/apphub/apphub_gui.py"
+OPEN="/usr/local/bin/devos-open-app"
+if [ $# -eq 0 ] || [ "${1:-}" = "--gui" ]; then
+    exec -a "devos-apphub" /usr/bin/python3 "$GUI"
+fi
+# Ignore broken desktop field codes like a literal "%f".
+if [ "$1" = "%f" ] || [ "$1" = "%F" ] || [ "$1" = "%u" ] || [ "$1" = "%U" ]; then
+    exec -a "devos-apphub" /usr/bin/python3 "$GUI"
+fi
+exec "$OPEN" "$@"

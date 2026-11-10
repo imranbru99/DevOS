@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=DevOS AI
+Comment=Open DevOS AI chat after sign-in (voice call + typing)
+Exec=/usr/local/bin/devos-chat
+Icon=devos-chat
+Terminal=false
+OnlyShowIn=KDE;
+X-KDE-autostart-phase=2
+X-GNOME-Autostart-enabled=true
+StartupWMClass=devos-chat

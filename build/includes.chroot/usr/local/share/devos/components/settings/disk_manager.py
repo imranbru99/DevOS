@@ -13,7 +13,7 @@ import shutil
 import subprocess
 import shlex
 
-from storage_layout import plan_layout, layout_script, desktop_owner, ownership_script, volume_label, system_layout_script
+from storage_layout import plan_layout, layout_script, desktop_owner, ownership_script, volume_label, system_layout_script, mkfs_command
 from typing import Dict, Any, List, Tuple
 
 
@@ -680,7 +680,7 @@ class DiskManager:
                 elif fs_type == "vfat":
                     mkfs_cmd = f"mkfs.vfat -F32 -n {target_label} {part1}"
                 else:
-                    mkfs_cmd = f"mkfs.ext4 -F -L {target_label} {part1}"
+                    mkfs_cmd = mkfs_command(part1, "ext4", label or "Storage")
 
                 script = (
                     f"set -e\n"
@@ -709,7 +709,7 @@ class DiskManager:
                 elif fs_type == "vfat":
                     mkfs_cmd = f"mkfs.vfat -F32 -n {target_label} {device}"
                 else:
-                    mkfs_cmd = f"mkfs.ext4 -F -L {target_label} {device}"
+                    mkfs_cmd = mkfs_command(device, "ext4", label or "Storage")
 
                 script = (
                     f"set -e\n"

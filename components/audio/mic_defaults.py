@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Durable microphone defaults for DevOS (recorder, calls, and every app).
+"""Durable microphone and speaker defaults for DevOS (recorder, calls, every app).
 
-PipeWire/WirePlumber already remembers the last default node, but USB mics often
-reappear under a new node name after unplug/replug or profile changes. DevOS
-stores a stable identity (USB serial / bus-id / description) and re-applies
-`pactl set-default-source` / `wpctl set-default` whenever that device returns so
-Chrome calls, voice typing, and the screen recorder all stay on the same mic.
+PipeWire/WirePlumber already remembers the last default node, but USB mics and
+speakers often reappear under a new node name after unplug/replug or profile
+changes. DevOS stores a stable identity (USB serial / bus-id / description) and
+re-applies `pactl set-default-source` / `set-default-sink` / `wpctl set-default`
+whenever that device returns so Chrome calls, voice typing, playback, and the
+screen recorder all stay on the same devices.
 """
 from __future__ import annotations
 
@@ -121,10 +122,79 @@ def list_input_sources() -> List[Dict[str, Any]]:
     return _parse_sources(out)
 
 
+def _parse_sinks(text: str) -> List[Dict[str, Any]]:
+    sinks: List[Dict[str, Any]] = []
+    current: Optional[Dict[str, Any]] = None
+    for raw in text.splitlines():
+        line = raw.rstrip()
+        if line.startswith("Sink #"):
+            if current:
+                sinks.append(current)
+            current = {"props": {}}
+            continue
+        if current is None:
+            continue
+        if line.startswith("\tName:"):
+            current["name"] = line.split(":", 1)[1].strip()
+        elif line.startswith("\tDescription:"):
+            current["description"] = line.split(":", 1)[1].strip()
+        elif line.startswith("\tMute:"):
+            current["mute"] = line.split(":", 1)[1].strip().lower() == "yes"
+        elif line.startswith("\tVolume:"):
+            current["volume_line"] = line.split(":", 1)[1].strip()
+        elif " = " in line and line.strip().startswith(("alsa.", "device.", "node.", "api.")):
+            key, _, val = line.strip().partition(" = ")
+            current["props"][key] = val.strip().strip('"')
+    if current:
+        sinks.append(current)
+
+    real: List[Dict[str, Any]] = []
+    for sink in sinks:
+        name = sink.get("name") or ""
+        props = sink.get("props") or {}
+        if not name:
+            continue
+        sink["bus"] = props.get("device.bus") or ""
+        sink["serial"] = props.get("device.serial") or ""
+        sink["product"] = props.get("device.product.name") or props.get("node.nick") or sink.get("description") or name
+        sink["card"] = props.get("alsa.card_name") or props.get("device.product.name") or ""
+        sink["form_factor"] = props.get("device.form_factor") or ""
+        sink["is_usb"] = (sink["bus"] == "usb") or name.startswith("alsa_output.usb-")
+        score = 10
+        if sink["is_usb"] or sink["form_factor"] in ("speaker", "headset", "headphone"):
+            score += 100
+        desc = (sink.get("description") or "").lower()
+        if "hdmi" in name.lower() or "displayport" in name.lower() or "hdmi" in desc or "displayport" in desc:
+            score -= 80
+        if "headphone" in desc or "headset" in desc:
+            score += 20
+        sink["score"] = score
+        real.append(sink)
+    real.sort(key=lambda s: (-s["score"], s.get("description") or s["name"]))
+    return real
+
+
+def list_output_sinks() -> List[Dict[str, Any]]:
+    if not _whicht("pactl"):
+        return []
+    rc, out = _run(["pactl", "list", "sinks"])
+    if rc != 0:
+        return []
+    return _parse_sinks(out)
+
+
 def get_default_source() -> Optional[str]:
     if not _whicht("pactl"):
         return None
     rc, out = _run(["pactl", "get-default-source"])
+    name = out.strip() if rc == 0 else ""
+    return name or None
+
+
+def get_default_sink() -> Optional[str]:
+    if not _whicht("pactl"):
+        return None
+    rc, out = _run(["pactl", "get-default-sink"])
     name = out.strip() if rc == 0 else ""
     return name or None
 
@@ -136,6 +206,16 @@ def get_default_mic_label() -> str:
     for src in list_input_sources():
         if src["name"] == name:
             return src.get("description") or src.get("product") or name
+    return name
+
+
+def get_default_speaker_label() -> str:
+    name = get_default_sink()
+    if not name:
+        return "No speakers"
+    for sink in list_output_sinks():
+        if sink["name"] == name:
+            return sink.get("description") or sink.get("product") or name
     return name
 
 
@@ -191,7 +271,8 @@ def prefer_source(name: str, make_system_default: bool = True) -> Dict[str, Any]
     return {"ok": True, "prefs": path, "applied": applied, "source": name}
 
 
-def find_preferred_source(sources: Optional[List[Dict[str, Any]]] = None) -> Optional[Dict[str, Any]]:
+def find_preferred_source(sources: Optional[List[Dict[str, Any]]] = None, *,
+                          allow_fallback: bool = True) -> Optional[Dict[str, Any]]:
     sources = sources if sources is not None else list_input_sources()
     if not sources:
         return None
@@ -218,7 +299,38 @@ def find_preferred_source(sources: Optional[List[Dict[str, Any]]] = None) -> Opt
             if desc in (s.get("description") or "").lower():
                 return s
     # Auto-pick: USB / form-factor microphone first
-    return sources[0]
+    return sources[0] if allow_fallback else None
+
+
+def restore_input() -> None:
+    """Restore the chosen mic on reconnect without touching mute or gain."""
+    sources = list_input_sources()
+    chosen = find_preferred_source(sources, allow_fallback=False)
+    if chosen is None and not load_preferences().get("preferred_source_name"):
+        chosen = next((source for source in sources if source["is_usb"]), None)
+    if chosen and chosen["name"] != get_default_source():
+        set_default_source(chosen["name"])
+
+
+def usb_input_status(sys_root: Path = Path("/sys")) -> str:
+    """Describe how far a connected USB audio input got through the stack."""
+    rc, output = _run(["pactl", "list", "sources"])
+    if any(source["is_usb"] for source in _parse_sources(output)):
+        return "A USB input is ready. Select it above, then test the microphone."
+    for pcm in (sys_root / "class/sound").glob("pcmC*D*c"):
+        if any((parent / "idVendor").is_file() for parent in pcm.resolve().parents):
+            if rc:
+                return "Linux detected a USB recording input, but the sound service is unavailable."
+            return ("Linux detected a USB recording input. Open More volume settings → "
+                    "Configuration and choose a USB profile with an input.")
+    for interface in (sys_root / "bus/usb/devices").glob("*:*/bInterfaceClass"):
+        try:
+            if interface.read_text().strip().lower() == "01":
+                return ("A USB audio device is connected, but Linux found no USB recording input. "
+                        "Reconnect the microphone directly to another USB port.")
+        except OSError:
+            continue  # The device may have been unplugged during the check.
+    return "No USB audio device detected. Check the cable and plug the microphone directly into another USB port."
 
 
 def apply_preferred_source(auto_pick_usb: bool = True) -> Dict[str, Any]:
@@ -244,6 +356,122 @@ def apply_preferred_source(auto_pick_usb: bool = True) -> Dict[str, Any]:
         "description": chosen.get("description"),
         "heal": heal,
     }
+
+
+def set_default_sink(name: str) -> bool:
+    ok = False
+    if _whicht("pactl"):
+        rc, _ = _run(["pactl", "set-default-sink", name])
+        ok = rc == 0 or ok
+    node_id = _wpctl_id_for_name(name)
+    if node_id and _whicht("wpctl"):
+        rc, _ = _run(["wpctl", "set-default", node_id])
+        ok = rc == 0 or ok
+    return ok or (get_default_sink() == name)
+
+
+def prefer_sink(name: str, make_system_default: bool = True) -> Dict[str, Any]:
+    """Remember this speaker/headset and optionally make it the PipeWire default."""
+    match = next((s for s in list_output_sinks() if s["name"] == name), None)
+    prefs = load_preferences()
+    prefs["preferred_sink_name"] = name
+    if match:
+        prefs["preferred_sink_serial"] = match.get("serial") or ""
+        prefs["preferred_sink_product"] = match.get("product") or match.get("description") or ""
+        prefs["preferred_sink_description"] = match.get("description") or ""
+        prefs["preferred_sink_is_usb"] = bool(match.get("is_usb"))
+    path = save_preferences(prefs)
+    applied = False
+    if make_system_default:
+        applied = set_default_sink(name)
+        ensure_sink_ready(name)
+    return {"ok": True, "prefs": path, "applied": applied, "sink": name}
+
+
+def find_preferred_sink(sinks: Optional[List[Dict[str, Any]]] = None, *,
+                        allow_fallback: bool = True) -> Optional[Dict[str, Any]]:
+    sinks = sinks if sinks is not None else list_output_sinks()
+    if not sinks:
+        return None
+    prefs = load_preferences()
+    serial = (prefs.get("preferred_sink_serial") or "").strip()
+    product = (prefs.get("preferred_sink_product") or "").strip().lower()
+    desc = (prefs.get("preferred_sink_description") or "").strip().lower()
+    name = (prefs.get("preferred_sink_name") or "").strip()
+
+    if name:
+        for s in sinks:
+            if s["name"] == name:
+                return s
+    if serial:
+        for s in sinks:
+            if (s.get("serial") or "") == serial:
+                return s
+    if product:
+        for s in sinks:
+            if product in (s.get("product") or "").lower() or product in (s.get("description") or "").lower():
+                return s
+    if desc:
+        for s in sinks:
+            if desc in (s.get("description") or "").lower():
+                return s
+    return sinks[0] if allow_fallback else None
+
+
+def restore_output() -> None:
+    """Return to a saved speaker when available, preserving volume and mute."""
+    chosen = find_preferred_sink(allow_fallback=False)
+    if chosen and chosen["name"] != get_default_sink():
+        set_default_sink(chosen["name"])
+
+
+def apply_preferred_sink(auto_pick_usb: bool = True) -> Dict[str, Any]:
+    """Re-apply saved (or best USB/analog) speaker as the system default."""
+    sinks = list_output_sinks()
+    if not sinks:
+        return {"ok": False, "error": "no_output_sinks"}
+    prefs = load_preferences()
+    chosen = find_preferred_sink(sinks)
+    if chosen is None and auto_pick_usb:
+        chosen = sinks[0]
+    if chosen is None:
+        return {"ok": False, "error": "no_match"}
+    if not prefs.get("preferred_sink_serial") and not prefs.get("preferred_sink_name"):
+        if chosen.get("is_usb") or chosen.get("form_factor") in ("speaker", "headset", "headphone"):
+            prefer_sink(chosen["name"], make_system_default=False)
+    applied = set_default_sink(chosen["name"])
+    heal = ensure_sink_ready(chosen["name"])
+    return {
+        "ok": applied,
+        "sink": chosen["name"],
+        "description": chosen.get("description"),
+        "heal": heal,
+    }
+
+
+def apply_preferred_devices(auto_pick_usb: bool = True) -> Dict[str, Any]:
+    """Apply preferred mic and speakers together (login / USB sound hotplug)."""
+    return {
+        "source": apply_preferred_source(auto_pick_usb=auto_pick_usb),
+        "sink": apply_preferred_sink(auto_pick_usb=auto_pick_usb),
+    }
+
+
+def ensure_sink_ready(name: Optional[str] = None) -> Dict[str, Any]:
+    """Unmute and raise soft volume on the given sink."""
+    name = name or get_default_sink()
+    result = {"sink": name, "unmuted": False, "volume": False}
+    if not name or not _whicht("pactl"):
+        return result
+    rc, _ = _run(["pactl", "set-sink-mute", name, "0"])
+    result["unmuted"] = rc == 0
+    rc, _ = _run(["pactl", "set-sink-volume", name, "100%"])
+    result["volume"] = rc == 0
+    node_id = _wpctl_id_for_name(name)
+    if node_id and _whicht("wpctl"):
+        _run(["wpctl", "set-mute", node_id, "0"])
+        _run(["wpctl", "set-volume", node_id, "1.0"])
+    return result
 
 
 def ensure_source_ready(name: Optional[str] = None) -> Dict[str, Any]:
@@ -345,36 +573,58 @@ def format_source_choice(src: Dict[str, Any]) -> str:
 def main(argv: Optional[List[str]] = None) -> int:
     import argparse
     parser = argparse.ArgumentParser(prog="devos-audio-defaults",
-                                     description="Manage DevOS default microphone for all apps")
+                                     description="Manage DevOS default microphone and speakers for all apps")
     sub = parser.add_subparsers(dest="cmd")
-    sub.add_parser("list", help="list capture sources")
+    sub.add_parser("list", help="list capture sources and output sinks")
     sub.add_parser("status", help="show default + saved preference")
-    sub.add_parser("apply", help="apply saved/preferred mic as system default")
-    p = sub.add_parser("prefer", help="remember a source and set it as system default")
+    sub.add_parser("apply", help="apply saved/preferred mic and speakers as system defaults")
+    sub.add_parser("restore-devices", help="restore preferred audio devices after reconnecting")
+    sub.add_parser("check-usb-input", help="check USB microphone detection")
+    p = sub.add_parser("prefer", help="remember a mic source and set it as system default")
     p.add_argument("source", nargs="?", help="PipeWire/Pulse source name (default: current)")
-    sub.add_parser("heal", help="unmute + raise gain on the default mic")
+    ps = sub.add_parser("prefer-sink", help="remember a speaker sink and set it as system default")
+    ps.add_argument("sink", nargs="?", help="PipeWire/Pulse sink name (default: current)")
+    sub.add_parser("heal", help="unmute + raise gain on the default mic and speakers")
     probe = sub.add_parser("probe", help="measure a short peak from the mic")
     probe.add_argument("--seconds", type=float, default=1.2)
     args = parser.parse_args(argv)
+
+    if args.cmd == "restore-devices":
+        restore_input()
+        restore_output()
+        return 0
+    if args.cmd == "check-usb-input":
+        print(usb_input_status())
+        return 0
 
     if args.cmd in (None, "status"):
         prefs = load_preferences()
         print(json.dumps({
             "default_source": get_default_source(),
             "default_label": get_default_mic_label(),
+            "default_sink": get_default_sink(),
+            "default_speaker_label": get_default_speaker_label(),
             "preferences": prefs,
             "sources": [{"name": s["name"], "description": s.get("description"),
                          "usb": s.get("is_usb"), "serial": s.get("serial")}
                         for s in list_input_sources()],
+            "sinks": [{"name": s["name"], "description": s.get("description"),
+                       "usb": s.get("is_usb"), "serial": s.get("serial")}
+                      for s in list_output_sinks()],
         }, indent=2))
         return 0
     if args.cmd == "list":
+        print("Sources:")
         for s in list_input_sources():
             mark = "*" if s["name"] == get_default_source() else " "
             print(f"{mark} {s['name']}\t{format_source_choice(s)}")
+        print("Sinks:")
+        for s in list_output_sinks():
+            mark = "*" if s["name"] == get_default_sink() else " "
+            print(f"{mark} {s['name']}\t{format_source_choice(s)}")
         return 0
     if args.cmd == "apply":
-        print(json.dumps(apply_preferred_source(), indent=2))
+        print(json.dumps(apply_preferred_devices(), indent=2))
         return 0
     if args.cmd == "prefer":
         name = args.source or get_default_source()
@@ -383,8 +633,18 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 1
         print(json.dumps(prefer_source(name), indent=2))
         return 0
+    if args.cmd == "prefer-sink":
+        name = args.sink or get_default_sink()
+        if not name:
+            print("No sink available", flush=True)
+            return 1
+        print(json.dumps(prefer_sink(name), indent=2))
+        return 0
     if args.cmd == "heal":
-        print(json.dumps(ensure_source_ready(), indent=2))
+        print(json.dumps({
+            "source": ensure_source_ready(),
+            "sink": ensure_sink_ready(),
+        }, indent=2))
         return 0
     if args.cmd == "probe":
         ensure_source_ready()

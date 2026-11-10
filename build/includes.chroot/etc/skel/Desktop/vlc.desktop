@@ -4,6 +4,7 @@ Name=VLC Media Player
 GenericName=Media Player
 Comment=Play audio, music, movies, and video streams
 Exec=env QT_QPA_PLATFORM=xcb /usr/bin/vlc --started-from-file %U
+TryExec=/usr/bin/vlc
 Icon=vlc
 Terminal=false
 Type=Application

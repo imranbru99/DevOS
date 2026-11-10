@@ -37,13 +37,23 @@ def luminance(rgb: tuple[int, int, int]) -> float:
     return 0.2126 * r + 0.7152 * g + 0.0722 * b
 
 
+def relative_luminance(rgb: tuple[int, int, int]) -> float:
+    channels = [value / 255.0 for value in rgb]
+    r, g, b = (
+        value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4
+        for value in channels
+    )
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
 class TestColorContrast(unittest.TestCase):
     light = os.path.join(ROOT, "build/includes.chroot/usr/share/color-schemes/DevOS-Light.colors")
     dark = os.path.join(ROOT, "build/includes.chroot/usr/share/color-schemes/DevOS.colors")
 
     def test_light_scheme_text_is_near_black_on_light_surfaces(self):
         colors = parse_colors(self.light)
-        for group in ("Colors:Window", "Colors:View", "Colors:Button", "Colors:Tooltip"):
+        # Tooltip stays frosted-dark for desktop menus over wallpaper — tested below.
+        for group in ("Colors:Window", "Colors:View", "Colors:Button"):
             bg = colors[group]["BackgroundNormal"]
             fg = colors[group]["ForegroundNormal"]
             inactive = colors[group]["ForegroundInactive"]
@@ -52,6 +62,25 @@ class TestColorContrast(unittest.TestCase):
             self.assertLess(luminance(inactive), 0.45, group)
             # Contrast-ish: background much lighter than text
             self.assertGreater(luminance(bg) - luminance(fg), 0.65, group)
+
+    def test_light_tooltip_is_frosted_dark_like_complementary(self):
+        """Desktop context menus / tooltips use Tooltip role over wallpapers."""
+        colors = parse_colors(self.light)
+        group = "Colors:Tooltip"
+        bg = colors[group]["BackgroundNormal"]
+        fg = colors[group]["ForegroundNormal"]
+        self.assertLess(luminance(bg), 0.25, group)
+        self.assertGreater(luminance(fg), 0.7, group)
+        self.assertGreater(luminance(fg) - luminance(bg), 0.5, group)
+
+    def test_light_link_contrast_meets_aa_on_white(self):
+        colors = parse_colors(self.light)
+        bg = colors["Colors:View"]["BackgroundNormal"]
+        link = colors["Colors:View"]["ForegroundLink"]
+        # Relative luminance contrast ≥ 4.5:1 (WCAG AA for normal text).
+        l1, l2 = relative_luminance(bg), relative_luminance(link)
+        contrast = (max(l1, l2) + 0.05) / (min(l1, l2) + 0.05)
+        self.assertGreaterEqual(contrast, 4.5)
 
     def test_light_view_fields_are_not_black_blocks(self):
         colors = parse_colors(self.light)

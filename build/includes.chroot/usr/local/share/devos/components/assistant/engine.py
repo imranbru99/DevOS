@@ -201,10 +201,19 @@ def parse_sse_delta(payload: str):
 
 
 def stream_preview(text: str) -> str:
-    """What to show while an answer is still arriving: whole words only (so a half-written name
-    is never shown before scrub() can catch it), scrubbed."""
+    """What to show while an answer is still arriving.
+
+    Prefer whole words (so scrub() can catch half-written brand names). For the
+    first few characters before a space, still show scrubbed text so call-mode
+    typing appears with the first tokens / voice — not after a full word.
+    """
     cut = max(text.rfind(" "), text.rfind("\n"))
-    return scrub(text[:cut]) if cut > 0 else ""
+    if cut > 0:
+        return scrub(text[:cut])
+    raw = (text or "").strip()
+    if len(raw) >= 3:
+        return scrub(raw)
+    return ""
 
 
 class StreamHandle:

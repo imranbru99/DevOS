@@ -196,6 +196,20 @@ if command -v xorriso >/dev/null 2>&1; then
     else
         fail "EFI/BOOT/grub.cfg must be a search+configfile stub, not a full menu"
     fi
+    if command -v mtype >/dev/null 2>&1; then
+        esp_image="${TMP}/esp.img"
+        if xorriso -osirrox on -indev "$ISO" -extract /boot/grub/efi.img "$esp_image" >/dev/null 2>&1; then
+            for stub in /EFI/BOOT/grub.cfg /EFI/ubuntu/grub.cfg /boot/grub/grub.cfg; do
+                if mtype -i "$esp_image" "::$stub" 2>/dev/null | cmp -s "$EFI_CFG" -; then
+                    pass "FAT ESP has matching boot-menu stub at $stub"
+                else
+                    fail "FAT ESP is missing the boot-menu stub at $stub"
+                fi
+            done
+        else
+            fail "Could not extract FAT ESP image for boot-menu verification"
+        fi
+    fi
 fi
 
 # --- Summary ---

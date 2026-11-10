@@ -129,12 +129,54 @@ class TestChromeProfiles(unittest.TestCase):
             self.assertNotIn("applications:google-chrome.desktop", text)
             self.assertIn("separateLaunchers=true", text)
             self.assertIn("applications:devos-search.desktop", text)
+            # Profile literally named "Default" must still get its own pin.
+            open(os.path.join(apps, "chrome-default.desktop"), "w", encoding="utf-8").write(
+                "[Desktop Entry]\n"
+            )
+            ok = chrome_profiles.sync_plasma_profile_launchers(tmp_home, ["default", "work"])
+            self.assertTrue(ok)
+            text = open(appletsrc, encoding="utf-8").read()
+            self.assertIn("applications:chrome-default.desktop", text)
+            self.assertIn("applications:chrome-work.desktop", text)
             # All closed → restore Chrome pin.
             ok = chrome_profiles.sync_plasma_profile_launchers(tmp_home, [])
             self.assertTrue(ok)
             text = open(appletsrc, encoding="utf-8").read()
             self.assertIn("applications:google-chrome.desktop", text)
             self.assertNotIn("chrome-work.desktop", text)
+
+    def test_class_for_profile_uses_display_name(self):
+        with tempfile.TemporaryDirectory() as tmp_home:
+            chrome = os.path.join(tmp_home, ".config/google-chrome")
+            os.makedirs(chrome, exist_ok=True)
+            with open(os.path.join(chrome, "Local State"), "w", encoding="utf-8") as fh:
+                json.dump(
+                    {
+                        "profile": {
+                            "info_cache": {
+                                "Default": {"name": "Work"},
+                                "Profile 1": {"name": "Mirza"},
+                            }
+                        }
+                    },
+                    fh,
+                )
+            old_home = os.environ.get("HOME")
+            os.environ["HOME"] = tmp_home
+            try:
+                self.assertEqual(
+                    chrome_profiles.class_for_profile_key("Default", tmp_home),
+                    "chrome-work",
+                )
+                self.assertEqual(
+                    chrome_profiles.class_for_profile_key("Profile 1", tmp_home),
+                    "chrome-mirza",
+                )
+            finally:
+                if old_home is None:
+                    os.environ.pop("HOME", None)
+                else:
+                    os.environ["HOME"] = old_home
 
     def test_detect_window_profile_markers(self):
         profiles = {"Default": "Work", "Profile 1": "Mirza", "Profile 4": "Blog"}

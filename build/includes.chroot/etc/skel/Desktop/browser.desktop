@@ -1,13 +1,13 @@
-﻿[Desktop Entry]
+[Desktop Entry]
 Version=1.0
-Name=Chrome
+Name=DevOS Browser
 GenericName=Web Browser
-Comment=Google Chrome. Bookmarks and sign-in stay on this computer after restart
-Exec=devos-browser %U
-Icon=google-chrome
+Comment=Browse the web in DevOS
+Exec=/usr/local/bin/devos-web-browser %U
+Icon=devos-browser
 Terminal=false
 Type=Application
 Categories=Network;WebBrowser;
 MimeType=text/html;application/xhtml+xml;x-scheme-handler/http;x-scheme-handler/https;
 StartupNotify=true
-StartupWMClass=google-chrome
+StartupWMClass=devos-browser

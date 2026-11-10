@@ -60,11 +60,15 @@ if helpers.exists() and 'MP_QUIET=""' in helpers.read_text():
     sys.exit("live boot would call modprobe with an empty module name")
 PY
 
+# The DevOS ISO has no deb archive on the media. Casper's cache hook can
+# reach the configured Ubuntu mirrors before the live network is available.
+rm -f /usr/share/initramfs-tools/scripts/casper-bottom/41apt_build_cache_cdrom
+
 # Ubuntu's logo is what the splash draws when its theme is still in the initrd.
-# Remove those themes before the initrd is packed, and do not start Plymouth.
+# Remove those themes before the initrd is packed.
 # Keep Ubuntu's two-step plugin (plymouth-theme-spinner). Script themes go blank
 # on some Intel TVs; ModuleName=two-step is the spinner animation plugin.
-apt-get install -y plymouth-theme-spinner >/dev/null 2>&1 || true
+apt-get install -y plymouth-theme-spinner >/dev/null 2>&1
 apt-get purge -y plymouth-theme-ubuntu-logo plymouth-theme-ubuntu-text >/dev/null 2>&1 || true
 rm -rf \
     /usr/share/plymouth/themes/ubuntu-logo \
@@ -75,6 +79,11 @@ rm -f /usr/share/plymouth/ubuntu-logo.png 2>/dev/null || true
 if [ -f /usr/share/pixmaps/devos-logo.png ]; then
     cp -f /usr/share/pixmaps/devos-logo.png /usr/share/plymouth/ubuntu-logo.png 2>/dev/null || true
 fi
+# Two-step loads its lock and input controls even on a regular, unencrypted
+# boot. A missing lock.png aborts the splash and leaves Plymouth's text dots.
+for asset in lock.png entry.png bullet.png capslock.png keyboard.png keymap-render.png; do
+    install -m 644 "/usr/share/plymouth/themes/spinner/$asset" "/usr/share/plymouth/themes/devos/$asset"
+done
 # A Windows checkout can write ModuleName=two-step\r — strip CR so the plugin loads.
 sed -i 's/\r$//' /usr/share/plymouth/themes/devos/devos.plymouth
 [ -f /usr/share/plymouth/themes/devos/devos.script ] && sed -i 's/\r$//' /usr/share/plymouth/themes/devos/devos.script || true

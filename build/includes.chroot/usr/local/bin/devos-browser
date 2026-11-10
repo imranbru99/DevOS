@@ -1,6 +1,5 @@
 #!/bin/bash
-# Chrome is optional. Falkon is the built-in browser: it uses the web engine
-# already in the desktop, so it is smaller and opens when Chrome does not.
+# Optional Google Chrome launcher, including DevOS profile and Guest support.
 # Google picks the search language from the browser, not from the public IP.
 # Ask the network which country this connection is in, then send that language.
 set -u
@@ -43,20 +42,6 @@ tell() {
     fi
 }
 
-# Falkon is the built-in browser. Chrome flags are not passed through.
-open_falkon() {
-    [ -x /usr/bin/falkon ] || return 1
-    falkon_args=()
-    for arg in "$@"; do
-        case "$arg" in
-            --incognito|--private|--guest) falkon_args+=(--private-browsing) ;;
-            --accept-lang=*|--disable-gpu) ;;
-            *) falkon_args+=("$arg") ;;
-        esac
-    done
-    exec /usr/bin/falkon "${falkon_args[@]}"
-}
-
 chrome=""
 for bin in /usr/bin/google-chrome-stable /usr/bin/google-chrome /opt/google/chrome/google-chrome; do
     if [ -x "$bin" ]; then
@@ -66,7 +51,7 @@ for bin in /usr/bin/google-chrome-stable /usr/bin/google-chrome /opt/google/chro
 done
 
 if [ -z "$chrome" ]; then
-    open_falkon "$@" || tell "No browser is installed yet. Open Terminal and run: sudo devos-install-chrome"
+    tell "Google Chrome is not installed. Choose Google Chrome in DevOS Features, or open DevOS Browser."
     exit 1
 fi
 
@@ -165,8 +150,8 @@ elif [ -f "$user_sync_script" ]; then
     python3 "$user_sync_script" sync >/dev/null 2>&1 &
 fi
 
-# Windows-like profiles: each profile gets its own WM class (chrome-<slug>) so
-# Plasma shows a separate avatar icon — never one grouped Chrome blob.
+# Windows-like profiles: each Chrome user gets its own WM class (chrome-<slug>)
+# so Plasma shows a separate avatar icon in the footer — never one grouped blob.
 is_guest=0
 prof_dir=""
 has_class=0
@@ -178,6 +163,27 @@ for arg in "$@"; do
     esac
 done
 
+# Resolve Chrome --class from the profile *display name* (same slug as
+# chrome_profiles.py). Directory keys like "Default" must not become
+# chrome-default when the user named that profile "Work".
+chrome_class_for_profile() {
+    local key="${1:-}"
+    local script="/usr/local/share/devos/components/browser/chrome_profiles.py"
+    local user_script="$HOME/.local/share/devos/components/browser/chrome_profiles.py"
+    local py=""
+    if [ -f "$script" ]; then
+        py="$script"
+    elif [ -f "$user_script" ]; then
+        py="$user_script"
+    fi
+    if [ -n "$py" ]; then
+        python3 "$py" class-for "${key}" 2>/dev/null && return 0
+    fi
+    local fallback
+    fallback=$(printf '%s' "${key:-Default}" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9' '-' | sed 's/^-*//;s/-*$//')
+    printf 'chrome-%s\n' "${fallback:-chrome}"
+}
+
 if [ "$is_guest" -eq 1 ]; then
     # Ephemeral guest session: automatically removed on close
     guest_tmp=$(mktemp -d /tmp/devos-chrome-guest.XXXXXX)
@@ -188,33 +194,42 @@ if [ "$is_guest" -eq 1 ]; then
     "$chrome" "${args[@]}" --class="chrome-guest" --user-data-dir="$guest_tmp" --no-first-run --no-default-browser-check "$@" &
     cpid=$!
     trap 'kill "$cpid" 2>/dev/null; cleanup; exit 0' INT TERM HUP
-    wait "$cpid" 2>/dev/null || true
-    cleanup
-    exit 0
+    wait "$cpid"
+    code=$?
+    if [ "$code" -ne 0 ]; then
+        tell "Google Chrome Guest stopped with exit code $code."
+    fi
+    exit "$code"
 fi
 
-if [ "$has_class" -eq 0 ] && [ -n "$prof_dir" ]; then
-    slug=$(echo "$prof_dir" | tr '[:upper:]' '[:lower:]' | tr -c '[:alnum:]' '-')
-    # Trim leading/trailing hyphens from tr
-    slug=$(echo "$slug" | sed 's/^-*//;s/-*$//')
-    [ -n "$slug" ] && args+=(--class="chrome-${slug}")
+if [ "$has_class" -eq 0 ]; then
+    if [ -z "$prof_dir" ]; then
+        # Bare Start-menu / URL launch → last-used (or Default) profile class.
+        prof_dir=$(python3 - <<'PY' 2>/dev/null || true
+import json, os
+path = os.path.expanduser("~/.config/google-chrome/Local State")
+try:
+    with open(path, encoding="utf-8") as fh:
+        data = json.load(fh)
+    last = (data.get("profile") or {}).get("last_used") or ""
+    print(last or "Default")
+except Exception:
+    print("Default")
+PY
+)
+        [ -z "$prof_dir" ] && prof_dir="Default"
+        args+=(--profile-directory="${prof_dir}")
+    fi
+    class_name=$(chrome_class_for_profile "$prof_dir")
+    [ -n "$class_name" ] && args+=(--class="${class_name}")
 fi
-
-chrome_cmd=("$chrome")
 
 log=$(mktemp)
-"${chrome_cmd[@]}" "${args[@]}" "$@" >"$log" 2>&1 &
-pid=$!
-sleep 2
-if kill -0 "$pid" 2>/dev/null; then
-    wait "$pid" || true
-    rm -f "$log"
-    exit 0
-fi
-wait "$pid"
+trap 'rm -f "$log"' EXIT
+"$chrome" "${args[@]}" "$@" >"$log" 2>&1
 code=$?
-rm -f "$log"
 if [ "$code" -ne 0 ]; then
-    open_falkon "$@" || tell "Chrome did not open, and the built-in browser is missing."
+    tail -n 8 "$log" >&2
+    tell "Google Chrome did not open. Open DevOS Browser or check Chrome from Terminal."
 fi
 exit "$code"

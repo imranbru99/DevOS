@@ -24,6 +24,7 @@ import sys
 import argparse
 import fnmatch
 import shlex
+import stat
 import tempfile
 import threading
 from pathlib import Path
@@ -116,6 +117,97 @@ except ImportError:
 
 # Cache for rendered Windows icons
 _ICON_CACHE = {}
+# Cache for .desktop Name=/Icon= (mtime → fields)
+_DESKTOP_ENTRY_CACHE = {}
+
+
+def parse_desktop_entry(path):
+    """Read Name/Icon/Comment from a FreeDesktop .desktop shortcut (Windows-like)."""
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return {}
+    cached = _DESKTOP_ENTRY_CACHE.get(path)
+    if cached and cached[0] == mtime:
+        return cached[1]
+    info = {"name": "", "icon": "", "comment": "", "generic": "", "type": "Application"}
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            in_entry = False
+            for raw in handle:
+                line = raw.strip()
+                if line == "[Desktop Entry]":
+                    in_entry = True
+                    continue
+                if line.startswith("[") and line.endswith("]"):
+                    if in_entry:
+                        break
+                    continue
+                if not in_entry or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                key = key.strip()
+                # Prefer unlocalized Name= over Name[xx]=
+                if key == "Name" and not info["name"]:
+                    info["name"] = val.strip()
+                elif key == "Icon" and not info["icon"]:
+                    info["icon"] = val.strip()
+                elif key == "Comment" and not info["comment"]:
+                    info["comment"] = val.strip()
+                elif key == "GenericName" and not info["generic"]:
+                    info["generic"] = val.strip()
+                elif key == "Type":
+                    info["type"] = val.strip()
+    except OSError:
+        pass
+    _DESKTOP_ENTRY_CACHE[path] = (mtime, info)
+    return info
+
+
+def resolve_desktop_icon(icon_name, size=48):
+    """Resolve a .desktop Icon= value to a QIcon (theme name or file path)."""
+    if not icon_name:
+        return get_win_icon("file-doc", size)
+    expanded = os.path.expanduser(icon_name)
+    if os.path.isfile(expanded):
+        return QIcon(expanded)
+    if icon_name.endswith((".png", ".svg", ".xpm", ".ico")) or os.path.sep in icon_name:
+        for base in (
+            "/usr/share/pixmaps",
+            "/usr/share/icons/hicolor/scalable/apps",
+            "/usr/share/icons/hicolor/48x48/apps",
+            os.path.expanduser("~/.local/share/icons/hicolor/scalable/apps"),
+        ):
+            candidate = expanded if os.path.isabs(expanded) else os.path.join(base, os.path.basename(expanded))
+            if os.path.isfile(candidate):
+                return QIcon(candidate)
+    theme_icon = QIcon.fromTheme(icon_name)
+    if not theme_icon.isNull():
+        return theme_icon
+    for base in (
+        "/usr/share/icons/hicolor",
+        "/usr/share/pixmaps",
+        os.path.expanduser("~/.local/share/icons/hicolor"),
+    ):
+        for res in ("scalable/apps", "128x128/apps", "64x64/apps", "48x48/apps", "32x32/apps", ""):
+            folder = os.path.join(base, res) if res else base
+            for ext in (".svg", ".png", ".xpm"):
+                candidate = os.path.join(folder, icon_name + ext)
+                if os.path.isfile(candidate):
+                    return QIcon(candidate)
+    return get_win_icon("file-doc", size)
+
+
+def entry_display_name(path, entry, show_extensions=True):
+    """Windows-like label: .desktop shortcuts show Name=, not browser.desktop."""
+    if entry.lower().endswith(".desktop") and os.path.isfile(path):
+        info = parse_desktop_entry(path)
+        if info.get("name"):
+            return info["name"]
+        return os.path.splitext(entry)[0].replace("-", " ").replace("_", " ").title()
+    if show_extensions or os.path.isdir(path):
+        return entry
+    return os.path.splitext(entry)[0]
 
 
 def get_win_icon(name, size=32):
@@ -131,23 +223,30 @@ def get_win_icon(name, size=32):
     s = size / 64.0
 
     if name == "this-pc":
-        # Windows 11 This PC monitor icon
-        p.setBrush(QColor("#1e293b"))
-        p.setPen(QPen(QColor("#475569"), 2 * s))
-        p.drawRoundedRect(QRectF(8 * s, 8 * s, 48 * s, 34 * s), 4 * s, 4 * s)
-        grad = QLinearGradient(10 * s, 10 * s, 54 * s, 40 * s)
-        grad.setColorAt(0, QColor("#0284c7"))
-        grad.setColorAt(1, QColor("#0369a1"))
-        p.setBrush(grad)
+        # File Explorer pin: blue tile + gold folder (matches taskbar SVG).
+        tile = QLinearGradient(4 * s, 4 * s, 60 * s, 60 * s)
+        tile.setColorAt(0, QColor("#38bdf8"))
+        tile.setColorAt(0.55, QColor("#0284c7"))
+        tile.setColorAt(1, QColor("#0c4a6e"))
+        p.setBrush(tile)
+        p.setPen(QPen(QColor(224, 242, 254, 90), 1.4 * s))
+        p.drawRoundedRect(QRectF(4 * s, 4 * s, 56 * s, 56 * s), 14 * s, 14 * s)
+        folder = QLinearGradient(16 * s, 22 * s, 50 * s, 50 * s)
+        folder.setColorAt(0, QColor("#fde68a"))
+        folder.setColorAt(0.45, QColor("#fbbf24"))
+        folder.setColorAt(1, QColor("#d97706"))
+        p.setBrush(folder)
         p.setPen(Qt.NoPen)
-        p.drawRoundedRect(QRectF(11 * s, 11 * s, 42 * s, 28 * s), 2 * s, 2 * s)
-        # Screen glow
-        p.setBrush(QColor(255, 255, 255, 50))
-        p.drawEllipse(QPointF(38 * s, 28 * s), 12 * s, 8 * s)
-        # Stand
-        p.setBrush(QColor("#64748b"))
-        p.drawRect(QRectF(28 * s, 42 * s, 8 * s, 8 * s))
-        p.drawRoundedRect(QRectF(20 * s, 50 * s, 24 * s, 4 * s), 2 * s, 2 * s)
+        body = QPainterPath()
+        body.addRoundedRect(QRectF(16 * s, 26 * s, 32 * s, 22 * s), 3 * s, 3 * s)
+        p.drawPath(body)
+        tab = QLinearGradient(16 * s, 18 * s, 36 * s, 28 * s)
+        tab.setColorAt(0, QColor("#fef3c7"))
+        tab.setColorAt(1, QColor("#f59e0b"))
+        p.setBrush(tab)
+        p.drawRoundedRect(QRectF(16 * s, 20 * s, 18 * s, 8 * s), 2 * s, 2 * s)
+        p.setBrush(QColor(255, 247, 237, 90))
+        p.drawRoundedRect(QRectF(19 * s, 30 * s, 26 * s, 12 * s), 2 * s, 2 * s)
 
     elif name == "drive-c":
         # Windows system drive: Metallic hard drive + Windows logo
@@ -510,31 +609,35 @@ def get_win_icon(name, size=32):
         p.drawPolygon(arrow)
 
     elif name == "cut":
-        # Windows 11 scissor blades
-        p.setPen(QPen(QColor("#38bdf8"), 2.5 * s, Qt.SolidLine, Qt.RoundCap))
+        # Scissor blades — thicker theme blue
+        p.setPen(QPen(QColor("#0078d4"), 2.8 * s, Qt.SolidLine, Qt.RoundCap))
         p.drawEllipse(QPointF(20 * s, 46 * s), 7 * s, 7 * s)
         p.drawEllipse(QPointF(44 * s, 46 * s), 7 * s, 7 * s)
+        p.setPen(QPen(QColor("#38bdf8"), 2.8 * s, Qt.SolidLine, Qt.RoundCap))
         p.drawLine(QPointF(24 * s, 40 * s), QPointF(46 * s, 14 * s))
         p.drawLine(QPointF(40 * s, 40 * s), QPointF(18 * s, 14 * s))
 
     elif name == "copy":
-        # Windows 11 overlapping sheets
-        p.setBrush(QColor("#1e293b"))
-        p.setPen(QPen(QColor("#94a3b8"), 2 * s))
+        # Overlapping sheets — vivid theme blue on both dark and light chrome
+        p.setBrush(QColor("#e0f2fe"))
+        p.setPen(QPen(QColor("#0284c7"), 2.2 * s))
         p.drawRoundedRect(QRectF(14 * s, 10 * s, 28 * s, 34 * s), 3 * s, 3 * s)
-        p.setBrush(QColor("#38bdf8"))
-        p.setPen(QPen(QColor("#ffffff"), 1.5 * s))
+        p.setBrush(QColor("#0078d4"))
+        p.setPen(QPen(QColor("#ffffff"), 1.6 * s))
         p.drawRoundedRect(QRectF(22 * s, 20 * s, 28 * s, 34 * s), 3 * s, 3 * s)
 
     elif name == "paste":
-        # Windows 11 clipboard with paper
-        p.setBrush(QColor("#64748b"))
+        # Clipboard with paper — strong contrast
+        p.setBrush(QColor("#475569"))
         p.setPen(Qt.NoPen)
         p.drawRoundedRect(QRectF(16 * s, 10 * s, 32 * s, 44 * s), 3 * s, 3 * s)
-        p.setBrush(QColor("#ffffff"))
+        p.setBrush(QColor("#f8fafc"))
         p.drawRoundedRect(QRectF(20 * s, 18 * s, 24 * s, 32 * s), 2 * s, 2 * s)
         p.setBrush(QColor("#0078d4"))
         p.drawRoundedRect(QRectF(24 * s, 8 * s, 16 * s, 8 * s), 2 * s, 2 * s)
+        p.setPen(QPen(QColor("#38bdf8"), 1.8 * s, Qt.SolidLine, Qt.RoundCap))
+        p.drawLine(QPointF(26 * s, 28 * s), QPointF(38 * s, 28 * s))
+        p.drawLine(QPointF(26 * s, 34 * s), QPointF(36 * s, 34 * s))
 
     elif name == "rename":
         # Windows 11 document with editing pen
@@ -567,23 +670,27 @@ def get_win_icon(name, size=32):
         p.drawLine(QPointF(40 * s, 26 * s), QPointF(40 * s, 46 * s))
 
     elif name == "sort":
-        # Windows 11 up/down sort arrows
-        p.setPen(QPen(QColor("#38bdf8"), 2.5 * s, Qt.SolidLine, Qt.RoundCap))
+        # Up/down sort arrows — thicker theme blue
+        p.setPen(QPen(QColor("#0078d4"), 3.0 * s, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
         p.drawLine(QPointF(24 * s, 14 * s), QPointF(24 * s, 50 * s))
         p.drawLine(QPointF(16 * s, 24 * s), QPointF(24 * s, 14 * s))
         p.drawLine(QPointF(32 * s, 24 * s), QPointF(24 * s, 14 * s))
+        p.setPen(QPen(QColor("#38bdf8"), 3.0 * s, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
         p.drawLine(QPointF(42 * s, 14 * s), QPointF(42 * s, 50 * s))
         p.drawLine(QPointF(34 * s, 40 * s), QPointF(42 * s, 50 * s))
         p.drawLine(QPointF(50 * s, 40 * s), QPointF(42 * s, 50 * s))
 
     elif name == "view":
-        # Windows 11 grid view squares
-        p.setPen(QPen(QColor("#38bdf8"), 1.8 * s))
-        p.setBrush(QColor("#1e293b"))
-        p.drawRoundedRect(QRectF(12 * s, 12 * s, 18 * s, 18 * s), 2 * s, 2 * s)
-        p.drawRoundedRect(QRectF(34 * s, 12 * s, 18 * s, 18 * s), 2 * s, 2 * s)
-        p.drawRoundedRect(QRectF(12 * s, 34 * s, 18 * s, 18 * s), 2 * s, 2 * s)
-        p.drawRoundedRect(QRectF(34 * s, 34 * s, 18 * s, 18 * s), 2 * s, 2 * s)
+        # Grid view squares — filled accent tiles
+        p.setPen(QPen(QColor("#0284c7"), 1.6 * s))
+        p.setBrush(QColor("#38bdf8"))
+        p.drawRoundedRect(QRectF(12 * s, 12 * s, 18 * s, 18 * s), 3 * s, 3 * s)
+        p.setBrush(QColor("#0078d4"))
+        p.drawRoundedRect(QRectF(34 * s, 12 * s, 18 * s, 18 * s), 3 * s, 3 * s)
+        p.setBrush(QColor("#0ea5e9"))
+        p.drawRoundedRect(QRectF(12 * s, 34 * s, 18 * s, 18 * s), 3 * s, 3 * s)
+        p.setBrush(QColor("#0284c7"))
+        p.drawRoundedRect(QRectF(34 * s, 34 * s, 18 * s, 18 * s), 3 * s, 3 * s)
 
     elif name == "more":
         # Windows 11 three horizontal dots
@@ -844,6 +951,13 @@ def get_file_type_description(path):
         ".ppt": "PowerPoint Presentation",
         ".pptx": "PowerPoint Presentation",
     }
+    if ext == ".desktop" and os.path.isfile(path):
+        info = parse_desktop_entry(path)
+        if info.get("generic"):
+            return info["generic"]
+        if (info.get("type") or "").lower() == "link":
+            return "Shortcut"
+        return "Shortcut"
     if ext in ext_map:
         return ext_map[ext]
     mime, _ = mimetypes.guess_type(path)
@@ -852,23 +966,26 @@ def get_file_type_description(path):
     return f"{ext[1:].upper()} File" if ext else "File"
 
 
-def get_icon_for_file(path, is_dir=False):
+def get_icon_for_file(path, is_dir=False, size=48):
     if is_dir:
-        return get_win_icon("folder", 32)
+        return get_win_icon("folder", size)
     ext = os.path.splitext(path)[1].lower()
+    if ext == ".desktop":
+        info = parse_desktop_entry(path)
+        return resolve_desktop_icon(info.get("icon"), size)
     if ext in [".py", ".sh", ".c", ".cpp", ".h", ".js", ".html", ".css", ".json"]:
-        return get_win_icon("file-code", 32)
+        return get_win_icon("file-code", size)
     if ext in [".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico"]:
-        return get_win_icon("file-image", 32)
+        return get_win_icon("file-image", size)
     if ext == ".pdf":
-        return get_win_icon("file-pdf", 32)
+        return get_win_icon("file-pdf", size)
     if ext in [".zip", ".tar", ".gz", ".xz", ".7z", ".rar", ".iso"]:
-        return get_win_icon("file-archive", 32)
+        return get_win_icon("file-archive", size)
     if ext in [".mp4", ".mkv", ".avi", ".webm", ".mov"]:
-        return get_win_icon("folder-videos", 32)
+        return get_win_icon("folder-videos", size)
     if ext in [".mp3", ".wav", ".flac", ".ogg", ".aac"]:
-        return get_win_icon("folder-music", 32)
-    return get_win_icon("file-doc", 32)
+        return get_win_icon("folder-music", size)
+    return get_win_icon("file-doc", size)
 
 
 def is_recycle_bin_path(path: str) -> bool:
@@ -1007,7 +1124,7 @@ def list_drives():
 
     # Find root / system partition for C:
     root_stat = _stat_mount("/")
-    root_total, root_free, root_used = root_stat if root_stat else (0, 0, 0)
+    root_total, root_free, root_used = root_stat if root_stat else (0, None, None)
     root_drive = {
         "letter": "C",
         "title": "DevOS (C:)",
@@ -1017,6 +1134,7 @@ def list_drives():
         "total": root_total,
         "free": root_free,
         "used": root_used,
+        "fstype": "",
         "removable": False,
         "is_system": True,
     }
@@ -1034,6 +1152,7 @@ def list_drives():
         # Check if this node is the root device (e.g. nvme0n1p2)
         if mount == "/" or (label == "DevOS" and not root_drive["path"]):
             root_drive["path"] = path
+            root_drive["fstype"] = (node.get("fstype") or "").lower()
             if label:
                 root_drive["title"] = f"{label} (C:)"
             seen_devices.add(path)
@@ -1071,6 +1190,13 @@ def list_drives():
     # Always put C: at the beginning
     drives.insert(0, root_drive)
     return drives
+
+
+def drive_reserved(drive):
+    total, free, used = (drive.get(key) for key in ("total", "free", "used"))
+    if total is None or free is None or used is None:
+        return None
+    return max(0, total - used - free)
 
 
 def open_file_with_default(path):
@@ -1443,7 +1569,7 @@ class ExtractDialog(QDialog):
         self.resize(520, 220)
         self.setStyleSheet("""
             QDialog {
-                background: #202020;
+                background: #0c131f;
                 color: #ffffff;
                 font-family: 'Segoe UI', 'Noto Sans', sans-serif;
             }
@@ -1561,7 +1687,7 @@ class CompressDialog(QDialog):
         self.resize(480, 230)
         self.setStyleSheet("""
             QDialog {
-                background: #202020;
+                background: #0c131f;
                 color: #ffffff;
                 font-family: 'Segoe UI', 'Noto Sans', sans-serif;
             }
@@ -1652,7 +1778,8 @@ class DriveCard(QFrame):
         self.setCursor(Qt.PointingHandCursor)
         self.setFocusPolicy(Qt.StrongFocus)
         self.setMinimumHeight(86)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setMaximumWidth(420)
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
 
         row = QHBoxLayout(self)
         row.setContentsMargins(14, 12, 14, 12)
@@ -1689,11 +1816,16 @@ class DriveCard(QFrame):
         if total > 0 and free is not None:
             pct = max(0, min(100, int(round((used_bytes or 0) * 100 / total))))
             bar.setValue(pct)
-            # Red color if disk >= 90% full
-            if pct >= 90:
+            # Warn based on space a user can still write, excluding the reserve.
+            low_space = free <= total * 0.10
+            if low_space:
                 bar.setObjectName("driveBarFull")
-            # Same wording as Windows; numbers match df Avail / Size.
-            space_text = f"{format_bytes(free)} free of {format_bytes(total)}"
+            space_text = f"{format_bytes(free)} available / {format_bytes(total)}"
+            reserved = drive_reserved(drive)
+            if reserved:
+                space_text += f" · {format_bytes(reserved)} reserved"
+            if low_space:
+                space_text += " · Low space"
         elif total > 0:
             bar.setValue(0)
             if not drive.get("fstype"):
@@ -1705,6 +1837,7 @@ class DriveCard(QFrame):
             space_text = "Drive ready"
 
         space = QLabel(space_text)
+        space.setWordWrap(True)
         space.setObjectName("driveSpace")
 
         text_layout.addWidget(bar)
@@ -2587,6 +2720,18 @@ class FolderSizeThread(QThread):
         self.finished.emit(total_size, file_count, dir_count)
 
 
+def is_volume_recovery_folder(path):
+    """Recognize the protected lost+found directory at a filesystem root."""
+    parent, name = os.path.split(os.path.normpath(path))
+    if name != "lost+found" or not os.path.ismount(os.path.realpath(parent)):
+        return False
+    try:
+        info = os.stat(path, follow_symlinks=False)
+    except OSError:
+        return False
+    return stat.S_ISDIR(info.st_mode) and info.st_uid == 0 and not info.st_mode & 0o077
+
+
 class FileOpWorker(QThread):
     """Trash / delete / empty / restore off the UI thread so large trees do not freeze Explorer."""
 
@@ -2632,10 +2777,14 @@ class FileOpWorker(QThread):
                 break
             if not os.path.exists(p):
                 continue
+            if is_volume_recovery_folder(p):
+                errors.append("lost+found is a protected filesystem recovery folder.")
+                continue
             self.progress.emit(os.path.basename(p) or p)
             deleted = False
 
-            for cmd in (["gio", "trash", p], ["kioclient5", "move", p, "trash:/"]):
+            for cmd in (["gio", "trash", p], ["kioclient6", "move", p, "trash:/"],
+                        ["kioclient5", "move", p, "trash:/"]):
                 if self._cancel:
                     break
                 if not shutil.which(cmd[0]):
@@ -2657,39 +2806,31 @@ class FileOpWorker(QThread):
                 continue
 
             try:
+                # A fallback rename is atomic only on the same filesystem.
+                if os.lstat(p).st_dev != os.stat(trash_files).st_dev:
+                    raise OSError("Recycle Bin is unavailable on this volume.")
                 base = os.path.basename(p)
                 stem, ext = os.path.splitext(base)
                 dst = os.path.join(trash_files, base)
                 counter = 2
-                while os.path.exists(dst):
+                while os.path.lexists(dst) or os.path.lexists(
+                    os.path.join(trash_info, f"{os.path.basename(dst)}.trashinfo")
+                ):
                     dst = os.path.join(trash_files, f"{stem} ({counter}){ext}")
                     counter += 1
 
                 now_str = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
                 info_content = f"[Trash Info]\nPath={os.path.abspath(p)}\nDeletionDate={now_str}\n"
                 info_path = os.path.join(trash_info, f"{os.path.basename(dst)}.trashinfo")
+                with open(info_path, "x", encoding="utf-8") as handle:
+                    handle.write(info_content)
                 try:
-                    with open(info_path, "w", encoding="utf-8") as handle:
-                        handle.write(info_content)
-                except Exception:
-                    pass
-
-                # Same-disk rename is instant; cross-disk shutil.move copies then deletes.
-                try:
-                    if os.stat(p).st_dev == os.stat(trash_files).st_dev:
-                        os.rename(p, dst)
-                    else:
-                        shutil.move(p, dst)
+                    os.rename(p, dst)
                 except OSError:
-                    shutil.move(p, dst)
-            except Exception:
-                try:
-                    if os.path.isdir(p) and not os.path.islink(p):
-                        shutil.rmtree(p)
-                    else:
-                        os.remove(p)
-                except Exception as err:
-                    errors.append(f"{os.path.basename(p)}: {err}")
+                    os.unlink(info_path)
+                    raise
+            except OSError as err:
+                errors.append(f"{os.path.basename(p)}: {err}")
         return errors
 
     def _delete(self):
@@ -2700,11 +2841,14 @@ class FileOpWorker(QThread):
                 break
             if not p or not os.path.lexists(p):
                 continue
+            if is_volume_recovery_folder(p):
+                errors.append("lost+found is a protected filesystem recovery folder.")
+                continue
             self.progress.emit(os.path.basename(p) or p)
             base = os.path.basename(p)
             try:
                 if os.path.isdir(p) and not os.path.islink(p):
-                    shutil.rmtree(p, ignore_errors=True)
+                    shutil.rmtree(p)
                 else:
                     os.remove(p)
             except Exception as err:
@@ -2800,21 +2944,23 @@ class FileOpWorker(QThread):
 
 
 class DrivePieWidget(QWidget):
-    def __init__(self, used, free, parent=None):
+    def __init__(self, used, free, reserved, parent=None):
         super().__init__(parent)
         self.used = max(0, int(used or 0))
         self.free = max(0, int(free or 0))
+        self.reserved = max(0, int(reserved or 0))
         self.setFixedSize(130, 130)
 
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        total = self.used + self.free
+        total = self.used + self.free + self.reserved
         if total <= 0:
             return
         rect = QRectF(10, 10, 110, 110)
         used_angle = int(round((self.used / total) * 360 * 16))
-        free_angle = 360 * 16 - used_angle
+        reserved_angle = int(round((self.reserved / total) * 360 * 16))
+        free_angle = 360 * 16 - used_angle - reserved_angle
 
         p.setPen(Qt.NoPen)
         p.setBrush(QColor("#0078d4"))
@@ -2822,6 +2968,10 @@ class DrivePieWidget(QWidget):
 
         p.setBrush(QColor("#475569"))
         p.drawPie(rect, 90 * 16 - used_angle, -free_angle)
+
+        if reserved_angle:
+            p.setBrush(QColor("#d69e43"))
+            p.drawPie(rect, 90 * 16 - used_angle - free_angle, -reserved_angle)
 
         p.setBrush(QColor("#20242f"))
         p.drawEllipse(QPointF(65, 65), 32, 32)
@@ -3031,6 +3181,9 @@ class WindowsFolderPropertiesDialog(QDialog):
     def _on_ok_clicked(self):
         new_name = self.name_edit.text().strip()
         if new_name and new_name != self.folder_name:
+            if is_volume_recovery_folder(self.path):
+                QMessageBox.information(self, "Protected folder", "lost+found is reserved for filesystem recovery.")
+                return
             new_path = os.path.join(os.path.dirname(self.path), new_name)
             try:
                 os.rename(self.path, new_path)
@@ -3283,41 +3436,33 @@ class WindowsDrivePropertiesDialog(QDialog):
         grid.addWidget(self._make_value_label("Local Disk"), 0, 1)
 
         grid.addWidget(self._make_label("File system:"), 1, 0)
-        grid.addWidget(self._make_value_label("NTFS (DevOS High Performance)"), 1, 1)
+        grid.addWidget(self._make_value_label((drive.get("fstype") or "Unknown").upper()), 1, 1)
 
         gen_layout.addLayout(grid)
         gen_layout.addWidget(self._make_line())
 
         total = drive.get("total") or 0
         free = drive.get("free")
-        if free is None:
-            free = 0
-        # Match df Used (file blocks), not total-free (which includes reserved).
         used = drive.get("used")
-        if used is None:
-            used = max(0, total - free)
-        else:
-            used = max(0, int(used))
+        reserved = drive_reserved(drive)
 
         space_grid = QGridLayout()
         space_grid.setHorizontalSpacing(12)
         space_grid.setVerticalSpacing(8)
 
-        swatch_used = QLabel()
-        swatch_used.setFixedSize(14, 14)
-        swatch_used.setStyleSheet("background: #0078d4; border-radius: 2px;")
-        space_grid.addWidget(swatch_used, 0, 0)
-        space_grid.addWidget(self._make_label("Used space:"), 0, 1)
-        space_grid.addWidget(self._make_value_label(f"{used:,} bytes"), 0, 2)
-        space_grid.addWidget(self._make_value_label(format_bytes(used)), 0, 3)
-
-        swatch_free = QLabel()
-        swatch_free.setFixedSize(14, 14)
-        swatch_free.setStyleSheet("background: #475569; border-radius: 2px;")
-        space_grid.addWidget(swatch_free, 1, 0)
-        space_grid.addWidget(self._make_label("Free space:"), 1, 1)
-        space_grid.addWidget(self._make_value_label(f"{free:,} bytes"), 1, 2)
-        space_grid.addWidget(self._make_value_label(format_bytes(free)), 1, 3)
+        rows = (
+            ("Used space:", used, "#0078d4"),
+            ("Available space:", free, "#475569"),
+            ("System reserved:", reserved, "#d69e43"),
+        )
+        for row, (label, amount, color) in enumerate(rows):
+            swatch = QLabel()
+            swatch.setFixedSize(14, 14)
+            swatch.setStyleSheet(f"background: {color}; border-radius: 2px;")
+            space_grid.addWidget(swatch, row, 0)
+            space_grid.addWidget(self._make_label(label), row, 1)
+            space_grid.addWidget(self._make_value_label("—" if amount is None else f"{amount:,} bytes"), row, 2)
+            space_grid.addWidget(self._make_value_label("—" if amount is None else format_bytes(amount)), row, 3)
 
         gen_layout.addLayout(space_grid)
         gen_layout.addWidget(self._make_line())
@@ -3330,7 +3475,7 @@ class WindowsDrivePropertiesDialog(QDialog):
         gen_layout.addLayout(cap_grid)
 
         mid_row = QHBoxLayout()
-        pie = DrivePieWidget(used, free)
+        pie = DrivePieWidget(used, free, reserved)
         mid_row.addWidget(pie)
 
         btn_cleanup = QPushButton("Disk Cleanup")
@@ -4145,18 +4290,19 @@ class WindowsFileExplorer(QMainWindow):
 
         main_layout.addWidget(nav_toolbar)
 
-        # 2. Command Ribbon (Windows 11 Fluent)
+        # 2. Command Ribbon (Windows 11 Fluent) — roomy, theme-colored chips
         cmd_bar = QWidget()
         cmd_bar.setObjectName("commandBar")
         cmd_layout = QHBoxLayout(cmd_bar)
-        cmd_layout.setContentsMargins(10, 4, 10, 4)
-        cmd_layout.setSpacing(4)
+        cmd_layout.setContentsMargins(14, 8, 14, 8)
+        cmd_layout.setSpacing(8)
 
         # "+ New ˇ" Dropdown Button
         self.btn_new = QPushButton("  New  ")
         self.btn_new.setIcon(get_win_icon("new", 18))
         self.btn_new.setObjectName("newBtn")
         self.btn_new.setToolTip("Create new item")
+        self.btn_new.setFixedHeight(34)
         new_menu = QMenu(self.btn_new)
         act_new_folder = new_menu.addAction(get_win_icon("folder", 16), "Folder\tCtrl+Shift+N")
         act_new_folder.triggered.connect(self.action_new_folder)
@@ -4171,7 +4317,7 @@ class WindowsFileExplorer(QMainWindow):
 
         self.btn_new_folder = self.btn_new  # Alias for backward compatibility & tests
 
-        cmd_layout.addSpacing(6)
+        cmd_layout.addSpacing(10)
 
         # Action Icon Buttons
         self.btn_cut = QPushButton()
@@ -4192,11 +4338,12 @@ class WindowsFileExplorer(QMainWindow):
             (self.btn_delete, "delete", "Delete (Delete)", self.action_delete),
         ]
         for btn, name, tip, cb in action_defs:
-            btn.setIcon(get_win_icon(name, 18))
+            btn.setIcon(get_win_icon(name, 20))
             btn.setObjectName("cmdIconBtn")
             btn.setToolTip(tip)
-            btn.setFixedSize(34, 30)
-            btn.setIconSize(QSize(18, 18))
+            btn.setFixedSize(38, 34)
+            btn.setIconSize(QSize(20, 20))
+            btn.setCursor(Qt.PointingHandCursor)
             btn.clicked.connect(cb)
             cmd_layout.addWidget(btn)
 
@@ -4248,15 +4395,18 @@ class WindowsFileExplorer(QMainWindow):
         sep = QFrame()
         sep.setFrameShape(QFrame.VLine)
         sep.setObjectName("cmdSep")
-        sep.setFixedHeight(24)
+        sep.setFixedHeight(28)
+        cmd_layout.addSpacing(4)
         cmd_layout.addWidget(sep)
+        cmd_layout.addSpacing(4)
 
         # "⇅ Sort ˇ"
         self.btn_sort = QPushButton("Sort")
-        self.btn_sort.setIcon(get_win_icon("sort", 16))
+        self.btn_sort.setIcon(get_win_icon("sort", 18))
         self.btn_sort.setObjectName("cmdMenuBtn")
-        self.btn_sort.setMinimumWidth(80)
-        self.btn_sort.setFixedHeight(30)
+        self.btn_sort.setMinimumWidth(88)
+        self.btn_sort.setFixedHeight(34)
+        self.btn_sort.setCursor(Qt.PointingHandCursor)
         sort_menu = QMenu(self.btn_sort)
         for col_idx, col_name in enumerate(["Name", "Date modified", "Type", "Size"]):
             sort_menu.addAction(col_name, lambda c=col_idx: self.table_view.sortItems(c, self.table_view.horizontalHeader().sortIndicatorOrder()))
@@ -4268,10 +4418,11 @@ class WindowsFileExplorer(QMainWindow):
 
         # "⊞ View ˇ"
         self.btn_view = QPushButton("View")
-        self.btn_view.setIcon(get_win_icon("view", 16))
+        self.btn_view.setIcon(get_win_icon("view", 18))
         self.btn_view.setObjectName("cmdMenuBtn")
-        self.btn_view.setMinimumWidth(80)
-        self.btn_view.setFixedHeight(30)
+        self.btn_view.setMinimumWidth(88)
+        self.btn_view.setFixedHeight(34)
+        self.btn_view.setCursor(Qt.PointingHandCursor)
         view_menu = QMenu(self.btn_view)
         view_menu.addAction("Extra large icons", lambda: self.set_view_mode("icons", 128))
         view_menu.addAction("Large icons", lambda: self.set_view_mode("icons", 96))
@@ -4310,8 +4461,9 @@ class WindowsFileExplorer(QMainWindow):
         # "···" See More Menu
         self.btn_more = QPushButton("…")
         self.btn_more.setObjectName("cmdIconBtn")
-        self.btn_more.setFixedSize(34, 30)
+        self.btn_more.setFixedSize(38, 34)
         self.btn_more.setToolTip("See more")
+        self.btn_more.setCursor(Qt.PointingHandCursor)
         more_menu = QMenu(self.btn_more)
         more_menu.addAction("Undo\tCtrl+Z", self.action_undo)
         more_menu.addAction("Pin to Quick access", lambda: self.pin_to_quick_access(self._current_path))
@@ -4344,8 +4496,9 @@ class WindowsFileExplorer(QMainWindow):
         self.details_button.setIcon(get_win_icon("file-doc", 16))
         self.details_button.setObjectName("cmdBtn")
         self.details_button.setCheckable(True)
-        self.details_button.setMinimumWidth(80)
-        self.details_button.setFixedHeight(30)
+        self.details_button.setMinimumWidth(88)
+        self.details_button.setFixedHeight(34)
+        self.details_button.setCursor(Qt.PointingHandCursor)
         self.details_button.setChecked(self._view_mode == "details")
         self.details_button.setToolTip("Details view")
         self.details_button.clicked.connect(lambda: self.set_view_mode("details"))
@@ -4355,8 +4508,9 @@ class WindowsFileExplorer(QMainWindow):
         self.preview_button.setIcon(get_win_icon("preview", 16))
         self.preview_button.setObjectName("cmdBtn")
         self.preview_button.setCheckable(True)
-        self.preview_button.setMinimumWidth(84)
-        self.preview_button.setFixedHeight(30)
+        self.preview_button.setMinimumWidth(92)
+        self.preview_button.setFixedHeight(34)
+        self.preview_button.setCursor(Qt.PointingHandCursor)
         self.preview_button.setChecked(self._settings.get("preview", False))
         self.preview_button.setToolTip("Preview pane (Alt+P)")
         self.preview_button.clicked.connect(self.toggle_preview)
@@ -4814,26 +4968,28 @@ class WindowsFileExplorer(QMainWindow):
                 border-color: #0078d4;
             }
             #commandBar {
-                background: #1c2027;
-                border-bottom: 1px solid #282f3a;
+                background: #0f1a2a;
+                border-bottom: 1px solid #243447;
             }
-            QPushButton#cmdBtn {
-                background: transparent;
-                border: 1px solid transparent;
-                border-radius: 5px;
-                color: #cbd5e1;
-                font-size: 12px;
-                padding: 5px 9px;
+            QPushButton#cmdBtn, QPushButton#cmdIconBtn, QPushButton#cmdMenuBtn {
+                background: #162337;
+                border: 1px solid #2a3f5c;
+                border-radius: 8px;
+                color: #e8f1ff;
+                font-size: 12.5px;
+                font-weight: 600;
+                padding: 6px 12px;
+                min-height: 32px;
             }
-            QPushButton#cmdBtn:hover {
-                background: #28303e;
-                border-color: #384357;
+            QPushButton#cmdBtn:hover, QPushButton#cmdIconBtn:hover, QPushButton#cmdMenuBtn:hover {
+                background: #1c3350;
+                border-color: #38bdf8;
                 color: #ffffff;
             }
             QPushButton#cmdBtn:checked {
-                background: #1e3a5f;
-                border-color: #0078d4;
-                color: #ffffff;
+                background: #0c4a6e;
+                border-color: #38bdf8;
+                color: #e0f2fe;
             }
             #sidebar {
                 background: #17191e;
@@ -5231,77 +5387,105 @@ class WindowsFileExplorer(QMainWindow):
             }
             QLineEdit#searchBox:focus { border-color: #0078d4; background: #0d1522; }
 
-            QWidget#commandBar { background: #0d1522; border-bottom: 1px solid #1c2b3e; padding: 4px 10px; }
-            QPushButton#cmdBtn, QToolButton#cmdBtn {
-                background: transparent;
-                border: 1px solid transparent;
-                border-radius: 6px;
-                padding: 5px 12px;
-                color: #e2e8f0;
-                font-size: 12px;
-                min-height: 28px;
+            QWidget#commandBar {
+                background: #0f1a2a;
+                border-bottom: 1px solid #243447;
+                padding: 6px 12px;
             }
-            QPushButton#cmdBtn:hover, QToolButton#cmdBtn:hover { background: #1a283c; border-color: #273d5c; color: #ffffff; }
-            QPushButton#cmdBtn:pressed, QToolButton#cmdBtn:pressed { background: #223753; }
-            QPushButton#cmdBtn:checked, QToolButton#cmdBtn:checked { background: #1a365d; border-color: #0078d4; color: #60a5fa; }
-            QPushButton#cmdBtn:disabled { color: #475569; }
+            QPushButton#cmdBtn, QToolButton#cmdBtn {
+                background: #162337;
+                border: 1px solid #2a3f5c;
+                border-radius: 8px;
+                padding: 6px 14px;
+                color: #e8f1ff;
+                font-size: 12.5px;
+                font-weight: 600;
+                min-height: 32px;
+            }
+            QPushButton#cmdBtn:hover, QToolButton#cmdBtn:hover {
+                background: #1c3350;
+                border-color: #38bdf8;
+                color: #ffffff;
+            }
+            QPushButton#cmdBtn:pressed, QToolButton#cmdBtn:pressed { background: #1e3a5f; }
+            QPushButton#cmdBtn:checked, QToolButton#cmdBtn:checked {
+                background: #0c4a6e;
+                border-color: #38bdf8;
+                color: #e0f2fe;
+            }
+            QPushButton#cmdBtn:disabled { color: #64748b; background: #121a27; border-color: #1e293b; }
 
             QPushButton#cmdIconBtn {
-                background: transparent;
-                border: 1px solid transparent;
-                border-radius: 6px;
-                padding: 4px;
-                min-width: 32px;
-                max-width: 34px;
-                min-height: 28px;
-                max-height: 30px;
-                color: #e2e8f0;
+                background: #162337;
+                border: 1px solid #2a3f5c;
+                border-radius: 8px;
+                padding: 5px;
+                min-width: 36px;
+                max-width: 40px;
+                min-height: 32px;
+                max-height: 36px;
+                color: #e8f1ff;
             }
-            QPushButton#cmdIconBtn:hover { background: #1a283c; border-color: #273d5c; color: #ffffff; }
-            QPushButton#cmdIconBtn:pressed { background: #223753; }
-            QPushButton#cmdIconBtn:disabled { color: #475569; }
+            QPushButton#cmdIconBtn:hover {
+                background: #1c3350;
+                border-color: #38bdf8;
+                color: #ffffff;
+            }
+            QPushButton#cmdIconBtn:pressed { background: #1e3a5f; border-color: #0284c7; }
+            QPushButton#cmdIconBtn:disabled { color: #64748b; background: #121a27; border-color: #1e293b; }
 
             QPushButton#cmdMenuBtn {
-                background: transparent;
-                border: 1px solid transparent;
-                border-radius: 6px;
-                padding: 5px 24px 5px 10px;
-                color: #e2e8f0;
-                font-size: 12px;
-                min-height: 28px;
-                min-width: 76px;
+                background: #162337;
+                border: 1px solid #2a3f5c;
+                border-radius: 8px;
+                padding: 6px 26px 6px 12px;
+                color: #e8f1ff;
+                font-size: 12.5px;
+                font-weight: 600;
+                min-height: 32px;
+                min-width: 84px;
             }
-            QPushButton#cmdMenuBtn:hover { background: #1a283c; border-color: #273d5c; color: #ffffff; }
-            QPushButton#cmdMenuBtn:pressed { background: #223753; }
+            QPushButton#cmdMenuBtn:hover {
+                background: #1c3350;
+                border-color: #38bdf8;
+                color: #ffffff;
+            }
+            QPushButton#cmdMenuBtn:pressed { background: #1e3a5f; }
             QPushButton#cmdMenuBtn::menu-indicator {
                 subcontrol-origin: padding;
                 subcontrol-position: center right;
-                right: 6px;
-                width: 9px;
-                height: 9px;
+                right: 8px;
+                width: 10px;
+                height: 10px;
             }
 
             QPushButton#newBtn {
                 background: #0078d4;
                 color: white;
-                font-weight: 600;
-                border: 1px solid #2563eb;
-                border-radius: 6px;
-                padding: 5px 18px 5px 12px;
-                font-size: 12px;
-                min-height: 28px;
+                font-weight: 700;
+                border: 1px solid #38bdf8;
+                border-radius: 8px;
+                padding: 6px 20px 6px 14px;
+                font-size: 12.5px;
+                min-height: 32px;
             }
-            QPushButton#newBtn:hover { background: #1d4ed8; }
-            QPushButton#newBtn:pressed { background: #1e40af; }
+            QPushButton#newBtn:hover { background: #0284c7; border-color: #7dd3fc; }
+            QPushButton#newBtn:pressed { background: #0369a1; }
             QPushButton#newBtn::menu-indicator {
                 subcontrol-origin: padding;
                 subcontrol-position: center right;
-                right: 6px;
-                width: 9px;
-                height: 9px;
+                right: 8px;
+                width: 10px;
+                height: 10px;
             }
 
-            QFrame#cmdSep { background: #22334a; max-width: 1px; min-width: 1px; margin: 4px 6px; }
+            QFrame#cmdSep {
+                background: #334155;
+                max-width: 2px;
+                min-width: 2px;
+                margin: 4px 8px;
+                border-radius: 1px;
+            }
 
             QWidget#sidebar { background: #0c131f; border-right: 1px solid #1a2638; }
             QLabel#sideSection { color: #64748b; font-size: 11px; font-weight: 600; text-transform: uppercase; padding: 8px 8px 4px 8px; }
@@ -5359,6 +5543,45 @@ class WindowsFileExplorer(QMainWindow):
             QTreeWidget#advancedSettingsTree { background: #0a1019; border: 1px solid #1e2c40; border-radius: 6px; padding: 6px; color: #e2e8f0; }
             QTabWidget#optionsTabs::pane { border: 1px solid #233247; background: #0e1624; border-radius: 8px; }
             QCheckBox, QRadioButton { color: #cbd5e1; spacing: 8px; }
+
+            QLabel#sectionHeading { color: #f8fafc; font-weight: 700; letter-spacing: 0.02em; }
+            #folderTile {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #1a273b, stop:1 #121a28);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 12px;
+            }
+            #folderTile:hover, #folderTile:focus {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #223450, stop:1 #182437);
+                border: 1px solid #38bdf8;
+            }
+            QLabel#folderTileTitle { color: #f8fafc; background: transparent; }
+            QLabel#folderTileSub { color: #94a3b8; font-size: 11px; background: transparent; }
+            #driveCard {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #1a273b, stop:1 #121a28);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 12px;
+                max-width: 420px;
+            }
+            #driveCard:hover, #driveCard:focus {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #223450, stop:1 #182437);
+                border: 1px solid #38bdf8;
+            }
+            QLabel#driveTitle { color: #f8fafc; background: transparent; font-weight: 600; }
+            QLabel#driveSpace { color: #94a3b8; font-size: 12px; background: transparent; }
+            QLabel#driveInsight { color: #7dd3fc; font-size: 11px; background: transparent; }
+            QProgressBar#driveBar {
+                background: #243247;
+                border: none;
+                border-radius: 4px;
+            }
+            QProgressBar#driveBar::chunk {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #2563eb, stop:1 #38bdf8);
+                border-radius: 4px;
+            }
+            QProgressBar#driveBarFull::chunk {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #ef4444, stop:1 #f87171);
+                border-radius: 4px;
+            }
         """)
         app = QApplication.instance()
         mgr = getattr(app, "_devos_appearance", None) if app else None
@@ -5541,17 +5764,33 @@ class WindowsFileExplorer(QMainWindow):
     def _reflow_storage_cards(self):
         if not hasattr(self, "this_pc_scroll_widget"):
             return
-        width = self.this_pc_scroll_widget.width()
-        for grid, minimum, maximum in ((self.folders_grid, 225, 3), (self.drives_grid, 330, 2)):
+        width = max(1, self.this_pc_scroll_widget.width() - 24)
+        for grid, minimum, maximum in ((self.folders_grid, 210, 4), (self.drives_grid, 280, 3)):
             columns = max(1, min(maximum, width // minimum))
+            # Prefer compact drive cards — never stretch one C: card across the window.
+            if grid is self.drives_grid and grid.count() == 1:
+                columns = 1
             if all(grid.getItemPosition(i)[:2] == (i // columns, i % columns) for i in range(grid.count())):
+                for column in range(maximum):
+                    stretch = 0
+                    if grid is self.drives_grid:
+                        stretch = 0  # left-align fixed-width drive cards
+                    elif column < columns:
+                        stretch = 1
+                    grid.setColumnStretch(column, stretch)
                 continue
             cards = []
             while grid.count():
                 item = grid.takeAt(0)
-                if item.widget(): cards.append(item.widget())
-            for column in range(maximum): grid.setColumnStretch(column, 1 if column < columns else 0)
-            for index, card in enumerate(cards): grid.addWidget(card, index // columns, index % columns)
+                if item.widget():
+                    cards.append(item.widget())
+            for column in range(maximum):
+                if grid is self.drives_grid:
+                    grid.setColumnStretch(column, 0)
+                else:
+                    grid.setColumnStretch(column, 1 if column < columns else 0)
+            for index, card in enumerate(cards):
+                grid.addWidget(card, index // columns, index % columns)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -5593,11 +5832,13 @@ class WindowsFileExplorer(QMainWindow):
 
         self._rebuild_sidebar()
 
-        # Place drive cards in 2-column or 3-column grid
-        columns = 2
+        # Compact cards — reflow picks 1–3 columns; max width keeps C: from stretching.
+        columns = 3 if len(self._drives) >= 3 else max(1, len(self._drives))
         for idx, drive in enumerate(self._drives):
             card = DriveCard(drive, on_open=self.open_drive, on_context=self._show_drive_context_menu)
             self.drives_grid.addWidget(card, idx // columns, idx % columns)
+        for column in range(3):
+            self.drives_grid.setColumnStretch(column, 0)
         QTimer.singleShot(0, self._reflow_storage_cards)
 
     def open_drive(self, drive):
@@ -5817,6 +6058,21 @@ class WindowsFileExplorer(QMainWindow):
             self.content_stack.setCurrentIndex(1)
             self.btn_up.setEnabled(True)
             self._load_folder_contents(path)
+            # Desktop shortcuts look like Windows when shown as large icons.
+            try:
+                desktop_dir = os.path.normpath(os.path.expanduser("~/Desktop"))
+                if os.path.normpath(path) == desktop_dir:
+                    folder_views = self._settings.setdefault("folder_views", {})
+                    if path not in folder_views:
+                        folder_views[path] = {"mode": "icons", "icon_size": 96}
+                        self.set_view_mode("icons", 96)
+                    elif folder_views.get(path, {}).get("mode") == "icons":
+                        self.set_view_mode(
+                            "icons",
+                            folder_views[path].get("icon_size") or 96,
+                        )
+            except Exception:
+                pass
 
         self._update_command_bar()
         watched = self._watcher.directories()
@@ -5891,9 +6147,9 @@ class WindowsFileExplorer(QMainWindow):
         for entry in entries:
             if entry in [".", ".."]:
                 continue
-            if not self._show_hidden and entry.startswith("."):
-                continue
             full_path = os.path.join(path, entry)
+            if not self._show_hidden and (entry.startswith(".") or is_volume_recovery_folder(full_path)):
+                continue
             if os.path.isdir(full_path):
                 dirs.append(entry)
             else:
@@ -5931,7 +6187,7 @@ class WindowsFileExplorer(QMainWindow):
                 size_val = -1
 
             item_type = get_file_type_description(full_path)
-            icon = get_icon_for_file(full_path, is_dir)
+            icon = get_icon_for_file(full_path, is_dir, size=64 if not is_dir and entry.lower().endswith(".desktop") else 48)
 
             if in_trash:
                 orig_loc, del_date = get_trash_info(full_path)
@@ -5954,12 +6210,16 @@ class WindowsFileExplorer(QMainWindow):
                 col2_text = item_type
                 col2_val = item_type
 
-            # Name Column
-            display_name = entry if is_dir or self._settings.get("extensions", True) else os.path.splitext(entry)[0]
+            # Name Column — .desktop shortcuts show friendly Name= like Windows
+            display_name = entry_display_name(
+                full_path, entry, show_extensions=self._settings.get("extensions", True)
+            )
             name_item = ExplorerTableItem(display_name)
             name_item.setIcon(icon)
             name_item.setData(Qt.UserRole, full_path)
             name_item.setData(Qt.UserRole + 1, is_dir)
+            if entry.lower().endswith(".desktop"):
+                name_item.setToolTip(f"{display_name}\n{entry}")
             self.table_view.setItem(row, 0, name_item)
 
             # Col 1 (Date modified or Original location)
@@ -5982,9 +6242,15 @@ class WindowsFileExplorer(QMainWindow):
             self.table_view.setItem(row, 3, size_item)
 
             # Also populate Icon list view
-            display_name = entry if is_dir or self._settings.get("extensions", True) else os.path.splitext(entry)[0]
             list_item = QListWidgetItem(icon, display_name)
-            list_item.setToolTip(entry + "\n" + mtime + "\n" + size_str)
+            tip_bits = [display_name]
+            if entry.lower().endswith(".desktop") and display_name != entry:
+                tip_bits.append(entry)
+            if mtime:
+                tip_bits.append(mtime)
+            if size_str:
+                tip_bits.append(size_str)
+            list_item.setToolTip("\n".join(tip_bits))
             list_item.setData(Qt.UserRole, full_path)
             list_item.setData(Qt.UserRole + 1, is_dir)
             self.list_view.addItem(list_item)
@@ -6336,15 +6602,23 @@ class WindowsFileExplorer(QMainWindow):
             self.list_view.hide()
             self.table_view.show()
             self.btn_view.setText("View: Details")
+            self.details_button.setChecked(True)
         else:
             self._view_mode = "icons"
             self.table_view.hide()
             self.list_view.show()
-            if icon_size:
-                self.list_view.setIconSize(QSize(icon_size, int(icon_size * 0.75)))
-                self.list_view.setGridSize(QSize(icon_size + 34, icon_size + 42))
+            size = icon_size or 96
+            self.list_view.setIconSize(QSize(size, size))
+            self.list_view.setGridSize(QSize(size + 40, size + 52))
             self.btn_view.setText("View: Icons")
+            self.details_button.setChecked(False)
             self._thumbnail_timer.start()
+        if self._current_path and os.path.isdir(self._current_path):
+            views = self._settings.setdefault("folder_views", {})
+            views[self._current_path] = {
+                "mode": self._view_mode,
+                "icon_size": icon_size or views.get(self._current_path, {}).get("icon_size") or 96,
+            }
         self.save_settings()
 
     def action_new_markdown_document(self):
@@ -6604,6 +6878,9 @@ class WindowsFileExplorer(QMainWindow):
         for src in self._clipboard["paths"]:
             if not os.path.exists(src):
                 continue
+            if is_volume_recovery_folder(src):
+                QMessageBox.information(self, "Protected folder", "lost+found is reserved for filesystem recovery.")
+                continue
             dest = os.path.join(self._current_path, os.path.basename(src))
             try:
                 if action == "cut":
@@ -6621,19 +6898,8 @@ class WindowsFileExplorer(QMainWindow):
 
     def action_rename(self):
         paths = self.get_selected_paths()
-        if len(paths) != 1:
-            return
-        target = paths[0]
-        old_name = os.path.basename(target)
-        new_name = prompt_name_dialog(
-            self, "Rename", f"Rename '{old_name}' to:", old_name,
-            select_stem=("." in old_name and not os.path.isdir(target)))
-        if new_name and new_name != old_name:
-            try:
-                os.rename(target, os.path.join(os.path.dirname(target), new_name))
-                self.refresh()
-            except OSError as err:
-                QMessageBox.critical(self, "Error", f"Failed to rename: {err.strerror}")
+        if len(paths) == 1:
+            self.action_rename_path(paths[0])
 
     def action_delete(self):
         if self.is_in_recycle_bin():
@@ -6683,9 +6949,9 @@ class WindowsFileExplorer(QMainWindow):
             dlg.reset()
             dlg.hide()
             self.refresh()
-            if hasattr(self, "status") and done_message:
+            if not errors and hasattr(self, "status") and done_message:
                 self.status.showMessage(done_message, 4000)
-            elif hasattr(self, "status_selected_info") and done_message:
+            elif not errors and hasattr(self, "status_selected_info") and done_message:
                 self.status_selected_info.setText(done_message)
             if errors:
                 QMessageBox.critical(
@@ -6766,6 +7032,9 @@ class WindowsFileExplorer(QMainWindow):
 
     def action_rename_path(self, target):
         if not os.path.exists(target):
+            return
+        if is_volume_recovery_folder(target):
+            QMessageBox.information(self, "Protected folder", "lost+found is reserved for filesystem recovery.")
             return
         old_name = os.path.basename(target)
         new_name = prompt_name_dialog(

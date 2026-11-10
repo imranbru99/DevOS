@@ -1,10 +1,16 @@
 from pathlib import Path
+import json
 import sys
 from unittest.mock import patch
 
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/'components/cloudpc'))
-from browser_launch import launch_command, launch_via_default_pwa, PWA_NAV
+from browser_launch import (
+    discover_app_id,
+    launch_command,
+    launch_via_default_pwa,
+    PWA_NAV,
+)
 from launchers import integrate
 
 
@@ -27,8 +33,8 @@ def test_installed_pwa_uses_app_id_not_plain_app_url(tmp_path,monkeypatch):
     app_id='a'*32
     apps=tmp_path/'applications'
     apps.mkdir(parents=True)
-    (apps/'chrome-%s-Default.desktop'%app_id).write_text(
-        '[Desktop Entry]\nName=Windows App\nExec=chrome --app-id=%s\n'%app_id
+    (apps / f"chrome-{app_id}-Default.desktop").write_text(
+        f"[Desktop Entry]\nName=Windows App\nExec=chrome --app-id={app_id}\n"
     )
     with patch('browser_launch.browser_binary',return_value=('chrome','/browser')):
         cmd=launch_command()
@@ -38,12 +44,26 @@ def test_installed_pwa_uses_app_id_not_plain_app_url(tmp_path,monkeypatch):
     assert not any(a.startswith('--user-data-dir=') for a in cmd)
 
 
+def test_discover_app_id_from_chrome_preferences(tmp_path, monkeypatch):
+    monkeypatch.setenv('HOME', str(tmp_path))
+    monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path / 'share'))
+    chrome = tmp_path / '.config/google-chrome/Default'
+    chrome.mkdir(parents=True)
+    app_id = 'c' * 32
+    (chrome / 'Preferences').write_text(
+        json.dumps({"web_apps": {"app_id": app_id, "url": "https://windows.cloud.microsoft/"}}),
+        encoding='utf-8',
+    )
+    assert discover_app_id(None) == app_id
+
+
 def test_default_pwa_launch_command_shape():
     with patch('browser_launch.browser_binary',return_value=('chrome','/browser')):
         cmd=launch_via_default_pwa('b'*32)
     assert cmd[0]=='/browser'
     assert '--app-id='+('b'*32) in cmd
     assert any(PWA_NAV in arg for arg in cmd)
+    assert '--class=chrome-windows.cloud.microsoft__-Default' in cmd
 
 
 def test_profile_shortcut_uses_same_isolated_launcher(tmp_path):

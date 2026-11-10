@@ -934,7 +934,9 @@ class TestStreaming(unittest.TestCase):
     def test_preview_hides_half_words(self):
         self.assertEqual(engine.stream_preview("I am Qw"), "I am")
         self.assertEqual(engine.stream_preview("I am Qwen2.5 and"), "I am DevOS AI")
-        self.assertEqual(engine.stream_preview("Hel"), "")
+        # First tokens show immediately (call mode typing tracks voice).
+        self.assertEqual(engine.stream_preview("Hel"), engine.scrub("Hel"))
+        self.assertEqual(engine.stream_preview("Hi"), "")
 
 
 class TestSmarterAI(unittest.TestCase):
@@ -1928,12 +1930,24 @@ class TestVoiceAvailability(unittest.TestCase):
         def run(cmd):
             calls.append(cmd[0])
             return {"pactl": "0\tx.monitor\tm\ts\tIDLE\n", "arecord": "card 0: X\n"}[cmd[0]]
-        self.assertFalse(voice.has_microphone(fake_which({"pactl", "arecord"}), run))
-        self.assertEqual(calls, ["pactl"])
+        # Monitor-only pactl must fall through to arecord (USB mic still on ALSA).
+        self.assertTrue(voice.has_microphone(fake_which({"pactl", "arecord"}), run))
+        self.assertEqual(calls, ["pactl", "arecord"])
         # sound server not answering -> the card list decides
         self.assertTrue(voice.has_microphone(fake_which({"pactl", "arecord"}),
                                              lambda c: None if c[0] == "pactl" else "card 1: USB\n"))
         self.assertFalse(voice.has_microphone(fake_which(set()), run), "nothing could record")
+        # pactl with a real input wins without asking arecord
+        calls.clear()
+
+        def run_mic(cmd):
+            calls.append(cmd[0])
+            return {
+                "pactl": "1\talsa_input.usb-Mic\tmodule-alsa-card.c\ts16le 1ch 48000Hz\tRUNNING\n",
+                "arecord": "card 0: X\n",
+            }[cmd[0]]
+        self.assertTrue(voice.has_microphone(fake_which({"pactl", "arecord"}), run_mic))
+        self.assertEqual(calls, ["pactl"])
 
     def test_check_is_cached(self):
         n = {"ready": 0, "mic": 0}

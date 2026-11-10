@@ -1,10 +1,15 @@
 [Desktop Entry]
 Type=Application
+# Hidden until Features installs a real Antigravity binary.
+NoDisplay=true
+Hidden=true
+X-DevOS-Hidden=true
 Name=Antigravity IDE
 GenericName=AI coding (second account)
 Comment=Second Antigravity — separate Google account, projects, and profile from Google Antigravity
+TryExec=/opt/antigravity/antigravity
 Exec=/usr/local/bin/antigravity-kde %F
-Icon=antigravity-kde
+Icon=devos-antigravity-studio
 Terminal=false
 Categories=Development;IDE;
 MimeType=text/plain;inode/directory;
@@ -16,4 +21,4 @@ Actions=NewWindow;
 [Desktop Action NewWindow]
 Name=New Window
 Exec=/usr/local/bin/antigravity-kde --new-window %F
-Icon=antigravity-kde
+Icon=devos-antigravity-studio

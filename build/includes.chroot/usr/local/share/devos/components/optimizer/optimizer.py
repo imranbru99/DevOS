@@ -1531,7 +1531,11 @@ def run_gui(open_cleanup=False):
             self.setWindowIcon(app_icon())
             self.setMinimumSize(640, 700)
             self.resize(660, 720)
-            self.setStyleSheet(STYLE)
+            try:
+                from devos_appearance import adapt_stylesheet, current_mode
+                self.setStyleSheet(adapt_stylesheet(STYLE, current_mode()))
+            except Exception:
+                self.setStyleSheet(STYLE)
             outer = QtWidgets.QVBoxLayout(self)
             outer.setContentsMargins(24, 22, 24, 22)
             outer.setSpacing(14)

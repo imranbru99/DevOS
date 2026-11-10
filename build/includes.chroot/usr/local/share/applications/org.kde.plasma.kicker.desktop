@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Start Menu
+GenericName=Application Menu
+Comment=Application Menu
+Icon=start-here-kde
+Exec=true
+Terminal=false
+NoDisplay=true
+X-DevOS-FriendlyAlias=true

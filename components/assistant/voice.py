@@ -19,6 +19,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import wave
@@ -149,11 +150,57 @@ def pcm_to_wav(pcm: bytes, rate: int = RATE) -> bytes:
 # ---------------------------------------------------------------------------
 
 
-def record_command(which: Callable = shutil.which) -> Optional[List[str]]:
+def _preferred_capture_source() -> Optional[str]:
+    """Best PipeWire/Pulse capture source name, if the sound server is up."""
+    try:
+        components = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if components not in sys.path:
+            sys.path.insert(0, components)
+        from audio.mic_defaults import get_default_source, find_preferred_source
+        name = get_default_source()
+        if name and not name.endswith(".monitor"):
+            return name
+        preferred = find_preferred_source()
+        if preferred and preferred.get("name"):
+            return str(preferred["name"])
+    except Exception:
+        pass
+    if shutil.which("pactl"):
+        try:
+            out = subprocess.check_output(
+                ["pactl", "get-default-source"], text=True, stderr=subprocess.DEVNULL, timeout=2,
+            ).strip()
+            if out and not out.endswith(".monitor"):
+                return out
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return None
+
+
+def alsa_capture_device(text: str) -> Optional[str]:
+    cards = re.findall(r"^card\s+(\d+):[^\n]*?device\s+(\d+):([^\n]*)",
+                       text, re.MULTILINE | re.IGNORECASE)
+    if not cards:
+        return None
+    usb_cards = set(re.findall(r"^card\s+(\d+):[^\n]*\busb\b", text, re.MULTILINE | re.IGNORECASE))
+    card, device, _ = next((entry for entry in cards if entry[0] in usb_cards), cards[0])
+    return f"plughw:{card},{device}"
+
+
+def record_command(which: Callable = shutil.which, device: Optional[str] = None,
+                   run: Optional[Callable] = None) -> Optional[List[str]]:
     if which("parecord"):
-        return ["parecord", "--raw", "--format=s16le", f"--rate={RATE}", "--channels=1", "--latency-msec=50"]
+        source = device or _preferred_capture_source()
+        if source and not source.endswith(".monitor"):
+            return ["parecord", f"--device={source}", "--raw", "--format=s16le",
+                    f"--rate={RATE}", "--channels=1", "--latency-msec=50"]
     if which("arecord"):
-        return ["arecord", "-q", "-f", "S16_LE", "-r", str(RATE), "-c", "1", "-t", "raw"]
+        capture = alsa_capture_device((run or _capture)(["arecord", "-l"]) or "")
+        args = ["arecord", "-q", "-f", "S16_LE", "-r", str(RATE), "-c", "1", "-t", "raw"]
+        if capture:
+            return [*args, "-D", capture]
+        if not which("pactl") and not which("parecord"):
+            return args
     return None
 
 
@@ -200,7 +247,7 @@ class Recorder:
         """(pcm, problem)."""
         argv = record_command(self.which)
         if not argv:
-            return b"", "No microphone recorder is available on this PC."
+            return b"", "No microphone input is ready. Open Sound and check Input."
         try:
             self._proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         except OSError:
@@ -261,7 +308,7 @@ class Recorder:
                 err = self._proc.stderr.read() or b""
             except Exception:
                 pass
-            return b"", "No microphone was found." if err else "Nothing was recorded."
+            return b"", "The microphone could not be opened. Check Sound → Input or close other apps using it." if err else "Nothing was recorded."
         # Manual stop: always try to understand whatever was captured.
         if self._manual_stop and len(pcm) >= FRAME_BYTES * 2:
             return bytes(pcm), ""
@@ -328,11 +375,12 @@ def _capture(cmd: List[str], timeout: float = 2.0) -> Optional[str]:
 
 def has_microphone(which: Callable = shutil.which, run: Callable = _capture) -> bool:
     """True when a capture device is found. The sound server is asked first, then the sound cards.
+    If pactl is up but only lists monitors (USB mic not in PipeWire yet), fall through to arecord.
     Without either tool nothing could record anyway, so that counts as no microphone."""
     if which("pactl"):
         out = run(["pactl", "list", "short", "sources"])
-        if out is not None:
-            return parse_pactl_sources(out)
+        if out is not None and parse_pactl_sources(out):
+            return True
     if which("arecord"):
         out = run(["arecord", "-l"])
         if out is not None:
@@ -508,20 +556,44 @@ class Transcriber:
     def transcribe(cls, pcm: bytes, path: str = None) -> str:
         audio = pcm_to_float(pcm)
         prefer = _preferred_stt_language()
+        sticky = cls.last_language if cls.last_language in LANGUAGES else ""
         with cls._lock:
             model = cls.load(path)
-            # Forced language from Voice settings.
+
+            def _one(language: str) -> str:
+                text = clean_segments(model.transcribe(audio, language=language))
+                if text and _HALLUCINATION.search(text):
+                    return ""
+                return text
+
+            # Forced language from Voice settings — single pass first (dual only if empty).
             if prefer in ("bn", "en"):
+                text = _one(prefer)
+                if text:
+                    cls.last_language = prefer
+                    return text
                 text, lang = cls._pick_bn_en(model, audio, prefer=prefer)
                 cls.last_language = lang
                 return text
+
+            # Call / follow-up turns: reuse last language (avoids dual bn+en every time).
+            if sticky:
+                text = _one(sticky)
+                if text:
+                    cls.last_language = sticky
+                    return text
+
             lang = cls.detect(model, audio)
             # Tiny models often mis-label Bangla as hi/ur/as/en — dual-pass when unsure.
             if lang in ("bn", "hi", "as", "ur", "ne") or lang not in LANGUAGES:
                 text, lang = cls._pick_bn_en(model, audio, prefer="auto")
             elif lang == "en":
-                # Still try Bangla: detection frequently prefers English for Bangla speech.
-                text, lang = cls._pick_bn_en(model, audio, prefer="en")
+                # First English pass only; dual-pass if that came up empty.
+                text = _one("en")
+                if text:
+                    lang = "en"
+                else:
+                    text, lang = cls._pick_bn_en(model, audio, prefer="en")
             else:
                 text = clean_segments(model.transcribe(audio, language="auto"))
                 if text and _HALLUCINATION.search(text):
@@ -761,9 +833,9 @@ def plain_for_speech(md: str, limit: int = 480) -> str:
 # Spoken replies: start voice as soon as text starts typing (never wait for the
 # full answer). Natural pace for a ~10-year-old — clear, not rushed.
 _TTS_RATE = "+0%"              # natural human pace (do not speed up)
-_GAP_BRIDGE_S = 0.22           # keep .!? handoff tight while staying smooth
-_FIRST_CHUNK_MIN = 6           # chars before an eager first cut is allowed
-_FIRST_WORDS = 2               # speak the first 2 whole words while typing continues
+_GAP_BRIDGE_S = 0.18           # keep .!? handoff tight while staying smooth
+_FIRST_CHUNK_MIN = 3           # start voice as soon as a few chars type
+_FIRST_WORDS = 1               # speak the first whole word while typing continues
 _CHUNK_SOFT_MIN = 28
 _PLAY_PROCS: List["subprocess.Popen"] = []
 _PLAY_LOCK = threading.Lock()
@@ -1092,7 +1164,7 @@ def _next_speak_cut(pending: str, force: bool = False, first: bool = False) -> T
                 return chunk, cut
         words = pending.split()
         need = _FIRST_WORDS
-        # If we already have enough plain text for a short first beat, speak it.
+        # Speak the first word as soon as it lands (call mode tracks typing).
         if len(words) >= need and len(pending.strip()) >= _FIRST_CHUNK_MIN:
             take = words[:need]
             pattern = r"\s+".join(re.escape(w) for w in take)
@@ -1106,6 +1178,10 @@ def _next_speak_cut(pending: str, force: bool = False, first: bool = False) -> T
                 chunk = pending[:cut].strip()
                 if chunk:
                     return chunk, cut
+        # Single short token already on screen (e.g. "Hi") — speak immediately.
+        stripped = pending.strip()
+        if 2 <= len(stripped) <= 24 and " " not in stripped and re.match(r"^[\w\u0980-\u09FF]+[.!,।]?$", stripped):
+            return stripped, len(pending)
 
     # Only break mid-sentence on commas when the clause is already long —
     # fewer cuts ⇒ fewer gaps after "." / "!" / ",".
@@ -1279,19 +1355,21 @@ def _speak_chunk(text: str, language: str, out: Optional[str] = None,
 
     th = threading.Thread(target=_edge, daemon=True)
     th.start()
-    # Short phrases (first opener / 2 words): play the instant the mp3 lands.
-    deadline = time.time() + (min(edge_wait_s, 8.0) if len(plain) < 90 else max(0.4, edge_wait_s))
+    # Short phrases (first word / opener): only wait briefly for an mp3, then
+    # live-stream so voice starts with typing instead of after full synth.
+    brief = 0.28 if len(plain) < 90 else min(edge_wait_s, 8.0)
+    deadline = time.time() + brief
     while time.time() < deadline:
         if box.get("ok"):
             break
         th.join(timeout=0.03)
     if box.get("ok") and _play_file(path):
         return True
-    # Longer phrase / pool busy: live stream overlaps remaining synth latency.
-    if len(plain) >= 40 and _speak_stream_edge(plain, language):
+    # Live stream overlaps remaining synth — including short first call chunks.
+    if _speak_stream_edge(plain, language):
         return True
     if not box.get("ok"):
-        th.join(timeout=6)
+        th.join(timeout=max(1.0, min(edge_wait_s, 6.0)))
     if box.get("ok") and _play_file(path):
         return True
     return _speak_espeak(plain, language)

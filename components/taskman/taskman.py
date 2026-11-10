@@ -79,58 +79,64 @@ KNOWN_GUI = {
     "devos-settings", "devos-ai-code-agent",
 }
 
-PRETTY = {
-    "chrome": "Google Chrome", "google-chrome": "Google Chrome",
-    "chromium": "Chromium", "chromium-browser": "Chromium",
-    "firefox": "Firefox", "firefox-bin": "Firefox",
-    "code": "Visual Studio Code", "codium": "VSCodium", "cursor": "Cursor",
-    "plasmashell": "Desktop", "dolphin": "File Explorer", "konsole": "Terminal",
-    "kate": "Text Editor", "okular": "PDF Viewer", "gwenview": "Photos",
-    "gimp": "GIMP", "soffice.bin": "LibreOffice", "vlc": "VLC", "spotify": "Spotify",
-    "telegram-desktop": "Telegram", "discord": "Discord", "steam": "Steam",
-    "systemsettings": "Settings", "kwin_x11": "Desktop Window Manager",
-    "kwin_wayland": "Desktop Window Manager", "kwin": "Desktop Window Manager",
-    "taskman.py": "Task Manager", "devos-taskman": "Task Manager", "taskman": "Task Manager",
-    "devos-files": "File Explorer", "devos-terminal": "Terminal",
-    "devos-settings": "Settings", "devos-ai-code-agent": "AI Code Agent",
-    "kinfocenter": "About this PC", "devos-about": "About this PC", "about.py": "About this PC",
-    "baloorunner": "File Search Helper", "baloo_file": "File Search Indexer",
-    "baloo_file_extractor": "File Search Indexer",
-    "kdeconnectd": "Phone Link", "kdeconnect-indicator": "Phone Link",
-    "kdeconnect-app": "Phone Link", "kdeconnect-handler": "Phone Link",
-    "kglobalacceld": "Keyboard Shortcuts", "kglobalaccel5": "Keyboard Shortcuts",
-    "kglobalaccel6": "Keyboard Shortcuts",
-    "knighttimed": "Night Light", "knighttime": "Night Light",
-    "btop": "Resource Monitor", "btop++": "Resource Monitor", "devos-resources": "Resource Monitor",
-    "devos-browser": "Browser", "devos-portal-fc": "App Permissions Helper",
-    "xdg-desktop-portal-kde": "App Permissions Helper",
-    "xdg-desktop-portal": "App Permissions Helper",
-    "notify-send": "Notification", "plasmashell": "Desktop",
-    "power_settings.py": "Power & sleep", "power_settings": "Power & sleep",
-    "devos-power": "Power & sleep",
-    "devos-tray-overflow": "System Tray", "optimizer.py": "PC Optimizer",
-    "devos-optimizer": "PC Optimizer", "security_center.py": "Security",
-    "devos-security": "Security", "dashboard_server.py": "Dashboard",
-    "devos-dashboard": "Dashboard", "pipeline_gui.py": "AI Pipeline",
-    "assistant.py": "DevOS AI", "devos-chat": "DevOS AI",
-    "filezilla": "File Transfer", "filelight": "Storage Sense",
-    "keepassxc": "Password Manager", "ksmserver": "Session",
-    "kded6": "Desktop Services", "kded5": "Desktop Services",
-    "polkit-kde-authentication-agent-1": "Permission Prompt",
-    "polkit-kde-authentication-agent": "Permission Prompt",
-    "polkit-kde-auth": "Permission Prompt",
-    # Background desktop helpers (never show raw KDE names).
-    "xorg": "Display Server", "Xorg": "Display Server",
-    "kaccess": "Accessibility",
-    "org_kde_powerdevil": "Power Manager", "powerdevil": "Power Manager",
-    "kactivitymanagerd": "Activity Manager", "kactivitymanage": "Activity Manager",
-    "kscreen_backend_launcher": "Display Helper", "kscreen_backend": "Display Helper",
-    "gmenudbusmenuproxy": "Menu Helper", "gmenudbusmenupr": "Menu Helper",
-    "xembedsniproxy": "Tray Icon Helper",
-    "server.py": "DevOS AI Core", "ai-core": "DevOS AI Core",
-    "devos-ai-core": "DevOS AI Core", "llama-server": "AI Model Engine",
-    "ollama": "AI Model Engine",
-}
+def _load_pretty():
+    names = {
+        "chrome": "Google Chrome", "google-chrome": "Google Chrome",
+        "chromium": "Chromium", "chromium-browser": "Chromium",
+        "firefox": "Firefox", "firefox-bin": "Firefox",
+        "code": "Visual Studio Code", "codium": "VSCodium", "cursor": "Cursor",
+        "gimp": "GIMP", "soffice.bin": "LibreOffice", "vlc": "VLC", "spotify": "Spotify",
+        "telegram-desktop": "Telegram", "discord": "Discord", "steam": "Steam",
+        "kwin_x11": "Desktop Window Manager",
+        "kwin_wayland": "Desktop Window Manager", "kwin": "Desktop Window Manager",
+        "taskman.py": "Task Manager", "taskman": "Task Manager",
+        "devos-ai-code-agent": "AI Code Agent",
+        "devos-about": "About this PC", "about.py": "About this PC",
+        "baloorunner": "File Search Helper", "baloo_file": "File Search Indexer",
+        "baloo_file_extractor": "File Search Indexer",
+        "kdeconnect-indicator": "Phone Link", "kdeconnect-handler": "Phone Link",
+        "kglobalacceld": "Keyboard Shortcuts", "kglobalaccel5": "Keyboard Shortcuts",
+        "kglobalaccel6": "Keyboard Shortcuts",
+        "knighttimed": "Night Light", "knighttime": "Night Light",
+        "devos-portal-fc": "App Permissions Helper",
+        "xdg-desktop-portal-kde": "App Permissions Helper",
+        "xdg-desktop-portal": "App Permissions Helper",
+        "notify-send": "Notification",
+        "power_settings.py": "Power & sleep", "power_settings": "Power & sleep",
+        "devos-power": "Power & sleep",
+        "devos-tray-overflow": "System Tray", "optimizer.py": "PC Optimizer",
+        "devos-optimizer": "PC Optimizer", "security_center.py": "Security",
+        "dashboard_server.py": "Dashboard",
+        "devos-dashboard": "Dashboard", "pipeline_gui.py": "AI Pipeline",
+        "assistant.py": "DevOS AI",
+        "ksmserver": "Session",
+        "kded6": "Desktop Services", "kded5": "Desktop Services",
+        "polkit-kde-authentication-agent-1": "Permission Prompt",
+        "polkit-kde-authentication-agent": "Permission Prompt",
+        "polkit-kde-auth": "Permission Prompt",
+        "xorg": "Display Server", "Xorg": "Display Server",
+        "kaccess": "Accessibility",
+        "org_kde_powerdevil": "Power Manager", "powerdevil": "Power Manager",
+        "kactivitymanagerd": "Activity Manager", "kactivitymanage": "Activity Manager",
+        "kscreen_backend_launcher": "Display Helper", "kscreen_backend": "Display Helper",
+        "gmenudbusmenuproxy": "Menu Helper", "gmenudbusmenupr": "Menu Helper",
+        "xembedsniproxy": "Tray Icon Helper",
+        "server.py": "DevOS AI Core", "ai-core": "DevOS AI Core",
+        "devos-ai-core": "DevOS AI Core", "llama-server": "AI Model Engine",
+        "ollama": "AI Model Engine",
+    }
+    try:
+        from app_friendly_names import ALIASES
+        for agent, (label, _icon, _generic) in ALIASES.items():
+            names.setdefault(agent, label)
+            if agent.startswith("org.kde."):
+                names.setdefault(agent.rsplit(".", 1)[-1], label)
+    except ImportError:
+        pass
+    return names
+
+
+PRETTY = _load_pretty()
 
 # Full cmdline path fragments → friendly name (beats bare server.py).
 CMDLINE_PRETTY = (
@@ -141,10 +147,13 @@ CMDLINE_PRETTY = (
     ("/optimizer/optimizer.py", "PC Optimizer"),
     ("/security/security_center.py", "Security"),
     ("/assistant/assistant.py", "DevOS AI"),
+    ("/assistant/listen.py", "DevOS AI Hands-free"),
     ("/taskman/taskman.py", "Task Manager"),
     ("/power/power_settings.py", "Power & sleep"),
     ("/notes/notes.py", "Notes"),
     ("/broadband/broadband.py", "Internet Dial-up"),
+    ("mariadbd", "MariaDB"),
+    ("mysqld", "MariaDB"),
 )
 
 STATE_NAMES = {
@@ -314,6 +323,15 @@ def pretty_name(comm):
     cleaned = re.sub(r"[\._-]?(service|daemon|helper)$", "", lower, flags=re.I)
     if cleaned in PRETTY:
         return PRETTY[cleaned]
+    try:
+        from app_friendly_names import friendly_app_name, looks_technical
+        label = friendly_app_name(key)
+        if label and not looks_technical(label):
+            return label
+    except ImportError:
+        pass
+    if "/" in key or key.startswith("org."):
+        return "App"
     if key[:1].islower():
         return key[0].upper() + key[1:]
     return key
@@ -1484,64 +1502,79 @@ def run_gui():
             w = self.width()
             h = self.height()
             rect = QtCore.QRectF(12, 12, w - 24, h - 36)
-            
+            light = True
+            try:
+                from devos_appearance import current_mode
+                light = current_mode() in ("light", "mac-light")
+            except Exception:
+                pass
+            face = "#ffffff" if light else "#0f172a"
+            stroke = "#e2e8f0" if light else "#1e293b"
+            grid = "#f1f5f9" if light else "#1e293b"
+            line = "#0284c7" if light else "#38bdf8"
+            label = "#64748b" if light else "#94a3b8"
+
             # Background card
             bg_path = QtGui.QPainterPath()
             bg_path.addRoundedRect(QtCore.QRectF(0, 0, w, h), 8, 8)
-            painter.fillPath(bg_path, QtGui.QColor("#ffffff"))
-            painter.setPen(QtGui.QColor("#e2e8f0"))
+            painter.fillPath(bg_path, QtGui.QColor(face))
+            painter.setPen(QtGui.QColor(stroke))
             painter.drawPath(bg_path)
-            
+
             # Subtle Grid lines
-            painter.setPen(QtGui.QColor("#f1f5f9"))
+            painter.setPen(QtGui.QColor(grid))
             for step in range(1, 4):
                 y = rect.top() + rect.height() * step / 4.0
                 painter.drawLine(QtCore.QPointF(rect.left(), y), QtCore.QPointF(rect.right(), y))
-                
+
             peak = 100.0
             if self.auto:
                 peak = max(self.points) if self.points else 1.0
                 peak = max(peak * 1.25, 1.0)
-                
+
             if len(self.points) >= 2:
                 span = rect.width() / 59.0
                 offset = 60 - len(self.points)
-                
+
                 # Build path for gradient fill and line
                 line_path = QtGui.QPainterPath()
                 first_x = rect.left() + offset * span
                 first_y = rect.bottom() - rect.height() * (min(self.points[0], peak) / peak)
                 line_path.moveTo(first_x, first_y)
-                
+
                 poly_path = QtGui.QPainterPath()
                 poly_path.moveTo(first_x, rect.bottom())
                 poly_path.lineTo(first_x, first_y)
-                
+
                 for index, value in enumerate(self.points[1:], start=1):
                     x = rect.left() + (index + offset) * span
                     y = rect.bottom() - rect.height() * (min(value, peak) / peak)
                     line_path.lineTo(x, y)
                     poly_path.lineTo(x, y)
-                    
+
                 last_x = rect.left() + (len(self.points) - 1 + offset) * span
                 poly_path.lineTo(last_x, rect.bottom())
                 poly_path.closeSubpath()
-                
+
                 # Gradient fill under the curve
                 gradient = QtGui.QLinearGradient(0, rect.top(), 0, rect.bottom())
-                gradient.setColorAt(0, QtGui.QColor(0, 103, 192, 70))
-                gradient.setColorAt(1, QtGui.QColor(0, 103, 192, 5))
+                c = QtGui.QColor(line)
+                c.setAlpha(70)
+                gradient.setColorAt(0, c)
+                c2 = QtGui.QColor(line)
+                c2.setAlpha(5)
+                gradient.setColorAt(1, c2)
                 painter.fillPath(poly_path, gradient)
-                
+
                 # Crisp Fluent stroke line
-                pen = QtGui.QPen(QtGui.QColor("#0067c0"), 2)
+                pen = QtGui.QPen(QtGui.QColor(line), 2)
                 pen.setCapStyle(QtCore.Qt.RoundCap)
                 pen.setJoinStyle(QtCore.Qt.RoundJoin)
                 painter.setPen(pen)
                 painter.drawPath(line_path)
-                
+
             # Footer & axis labels
-            painter.setPen(QtGui.QColor("#94a3b8"))
+            painter.setPen(QtGui.QColor(label))
             font = painter.font()
             font.setPointSize(9)
             painter.setFont(font)
@@ -1660,13 +1693,13 @@ def run_gui():
             side_layout.setContentsMargins(8, 12, 8, 12)
             self.nav = []
             pages = (
-                ("processes", "▤   Processes"),
-                ("performance", "📈  Performance"),
-                ("history", "⏱   App history"),
-                ("startup", "🚀  Startup apps"),
-                ("users", "👤  Users"),
-                ("details", "📋  Details"),
-                ("services", "⚙   Services"),
+                ("processes", "Processes"),
+                ("performance", "Performance"),
+                ("history", "App history"),
+                ("startup", "Startup apps"),
+                ("users", "Users"),
+                ("details", "Details"),
+                ("services", "Services"),
             )
             self.stack = QtWidgets.QStackedWidget()
             for index, (key, label) in enumerate(pages):
@@ -1851,6 +1884,7 @@ def run_gui():
             layout = QtWidgets.QVBoxLayout(page)
             self.history_note = QtWidgets.QLabel("")
             self.history_note.setObjectName("muted")
+            self.history_note.setWordWrap(True)
             clear = QtWidgets.QPushButton("Delete usage history")
             clear.setFlat(True)
             clear.clicked.connect(self.clear_history)
@@ -2035,14 +2069,25 @@ def run_gui():
             snap = self.snap
 
             def card(title, value, sub=""):
-                sub_html = "<div style='font-size:11px; color:#6b7280; margin-top:2px;'>%s</div>" % sub if sub else ""
+                light = True
+                try:
+                    from devos_appearance import current_mode
+                    light = current_mode() in ("light", "mac-light")
+                except Exception:
+                    pass
+                bg = "#ffffff" if light else "#111827"
+                border = "#e2e8f0" if light else "#1e293b"
+                muted = "#64748b" if light else "#94a3b8"
+                ink = "#0f172a" if light else "#f8fafc"
+                sub_c = "#6b7280" if light else "#94a3b8"
+                sub_html = "<div style='font-size:11px; color:%s; margin-top:2px;'>%s</div>" % (sub_c, sub) if sub else ""
                 return """
-                <td style='background:#ffffff; border:1px solid #e2e8f0; border-radius:6px; padding:10px 14px;'>
-                    <div style='font-size:10px; font-weight:700; color:#64748b; text-transform:uppercase; letter-spacing:0.5px;'>%s</div>
-                    <div style='font-size:18px; font-weight:700; color:#0f172a; margin-top:2px;'>%s</div>
+                <td style='background:%s; border:1px solid %s; border-radius:6px; padding:10px 14px;'>
+                    <div style='font-size:10px; font-weight:700; color:%s; text-transform:uppercase; letter-spacing:0.5px;'>%s</div>
+                    <div style='font-size:18px; font-weight:700; color:%s; margin-top:2px;'>%s</div>
                     %s
                 </td>
-                """ % (title, value, sub_html)
+                """ % (bg, border, muted, title, ink, value, sub_html)
 
             if key == "cpu":
                 cpu = snap["cpu"]
@@ -2083,10 +2128,32 @@ def run_gui():
                                     float(row.get("memory_mb") or 0)))
                 top.sort(key=lambda item: item[1], reverse=True)
                 heavy = [(name, mb) for name, mb in top if mb >= 50][:5]
+
+                def _short_mem_label(raw):
+                    text = re.sub(r"\s+", " ", str(raw or "App")).strip()
+                    # Never show full Chrome/renderer argv in the summary list.
+                    if " --type=" in text or text.startswith("/") or len(text) > 48:
+                        low = text.lower()
+                        if "chrome" in low or "chromium" in low:
+                            return "Google Chrome"
+                        if "mariadb" in low or "mysqld" in low:
+                            return "MariaDB"
+                        if "devos" in low and "ai-core" in low:
+                            return "DevOS AI Core"
+                        if "assistant" in low:
+                            return "DevOS AI"
+                        base = os.path.basename(text.split(" ", 1)[0])
+                        return (base[:40] + "…") if len(base) > 40 else (base or "App")
+                    return text if len(text) <= 42 else (text[:40] + "…")
+
+                def _esc(s):
+                    return (str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                            .replace('"', "&quot;"))
+
                 top_html = "".join(
                     "<tr><td style='padding:2px 8px 2px 0;color:#334155;'>%s</td>"
                     "<td style='padding:2px 0;text-align:right;color:#0f172a;font-weight:600;'>%s</td></tr>"
-                    % (name, fmt_mb(mb))
+                    % (_esc(_short_mem_label(name)), fmt_mb(mb))
                     for name, mb in heavy
                 ) or "<tr><td style='color:#64748b;'>No large apps right now</td></tr>"
                 html = """
@@ -2104,8 +2171,8 @@ def run_gui():
                     </p>
                     <table width='100%%' cellspacing='0' cellpadding='0'>%s</table>
                     <p style='color:#6b7280;font-size:12px;margin:10px 2px 0;'>
-                      Memory %% is RAM — not your SSD. Chrome tabs and DevOS AI Core (local model)
-                      often use several GB. End task on those to free RAM; Cached is reused automatically.
+                      This PC has plenty of free RAM. AI answer speed depends on the on-device
+                      model, not Memory %%. Chrome and MariaDB here are normal; Cached is reused automatically.
                     </p>
                 </div>
                 """ % (
@@ -2173,7 +2240,19 @@ def run_gui():
                 )
                 self.perf_facts.setText(html)
             elif key == "gpu-none":
-                self.perf_facts.setText("<div style='color:#64748b; font-size:13px; padding:12px; background:#ffffff; border:1px solid #e2e8f0; border-radius:6px;'>No dedicated graphics utilization sensor detected.</div>")
+                _light = True
+                try:
+                    from devos_appearance import current_mode
+                    _light = current_mode() in ("light", "mac-light")
+                except Exception:
+                    pass
+                _bg = "#ffffff" if _light else "#111827"
+                _bd = "#e2e8f0" if _light else "#1e293b"
+                _ink = "#64748b" if _light else "#94a3b8"
+                self.perf_facts.setText(
+                    "<div style='color:%s; font-size:13px; padding:12px; background:%s; border:1px solid %s; border-radius:6px;'>"
+                    "No dedicated graphics utilization sensor detected.</div>" % (_ink, _bg, _bd)
+                )
             else:
                 card_name = key.split("-", 1)[1]
                 gpu = next((item for item in snap["gpus"] if item["card"] == card_name), None)

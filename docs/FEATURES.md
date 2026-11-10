@@ -62,8 +62,8 @@ contain these changes.
   separate browser profiles and resource limits for agent browser sessions.
 - Git/Git LFS/GitHub CLI, Node/npm, Python/pip/venv/pipx, PHP/Composer, MariaDB,
   PostgreSQL, Redis, SQLite, Podman and terminal tools. PHP follows Ubuntu's package
-  version. VS Code and Chrome are fetched during the build, with online helpers
-  if they are absent; check a specific image's package manifest for inclusion.
+  version. Select VS Code and Chrome in the installer or DevOS Features to
+  download them. The branded DevOS Browser is built into the base image.
 - `devos serve` local project starters and optional online scaffolding for Laravel,
   Next.js, PHP, WordPress and FastAPI; service status and public sharing helpers.
 - Phone Link browser pairing and KDE Connect; DevOS Share public tunnels;
@@ -86,7 +86,9 @@ in Wine compatibility; a Windows VM requires your own ISO and licence.
 The installer offers Normal, Professional, Student, Development, Creator, Gamer,
 Business, Family, Normal + Islamic and Premium. DevOS Features also supports
 Windows-like, Minimal and Choose later. Normal filters heavier apps by hardware;
-Premium selects the catalog except opt-in family controls. Presets can be edited.
+Premium selects the catalog except opt-in family controls. The installer starts
+with optional apps unchecked. Applying a preset fills the choices, which can then
+be edited individually.
 
 The following **97 entries** come from
 [`components/features/feature_catalog.py`](../components/features/feature_catalog.py).
@@ -113,7 +115,7 @@ delivery contract. Check `devos features list` on the installed system for state
 
 | Feature ID | Feature | Delivery / requirement |
 |---|---|---|
-| `chrome` | Google Chrome | Build-time vendor download; online helper if absent |
+| `chrome` | Google Chrome | Optional vendor download after installation |
 | `edge` | Microsoft Edge | Download from Flathub; catalog recommends 4 GB RAM |
 | `firefox` | Firefox | Download from Flathub |
 | `brave` | Brave | Download from Flathub; catalog recommends 4 GB RAM |
@@ -180,7 +182,7 @@ delivery contract. Check `devos features list` on the installed system for state
 | `chatgpt` | ChatGPT Desktop & Coding Agent | Download from Flathub |
 | `claude` | Claude Desktop | Download from Flathub |
 | `codex` | OpenAI Codex CLI | `devos-install-codex` (npm `@openai/codex`) |
-| `vscode` | Visual Studio Code | Build-time vendor download; online helper if absent |
+| `vscode` | Visual Studio Code | Optional vendor download after installation |
 | `devservers` | Web servers & databases | ISO package/component |
 | `postman` | Postman | Download from Flathub; catalog recommends 6 GB RAM |
 | `dbeaver` | DBeaver | Download from Flathub; catalog recommends 6 GB RAM |
@@ -268,7 +270,7 @@ delivery contract. Check `devos features list` on the installed system for state
 
 | Gap | What DevOS does now |
 |---|---|
-| Offline apps | ISO package list `18-offline-essentials` ships LibreOffice, Thunderbird, GIMP, Inkscape, PDF tools, Remmina, Timeshift, etc. Heavy Flatpaks (Steam, ONLYOFFICE, …) still download when selected. |
+| Offline apps | The full ISO archives LibreOffice, GIMP, Inkscape, PDF tools, Remmina, Timeshift and other optional DEBs. Selected apps install from the archive after first boot. Flatpaks including Thunderbird, Steam and ONLYOFFICE download when selected. |
 | Windows / Android | Wine + doctor + native Flatpak/web first; Waydroid image still downloads once (~850 MB). Not a full Windows/Android replacement. |
 | Hardware certification | `devos qualify` / `devos-hw-qualify` reports Secure Boot, GPU, RAM, audio/network for **this PC**. Not a claim that every GPU is certified. |
 | 2027 OS pieces | NPU detect + preference file (`~/.config/devos/npu-schedule.json`); Smart Shell via `devos heal` (+ optional bash hook); Vault remains folder LUKS (not full-disk). |

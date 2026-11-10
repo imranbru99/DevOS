@@ -23,6 +23,7 @@ import shutil
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -40,9 +41,12 @@ MIMEAPPS = "/etc/xdg/mimeapps.list"
 # the same name here wins over /usr/share/applications (XDG_DATA_DIRS order),
 # and "Hidden=true" makes the menu treat the app as removed.
 OVERRIDE_DIR = "/usr/local/share/applications"
+SYSTEM_APP_DIR = "/usr/share/applications"
 MARKER_DIR = "/etc/devos/features.d"
 HIDDEN_ENTRY = "[Desktop Entry]\nType=Application\nHidden=true\nX-DevOS-Hidden=true\n"
-GS_KEYS = ("packagechooser_features", "features")
+INSTALLER_CHOICE_KEY = "devos_selected_features"
+OFFLINE_REPO = Path("/usr/local/share/devos/offline-apt")
+OFFLINE_VENDOR = {"chrome": "google-chrome-stable", "vscode": "code"}
 
 # Removing a feature must never take the desktop, the installer or DevOS
 # itself with it (apt removes everything that depends on a purged package).
@@ -51,7 +55,7 @@ PROTECTED = {
     "systemsettings", "network-manager", "plasma-nm", "python3", "python3-pyqt5", "systemd", "sudo",
     "linux-image-generic", "linux-generic", "grub-common", "calamares", "flatpak", "pipewire",
     "xserver-xorg", "dbus", "udev", "okular", "kate", "ark", "gwenview", "falkon",
-}
+} | catalog.BASE_PACKAGES
 
 # Phone Link (8765), KDE Connect and the DevOS AI API (key-protected) answer
 # only on home networks when the firewall is on.
@@ -158,11 +162,65 @@ def builtin_on(feature: dict) -> bool:
 
 
 def _hidden(desktop: str) -> bool:
-    try:
-        with open(os.path.join(OVERRIDE_DIR, desktop), encoding="utf-8") as handle:
-            return "X-DevOS-Hidden=true" in handle.read()
-    except OSError:
-        return False
+    for directory in (OVERRIDE_DIR, SYSTEM_APP_DIR):
+        try:
+            with open(os.path.join(directory, desktop), encoding="utf-8") as handle:
+                return "X-DevOS-Hidden=true" in handle.read()
+        except FileNotFoundError:
+            continue
+    return False
+
+
+def set_desktops_visibility(desktops, on: bool) -> None:
+    """Show or hide Start-menu .desktop basenames under /usr/local/share/applications."""
+    os.makedirs(OVERRIDE_DIR, exist_ok=True)
+    hidden_keys = {"Hidden=true", "NoDisplay=true", "X-DevOS-Hidden=true"}
+
+    def _strip_hidden(text: str) -> str:
+        return "".join(
+            line for line in text.splitlines(keepends=True)
+            if line.strip() not in hidden_keys
+        )
+
+    for desktop in desktops or []:
+        path = os.path.join(OVERRIDE_DIR, desktop)
+        backup = path + ".devos-feature-backup"
+        if on:
+            if not _hidden(desktop):
+                continue
+            if os.path.lexists(backup):
+                os.replace(backup, path)
+                continue
+            # Prefer DevOS/debrand override (friendly Name=) over upstream.
+            template = None
+            for directory in (OVERRIDE_DIR, SYSTEM_APP_DIR):
+                candidate = os.path.join(directory, desktop)
+                try:
+                    text = Path(candidate).read_text(encoding="utf-8")
+                except FileNotFoundError:
+                    continue
+                # Skip our tiny hide stub — keep looking for a real launcher.
+                if text.strip() == HIDDEN_ENTRY.strip() or text.count("\n") < 4:
+                    continue
+                template = text
+                break
+            if template is None:
+                continue
+            Path(path).write_text(_strip_hidden(template), encoding="utf-8")
+        else:
+            if os.path.lexists(path) and not _hidden(desktop) and not os.path.lexists(backup):
+                os.replace(path, backup)
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(HIDDEN_ENTRY)
+
+
+def set_builtin_visibility(feature: dict, on: bool) -> None:
+    set_desktops_visibility((feature.get("builtin") or {}).get("desktop", []), on)
+
+
+def set_feature_menu_visibility(feature: dict, on: bool) -> None:
+    """Hide every launcher this feature owns when it was not chosen."""
+    set_desktops_visibility(catalog.feature_desktops(feature), on)
 
 
 def set_builtin(feature: dict, on: bool) -> bool:
@@ -172,15 +230,7 @@ def set_builtin(feature: dict, on: bool) -> bool:
         ok = run(cmd) == 0 and ok
     if on and not ok:
         return False
-    os.makedirs(OVERRIDE_DIR, exist_ok=True)
-    for desktop in built.get("desktop", []):
-        path = os.path.join(OVERRIDE_DIR, desktop)
-        if on:
-            if _hidden(desktop):
-                os.remove(path)
-        else:
-            with open(path, "w", encoding="utf-8") as handle:
-                handle.write(HIDDEN_ENTRY)
+    set_feature_menu_visibility(feature, on)
     marker = os.path.join(MARKER_DIR, feature["id"] + ".on")
     if on:
         os.makedirs(MARKER_DIR, exist_ok=True)
@@ -190,8 +240,28 @@ def set_builtin(feature: dict, on: bool) -> bool:
     return ok
 
 
+# One Windows App only: the ISO ships /usr/share/applications/devos-web-winapp.desktop.
+# Never also write /usr/local/share/applications/devos-web-winapp.desktop (that made
+# Kicker show two "Windows App" rows). Chrome's PWA copy is hidden by chrome_start_menu.
+WINAPP_DESKTOP = "devos-web-winapp.desktop"
+WINAPP_SYSTEM_PATH = os.path.join(SYSTEM_APP_DIR, WINAPP_DESKTOP)
+WINAPP_OVERRIDE_PATH = os.path.join(OVERRIDE_DIR, WINAPP_DESKTOP)
+
+
 def webapp_path(feature: dict) -> str:
+    if feature.get("id") == "winapp":
+        return WINAPP_SYSTEM_PATH
     return os.path.join(OVERRIDE_DIR, "devos-web-%s.desktop" % feature["id"])
+
+
+def webapp_enabled(feature: dict) -> bool:
+    try:
+        entry = Path(webapp_path(feature)).read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return "X-DevOS-WebApp=true" in entry and not re.search(
+        r"^(?:Hidden|NoDisplay)\s*=\s*true\s*$", entry, re.MULTILINE | re.IGNORECASE
+    )
 
 
 CHROME_POLICY = "/etc/opt/chrome/policies/managed/devos-webapps.json"
@@ -201,21 +271,60 @@ def webapp_entry(feature: dict) -> str:
     """First-launch Start-menu entry for a vendor web app. devos-pwa opens the
     app Chrome installed from CHROME_POLICY and then hides this entry in
     favour of Chrome's own launcher, which carries the vendor's real icon.
-    Windows App keeps its DevOS companion entry for session reminders.
-    A Cloud PC connection stays in that app because Chrome's launcher keeps
-    the new window there."""
+    Windows App keeps a single DevOS companion entry (system path only).
+    A Cloud PC connection stays in that app because the launcher uses the
+    installed PWA with navigation capturing — same as Microsoft's Windows App."""
     web = feature["webapp"]
     names = "|".join(web.get("names") or [feature["name"].split(" (")[0]])
-    command = ('/usr/local/bin/devos-windows-app' if feature['id'] == 'winapp' else
-               f'/usr/local/bin/devos-pwa {web["url"]} "{names}" devos-web-{feature["id"]}.desktop')
+    if feature["id"] == "winapp":
+        # Short Comment: long about text used to look like a second, different app.
+        return (
+            "[Desktop Entry]\nType=Application\n"
+            "Name=Windows App\n"
+            "GenericName=Microsoft Cloud PC\n"
+            "Comment=Windows 365, Azure Virtual Desktop and remote apps\n"
+            "Exec=/usr/local/bin/devos-windows-app\n"
+            "Icon=devos-web-winapp\n"
+            "StartupWMClass=chrome-windows.cloud.microsoft__-Default\n"
+            "Categories=Network;Office;\nTerminal=false\n"
+            "Keywords=windows;cloud;pc;rdp;azure;virtual desktop;365;\n"
+            "X-DevOS-WebApp=true\n"
+        )
+    command = f'/usr/local/bin/devos-pwa {web["url"]} "{names}" devos-web-{feature["id"]}.desktop'
     return (
         "[Desktop Entry]\nType=Application\n"
         f"Name={feature['name'].split(' (')[0]}\n"
         f"Comment={feature['about']}\n"
         f"Exec={command}\n"
-        f"Icon={'devos-web-winapp' if feature['id'] == 'winapp' else web.get('icon', 'applications-internet')}\n"
+        f"Icon={web.get('icon', 'applications-internet')}\n"
         "Categories=Network;Office;\nTerminal=false\nX-DevOS-WebApp=true\n"
     )
+
+
+def dedupe_windows_app_menu() -> None:
+    """Ensure only one Windows App Start-menu entry exists."""
+    # Prefer the ISO/system companion; drop the Features override duplicate.
+    if os.path.isfile(WINAPP_SYSTEM_PATH) and os.path.isfile(WINAPP_OVERRIDE_PATH):
+        try:
+            os.remove(WINAPP_OVERRIDE_PATH)
+        except OSError:
+            try:
+                with open(WINAPP_OVERRIDE_PATH, "w", encoding="utf-8") as handle:
+                    handle.write(HIDDEN_ENTRY)
+            except OSError:
+                pass
+    try:
+        from browser.chrome_start_menu import clean_chrome_start_menu
+        clean_chrome_start_menu()
+    except Exception:
+        pass
+    try:
+        from cloudpc.launchers import integrate
+        apps = os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")),
+                            "applications")
+        integrate(apps)
+    except Exception:
+        pass
 
 
 def webapp_policy(installed_urls) -> dict:
@@ -234,8 +343,9 @@ def webapp_policy(installed_urls) -> dict:
 
 
 def write_webapp_policy(path: str = CHROME_POLICY) -> None:
+    chosen = set(read_choice() or [])
     urls = [f["webapp"]["url"] for f in catalog.FEATURES
-            if f.get("webapp") and os.path.exists(webapp_path(f))]
+            if f["id"] in chosen and f.get("webapp") and webapp_enabled(f)]
     if not urls:
         try:
             os.remove(path)
@@ -259,16 +369,20 @@ def detect_hit(spec: str) -> bool:
 
 def is_installed(feature: dict) -> bool:
     if feature.get("webapp"):
-        return os.path.exists(webapp_path(feature))
+        return webapp_enabled(feature)
     detect = feature.get("detect") or []
+    has_pkg = bool(feature.get("apt") or feature.get("flatpak") or feature.get("script") or detect)
+    # Opt-in builtins stay off until Features enables them (marker), even if a
+    # wrapper script exists on the ISO.
+    if feature.get("builtin") and catalog.optin(feature) and not builtin_on(feature):
+        return False
     if detect and any(detect_hit(p) for p in detect):
-        if feature.get("builtin") and not builtin_on(feature):
-            return False
         return True
-    if feature.get("builtin") and not (
-        feature.get("apt") or feature.get("flatpak") or feature.get("script") or detect
-    ):
+    # Pure builtins (no package): menu visibility is the install state.
+    if feature.get("builtin") and not has_pkg:
         return builtin_on(feature)
+    # Package-backed apps: follow apt/flatpak — not whether the menu is hidden.
+    # (Hiding Calc while LibreOffice is still on disk must not block first-boot purge.)
     probes = feature["apt"] or ([] if feature["flatpak"] else feature["remove"][:1])
     if probes and not all(deb_installed(p) for p in probes):
         return False
@@ -303,6 +417,25 @@ def removal_hits_protected(simulation: str):
 # ---------------------------------------------------------------- add / remove
 
 _apt_updated = False
+_offline_updated = False
+
+
+def install_from_media(packages) -> bool:
+    """Try only the image's local APT index, keeping network APT lists separate."""
+    global _offline_updated
+    source = OFFLINE_REPO / "devos.list"
+    if not source.is_file():
+        return False
+    lists = Path(STATE_DIR) / "offline-lists"
+    lists.mkdir(parents=True, exist_ok=True)
+    apt = [
+        "apt-get", "-o", f"Dir::Etc::sourcelist={source}",
+        "-o", "Dir::Etc::sourceparts=-", "-o", f"Dir::State::lists={lists}",
+        "-o", "Acquire::Languages=none",
+    ]
+    if not _offline_updated:
+        _offline_updated = run([*apt, "update"]) == 0
+    return _offline_updated and run([*apt, "install", "-y", "--no-install-recommends", *packages]) == 0
 
 
 def apt_update() -> bool:
@@ -320,6 +453,15 @@ def add_feature(feature: dict) -> bool:
     ):
         return set_builtin(feature, True)
     if feature.get("webapp"):
+        if feature["id"] == "winapp":
+            # Single menu entry only — never create a second .desktop under OVERRIDE_DIR.
+            os.makedirs(SYSTEM_APP_DIR, exist_ok=True)
+            with open(WINAPP_SYSTEM_PATH, "w", encoding="utf-8") as handle:
+                handle.write(webapp_entry(feature))
+            dedupe_windows_app_menu()
+            write_webapp_policy()
+            after_install(feature)
+            return True
         os.makedirs(OVERRIDE_DIR, exist_ok=True)
         with open(webapp_path(feature), "w", encoding="utf-8") as handle:
             handle.write(webapp_entry(feature))
@@ -328,7 +470,7 @@ def add_feature(feature: dict) -> bool:
     ok = True
     if feature["eula"]:
         subprocess.run(["debconf-set-selections"], input=feature["eula"] + "\n", text=True)
-    if feature["apt"]:
+    if feature["apt"] and not install_from_media(feature["apt"]):
         if not apt_update():
             return False
         pkgs = apt_candidates(feature["apt"])
@@ -336,9 +478,14 @@ def add_feature(feature: dict) -> bool:
     if ok and feature["flatpak"]:
         ok = run(["flatpak", "install", "--system", "-y", "--noninteractive", "flathub"] + feature["flatpak"]) == 0
     if ok and feature["script"]:
+        vendor = OFFLINE_VENDOR.get(feature["id"])
+        if vendor and not deb_installed(vendor):
+            install_from_media([vendor])
         ok = run(["/bin/bash", feature["script"]]) == 0
     if ok and feature.get("builtin"):
         ok = set_builtin(feature, True)
+    elif ok and catalog.feature_desktops(feature):
+        set_feature_menu_visibility(feature, True)
     if ok:
         after_install(feature)
     return ok
@@ -351,13 +498,26 @@ def remove_feature(feature: dict, no_triggers: bool = False) -> bool:
     ):
         return set_builtin(feature, False)
     if feature.get("webapp"):
+        if feature["id"] == "winapp":
+            # Hide the single companion; do not leave an OVERRIDE duplicate behind.
+            try:
+                with open(WINAPP_SYSTEM_PATH, "w", encoding="utf-8") as handle:
+                    handle.write(HIDDEN_ENTRY)
+            except OSError:
+                pass
+            try:
+                os.remove(WINAPP_OVERRIDE_PATH)
+            except OSError:
+                pass
+            write_webapp_policy()
+            return True
         try:
             os.remove(webapp_path(feature))
         except OSError:
             pass
         write_webapp_policy()
         return True
-    pkgs = [p for p in feature["remove"] if deb_installed(p)]
+    pkgs = [p for p in feature["remove"] if p.split(":", 1)[0] not in PROTECTED and deb_installed(p)]
     if pkgs:
         sim = subprocess.run(["apt-get", "-s", "purge"] + pkgs, capture_output=True, text=True).stdout
         hits = removal_hits_protected(sim)
@@ -373,9 +533,12 @@ def remove_feature(feature: dict, no_triggers: bool = False) -> bool:
             return False
     for app in feature["flatpak"]:
         if flatpak_installed(app):
-            run(["flatpak", "uninstall", "--system", "-y", "--noninteractive", app])
+            if run(["flatpak", "uninstall", "--system", "-y", "--noninteractive", app]) != 0:
+                return False
     if feature.get("builtin"):
         set_builtin(feature, False)
+    elif catalog.feature_desktops(feature):
+        set_feature_menu_visibility(feature, False)
     after_remove(feature)
     return True
 
@@ -393,6 +556,8 @@ def after_install(feature: dict) -> None:
         with open("/usr/share/glib-2.0/schemas/90_devos-ibus.gschema.override", "w", encoding="utf-8") as handle:
             handle.write(IBUS_OVERRIDE)
         run(["glib-compile-schemas", "/usr/share/glib-2.0/schemas"])
+    elif feature["id"] == "winapp":
+        dedupe_windows_app_menu()
 
 
 def after_remove(feature: dict) -> None:
@@ -481,7 +646,11 @@ def apply(selected, remove_unselected: bool) -> bool:
 def _apply(selected, remove_unselected: bool) -> bool:
     have = installed_ids()
     todo = catalog.plan(selected, have)
-    if not remove_unselected:
+    if remove_unselected:
+        queued = read_state().get("removing", [])
+        removing = set(todo["remove"]) | (set(queued) - set(selected))
+        todo["remove"] = [f["id"] for f in catalog.FEATURES if f["id"] in removing]
+    else:
         todo["remove"] = []
     # DevOS's own tools switch on instantly and offline; doing them first means
     # Family Safety or prayer reminders don't wait behind gigabytes of downloads.
@@ -505,7 +674,7 @@ def _apply(selected, remove_unselected: bool) -> bool:
     for fid in missing:
         if fid not in failed:
             failed[fid] = "download or install failed"
-    write_state(running=False, current="", failed=failed, pending=missing, installed=installed)
+    write_state(running=False, current="", failed=failed, pending=missing, removing=[], installed=installed)
     if missing:
         enable_service()
     else:
@@ -513,16 +682,44 @@ def _apply(selected, remove_unselected: bool) -> bool:
     return not missing
 
 
-def selection_from_gs(path: str):
-    with open(path, encoding="utf-8") as handle:
-        data = json.load(handle)
-    for key in GS_KEYS:
-        if key in data:
-            value = data[key]
-            if isinstance(value, list):
-                value = ",".join(value)
-            return catalog.parse_selection(str(value))
-    return None
+def selection_from_gs(data: dict):
+    value = data.get(INSTALLER_CHOICE_KEY)
+    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+        value = ",".join(value)
+    return catalog.parse_selection(value) if isinstance(value, str) else None
+
+
+# Skel Desktop shortcuts tied to optional installer features (never core DevOS).
+DESKTOP_SHORTCUT_FEATURES = (
+    ("vscode", "devos-code.desktop"),
+    ("vlc", "vlc.desktop"),
+)
+
+
+def remove_unselected_desktop_shortcuts(selected, username) -> None:
+    # The installer has just copied these exact files from /etc/skel.
+    # Leave edited or independently created shortcuts alone.
+    import pwd
+
+    skeleton = Path("/etc/skel/Desktop")
+    try:
+        desktop = Path(pwd.getpwnam(username).pw_dir) / "Desktop"
+    except (KeyError, TypeError):
+        desktop = None
+    selected_set = set(selected or [])
+    for feature, name in DESKTOP_SHORTCUT_FEATURES:
+        if feature in selected_set:
+            continue
+        template = skeleton / name
+        try:
+            if template.is_file():
+                if desktop is not None:
+                    shortcut = desktop / template.name
+                    if not shortcut.is_symlink() and shortcut.is_file() and shortcut.read_bytes() == template.read_bytes():
+                        shortcut.unlink()
+                template.unlink()
+        except OSError as exc:
+            log(f"Could not remove the unselected shortcut {template.name}: {exc}")
 
 
 def installer_plan(path: str) -> int:
@@ -533,8 +730,10 @@ def installer_plan(path: str) -> int:
     on first boot via devos-features.service instead.
     """
     try:
-        selected = selection_from_gs(path)
-    except (OSError, ValueError):
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+        selected = selection_from_gs(data) if isinstance(data, dict) else None
+    except (OSError, ValueError, TypeError):
         selected = None
     finally:
         # The global-storage dump can hold account details: never keep it.
@@ -543,18 +742,27 @@ def installer_plan(path: str) -> int:
         except OSError:
             pass
     if selected is None:
-        log("No feature choice from the installer; keeping the standard set.")
-        return 0
-    if not selected:
-        log("No apps were chosen. Keeping the apps already on this PC. "
-            "Install or remove any app later in DevOS Features, or ask DevOS AI.")
-        have = installed_ids()
-        write_choice(have)
-        write_state(running=False, pending=[], removing=[], failed={}, current="")
-        return 0
+        log("No valid optional app choices were saved. Only the base system will be installed.")
+        selected = []
+        data = {}
     write_choice(selected)
     have = installed_ids()
     todo = catalog.plan(selected, have)
+    selected_set = set(selected)
+    # Only what the user ticked stays in All Applications. Hide role/menu
+    # launchers (Calc, Fingerprint, GIMP, …) immediately — do not wait for apt purge.
+    for feature in catalog.FEATURES:
+        if feature["id"] in catalog.BASE_FEATURE_IDS:
+            continue
+        on = feature["id"] in selected_set
+        if feature.get("webapp"):
+            if not on and webapp_enabled(feature):
+                remove_feature(feature)
+        elif catalog.feature_desktops(feature) or feature.get("builtin"):
+            # First boot exposes pending apps only after their setup succeeds.
+            set_feature_menu_visibility(feature, on and feature["id"] in have)
+    write_webapp_policy()
+    remove_unselected_desktop_shortcuts(selected, data.get("username"))
     write_state(
         running=False,
         pending=todo["add"],

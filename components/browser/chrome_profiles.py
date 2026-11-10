@@ -236,7 +236,7 @@ def update_google_chrome_desktop(home_dir, all_profiles):
     devos_bin = (
         os.path.join(home_dir, ".local/bin/devos-browser")
         if os.path.isfile(os.path.join(home_dir, ".local/bin/devos-browser"))
-        else "devos-browser"
+        else "/usr/local/bin/devos-browser"
     )
 
     action_keys = ["new-window", "new-private-window", "new-guest-window"]
@@ -326,7 +326,7 @@ def sync_all_profiles(home_dir=None):
     devos_bin = (
         os.path.join(home_dir, ".local/bin/devos-browser")
         if os.path.isfile(os.path.join(home_dir, ".local/bin/devos-browser"))
-        else "devos-browser"
+        else "/usr/local/bin/devos-browser"
     )
 
     # Build complete desktop actions for switching to any profile or guest mode
@@ -473,15 +473,22 @@ MimeType=application/pdf;application/rdf+xml;application/rss+xml;application/xht
     with open(user_desktop, "w", encoding="utf-8") as f:
         f.write(base_content)
 
-    # Ensure com.google.Chrome.desktop symlinks to google-chrome.desktop so pinned launcher unifies in-place
+    # WM_CLASS / pin alias only — never a second Start-menu tile (symlink to
+    # google-chrome.desktop made Kickoff list Chrome twice under G).
     com_chrome = os.path.join(apps_dir, "com.google.Chrome.desktop")
-    if not os.path.exists(com_chrome) or os.path.islink(com_chrome):
-        try:
-            if os.path.lexists(com_chrome):
-                os.remove(com_chrome)
-            os.symlink("google-chrome.desktop", com_chrome)
-        except OSError:
-            pass
+    try:
+        if os.path.lexists(com_chrome):
+            os.remove(com_chrome)
+        with open(com_chrome, "w", encoding="utf-8") as fh:
+            fh.write(
+                "[Desktop Entry]\nType=Application\nName=Google Chrome\n"
+                "NoDisplay=true\nHidden=true\nX-DevOS-Hidden=true\n"
+                f"Exec={devos_bin} %U\nIcon=google-chrome\n"
+                "StartupWMClass=google-chrome\nTerminal=false\n"
+                "Categories=Network;WebBrowser;\n"
+            )
+    except OSError:
+        pass
 
     # Ensure ~/.config/devos/chrome-policies/devos-familysafe.json exists with Guest mode enabled
     pol_dir = os.path.join(home_dir, ".config/devos/chrome-policies")
@@ -733,7 +740,9 @@ def sync_plasma_profile_launchers(home_dir=None, active_slugs=None):
         # Browser is open → hide idle Chrome pin; show each open profile avatar.
         seen = set()
         for slug in active:
-            if slug in seen or slug in {"default"}:
+            # Never skip "default" — that is a real profile slug when the
+            # user kept Google's Default profile name (Windows shows it too).
+            if slug in seen or slug == "guest":
                 continue
             desktop = f"chrome-{slug}.desktop"
             if not os.path.isfile(os.path.join(apps_dir, desktop)):
@@ -1323,9 +1332,16 @@ def watch_chrome_windows(home_dir=None, poll_interval=None):
                 and "windows app" not in w["title"].lower()
                 and "setting up" not in w["title"].lower()
             ]
-            cur_state = [(w["id"], w["title"]) for w in chrome_wins]
+            # Include WM class so we keep retagging until every window leaves
+            # google-chrome and gets chrome-<profile> (separate footer icons).
+            cur_state = [(w["id"], w["title"], w["wm_class"].lower()) for w in chrome_wins]
+            still_grouped = any(
+                "google-chrome" in (w["wm_class"] or "").lower()
+                and not (w["wm_class"] or "").lower().startswith("chrome-")
+                for w in chrome_wins
+            )
 
-            if cur_state != last_win_state:
+            if cur_state != last_win_state or still_grouped:
                 apply_window_profiles(home_dir)
                 last_win_state = cur_state
             # Idle longer when Chrome is not open.
@@ -1335,6 +1351,18 @@ def watch_chrome_windows(home_dir=None, poll_interval=None):
             sleep_for = poll_interval
 
         time.sleep(sleep_for)
+
+
+def class_for_profile_key(profile_key: str, home_dir=None) -> str:
+    """Return chrome-<slug> for a profile directory key (Default, Profile 1, …)."""
+    key = (profile_key or "").strip() or "Default"
+    if key.lower() == "guest":
+        return "chrome-guest"
+    home = home_dir or os.path.expanduser("~")
+    chrome_dir = os.path.join(home, ".config/google-chrome")
+    profiles = get_chrome_profiles(chrome_dir)
+    name = profiles.get(key) or key
+    return f"chrome-{slugify(name)}"
 
 
 if __name__ == "__main__":
@@ -1348,5 +1376,8 @@ if __name__ == "__main__":
     elif action == "watch":
         print("Starting DevOS Chrome Profile Watcher...")
         watch_chrome_windows()
+    elif action == "class-for":
+        key = sys.argv[2] if len(sys.argv) > 2 else "Default"
+        print(class_for_profile_key(key))
     else:
-        print(f"Unknown action: {action}. Use sync, apply, or watch.")
+        print(f"Unknown action: {action}. Use sync, apply, watch, or class-for.")

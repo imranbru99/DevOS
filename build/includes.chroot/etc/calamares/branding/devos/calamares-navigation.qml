@@ -182,9 +182,10 @@ Rectangle {
             color: "#cc020617"
             focus: true
             Keys.onEscapePressed: installWin.close()
+            // Backdrop must not dismiss — install is a deliberate confirm.
             MouseArea {
                 anchors.fill: parent
-                onClicked: installWin.close()
+                onClicked: {}
             }
 
             Rectangle {

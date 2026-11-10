@@ -8,4 +8,4 @@ X-KDE-PluginInfo-Author=DevOS
 X-KDE-PluginInfo-Version=1.0
 X-KDE-PluginInfo-Category=Desktop
 X-Plasma-MainScript=defaults
-X-KDE-fallbackPackage=org.kde.breezedark.desktop
+X-KDE-fallbackPackage=org.kde.breeze.desktop

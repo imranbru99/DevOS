@@ -24,15 +24,19 @@ ProgressBarForegroundColor=0x38bdf8
 MessageBelowAnimation=true
 
 [boot-up]
+UseFirmwareBackground=false
 UseEndAnimation=false
 
 [shutdown]
+UseFirmwareBackground=false
 UseEndAnimation=false
 
 [reboot]
+UseFirmwareBackground=false
 UseEndAnimation=false
 
 [updates]
+UseFirmwareBackground=false
 SuppressMessages=true
 ProgressBarShowPercentComplete=true
 UseProgressBar=true

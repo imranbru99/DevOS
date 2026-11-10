@@ -21,8 +21,8 @@ fi
 
 # Ensure AI backend is accessible
 AI_DIRS=(
-    "${HOME:-}/project/dev-os/components/ai-core"
     "/usr/local/share/devos/components/ai-core"
+    "${HOME:-}/project/dev-os/components/ai-core"
 )
 if ! ss -ltn 2>/dev/null | grep -q ':11434'; then
     for AD in "${AI_DIRS[@]}"; do
@@ -39,10 +39,10 @@ if [ -d "${REPO_COMPONENTS}" ]; then
     DIR="$(cd "${REPO_COMPONENTS}" && pwd)"
 elif [ -n "${DEVOS_COMPONENTS_DIR:-}" ] && [ -d "${DEVOS_COMPONENTS_DIR}/code-agent" ]; then
     DIR="${DEVOS_COMPONENTS_DIR}/code-agent"
-elif [ -d "${HOME:-}/project/dev-os/components/code-agent" ]; then
-    DIR="${HOME:-}/project/dev-os/components/code-agent"
-else
+elif [ -d /usr/local/share/devos/components/code-agent ]; then
     DIR="/usr/local/share/devos/components/code-agent"
+else
+    DIR="${HOME:-}/project/dev-os/components/code-agent"
 fi
 
 if [ $# -gt 0 ] && [ "$1" = "--cli" ]; then

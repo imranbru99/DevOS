@@ -794,11 +794,11 @@ def parse_social_post(text: str) -> Optional[Action]:
 
 def browser_command(browser: str, url: str, which: Callable) -> List[str]:
     if browser == "firefox":
-        cands = ["firefox", "devos-browser", "google-chrome-stable", "google-chrome", "xdg-open"]
+        cands = ["firefox", "devos-web-browser", "google-chrome-stable", "google-chrome", "xdg-open"]
     elif browser == "chrome":
-        cands = ["devos-browser", "google-chrome-stable", "google-chrome", "chromium", "xdg-open"]
+        cands = ["devos-web-browser", "google-chrome-stable", "google-chrome", "chromium", "xdg-open"]
     else:
-        cands = ["devos-browser", "google-chrome-stable", "google-chrome", "firefox", "xdg-open"]
+        cands = ["devos-web-browser", "google-chrome-stable", "google-chrome", "firefox", "xdg-open"]
     for c in cands:
         if which(c):
             return [c, url]
@@ -878,7 +878,7 @@ def scan_desktop_entries(dirs: List[str]) -> Dict[str, DesktopApp]:
 
 # DevOS names -> desktop ids, in preference order.
 APP_ALIASES = {
-    "chrome": ["devos-browser", "google-chrome", "com.google.Chrome"],
+    "chrome": ["google-chrome", "com.google.Chrome"],
     "browser": ["devos-browser", "google-chrome", "firefox", "org.kde.falkon"],
     "web browser": ["devos-browser", "google-chrome", "firefox"],
     "internet": ["devos-browser", "google-chrome"],
@@ -3065,7 +3065,7 @@ CLICK_TO_TYPE_TEXT = "Click where to type, then say it again."
 
 # Window classes of the apps we may type into (WM_CLASS, case-insensitive).
 APP_WMCLASS = {
-    "devos-browser": "google-chrome", "google-chrome": "google-chrome", "firefox": "firefox",
+    "devos-browser": "devos-web-browser", "google-chrome": "google-chrome", "firefox": "firefox",
     "devos-notepad": "notepad.py", "org.kde.konsole": "konsole", "konsole": "konsole", "org.kde.kate": "kate",
     "org.kde.kwrite": "kwrite", "libreoffice-writer": "libreoffice", "org.kde.kcalc": "kcalc",
     "org.kde.dolphin": "dolphin", "devos-thispc": "dolphin", "vlc": "vlc", "devos-code": "vscodium",

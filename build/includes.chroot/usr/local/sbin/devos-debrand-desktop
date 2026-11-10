@@ -91,11 +91,7 @@ RENAME = {
         "disk;partition;drive;format;volume;",
         None,
     ),
-    "org.kde.plasma.emojier": (
-        "Emoji Picker", "Emoji",
-        "emoji;emoticon;smiley;",
-        None,
-    ),
+    # Plasma Emojier is hidden — DevOS Emoji panel is the product surface when chosen.
     "org.kde.ConfigurePrinter": (
         "Printers", "Printer Settings",
         "printer;print;scanning;",
@@ -135,6 +131,16 @@ RENAME = {
         "Settings", "Control Panel",
         "settings;control panel;preferences;system;",
         None,
+    ),
+    "org.kde.krunner": (
+        "Search", "Search",
+        "search;find;krunner;launcher;",
+        "system-search",
+    ),
+    "krunner": (
+        "Search", "Search",
+        "search;find;krunner;launcher;",
+        "system-search",
     ),
     "org.kde.kfontview": (
         "Fonts", "Font Viewer",
@@ -272,6 +278,11 @@ RENAME = {
         "password;keepass;vault;security;credentials;",
         "keepassxc",
     ),
+    "org.kde.kamoso": (
+        "Camera", "Take photos and videos with your camera",
+        "camera;webcam;video;photo;kamoso;",
+        "camera-web",
+    ),
     "keepassxc": (
         "Password Manager", "Store passwords safely",
         "password;keepass;vault;security;credentials;",
@@ -309,6 +320,21 @@ RENAME = {
     ),
 }
 
+# Optional Features apps: ship renamed but Hidden until the user ticks them
+# (installer_plan / Features strips X-DevOS-Hidden). Stops Calc Spreadsheet
+# and similar from appearing when LibreOffice was never chosen.
+OPTIONAL_APPS_HIDDEN = {
+    "libreoffice-writer", "libreoffice-calc", "libreoffice-impress",
+    "libreoffice-startcenter", "libreoffice-draw", "libreoffice-math",
+    "libreoffice-base",
+    "gimp", "inkscape", "org.inkscape.Inkscape",
+    "pdfarranger", "com.github.jeromerenault.pdfarranger",
+    "xournalpp", "com.github.xournalpp.xournalpp",
+    "org.kde.korganizer", "org.kde.kalarm", "org.kde.kalarm.kalarm",
+    "timeshift-gtk", "timeshift-launcher",
+    "org.kde.kolourpaint",
+}
+
 # Upstream launchers hidden from the menu. DevOS wrappers (or the renamed
 # Calculator entry) are what people open. Hidden overrides MUST keep the
 # friendly Name= so the taskbar never shows Dolphin / Kate / KCalc.
@@ -322,6 +348,7 @@ HIDE = {
     "kdesystemsettings",
     "code", "code-url-handler", "code-workspace", "code-oss", "codium", "codium-url-handler",
     "org.kde.klipper",
+    "org.kde.plasma.emojier", "plasma-emojier",  # DevOS Emoji panel when chosen
     "org.kde.spectacle", "spectacle",  # DevOS Snipping Tool wrapper
     "org.kde.kcalc", "kcalc",  # DevOS Calculator wrapper
     "org.kde.okular", "okular",  # DevOS PDF Viewer wrapper
@@ -369,7 +396,7 @@ Name=Calculator
 GenericName=Calculator
 Comment=Do math quickly
 Exec=kcalc
-Icon=accessories-calculator
+Icon=devos-calculator
 Terminal=false
 Categories=Qt;Utility;Calculator;
 Keywords=calculator;calc;math;kcalc;
@@ -383,7 +410,7 @@ Name=PDF Viewer
 GenericName=Document Viewer
 Comment=Open PDF and documents
 Exec=okular %U
-Icon=application-pdf
+Icon=devos-pdf
 Terminal=false
 Categories=Qt;Office;Viewer;
 MimeType=application/pdf;application/x-gzpdf;application/x-bzpdf;application/x-wwf;
@@ -397,7 +424,7 @@ Name=Photos
 GenericName=Photo Viewer
 Comment=View pictures and photos
 Exec=gwenview %U
-Icon=gwenview
+Icon=devos-photos
 Terminal=false
 Categories=Qt;Graphics;Viewer;
 MimeType=image/jpeg;image/png;image/gif;image/webp;image/tiff;image/bmp;image/svg+xml;
@@ -411,7 +438,7 @@ Name=Zip Folders
 GenericName=Archive Manager
 Comment=Open and create zip files
 Exec=ark %U
-Icon=utilities-file-archiver
+Icon=devos-zip
 Terminal=false
 Categories=Qt;Utility;Archiving;Compression;
 MimeType=application/zip;application/x-tar;application/x-compressed-tar;application/x-7z-compressed;application/x-rar;
@@ -425,7 +452,7 @@ Name=Snipping Tool
 GenericName=Screenshot
 Comment=Capture the screen
 Exec=spectacle
-Icon=spectacle
+Icon=devos-snip
 Terminal=false
 Categories=Qt;Utility;Graphics;
 Keywords=screenshot;snip;snipping;capture;screen;spectacle;
@@ -440,7 +467,7 @@ Name=Antigravity IDE
 GenericName=AI coding (second account)
 Comment=Second Antigravity — separate Google account, projects, and profile from Google Antigravity
 Exec=/usr/local/bin/antigravity-kde %F
-Icon=antigravity-kde
+Icon=devos-antigravity-studio
 Terminal=false
 Categories=Development;IDE;
 MimeType=text/plain;inode/directory;
@@ -455,7 +482,7 @@ Name=Text Editor
 GenericName=Edit documents and code
 Comment=Write notes, scripts, and code — clean, modern, and easy
 Exec=kate --desktopfile /usr/share/applications/devos-editor.desktop %U
-Icon=accessories-text-editor
+Icon=devos-editor
 Terminal=false
 Categories=Qt;Utility;TextEditor;
 MimeType=text/plain;text/x-python;text/x-csrc;text/x-c++src;text/html;text/css;text/markdown;application/x-shellscript;application/json;application/javascript;text/x-java;text/x-chdr;text/x-c++hdr;
@@ -470,7 +497,7 @@ Name=Paint
 GenericName=Paint pictures
 Comment=Draw and edit simple pictures — like Windows Paint
 Exec=kolourpaint %U
-Icon=kolourpaint
+Icon=devos-paint
 Terminal=false
 Categories=Qt;Graphics;2DGraphics;RasterGraphics;
 MimeType=image/png;image/jpeg;image/gif;image/bmp;image/webp;image/x-xpm;
@@ -484,7 +511,7 @@ Name=Scanner
 GenericName=Scan documents and photos
 Comment=Scan papers and photos to this PC
 Exec=skanlite %U
-Icon=scanner
+Icon=devos-scanner
 Terminal=false
 Categories=Qt;Graphics;Scanning;OCR;
 Keywords=scanner;scan;skanlite;document;photo;
@@ -497,7 +524,7 @@ Name=Character Map
 GenericName=Symbols and characters
 Comment=Find and copy any character or symbol
 Exec=kcharselect
-Icon=accessories-character-map
+Icon=devos-charmap
 Terminal=false
 Categories=Qt;Utility;
 Keywords=character;unicode;symbol;charmap;kcharselect;
@@ -510,7 +537,7 @@ Name=Magnifier
 GenericName=Screen magnifier
 Comment=Enlarge part of the screen — helpful for reading small text
 Exec=kmag
-Icon=kmag
+Icon=devos-magnifier
 Terminal=false
 Categories=Qt;Utility;Accessibility;
 Keywords=magnifier;zoom;accessibility;kmag;enlarge;
@@ -523,7 +550,7 @@ Name=Password Manager
 GenericName=Store passwords safely
 Comment=Keep passwords in a locked vault on this PC
 Exec=keepassxc %U
-Icon=keepassxc
+Icon=devos-passwords
 Terminal=false
 Categories=Qt;Utility;Security;
 MimeType=application/x-keepass2;
@@ -550,18 +577,46 @@ X-DevOS-Backend=btop
 os.makedirs(DST, exist_ok=True)
 
 
-def rewrite(app_id, name=None, generic=None, keywords=None, icon=None, hide=False):
+def chosen_desktop_ids():
+    import sys
+    sys.path.insert(0, "/usr/local/share/devos/components/features")
+    try:
+        import feature_catalog
+        with open("/etc/devos/features.conf", encoding="utf-8") as handle:
+            selected = feature_catalog.parse_selection(",".join(
+                line.strip() for line in handle if not line.startswith("#")
+            ))
+        return {
+            desktop.removesuffix(".desktop")
+            for feature in feature_catalog.FEATURES if feature["id"] in selected
+            for desktop in feature_catalog.feature_desktops(feature)
+        }
+    except (OSError, ImportError):
+        return set()
+
+
+CHOSEN_DESKTOPS = chosen_desktop_ids()
+
+
+def rewrite(app_id, name=None, generic=None, keywords=None, icon=None, hide=False,
+            feature_hide=False):
     src = os.path.join(SRC, app_id + ".desktop")
     if not os.path.isfile(src):
         return
     out, section = [], None
     saw_keywords = False
     with open(src, encoding="utf-8", errors="replace") as handle:
-        for line in handle:
+        lines = handle.readlines()
+        managed = any(line.strip() == "X-DevOS-Hidden=true" for line in lines)
+        feature_hide = feature_hide and app_id not in CHOSEN_DESKTOPS
+        for line in lines:
             stripped = line.strip()
             if stripped.startswith("["):
                 section = stripped
             main = section == "[Desktop Entry]"
+            if main and app_id in OPTIONAL_APPS_HIDDEN and (managed or feature_hide):
+                if stripped.partition("=")[0] in ("NoDisplay", "Hidden", "X-DevOS-Hidden"):
+                    continue
             if main and re.match(r"^(Name|GenericName|Comment|Keywords)\[", stripped):
                 continue  # translations would show the old name
             if main and name and stripped.startswith("Name="):
@@ -574,8 +629,12 @@ def rewrite(app_id, name=None, generic=None, keywords=None, icon=None, hide=Fals
             elif main and icon and stripped.startswith("Icon="):
                 line = f"Icon={icon}\n"
             out.append(line)
-            if main and stripped == "[Desktop Entry]" and hide:
+            if main and stripped == "[Desktop Entry]" and (hide or feature_hide):
                 out.append("NoDisplay=true\n")
+                if feature_hide:
+                    out.append("Hidden=true\n")
+                    out.append("X-DevOS-Hidden=true\n")
+
     if keywords and not saw_keywords:
         # Insert after Name= so search indexes the friendly terms.
         inserted = []
@@ -606,11 +665,61 @@ for app_id, (name, generic, keywords, icon) in RENAME.items():
         keywords=keywords,
         icon=icon,
         hide=app_id in HIDE,
+        feature_hide=app_id in OPTIONAL_APPS_HIDDEN,
     )
 
 for app_id in sorted(HIDE):
     if app_id not in RENAME:
         rewrite(app_id, hide=True)
+
+for app_id in sorted(OPTIONAL_APPS_HIDDEN):
+    if app_id not in RENAME and app_id not in HIDE:
+        rewrite(app_id, feature_hide=True)
+
+# Recent Files / KActivities look up initiatingAgent by desktop *name*
+# (KService::serviceByDesktopName). Short ids like "dolphin" and plasma
+# ids like "org.kde.krunner" have no upstream .desktop — without these
+# stubs the Settings page shows the raw technical string + a gear icon.
+def write_friendly_aliases():
+    """Fill gaps only. Never shadow a real packaged .desktop (would break launch)."""
+    import sys
+    sys.path.insert(0, "/usr/local/share/devos/components")
+    try:
+        from app_friendly_names import ALIASES, alias_desktop_body
+    except ImportError:
+        return
+    for agent in sorted(ALIASES):
+        body = alias_desktop_body(agent)
+        if not body:
+            continue
+        filename = agent + ".desktop"
+        src_path = os.path.join(SRC, filename)
+        dst_path = os.path.join(DST, filename)
+        # Packaged launcher exists — rewrite() already set a clear Name=.
+        if os.path.isfile(src_path):
+            try:
+                with open(src_path, encoding="utf-8", errors="replace") as handle:
+                    if "X-DevOS-FriendlyAlias=true" not in handle.read():
+                        # Drop a stale local stub that would shadow Settings etc.
+                        if os.path.isfile(dst_path):
+                            with open(dst_path, encoding="utf-8", errors="replace") as handle:
+                                if "X-DevOS-FriendlyAlias=true" in handle.read():
+                                    os.remove(dst_path)
+                        continue
+            except OSError:
+                continue
+        try:
+            if os.path.isfile(dst_path):
+                with open(dst_path, encoding="utf-8", errors="replace") as handle:
+                    existing = handle.read()
+                if "X-DevOS-FriendlyAlias=true" not in existing:
+                    continue
+            with open(dst_path, "w", encoding="utf-8") as handle:
+                handle.write(body)
+        except OSError:
+            raise
+
+write_friendly_aliases()
 
 # Calculator / Photos / PDF / Zip / Snip: visible DevOS names in the menu.
 # Upstream org.kde.* stay as named backends for taskbar matching.
@@ -710,12 +819,82 @@ def public_brand(text):
     text = re.sub(r"Kubuntu", "DevOS", text, flags=re.IGNORECASE)
     text = re.sub(r"(?<![\w.])Ubuntu\b", "DevOS", text, flags=re.IGNORECASE)
     text = re.sub(r"(?<![\w.])KDE\s+Plasma\b", "DevOS", text, flags=re.IGNORECASE)
-    text = re.sub(r"(?<![\w.])Plasma\b", "", text, flags=re.IGNORECASE)
+    # Never leave a bare "Plasma" for people to read — Settings used to show
+    # a "Plasma" group and "Allow Plasma to show:". Say Desktop instead.
+    text = re.sub(r"(?<![\w.])Plasma\b", "Desktop", text, flags=re.IGNORECASE)
     text = re.sub(r"(?<![\w.])KDE\b", "", text)
     text = re.sub(r"[ \t]{2,}", " ", text)
     text = re.sub(r"\(\s*\)", "", text)
     text = re.sub(r"\s+([,.;:])", r"\1", text)
     return text.strip(" \t-–—")
+
+
+def brand_settings_qml():
+    """General Behavior and similar KCMs embed 'Plasma' in i18n source strings.
+    English UI uses those msgids directly, so desktop-file branding never reaches
+    them — rewrite the QML/UI copy in place."""
+    replacements = (
+        ('i18nc("@title:group", "Plasma")', 'i18nc("@title:group", "Desktop")'),
+        ("i18nc('@title:group', 'Plasma')", "i18nc('@title:group', 'Desktop')"),
+        ("Allow Plasma to show:", "Allow the desktop to show:"),
+        ("Allow Plasma widgets", "Allow desktop widgets"),
+        ("all Plasma panel", "all desktop panel"),
+        ("Allow Plasma to show panel", "Allow the desktop to show panel"),
+        ('title: "Plasma"', 'title: "Desktop"'),
+        ("title: 'Plasma'", "title: 'Desktop'"),
+        (">Plasma<", ">Desktop<"),
+    )
+    roots = (
+        "/usr/share",
+        "/usr/lib",
+        "/usr/lib/x86_64-linux-gnu",
+        "/usr/lib64",
+    )
+    for root in roots:
+        if not os.path.isdir(root):
+            continue
+        for dirpath, dirnames, filenames in os.walk(root):
+            parts = set(dirpath.replace("\\", "/").split("/"))
+            if parts & {"locale", "icons", "wallpapers", "node_modules", ".git"}:
+                dirnames[:] = []
+                continue
+            for name in filenames:
+                if not name.endswith((".qml", ".ui", ".js")):
+                    continue
+                path = os.path.join(dirpath, name)
+                try:
+                    with open(path, encoding="utf-8", errors="replace") as handle:
+                        text = handle.read()
+                except OSError:
+                    continue
+                if "Plasma" not in text:
+                    continue
+                # Only touch settings / workspace UI that people actually read.
+                lower_path = path.replace("\\", "/").lower()
+                if not any(
+                    token in lower_path
+                    for token in (
+                        "kcm",
+                        "workspace",
+                        "systemsettings",
+                        "plasma-desktop",
+                        "lookandfeel",
+                        "desktoppackage",
+                    )
+                ):
+                    continue
+                new = text
+                for old, repl in replacements:
+                    new = new.replace(old, repl)
+                if new != text:
+                    try:
+                        with open(path, "w", encoding="utf-8") as handle:
+                            handle.write(new)
+                    except OSError:
+                        pass
+
+
+brand_settings_qml()
 
 
 def brand_desktop(path):
@@ -807,12 +986,11 @@ Variant=Desktop
 UseOSReleaseVersion=true
 EOF
 
-# The stock login splash is the upstream logo. DevOS opens straight to the
-# desktop instead (also faster).
+# Use the DevOS session splash when Plasma starts.
 cat > /etc/xdg/ksplashrc << 'EOF'
 [KSplash]
-Engine=none
-Theme=None
+Engine=KSplashQML
+Theme=org.devos.desktop
 EOF
 
 update-desktop-database /usr/local/share/applications >/dev/null 2>&1 || true

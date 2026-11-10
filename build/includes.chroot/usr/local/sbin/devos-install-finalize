@@ -83,7 +83,7 @@ LAUNCHERS = (
     "applications:devos-code.desktop,applications:devos-settings.desktop"
 )
 FAVORITES = (
-    "applications:google-chrome.desktop,applications:devos-thispc.desktop,"
+    "applications:devos-browser.desktop,applications:devos-thispc.desktop,"
     "applications:devos-notepad.desktop,applications:devos-code.desktop,"
     "applications:devos-chat.desktop,applications:devos-dashboard.desktop,"
     "applications:devos-apps.desktop,applications:devos-settings.desktop"
@@ -179,13 +179,6 @@ rm -f \
 rm -f /etc/systemd/system/sddm.service.wants/devos-force-installer.service
 rm -f /etc/systemd/system/multi-user.target.wants/devos-force-installer.service
 rm -f /etc/systemd/system/devos-force-installer.service
-# Scrub any leftover Autologin that still points at the installer session.
-if [ -f /etc/sddm.conf ]; then
-    sed -i \
-        -e '/^Session=.*devos-install/d' \
-        -e '/^User=devos$/d' \
-        /etc/sddm.conf 2>/dev/null || true
-fi
 for f in /etc/sddm.conf.d/*.conf; do
     [ -f "$f" ] || continue
     if grep -qE 'devos-install|User=devos' "$f" 2>/dev/null; then
@@ -240,10 +233,25 @@ if [ -n "$owner" ] && [ -f /etc/systemd/system/devos-dashboard.service ]; then
     printf '[Service]\nUser=%s\n' "$owner" > /etc/systemd/system/devos-dashboard.service.d/user.conf
 fi
 
-# Windows-style first boot: skip the sign-in wall and open the desktop
-# (homepage autostart opens next). Empty-password accounts also get passwd -d
-# so lock screen / sudo accept Enter like a fresh Windows local account.
-if [ -n "$owner" ]; then
+# Calamares's displaymanager job sets [Autologin] User in the target main
+# config only when automatic sign-in was selected. The live-only overrides
+# have been removed above. Accept the choice only for the installed account.
+auto_user=""
+if [ -f /etc/sddm.conf ]; then
+    auto_user="$(awk '
+        /^[[:space:]]*\[/ { autologin = ($0 ~ /^[[:space:]]*\[Autologin\][[:space:]]*$/) }
+        autologin && /^[[:space:]]*User[[:space:]]*=/ {
+            sub(/^[[:space:]]*User[[:space:]]*=[[:space:]]*/, "")
+            sub(/[[:space:]]+$/, "")
+            user = $0
+        }
+        END { print user }
+    ' /etc/sddm.conf)"
+fi
+rm -f /etc/sddm.conf.d/zz-devos-autologin.conf
+session_name="${plasma_session##*/}"
+[ -n "$session_name" ] || session_name="plasma.desktop"
+if [ -n "$owner" ] && [ "$auto_user" = "$owner" ]; then
     hash="$(getent shadow "$owner" | cut -d: -f2)"
     if python3 - "$hash" << 'PY'
 import sys, warnings
@@ -264,23 +272,25 @@ PY
         echo "==> ${owner} has no password: clearing lock for automatic sign-in"
         passwd -d "$owner" >/dev/null 2>&1 || true
     fi
-    session_name="${plasma_session##*/}"
-    [ -n "$session_name" ] || session_name="plasma.desktop"
     echo "==> Enabling Windows-style automatic sign-in for ${owner}"
-    mkdir -p /etc/sddm.conf.d
     printf '[Autologin]\nUser=%s\nSession=%s\nRelogin=false\n' "$owner" "$session_name" \
         > /etc/sddm.conf.d/zz-devos-autologin.conf
-    # Also pin SDDM main conf so a leftover Session= line cannot win.
-    cat > /etc/sddm.conf << EOF
+else
+    auto_user=""
+    echo "==> Keeping the DevOS sign-in screen enabled"
+fi
+
+# The main file takes precedence over drop-ins. Clear User explicitly when
+# disabled so any remaining vendor defaults cannot enable automatic sign-in.
+cat > /etc/sddm.conf << EOF
 [Autologin]
-User=${owner}
+User=${auto_user}
 Session=${session_name}
 Relogin=false
 
 [General]
 DisplayServer=x11
 EOF
-fi
 
 # Ensure /vmlinuz and /initrd.img root symlinks exist for the installed kernel
 latest_vmlinuz=$(ls -1 /boot/vmlinuz-* 2>/dev/null | sort -V | tail -n 1)

@@ -54,6 +54,10 @@ alsa-utils
 plasma-pa
 pavucontrol-qt
 
+# 6b. Camera (always-on OS basic — not an installer Features checkbox)
+kamoso
+v4l-utils
+
 # 7. Printing & Scanning (Driverless IPP Everywhere + Legacy)
 cups
 cups-client
@@ -62,8 +66,7 @@ cups-ipp-utils
 ipp-usb
 avahi-daemon
 sane-utils
-fprintd
-libpam-fprintd
+# Fingerprint (fprintd) only via Features → Fingerprint sign-in.
 
 # 8. Mobile & Media Devices (MTP & udev probe)
 libmtp-runtime

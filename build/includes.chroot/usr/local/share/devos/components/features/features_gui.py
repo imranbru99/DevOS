@@ -327,7 +327,7 @@ QFrame#footer QLabel { background: transparent; }
 QCheckBox { font-weight: 600; color: #f8fafc; spacing: 10px; }
 QCheckBox::indicator { width: 18px; height: 18px; border: 2px solid #475569; border-radius: 5px; background: #0b0f1a; }
 QCheckBox::indicator:hover { border-color: #38bdf8; }
-QCheckBox::indicator:checked { background: #38bdf8; border-color: #38bdf8; }
+QCheckBox::indicator:checked { background: #0284c7; border-color: #0284c7; }
 QScrollBar:vertical { background: transparent; width: 10px; margin: 2px; }
 QScrollBar::handle:vertical { background: #334155; border-radius: 4px; min-height: 30px; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
@@ -461,7 +461,10 @@ def build_window(QtCore, QtWidgets):
             self.list_layout.setContentsMargins(24, 4, 24, 16)
             self.list_layout.setSpacing(8)
             for cat, title_text in catalog.CATEGORIES:
-                items = [f for f in catalog.FEATURES if f["category"] == cat]
+                items = [
+                    f for f in catalog.FEATURES
+                    if f["category"] == cat and f["id"] not in catalog.BASE_FEATURE_IDS
+                ]
                 if not items:
                     continue
                 header = QtWidgets.QLabel(title_text)
@@ -625,16 +628,31 @@ def build_window(QtCore, QtWidgets):
             self.reset.setEnabled(set(self.selected) != set(self.chosen))
 
         # ------------------------------------------------ installed state
+        def closeEvent(self, event):
+            if self.proc is not None:
+                event.ignore()
+                return
+            if self.list_proc is not None:
+                process = self.list_proc
+                process.finished.disconnect(self._installed_loaded)
+                process.kill()
+                process.waitForFinished(1000)
+                self.list_proc = None
+            super().closeEvent(event)
+
         def refresh_installed(self):
             if self.list_proc is not None:
                 return
             cmd = list_command()
             self.list_proc = QtCore.QProcess(self)
             self.list_proc.finished.connect(self._installed_loaded)
+            self.list_proc.errorOccurred.connect(
+                lambda error: self._installed_loaded() if error == QtCore.QProcess.FailedToStart else None)
             self.list_proc.start(cmd[0], cmd[1:])
 
         def _installed_loaded(self, *_args):
             text = bytes(self.list_proc.readAllStandardOutput()).decode(errors="replace")
+            self.list_proc.deleteLater()
             self.list_proc = None
             installed, chosen = parse_feature_list(text)
             if installed is None:
@@ -643,7 +661,8 @@ def build_window(QtCore, QtWidgets):
             first = not self.loaded
             self.installed, self.chosen, self.loaded = installed, chosen, True
             for fid, badge in self.badges.items():
-                badge.setVisible(fid in installed)
+                # "Installed" means chosen for this PC — not merely sitting on the ISO.
+                badge.setVisible(fid in chosen)
             if first or self.proc is None:
                 self.set_ticks(chosen)
             self.update_summary()
@@ -666,13 +685,16 @@ def build_window(QtCore, QtWidgets):
             self.proc.readyReadStandardOutput.connect(
                 lambda: self.proc and self.proc.readAllStandardOutput())
             self.proc.finished.connect(self._applied)
+            self.proc.errorOccurred.connect(
+                lambda error: self._applied(1) if error == QtCore.QProcess.FailedToStart else None)
             self.proc.start(cmd[0], cmd[1:])
 
         def _applied(self, code, _status=None):
+            self.proc.deleteLater()
             self.proc = None
             # New apps (Flatpaks especially) only appear in the Start menu after
             # KDE rebuilds its menu cache.
-            QtCore.QProcess.startDetached("kbuildsycoca5", ["--noincremental"])
+            QtCore.QProcess.startDetached("kbuildsycoca6", ["--noincremental"])
             info = parse_state(read_json(STATE_FILE))
             self.retry.setEnabled(True)
             done = finished_text(code, info)
@@ -760,7 +782,7 @@ def build_window(QtCore, QtWidgets):
                 row = QtWidgets.QHBoxLayout(card)
                 row.setContentsMargins(16, 10, 16, 10)
                 label = QtWidgets.QLabel(name)
-                label.setStyleSheet("font-weight: 600; color: #f8fafc; background: transparent;")
+                label.setStyleSheet("font-weight: 600; background: transparent;")
                 row.addWidget(label, 1)
                 combo = QtWidgets.QComboBox()
                 combo.setMinimumWidth(320)

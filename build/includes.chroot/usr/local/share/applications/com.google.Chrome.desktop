@@ -1,1 +1,12 @@
-google-chrome.desktop
+[Desktop Entry]
+Type=Application
+# Alias for taskbar / WM_CLASS matching only — never a second Start-menu Chrome tile.
+Name=Google Chrome
+NoDisplay=true
+Hidden=true
+X-DevOS-Hidden=true
+Exec=/usr/local/bin/devos-browser %U
+Icon=google-chrome
+StartupWMClass=google-chrome
+Terminal=false
+Categories=Network;WebBrowser;

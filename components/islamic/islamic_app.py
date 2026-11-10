@@ -199,7 +199,7 @@ QFrame#hero { border: 1px solid #1e3a5f; border-radius: 18px;
   background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #0c4a6e, stop:0.55 #0f172a, stop:1 #111827); }
 QFrame#tile { background: #0f172a; border: 1px solid #1e293b; border-radius: 14px; }
 QFrame#tileNext { border: 1px solid #38bdf8; border-radius: 14px;
-  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #0369a1, stop:1 #0c4a6e); }
+  background: rgba(14, 165, 233, 0.18); }
 QFrame#aibox { background: #111827; border: 1px dashed #334155; border-radius: 10px; }
 QPushButton { background: #1e293b; border: 1px solid #334155; border-radius: 9px; padding: 7px 14px; color: #e2e8f0; }
 QPushButton:hover { border-color: #38bdf8; }
@@ -279,17 +279,31 @@ def run_gui(screenshot=None):
             side = min(self.width(), self.height()) - 8
             p.translate(self.width() / 2, self.height() / 2)
             r = side / 2
+            light = False
+            try:
+                from devos_appearance import current_mode
+                light = current_mode() in ("light", "mac-light")
+            except Exception:
+                pass
             grad = QtGui.QRadialGradient(0, 0, r)
-            grad.setColorAt(0, QtGui.QColor("#13213a"))
-            grad.setColorAt(1, QtGui.QColor("#0b1220"))
+            if light:
+                grad.setColorAt(0, QtGui.QColor("#f8fafc"))
+                grad.setColorAt(1, QtGui.QColor("#e2e8f0"))
+                ring, tick_major, tick_minor = "#94a3b8", "#0284c7", "#cbd5e1"
+                ink_n, ink_other = "#0f172a", "#64748b"
+            else:
+                grad.setColorAt(0, QtGui.QColor("#13213a"))
+                grad.setColorAt(1, QtGui.QColor("#0b1220"))
+                ring, tick_major, tick_minor = "#1e3a5f", "#38bdf8", "#334155"
+                ink_n, ink_other = "#f8fafc", "#94a3b8"
             p.setBrush(grad)
-            p.setPen(QtGui.QPen(QtGui.QColor("#1e3a5f"), 2))
+            p.setPen(QtGui.QPen(QtGui.QColor(ring), 2))
             p.drawEllipse(QtCore.QPointF(0, 0), r, r)
             for deg in range(0, 360, 15):
                 p.save()
                 p.rotate(deg)
                 major = deg % 90 == 0
-                p.setPen(QtGui.QPen(QtGui.QColor("#38bdf8" if major else "#334155"), 2 if major else 1))
+                p.setPen(QtGui.QPen(QtGui.QColor(tick_major if major else tick_minor), 2 if major else 1))
                 p.drawLine(QtCore.QPointF(0, -r + 4), QtCore.QPointF(0, -r + (14 if major else 9)))
                 p.restore()
             font = p.font()
@@ -299,7 +313,7 @@ def run_gui(screenshot=None):
             for label, deg in (("N", 0), ("E", 90), ("S", 180), ("W", 270)):
                 rad = math.radians(deg)
                 x, y = math.sin(rad) * (r - 28), -math.cos(rad) * (r - 28)
-                p.setPen(QtGui.QColor("#f8fafc" if label == "N" else "#94a3b8"))
+                p.setPen(QtGui.QColor(ink_n if label == "N" else ink_other))
                 p.drawText(QtCore.QRectF(x - 12, y - 12, 24, 24), QtCore.Qt.AlignCenter, label)
             # needle
             p.save()
@@ -1019,8 +1033,20 @@ def run_gui(screenshot=None):
                     frame.setObjectName(want)
                     frame.style().unpolish(frame)
                     frame.style().polish(frame)
-                n.setStyleSheet("color: %s; font-weight: 600;" % ("#e0f2fe" if is_next else
-                                                                    ("#64748b" if key == "sunrise" else "#94a3b8")))
+                light = False
+                try:
+                    from devos_appearance import current_mode
+                    light = current_mode() in ("light", "mac-light")
+                except Exception:
+                    pass
+                if is_next:
+                    # tileNext stays a blue wash; use dark ink in light mode.
+                    ink = "#0f172a" if light else "#e0f2fe"
+                elif key == "sunrise":
+                    ink = "#64748b"
+                else:
+                    ink = "#334155" if light else "#94a3b8"
+                n.setStyleSheet("color: %s; font-weight: 600;" % ink)
 
     # Keep confirmation and input dialogs consistent across DevOS apps.
     import sys as _dialog_sys

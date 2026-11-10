@@ -13,12 +13,12 @@ Actions=RecordScreen;RecordRegion;RecordWindow;
 
 [Desktop Action RecordScreen]
 Name=Record Entire Screen
-Exec=devos-recorder --screen
+Exec=/usr/local/bin/devos-recorder --screen
 
 [Desktop Action RecordRegion]
 Name=Record Selected Area
-Exec=devos-recorder --region
+Exec=/usr/local/bin/devos-recorder --region
 
 [Desktop Action RecordWindow]
 Name=Record Active Window
-Exec=devos-recorder --window
+Exec=/usr/local/bin/devos-recorder --window

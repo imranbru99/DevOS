@@ -43,9 +43,9 @@ Page {
 
         ColumnLayout {
             id: form
-            x: Math.max(40, (parent.width - width) / 2)
-            y: 40
-            width: Math.min(usersPage.width - 80, 620)
+            x: Math.max(InstallerAppearance.pageMargin, (parent.width - width) / 2)
+            y: InstallerAppearance.pageMargin
+            width: Math.min(usersPage.width - InstallerAppearance.pageMargin * 2, InstallerAppearance.pageMaxWidth)
             spacing: 6
 
             PageIntro {

@@ -2,7 +2,7 @@
 # DevOS About this PC — visual system information.
 export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}"
 COMPONENTS_DIR="/usr/local/share/devos/components"
-if [ -d "/home/imran/project/dev-os/components" ]; then
+if [ ! -f "${COMPONENTS_DIR}/about/about.py" ] && [ -d "/home/imran/project/dev-os/components" ]; then
     COMPONENTS_DIR="/home/imran/project/dev-os/components"
 fi
 exec -a "$(basename "$0")" /usr/bin/python3 "${COMPONENTS_DIR}/about/about.py" "$@"

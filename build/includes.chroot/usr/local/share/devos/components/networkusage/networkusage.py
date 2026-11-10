@@ -54,9 +54,10 @@ def run_gui():
     except Exception:
         prepare_identity = None  # type: ignore
     try:
-        from app_identity import apply as apply_identity
+        from app_identity import apply as apply_identity, show_window
     except Exception:
         apply_identity = None  # type: ignore
+        show_window = None  # type: ignore
 
     STYLE = """
     QWidget#root {
@@ -205,13 +206,27 @@ def run_gui():
             p.setRenderHint(QtGui.QPainter.TextAntialiasing)
             w, h = self.width(), self.height()
 
+            light = False
+            try:
+                from devos_appearance import current_mode
+                light = current_mode() in ("light", "mac-light")
+            except Exception:
+                pass
             bg = QtGui.QLinearGradient(0, 0, 0, h)
-            bg.setColorAt(0.0, QtGui.QColor(15, 23, 42, 40))
-            bg.setColorAt(1.0, QtGui.QColor(2, 132, 199, 18))
+            if light:
+                bg.setColorAt(0.0, QtGui.QColor(248, 250, 252, 255))
+                bg.setColorAt(1.0, QtGui.QColor(224, 242, 254, 90))
+                grid = QtGui.QColor(148, 163, 184, 70)
+                axis = QtGui.QColor("#64748b")
+            else:
+                bg.setColorAt(0.0, QtGui.QColor(15, 23, 42, 40))
+                bg.setColorAt(1.0, QtGui.QColor(2, 132, 199, 18))
+                grid = QtGui.QColor(148, 163, 184, 28)
+                axis = QtGui.QColor("#64748b")
             p.fillRect(self.rect(), bg)
 
             if not self.rows:
-                p.setPen(QtGui.QColor("#64748b"))
+                p.setPen(axis)
                 font = p.font()
                 font.setPointSize(11)
                 p.setFont(font)
@@ -234,9 +249,9 @@ def run_gui():
             # soft grid
             for i in range(5):
                 y = pad_t + chart_h * i / 4
-                p.setPen(QtGui.QPen(QtGui.QColor(148, 163, 184, 28), 1))
+                p.setPen(QtGui.QPen(grid, 1))
                 p.drawLine(pad_l, int(y), w - pad_r, int(y))
-            p.setPen(QtGui.QColor("#64748b"))
+            p.setPen(axis)
             font = p.font()
             font.setPointSize(9)
             font.setBold(True)
@@ -737,7 +752,10 @@ def run_gui():
     if not icon.isNull():
         app.setWindowIcon(icon)
     win = Main()
-    win.show()
+    if show_window:
+        show_window(win, "devos-network-usage")
+    else:
+        win.show()
     return app.exec_()
 
 

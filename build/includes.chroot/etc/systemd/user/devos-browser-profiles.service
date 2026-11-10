@@ -14,8 +14,9 @@ ExecStart=/usr/local/bin/devos-browser-profiles-daemon
 Restart=always
 RestartSec=2
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
-Environment=DISPLAY=:1
-Environment=WAYLAND_DISPLAY=wayland-0
+# Inherit DISPLAY / WAYLAND_DISPLAY / XAUTHORITY from the graphical session.
+# Hardcoding DISPLAY=:1 broke avatar pins when the session was on :0.
+PassEnvironment=DISPLAY WAYLAND_DISPLAY XAUTHORITY
 
 [Install]
 WantedBy=graphical-session.target

@@ -2,11 +2,14 @@
 Type=Application
 Name=Windows App
 GenericName=Microsoft Cloud PC
-Comment=Microsoft Cloud PC (Windows 365) with DevOS session reminders
+Comment=Windows 365, Azure Virtual Desktop and remote apps
 Exec=/usr/local/bin/devos-windows-app
 Icon=devos-web-winapp
 StartupWMClass=chrome-windows.cloud.microsoft__-Default
 Terminal=false
-NoDisplay=false
+NoDisplay=true
+Hidden=true
+X-DevOS-Hidden=true
 Categories=Network;Office;
-Keywords=windows;cloud;pc;rdp;azure;virtual desktop;
+Keywords=windows;cloud;pc;rdp;azure;virtual desktop;365;
+X-DevOS-WebApp=true

@@ -1,0 +1,3 @@
+# DevOS: USB camera add — best-effort log (no installer UI).
+ACTION=="add", SUBSYSTEM=="video4linux", ENV{ID_BUS}=="usb", \
+  RUN+="/usr/bin/logger -t devos-camera USB-camera-added"

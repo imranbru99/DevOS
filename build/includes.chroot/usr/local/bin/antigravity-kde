@@ -15,7 +15,13 @@ elif [ -x "/opt/antigravity/antigravity" ]; then
 fi
 
 if [ -z "$IDE_BIN" ]; then
-    echo "Error: Antigravity IDE binary not found. Install Google Antigravity or Antigravity IDE first." >&2
+    msg='Antigravity IDE is not installed yet. Open DevOS Features, install Google Antigravity (or Antigravity IDE), then try again.'
+    echo "Error: $msg" >&2
+    if command -v kdialog >/dev/null 2>&1; then
+        kdialog --title "Antigravity IDE" --error "$msg" >/dev/null 2>&1 || true
+    elif command -v notify-send >/dev/null 2>&1; then
+        notify-send -a "DevOS" -i "dialog-error" "Antigravity IDE" "$msg" || true
+    fi
     exit 1
 fi
 

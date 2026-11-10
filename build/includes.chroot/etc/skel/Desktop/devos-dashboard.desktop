@@ -1,9 +1,9 @@
-﻿[Desktop Entry]
+[Desktop Entry]
 Type=Application
 Name=DevOS Dashboard
 GenericName=Dashboard
 Comment=DevOS status and setup
-Exec=devos-dashboard
+Exec=/usr/local/bin/devos dashboard
 Icon=devos-dashboard
 Terminal=false
 StartupNotify=true

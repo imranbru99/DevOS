@@ -10,10 +10,11 @@ fi
 
 WRAPPER=/usr/local/bin/antigravity-kde
 BIN=/opt/antigravity/antigravity
+IDE_LOCAL=/usr/local/share/devos/antigravity-ide/bin/antigravity-ide
 
-if [ ! -x "$BIN" ] && [ ! -x /usr/local/share/devos/antigravity-ide/bin/antigravity-ide ]; then
+if [ ! -x "$BIN" ] && [ ! -x "$IDE_LOCAL" ]; then
     if [ -x /usr/local/sbin/devos-install-antigravity ]; then
-        /usr/local/sbin/devos-install-antigravity || true
+        /usr/local/sbin/devos-install-antigravity
     fi
 fi
 
@@ -23,9 +24,9 @@ if [ ! -x "$WRAPPER" ]; then
 fi
 
 if [ ! -x "$BIN" ] \
-    && [ ! -x "${HOME:-/root}/.local/lib/antigravity-ide/antigravity-ide" ] \
-    && [ ! -x /usr/local/share/devos/antigravity-ide/bin/antigravity-ide ]; then
-    echo "Antigravity IDE binary not found. Install Google Antigravity first." >&2
+    && [ ! -x "$IDE_LOCAL" ] \
+    && [ ! -x "${HOME:-/root}/.local/lib/antigravity-ide/antigravity-ide" ]; then
+    echo "Antigravity IDE binary not found. Install Google Antigravity first (DevOS Features → Google Antigravity)." >&2
     exit 1
 fi
 

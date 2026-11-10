@@ -65,7 +65,7 @@ BUILT_IN_HANDLERS = {
 
 def F(id, cat, name, about, size_mb, win="", apt=None, flatpak=None, script=None, preinstalled=False,
       remove=None, presets=(), roles=None, needs_eula="", services=None, min_ram_gb=0, builtin=None,
-      webapp=None, detect=None):
+      webapp=None, detect=None, menu=None):
     if "windows" in presets and "islamic" not in presets:
         presets = tuple(presets) + ("islamic",)
     return {
@@ -86,13 +86,40 @@ def F(id, cat, name, about, size_mb, win="", apt=None, flatpak=None, script=None
         # Absolute paths or PATH command names that prove the feature is installed
         # (used for script-backed IDEs that apt/flatpak cannot see).
         "detect": list(detect or []),
+        # Extra Start-menu .desktop basenames to show only while this feature is chosen
+        # (roles + builtin desktops are included automatically by features_cli).
+        "menu": list(menu or []),
         "preinstalled": preinstalled or bool(builtin),
     }
 
 
+def feature_desktops(feature: Dict) -> List[str]:
+    """Every Start-menu .desktop this feature owns (hide when unticked)."""
+    seen = set()
+    out: List[str] = []
+    for name in list((feature.get("builtin") or {}).get("desktop") or []) + list(
+        (feature.get("roles") or {}).values()
+    ) + list(feature.get("menu") or []):
+        if name and name not in seen:
+            seen.add(name)
+            out.append(name)
+    return out
+
+
 EVERYONE = ("windows", "student", "developer", "creator", "gamer")
-# Kept even by the "Minimal" preset: DevOS itself relies on them.
-ESSENTIAL = EVERYONE + ("minimal",)
+# Windows-like defaults for the "Windows familiar" preset — NOT the installer
+# Minimal chip. Minimal must stay empty (add apps later in DevOS Features).
+ESSENTIAL = EVERYONE
+# These are shared OS dependencies. Other catalog packages are installed
+# only when requested. Bundled DevOS Python tools use launcher visibility.
+BASE_PACKAGES = {"ufw", "plasma-firewall", "fonts-noto-core", "espeak-ng", "libvkd3d1"}
+# True OS plumbing only — never optional Start-menu toys (emoji, notes, …).
+BASE_FEATURE_IDS = {
+    "firewall", "notofonts", "explorer", "terminal", "notepad",
+    "photos", "taskman", "security", "clipboard",
+    # Camera is OS plumbing (like speakers/mic), not an optional Features card.
+    "webcam",
+}
 
 FEATURES: List[Dict] = [
     # ---------------------------------------------------------------- office
@@ -101,12 +128,15 @@ FEATURES: List[Dict] = [
       650, win="Microsoft Office", flatpak=["org.onlyoffice.desktopeditors"], presets=(),
       roles={r: "org.onlyoffice.desktopeditors.desktop" for r in ("documents", "spreadsheets", "presentations")}, min_ram_gb=3),
     F("libreoffice", "office", "LibreOffice Writer, Calc, Impress",
-      "Offline office suite on the ISO (Writer, Calc, Impress). Best for .odt/.ods and complex macros.",
+      "Office suite for Writer, Calc and Impress. Best for .odt/.ods and complex macros.",
       380, win="Microsoft Office", apt=["libreoffice-writer", "libreoffice-calc", "libreoffice-impress",
                                          "libreoffice-kf6", "libreoffice-style-breeze"],
       preinstalled=True, presets=ESSENTIAL,
       roles={"documents": "libreoffice-writer.desktop", "spreadsheets": "libreoffice-calc.desktop",
-             "presentations": "libreoffice-impress.desktop"}, min_ram_gb=3),
+             "presentations": "libreoffice-impress.desktop"},
+      menu=["libreoffice-startcenter.desktop", "libreoffice-draw.desktop",
+            "libreoffice-math.desktop", "libreoffice-base.desktop"],
+      min_ram_gb=3),
     F("wps", "office", "WPS Office",
       "Free Microsoft Office alternative popular with students; includes PDF tools.",
       1100, win="Microsoft Office", flatpak=["com.wps.Office"], min_ram_gb=4),
@@ -119,18 +149,22 @@ FEATURES: List[Dict] = [
       needs_eula="ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true"),
     F("pdftools", "office", "PDF tools: merge, split, sign, annotate",
       "PDF Arranger and Xournal++ — shipped offline on the ISO.",
-      15, win="Adobe Acrobat", apt=["pdfarranger", "xournalpp"], preinstalled=True, presets=ESSENTIAL),
+      15, win="Adobe Acrobat", apt=["pdfarranger", "xournalpp"], preinstalled=True, presets=ESSENTIAL,
+      menu=["com.github.jeromerenault.pdfarranger.desktop", "pdfarranger.desktop",
+            "com.github.xournalpp.xournalpp.desktop", "xournalpp.desktop"]),
     F("notes", "office", "Joplin notes",
       "Notes and to-dos with sync to OneDrive/Dropbox, like OneNote.",
       300, win="OneNote", flatpak=["net.cozic.joplin_desktop"], presets=("student",), min_ram_gb=4),
     F("obsidian", "office", "Obsidian", "Markdown notes and knowledge base.", 350, flatpak=["md.obsidian.Obsidian"], min_ram_gb=4),
     F("calendar", "office", "Calendar & reminders", "Calendar with reminders, like Outlook Calendar.",
-      60, win="Outlook Calendar", apt=["korganizer", "kalarm"], presets=("professional",)),
+      60, win="Outlook Calendar", apt=["korganizer", "kalarm"], presets=("professional",),
+      menu=["org.kde.korganizer.desktop", "org.kde.kalarm.desktop", "org.kde.kalarm.kalarm.desktop"]),
     F("mindmap", "office", "XMind mind maps", "Mind maps and brainstorming.", 400, flatpak=["net.xmind.XMind"], min_ram_gb=4),
 
     # ---------------------------------------------------------------- internet
     F("chrome", "internet", "Google Chrome", "Chrome with Google sign-in and sync.", 330, win="Chrome",
       script="/usr/local/sbin/devos-install-chrome", preinstalled=True, remove=["google-chrome-stable"],
+      builtin={"desktop": ["google-chrome.desktop"]},
       presets=EVERYONE, roles={"browser": "google-chrome.desktop"}),
     F("edge", "internet", "Microsoft Edge", "Edge with Microsoft account sync.", 400, win="Edge",
       flatpak=["com.microsoft.Edge"], presets=(), roles={"browser": "com.microsoft.Edge.desktop"}, min_ram_gb=4),
@@ -139,10 +173,10 @@ FEATURES: List[Dict] = [
     F("brave", "internet", "Brave", "Browser with built-in ad blocking.", 350, flatpak=["com.brave.Browser"],
       roles={"browser": "com.brave.Browser.desktop"}, min_ram_gb=4),
     F("thunderbird", "internet", "Thunderbird email",
-      "Email and calendar for Gmail, Outlook.com and work accounts — apt package on the ISO.",
+      "Email and calendar for Gmail, Outlook.com and work accounts.",
       300, win="Outlook / Mail",
-      apt=["thunderbird"], preinstalled=True, presets=ESSENTIAL,
-      roles={"email": "thunderbird.desktop"}),
+      flatpak=["org.mozilla.thunderbird_esr"], presets=ESSENTIAL,
+      roles={"email": "org.mozilla.thunderbird_esr.desktop"}),
     F("winapp", "internet", "Windows App (Microsoft)",
       "Microsoft's own Windows App: Windows 365 cloud PCs, Azure Virtual Desktop, Dev Box and remote apps, "
       "in its own window. Connecting a Cloud PC stays in this app. Same app Microsoft offers for every "
@@ -159,6 +193,7 @@ FEATURES: List[Dict] = [
       1, win="Outlook", presets=(), webapp={"url": "https://outlook.live.com/mail/",
                                                       "icon": "internet-mail", "names": ["Outlook"]}),
     F("torrent", "internet", "qBittorrent", "Torrent downloads.", 30, apt=["qbittorrent"]),
+    F("filezilla", "internet", "FileZilla", "FTP and SFTP file transfers.", 35, apt=["filezilla"]),
 
     # ---------------------------------------------------------------- chat
     F("whatsapp", "chat", "WhatsApp", "WhatsApp for desktop (ZapZap).", 250, win="WhatsApp",
@@ -179,14 +214,14 @@ FEATURES: List[Dict] = [
     F("spotify", "media", "Spotify", "Music streaming.", 300, win="Spotify", flatpak=["com.spotify.Client"],
       presets=("windows", "student"), min_ram_gb=4),
     F("webcam", "media", "Camera", "Take photos and videos with the webcam.", 10, win="Camera", apt=["kamoso"],
-      presets=("windows", "student")),
+      preinstalled=True, presets=ESSENTIAL),
     F("recorder", "media", "Voice Recorder",
       "Record a voice note or a meeting from the microphone, like Windows Voice Recorder.",
       15, win="Voice Recorder", apt=["gnome-sound-recorder"], presets=("windows", "student")),
 
     # ---------------------------------------------------------------- creative
     F("paint", "creative", "Paint (KolourPaint)", "Simple drawing and image editing, like MS Paint.", 15,
-      win="Paint", apt=["kolourpaint"], presets=EVERYONE),
+      win="Paint", apt=["kolourpaint"], presets=EVERYONE, menu=["org.kde.kolourpaint.desktop"]),
     F("photopea", "creative", "Photoshop Alternative (Photopea)",
       "Full Photoshop PSD, AI, RAW and Sketch editor with identical layers, filters and shortcuts.", 1,
       win="Photoshop", presets=("creator", "windows"),
@@ -196,11 +231,13 @@ FEATURES: List[Dict] = [
       win="Adobe Photoshop", presets=("creator",),
       webapp={"url": "https://photoshop.adobe.com", "icon": "applications-graphics", "names": ["Adobe Photoshop", "Photoshop"]}),
     F("gimp", "creative", "GIMP", "Photo editing, like Photoshop — offline on the ISO.", 400, win="Photoshop",
-      apt=["gimp"], preinstalled=True, presets=("creator", "normal", "student"), min_ram_gb=4),
+      apt=["gimp"], preinstalled=True, presets=("creator", "normal", "student"), min_ram_gb=4,
+      menu=["gimp.desktop"]),
     F("krita", "creative", "Krita", "Digital painting and illustration.", 450, flatpak=["org.kde.krita"],
       presets=("creator",), min_ram_gb=6),
     F("inkscape", "creative", "Inkscape", "Vector graphics, like Illustrator — offline on the ISO.", 350,
-      win="Illustrator", apt=["inkscape"], preinstalled=True, presets=("creator", "normal"), min_ram_gb=4),
+      win="Illustrator", apt=["inkscape"], preinstalled=True, presets=("creator", "normal"), min_ram_gb=4,
+      menu=["org.inkscape.Inkscape.desktop", "inkscape.desktop"]),
     F("kdenlive", "creative", "Kdenlive video editor", "Video editing, like Clipchamp or Premiere.", 500,
       win="Clipchamp", flatpak=["org.kde.kdenlive"], presets=("creator",), min_ram_gb=8),
     F("obs", "creative", "OBS Studio", "Screen recording and live streaming.", 400, win="Xbox Game Bar recording",
@@ -231,16 +268,18 @@ FEATURES: List[Dict] = [
       "Independent from Antigravity IDE (second account). Pipeline slot: antigravity.", 500,
       win="Antigravity", presets=("developer",), min_ram_gb=4,
       script="/usr/local/sbin/devos-install-antigravity",
-      detect=["/opt/antigravity/antigravity", "/usr/local/bin/devos-antigravity"],
-      builtin={"desktop": ["antigravity.desktop"]}),
+      # Real binary only — wrappers always exist on the ISO and must not count as installed.
+      detect=["/opt/antigravity/antigravity"],
+      builtin={"optin": True, "desktop": ["antigravity.desktop"]}),
     F("antigravity-kde", "developer", "Antigravity IDE",
-      "Second Antigravity — separate Google login, projects, and profile "
-      "(~/.config/Antigravity-KDE, GEMINI_APP_DATA_DIR=antigravity-kde). "
-      "Runs beside Google Antigravity at the same time. Pipeline slot: antigravity-kde.", 50,
+      "Second Antigravity with its own Google login and projects. "
+      "Runs beside Google Antigravity at the same time.", 50,
       win="Antigravity IDE", presets=("developer",), min_ram_gb=4,
       script="/usr/local/sbin/devos-install-antigravity-kde",
-      detect=["/usr/local/bin/antigravity-kde"],
-      builtin={"desktop": ["devos-antigravity-studio.desktop"]}),
+      detect=["/opt/antigravity/antigravity",
+              "/usr/local/share/devos/antigravity-ide/bin/antigravity-ide",
+              "~/.local/lib/antigravity-ide/antigravity-ide"],
+      builtin={"optin": True, "desktop": ["devos-antigravity-studio.desktop"]}),
     F("cursor", "developer", "Cursor AI Code Editor",
       "AI-first code editor with deep codebase reasoning and interactive autocomplete.", 450,
       win="Cursor", flatpak=["com.cursor.Cursor"], presets=("developer",), min_ram_gb=4),
@@ -267,6 +306,7 @@ FEATURES: List[Dict] = [
       win="PuTTY", apt=["putty"], presets=("developer", "professional")),
     F("vscode", "developer", "Visual Studio Code", "Code editor with DevOS AI built in.", 400,
       win="VS Code", script="/usr/local/sbin/devos-install-code", preinstalled=True, remove=["code"],
+      builtin={"desktop": ["devos-code.desktop"]},
       presets=("windows", "student", "developer", "creator", "gamer")),
     F("devservers", "developer", "Web servers & databases",
       "PHP, MariaDB, PostgreSQL and Redis for local websites (like XAMPP/Laragon). Untick to save ~600 MB "
@@ -325,18 +365,19 @@ FEATURES: List[Dict] = [
       "Help or get help on another PC.", 200, win="Quick Assist / AnyDesk",
       flatpak=["com.anydesk.Anydesk", "com.rustdesk.RustDesk"], presets=("windows",), min_ram_gb=4),
     F("remmina", "utilities", "Remote Desktop (Remmina)",
-      "Connect to Windows PCs, Windows 365 and Azure Virtual Desktop over RDP — offline on the ISO.",
-      15, win="Windows App / Remote Desktop",
-      apt=["remmina", "remmina-plugin-rdp", "remmina-plugin-vnc"], preinstalled=True,
-      presets=("windows", "developer", "student", "normal")),
+      "Connect to Windows PCs over RDP. For Windows 365 Cloud PCs use Windows App. "
+      "Install only when you tick it — not part of the base system.",
+      15, win="Remote Desktop",
+      apt=["remmina", "remmina-plugin-rdp", "remmina-plugin-vnc"],
+      presets=("windows", "developer", "student")),
     F("scanner", "utilities", "Scanner app", "Scan documents to PDF.", 10, win="Windows Scan",
       apt=["skanlite"], presets=("windows", "student")),
     F("timeshift", "utilities", "System restore points (Timeshift)",
-      "Take a snapshot before changes and roll back in one click, like System Restore. "
-      "On the default ext4 install this is the DevOS restore backend; btrfs installs use Snapper.",
-      10, win="System Restore", apt=["timeshift"], presets=EVERYONE, preinstalled=True),
+      "Take a snapshot before changes and roll back in one click, like System Restore.",
+      10, win="System Restore", apt=["timeshift"], presets=EVERYONE, preinstalled=True,
+      menu=["timeshift-gtk.desktop", "timeshift-launcher.desktop"]),
     F("access", "utilities", "Accessibility (screen reader, magnifier, on-screen keyboard)",
-      "Orca reads the screen aloud, KMag enlarges it, and Onboard types by pointer.",
+      "Screen reader, magnifier, and on-screen keyboard for easier access.",
       80, win="Narrator, Magnifier, Touch keyboard",
       apt=["orca", "kmag", "onboard", "speech-dispatcher", "espeak-ng"],
       preinstalled=True, presets=ESSENTIAL),
@@ -355,7 +396,8 @@ FEATURES: List[Dict] = [
     F("bitwarden", "security", "Bitwarden", "Password manager with sync.", 300, flatpak=["com.bitwarden.desktop"], min_ram_gb=4),
     F("fingerprint", "security", "Fingerprint sign-in",
       "Sign in with a fingerprint reader, like Windows Hello, on laptops that have one. The password still works.",
-      8, win="Windows Hello", apt=["fprintd", "libpam-fprintd"], preinstalled=True, presets=ESSENTIAL),
+      8, win="Windows Hello", apt=["fprintd", "libpam-fprintd"], presets=("windows", "student", "professional"),
+      menu=["devos-fingerprint.desktop"]),
     F("domain", "security", "Company network (Active Directory)",
       "Join this PC to a workplace Active Directory domain.",
       20, win="Domain join", apt=["realmd", "sssd", "adcli", "oddjob", "oddjob-mkhomedir", "packagekit"],
@@ -370,7 +412,7 @@ FEATURES: List[Dict] = [
 
     # ---------------------------------------------------------------- compat
     F("winapps", "compat", "Windows apps (.exe, .msi)", "Run Windows programs with a double-click. DirectX 9–11 uses DXVK.", 900,
-      win=".exe support", apt=["wine", "wine64", "winetricks", "libvkd3d1"],
+      win=".exe support", apt=["wine", "wine64", "wine32:i386", "winetricks", "libvkd3d1"],
       remove=["wine", "wine64", "wine32:i386", "winetricks", "libvkd3d1"],
       preinstalled=True, presets=ESSENTIAL),
     F("winvm", "compat", "Windows virtual machine",
@@ -381,7 +423,7 @@ FEATURES: List[Dict] = [
     F("bottles", "compat", "Bottles", "Advanced Windows-app manager with ready-made setups for popular programs.",
       350, flatpak=["com.usebottles.bottles"], presets=("gamer",), min_ram_gb=4),
     F("android", "compat", "Android apps (.apk)", "Run Android apps in a window (downloads ~850 MB on first use).",
-      30, win="Windows Subsystem for Android", apt=["waydroid"], preinstalled=True, presets=EVERYONE, min_ram_gb=4),
+      30, win="Windows Subsystem for Android", apt=["waydroid", "weston"], preinstalled=True, presets=EVERYONE, min_ram_gb=4),
 ]
 
 # DevOS's own tools. Hiding one only removes it from the menu (and stops its
@@ -421,6 +463,9 @@ FEATURES += [
       builtin={"desktop": ["devos-ai-code-agent.desktop", "devos-code-agent.desktop"]}),
     F("phonelink", "devos", "Phone Link", "Control the PC from your phone's browser: files, clipboard, "
       "volume, screen and DevOS AI.", 1, win="Phone Link", presets=EVERYONE,
+      # Launcher ships Hidden (usr/local/share/applications override). Unticked at
+      # install stays off; ticking (or DevOS Features later) reveals it. kdeconnect
+      # stays on the ISO as shared plumbing, with its own launchers debrand-hidden.
       builtin={"desktop": ["devos-phonelink.desktop"]}),
     F("share", "devos", "DevOS Share", "Give an app running on this PC a public https link to show anyone.",
       1, win="ngrok", presets=("developer", "student", "windows"),
@@ -459,6 +504,22 @@ FEATURES += [
                "disable": [["/usr/local/sbin/devos-modesty", "disable"]]}),
 ]
 
+def optional_system_packages() -> set[str]:
+    return {
+        package for feature in FEATURES
+        if feature["id"] not in BASE_FEATURE_IDS
+        for package in feature["apt"] + feature["remove"]
+        if package.split(":", 1)[0] not in BASE_PACKAGES
+    }
+
+
+for _feature in FEATURES:
+    if _feature["id"] not in BASE_FEATURE_IDS and (
+        _feature["apt"] or _feature["flatpak"] or _feature["script"]
+    ):
+        _feature["preinstalled"] = False
+
+
 PRESETS = [
     ("recommended", "Normal", "Everyday apps for a normal PC. Heavy ones stay off when this computer is small."),
     ("professional", "Professional", "Office, Outlook, Teams, Zoom, PDF tools, remote desktop and a password manager, plus the everyday apps."),
@@ -470,7 +531,7 @@ PRESETS = [
     ("family", "Family", "The normal everyday apps, plus Family Safety so adult sites stay blocked."),
     ("islamic", "Normal + Islamic", "The normal everyday apps, plus prayer times, Quran & Hadith and Family Safety."),
     ("premium", "Premium", "Every app DevOS offers. Family Safety and the modesty filter stay off until you turn them on."),
-    ("later", "Choose later", "Skip the extra apps for now. After install, add or remove any of them in DevOS Features, or ask DevOS AI."),
+    ("later", "Choose later", "Install no optional apps now. After setup, add any of them in DevOS Features, or ask DevOS AI."),
     ("windows", "Windows-like", "Office, Edge, WhatsApp, Spotify, email and the everyday tools Windows users expect."),
     ("minimal", "Minimal", "Only what DevOS needs; add apps later in DevOS Features."),
 ]
@@ -518,8 +579,10 @@ def premium_ids() -> List[str]:
 
 
 def later_ids() -> List[str]:
-    """What is already on the PC. Nothing new is downloaded."""
-    return [f["id"] for f in FEATURES if f["preinstalled"] and not optin(f)]
+    """Choose later: install no optional apps now. Base OS tools stay; everything
+    else can be added afterwards in DevOS Features. Never treat unchecked
+    (or unvisited) optional apps as selected."""
+    return []
 
 
 def preset_ids(preset: str, ram_gb: Optional[float] = None, disk_gb: Optional[float] = None) -> List[str]:
@@ -629,7 +692,8 @@ def plan(selected: List[str], installed: List[str]) -> Dict[str, List[str]]:
     sel, have = set(selected), set(installed)
     return {
         "add": [f["id"] for f in FEATURES if f["id"] in sel and f["id"] not in have],
-        "remove": [f["id"] for f in FEATURES if f["id"] in have and f["id"] not in sel],
+        "remove": [f["id"] for f in FEATURES
+                   if f["id"] in have and f["id"] not in sel and f["id"] not in BASE_FEATURE_IDS],
     }
 
 

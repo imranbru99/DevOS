@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 import os
 import sys
+import json
+import runpy
 import tempfile
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
@@ -14,6 +19,128 @@ import first_boot_notice as notice
 
 
 class TestFeaturesAndNotice(unittest.TestCase):
+    def test_hidden_system_emoji_launcher_can_be_enabled_and_disabled(self):
+        emoji = catalog.feature("emoji")
+        with tempfile.TemporaryDirectory() as temporary:
+            override = Path(temporary, "override")
+            system = Path(temporary, "system")
+            system.mkdir()
+            launcher = "devos-emoji.desktop"
+            source = Path(ROOT, "build/includes.chroot/usr/share/applications", launcher)
+            (system / launcher).write_bytes(source.read_bytes())
+            with patch.object(cli, "OVERRIDE_DIR", str(override)), patch.object(cli, "SYSTEM_APP_DIR", str(system)):
+                self.assertFalse(cli.builtin_on(emoji))
+                cli.set_builtin_visibility(emoji, True)
+                self.assertTrue(cli.builtin_on(emoji))
+                entry = (override / launcher).read_text(encoding="utf-8")
+                self.assertIn("X-KDE-Shortcuts=Meta+.", entry)
+                self.assertNotIn("Hidden=true", entry)
+                cli.set_builtin_visibility(emoji, False)
+                self.assertFalse(cli.builtin_on(emoji))
+                cli.set_builtin_visibility(emoji, True)
+                self.assertEqual((override / launcher).read_text(encoding="utf-8"), entry)
+
+    def test_preserve_writes_empty_app_selection_into_target(self):
+        module = Path(ROOT) / ("build/includes.chroot/usr/lib/x86_64-linux-gnu/"
+                               "calamares/modules/devospreserve/main.py")
+        with tempfile.TemporaryDirectory(dir=ROOT) as target:
+            values = {"rootMountPoint": target, "devos_selected_features": "", "username": "devos"}
+            calamares = SimpleNamespace(globalstorage=SimpleNamespace(value=values.get))
+            with patch.dict(sys.modules, {"libcalamares": calamares}), patch("os.path.ismount", return_value=True):
+                runpy.run_path(str(module))["run"]()
+            saved = Path(target) / "var/lib/DevOS/install-choices.json"
+            self.assertEqual(json.loads(saved.read_text()), {"devos_selected_features": "", "username": "devos"})
+
+    def test_empty_installer_choice_does_not_keep_or_download_apps(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp:
+            path = Path(temp) / "choices.json"
+            path.write_text(json.dumps({"devos_selected_features": "", "packagechooser_features": "whatsapp"}))
+            with (
+                patch.object(cli, "write_choice") as write_choice,
+                patch.object(cli, "installed_ids", return_value=["vscode", "phonelink"]),
+                patch.object(cli, "set_feature_menu_visibility") as visibility,
+                patch.object(cli, "MARKER_DIR", temp),
+                patch.object(cli, "remove_unselected_desktop_shortcuts"),
+                patch.object(cli, "webapp_enabled", return_value=False),
+                patch.object(cli, "write_webapp_policy"),
+                patch.object(cli, "write_state") as state,
+                patch.object(cli, "enable_service") as service,
+            ):
+                self.assertEqual(cli.installer_plan(str(path)), 0)
+            write_choice.assert_called_once_with([])
+            self.assertEqual(state.call_args.kwargs["pending"], [])
+            self.assertEqual(set(state.call_args.kwargs["removing"]), {"vscode", "phonelink"})
+            visibility.assert_any_call(catalog.feature("phonelink"), False)
+            visibility.assert_any_call(catalog.feature("libreoffice"), False)
+            service.assert_called_once()
+            self.assertFalse(path.exists())
+
+    def test_later_ids_install_nothing_optional(self):
+        self.assertEqual(catalog.later_ids(), [])
+
+    def test_phonelink_ships_hidden_until_ticked(self):
+        phonelink = catalog.feature("phonelink")
+        self.assertIsNotNone(phonelink)
+        self.assertIn("devos-phonelink.desktop", phonelink["builtin"]["desktop"])
+        hidden = Path(ROOT) / "build/includes.chroot/usr/local/share/applications/devos-phonelink.desktop"
+        self.assertTrue(hidden.is_file())
+        self.assertIn("X-DevOS-Hidden=true", hidden.read_text(encoding="utf-8"))
+
+    def test_installer_plan_enables_only_ticked_builtins(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp:
+            path = Path(temp) / "choices.json"
+            path.write_text(json.dumps({"devos_selected_features": "phonelink,devosnotes"}))
+            with (
+                patch.object(cli, "write_choice"),
+                patch.object(cli, "installed_ids", return_value=["phonelink", "devosnotes", "share"]),
+                patch.object(cli, "set_feature_menu_visibility") as visibility,
+                patch.object(cli, "MARKER_DIR", temp),
+                patch.object(cli, "remove_unselected_desktop_shortcuts"),
+                patch.object(cli, "webapp_enabled", return_value=False),
+                patch.object(cli, "write_webapp_policy"),
+                patch.object(cli, "write_state"),
+                patch.object(cli, "enable_service"),
+            ):
+                self.assertEqual(cli.installer_plan(str(path)), 0)
+            enabled = {call.args[0]["id"] for call in visibility.call_args_list if call.args[1] is True}
+            disabled = {call.args[0]["id"] for call in visibility.call_args_list if call.args[1] is False}
+            self.assertIn("phonelink", enabled)
+            self.assertIn("devosnotes", enabled)
+            self.assertNotIn("phonelink", disabled)
+            self.assertIn("share", disabled)
+            self.assertIn("backup", disabled)
+
+    def test_missing_explicit_choice_ignores_legacy_or_unrelated_keys(self):
+        self.assertIsNone(cli.selection_from_gs({"features": "whatsapp", "packagechooser_features": "vscode"}))
+        self.assertIsNone(cli.selection_from_gs({"devos_selected_features": ["vscode", 1]}))
+        self.assertEqual(cli.selection_from_gs({"devos_selected_features": ""}), [])
+        self.assertEqual(cli.selection_from_gs({"devos_selected_features": ["vscode"]}), ["vscode"])
+
+    def test_browser_policy_uses_only_chosen_active_web_apps(self):
+        windows = catalog.feature("winapp")
+        other = catalog.feature("m365web")
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp)
+            stock = Path(ROOT, "build/includes.chroot/usr/share/applications/devos-web-winapp.desktop")
+            win = path / "winapp.desktop"
+            win.write_bytes(stock.read_bytes())
+            office = path / "m365web.desktop"
+            office.write_text(cli.webapp_entry(other), encoding="utf-8")
+            policy = path / "policy.json"
+            with patch.object(cli, "webapp_path", side_effect=lambda f: str(path / (f["id"] + ".desktop"))):
+                self.assertFalse(cli.is_installed(windows))
+                with patch.object(cli, "read_choice", return_value=["winapp"]):
+                    cli.write_webapp_policy(str(policy))
+                    self.assertFalse(policy.exists())
+                    win.write_text(cli.webapp_entry(windows), encoding="utf-8")
+                    cli.write_webapp_policy(str(policy))
+                    data = json.loads(policy.read_text(encoding="utf-8"))
+                    self.assertEqual([entry["url"] for entry in data["WebAppInstallForceList"]],
+                                     [windows["webapp"]["url"]])
+                with patch.object(cli, "read_choice", return_value=[]):
+                    cli.write_webapp_policy(str(policy))
+                    self.assertFalse(policy.exists())
+
     def test_winapps_packages_valid(self):
         """Verify winapps does not request non-existent packages like dxvk/vkd3d."""
         winapps = catalog.feature("winapps")

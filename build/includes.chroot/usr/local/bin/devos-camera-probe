@@ -1,0 +1,4 @@
+#!/bin/bash
+# DevOS camera probe — process title is the app id, not python3.
+export DEVOS_DESKTOP_FILE=devos-camera-probe
+exec -a "devos-camera-probe" /usr/bin/python3 /usr/local/share/devos/components/audio/camera_defaults.py "$@"

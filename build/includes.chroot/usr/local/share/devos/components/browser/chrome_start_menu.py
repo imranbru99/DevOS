@@ -133,15 +133,105 @@ def _write_atomic(path: Path, text: str, mode: int) -> None:
                 pass
 
 
+def dedupe_system_windows_app() -> int:
+    """Remove Features override copy when the ISO companion already exists."""
+    system = Path("/usr/share/applications/devos-web-winapp.desktop")
+    override = Path("/usr/local/share/applications/devos-web-winapp.desktop")
+    if system.is_file() and override.is_file():
+        try:
+            override.unlink()
+            return 1
+        except OSError:
+            try:
+                override.write_text(
+                    "[Desktop Entry]\nType=Application\nHidden=true\nX-DevOS-Hidden=true\n",
+                    encoding="utf-8",
+                )
+                return 1
+            except OSError:
+                return 0
+    return 0
+
+
+_CHROME_ALIAS_HIDE = (
+    "[Desktop Entry]\nType=Application\nName=Google Chrome\n"
+    "NoDisplay=true\nHidden=true\nX-DevOS-Hidden=true\n"
+    "Exec=/usr/local/bin/devos-browser %U\nIcon=google-chrome\n"
+    "StartupWMClass=google-chrome\nTerminal=false\n"
+    "Categories=Network;WebBrowser;\n"
+)
+
+
+def hide_chrome_menu_aliases(directory: Path | None = None) -> int:
+    """Keep a single Google Chrome Start-menu tile.
+
+    Kickoff treats com.google.Chrome.desktop as a separate app from
+    google-chrome.desktop even when one is a symlink — that showed Chrome twice.
+    Also re-hide /usr/share's vendor desktop after apt install.
+    """
+    changed = 0
+    share = Path("/usr/share/applications/google-chrome.desktop")
+    if share.is_file():
+        try:
+            text = share.read_text(encoding="utf-8", errors="replace")
+            if "NoDisplay=true" not in text:
+                if re.search(r"(?m)^NoDisplay=", text):
+                    text = re.sub(r"(?m)^NoDisplay=.*$", "NoDisplay=true", text)
+                else:
+                    text = text.replace(
+                        "[Desktop Entry]\n",
+                        "[Desktop Entry]\nNoDisplay=true\n",
+                        1,
+                    )
+                share.write_text(text if text.endswith("\n") else text + "\n", encoding="utf-8")
+                changed += 1
+        except OSError:
+            pass
+
+    roots = [
+        Path("/usr/local/share/applications"),
+        Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "applications",
+    ]
+    if directory is not None:
+        roots.append(Path(directory))
+    seen: set[Path] = set()
+    for root in roots:
+        try:
+            root = root.resolve()
+        except OSError:
+            continue
+        if root in seen or not root.is_dir():
+            continue
+        seen.add(root)
+        alias = root / "com.google.Chrome.desktop"
+        try:
+            if alias.is_symlink() or (alias.is_file() and "NoDisplay=true" not in alias.read_text(
+                encoding="utf-8", errors="replace"
+            )):
+                if alias.is_symlink() or alias.exists():
+                    alias.unlink()
+                alias.write_text(_CHROME_ALIAS_HIDE, encoding="utf-8")
+                changed += 1
+            elif not alias.exists():
+                # Prefer leaving user dirs alone when Chrome was never set up.
+                if root == Path("/usr/local/share/applications"):
+                    alias.write_text(_CHROME_ALIAS_HIDE, encoding="utf-8")
+                    changed += 1
+        except OSError:
+            continue
+    return changed
+
+
 def clean_chrome_start_menu(directory: Path | None = None) -> int:
     """Rewrite user Chrome .desktop files. Returns number of files changed."""
+    changed = dedupe_system_windows_app()
     directory = Path(
         directory
         or Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "applications"
     )
+    changed += hide_chrome_menu_aliases(directory)
     if not directory.is_dir():
-        return 0
-    changed = 0
+        return changed
     try:
         uid = os.getuid()
     except AttributeError:
@@ -163,6 +253,7 @@ def clean_chrome_start_menu(directory: Path | None = None) -> int:
             continue
 
         name = values.get("Name", "")
+        exec_line = values.get("Exec", "")
         profile = match.group(2)
         hide = values.get("NoDisplay", "").lower() == "true"
         new_name = None
@@ -176,10 +267,16 @@ def clean_chrome_start_menu(directory: Path | None = None) -> int:
         if friendly:
             new_name = friendly
             name = friendly
+        # Chrome sometimes names the PWA "Windows App" without a URL in Name=.
+        if "windows.cloud.microsoft" in exec_line.lower():
+            new_name = "Windows App"
+            name = "Windows App"
 
         name_key = name.strip().lower()
         # Duplicate of a DevOS companion → keep only the DevOS entry.
-        if _companion_visible(name_key):
+        if _companion_visible(name_key) or (
+            "windows.cloud.microsoft" in exec_line.lower() and _companion_visible("windows app")
+        ):
             force_hide = True
         # Still a raw URL after mapping failure → hide rather than confuse.
         if name.startswith("http://") or name.startswith("https://"):

@@ -3,11 +3,11 @@
     "KPlugin": {
         "Authors": [{ "Name": "DevOS" }],
         "Category": "Desktop",
-        "Description": "DevOS dark desktop",
+        "Description": "DevOS desktop (light by default; dark via DevOS theme)",
         "Id": "org.devos.desktop",
         "Name": "DevOS",
         "ServiceTypes": ["Plasma/LookAndFeel"],
         "Version": "1.0"
     },
-    "X-KDE-fallbackPackage": "org.kde.breezedark.desktop"
+    "X-KDE-fallbackPackage": "org.kde.breeze.desktop"
 }

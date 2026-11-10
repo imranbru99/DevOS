@@ -3,37 +3,97 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Chat</title>
+  <title>DevOS AI</title>
   <style>
-    :root { color-scheme: dark; }
+    :root { color-scheme: dark; --bg:#0b1220; --panel:#121a2b; --line:rgba(255,255,255,.08); --text:#e8eef8; --muted:#9eb0c9; --accent:#38bdf8; --accent-ink:#041018; --card:rgba(18,26,43,.92); --reason:#0c1422; --reason-text:#c9d7ea; --assistant:#1a2438; --input:#162033; --glow:#16324f; }
+    @media (prefers-color-scheme: light) {
+      :root { color-scheme: light; --bg:#f8fafc; --panel:#ffffff; --line:#cbd5e1; --text:#172438; --muted:#475569; --accent:#0284c7; --accent-ink:#ffffff; --card:#ffffff; --reason:#eef3f9; --reason-text:#334155; --assistant:#eef3f9; --input:#ffffff; --glow:#bae6fd; }
+    }
     * { box-sizing: border-box; }
-    html, body { margin: 0; height: 100%; background: #0c1220; color: #e8eef8; font-family: Inter, "Liberation Sans", sans-serif; }
-    .app { display: flex; flex-direction: column; height: 100%; }
-    header { padding: 16px 20px; border-bottom: 1px solid rgba(255,255,255,.08); background: rgba(16,24,40,.92); }
-    header h1 { margin: 0; font-size: 20px; }
-    header p { margin: 6px 0 0; color: #b7c3d6; font-size: 13px; }
-    #log { flex: 1; overflow: auto; padding: 20px; display: flex; flex-direction: column; gap: 12px; width: 100%; }
-    .msg { width: fit-content; max-width: 85%; min-width: 0; padding: 12px 14px; border-radius: 14px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
-    .user { margin-left: auto; background: #2563eb; }
-    .assistant { margin-right: auto; background: #1a2438; border: 1px solid rgba(255,255,255,.08); }
-    form { display: flex; gap: 10px; padding: 14px; border-top: 1px solid rgba(255,255,255,.08); min-width: 0; }
-    input { flex: 1; min-width: 0; border: 0; border-radius: 12px; padding: 14px 16px; background: #162033; color: inherit; font: inherit; }
-    button { border: 0; border-radius: 12px; padding: 0 18px; background: #38bdf8; color: #041018; font-weight: 700; cursor: pointer; }
+    html, body { margin: 0; height: 100%; background: radial-gradient(1200px 600px at 20% -10%, var(--glow) 0%, var(--bg) 55%); color: var(--text); font-family: "Segoe UI", "Noto Sans", sans-serif; }
+    .wrap { min-height: 100%; display: flex; align-items: center; justify-content: center; padding: 28px 18px; }
+    .card { width: min(520px, 100%); background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 28px 26px 22px; box-shadow: 0 24px 60px rgba(0,0,0,.18); }
+    .brand { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); font-weight: 700; margin: 0 0 10px; }
+    h1 { margin: 0; font-size: 26px; line-height: 1.2; font-weight: 700; }
+    .lead { margin: 12px 0 0; color: var(--muted); font-size: 15px; line-height: 1.5; }
+    .reason { margin-top: 18px; padding: 12px 14px; border-radius: 12px; background: var(--reason); border: 1px solid var(--line); color: var(--reason-text); font-size: 13px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; max-height: 9em; overflow: auto; }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
+    button, .linkish { appearance: none; border: 0; border-radius: 12px; padding: 12px 16px; font: inherit; font-weight: 700; cursor: pointer; }
+    #retry { background: var(--accent); color: var(--accent-ink); }
+    #retry:disabled { opacity: .55; cursor: wait; }
+    #textOnlyBtn { background: transparent; color: var(--text); border: 1px solid var(--line); }
+    .hint { margin-top: 14px; font-size: 12px; color: var(--muted); }
+    #textOnly { display: none; margin-top: 22px; border-top: 1px solid var(--line); padding-top: 18px; }
+    #textOnly.open { display: block; }
+    #log { max-height: 220px; overflow: auto; display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+    .msg { width: fit-content; max-width: 92%; padding: 10px 12px; border-radius: 12px; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; }
+    .user { margin-left: auto; background: #2563eb; color: #ffffff; }
+    .assistant { margin-right: auto; background: var(--assistant); border: 1px solid var(--line); color: var(--text); }
+    form { display: flex; gap: 8px; }
+    input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; background: var(--input); color: inherit; font: inherit; }
+    form button { background: var(--accent); color: var(--accent-ink); }
   </style>
 </head>
 <body>
-  <div class="app">
-    <header>
-      <h1>DevOS AI</h1>
-      <p>Your private assistant. Everything stays on this computer.</p>
-    </header>
-    <div id="log"></div>
-    <form id="ask">
-      <input id="text" autocomplete="off" placeholder="Ask DevOS AI anything: apps, files, Windows or Android programs">
-      <button type="submit">Send</button>
-    </form>
+  <div class="wrap">
+    <div class="card">
+      <p class="brand">DevOS AI</p>
+      <h1>Full assistant did not start</h1>
+      <p class="lead">Voice call and the mic live in the full DevOS AI window. This recovery page opens only when that window cannot start.</p>
+      <div class="reason" id="reason">Checking why…</div>
+      <div class="actions">
+        <button type="button" id="retry">Retry full assistant</button>
+        <button type="button" id="textOnlyBtn">Text-only (limited)</button>
+      </div>
+      <p class="hint">Retry runs <code>devos-chat</code> again. Details are also in <code>~/.cache/devos/chat-launch.log</code>.</p>
+      <div id="textOnly">
+        <div id="log"></div>
+        <form id="ask">
+          <input id="text" autocomplete="off" placeholder="Type a short question (no voice call here)">
+          <button type="submit">Send</button>
+        </form>
+      </div>
+    </div>
   </div>
   <script>
+    const params = new URLSearchParams(location.search);
+    const reasonEl = document.getElementById("reason");
+    const fromQuery = (params.get("reason") || "").trim();
+    reasonEl.textContent = fromQuery || "The full assistant (with voice call) could not open. Tap Retry.";
+
+    document.getElementById("retry").addEventListener("click", async () => {
+      const btn = document.getElementById("retry");
+      btn.disabled = true;
+      btn.textContent = "Starting…";
+      let ok = false;
+      try {
+        const res = await fetch("/api/actions/launch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "chat" })
+        });
+        const data = await res.json().catch(() => ({}));
+        ok = !!(res.ok && data && data.success);
+      } catch (_) {
+        ok = false;
+      }
+      if (ok) {
+        reasonEl.textContent = "Starting the full assistant with voice call… You can close this recovery window.";
+        btn.textContent = "Started";
+        return;
+      }
+      setTimeout(() => {
+        btn.disabled = false;
+        btn.textContent = "Retry full assistant";
+        reasonEl.textContent = (fromQuery || "Full assistant did not start.") +
+          "\n\nRetry did not launch. Close this page and open DevOS AI from the Start menu again.";
+      }, 800);
+    });
+
+    document.getElementById("textOnlyBtn").addEventListener("click", () => {
+      document.getElementById("textOnly").classList.toggle("open");
+    });
+
     const log = document.getElementById("log");
     const turns = [];
     function add(role, text) {
@@ -44,7 +104,8 @@
       log.scrollTop = log.scrollHeight;
       return el;
     }
-    add("assistant", "Hi, I am DevOS AI. I run on this computer, so your questions stay private. How can I help?");
+    add("assistant", "Text-only mode. Voice call is unavailable here — use Retry for the full assistant.");
+
     document.getElementById("ask").addEventListener("submit", async (event) => {
       event.preventDefault();
       const input = document.getElementById("text");
@@ -54,7 +115,7 @@
       input.value = "";
       add("user", text);
       turns.push({ role: "user", content: text });
-      const pending = add("assistant", "Answering on this computer...");
+      const pending = add("assistant", "Answering on this computer…");
       button.disabled = true;
       try {
         const response = await fetch("http://127.0.0.1:11434/v1/chat/completions", {

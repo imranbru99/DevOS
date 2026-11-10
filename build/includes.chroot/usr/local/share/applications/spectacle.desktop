@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Snipping Tool
+GenericName=Screenshot
+Comment=Screenshot
+Icon=spectacle
+Exec=true
+Terminal=false
+NoDisplay=true
+X-DevOS-FriendlyAlias=true

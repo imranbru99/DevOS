@@ -109,7 +109,7 @@ var data = {
   {
    "id": "later",
    "name": "Choose later",
-   "about": "Skip the extra apps for now. After install, add or remove any of them in DevOS Features, or ask DevOS AI."
+   "about": "Install no optional apps now. After setup, add any of them in DevOS Features, or ask DevOS AI."
   },
   {
    "id": "windows",
@@ -202,17 +202,16 @@ var data = {
    "id": "libreoffice",
    "category": "office",
    "name": "LibreOffice Writer, Calc, Impress",
-   "about": "Offline office suite on the ISO (Writer, Calc, Impress). Best for .odt/.ods and complex macros.",
+   "about": "Office suite for Writer, Calc and Impress. Best for .odt/.ods and complex macros.",
    "size_mb": 380,
    "windows": "Microsoft Office",
-   "preinstalled": true,
+   "preinstalled": false,
    "presets": [
     "windows",
     "student",
     "developer",
     "creator",
     "gamer",
-    "minimal",
     "islamic"
    ],
    "eula": "",
@@ -246,7 +245,6 @@ var data = {
     "developer",
     "creator",
     "gamer",
-    "minimal",
     "islamic"
    ],
    "eula": "",
@@ -277,14 +275,13 @@ var data = {
    "about": "PDF Arranger and Xournal++ — shipped offline on the ISO.",
    "size_mb": 15,
    "windows": "Adobe Acrobat",
-   "preinstalled": true,
+   "preinstalled": false,
    "presets": [
     "windows",
     "student",
     "developer",
     "creator",
     "gamer",
-    "minimal",
     "islamic"
    ],
    "eula": "",
@@ -354,7 +351,7 @@ var data = {
    "about": "Chrome with Google sign-in and sync.",
    "size_mb": 330,
    "windows": "Chrome",
-   "preinstalled": true,
+   "preinstalled": false,
    "presets": [
     "windows",
     "student",
@@ -410,17 +407,16 @@ var data = {
    "id": "thunderbird",
    "category": "internet",
    "name": "Thunderbird email",
-   "about": "Email and calendar for Gmail, Outlook.com and work accounts — apt package on the ISO.",
+   "about": "Email and calendar for Gmail, Outlook.com and work accounts.",
    "size_mb": 300,
    "windows": "Outlook / Mail",
-   "preinstalled": true,
+   "preinstalled": false,
    "presets": [
     "windows",
     "student",
     "developer",
     "creator",
     "gamer",
-    "minimal",
     "islamic"
    ],
    "eula": "",
@@ -476,6 +472,19 @@ var data = {
    "name": "qBittorrent",
    "about": "Torrent downloads.",
    "size_mb": 30,
+   "windows": "",
+   "preinstalled": false,
+   "presets": [],
+   "eula": "",
+   "min_ram_gb": 0,
+   "optin": false
+  },
+  {
+   "id": "filezilla",
+   "category": "internet",
+   "name": "FileZilla",
+   "about": "FTP and SFTP file transfers.",
+   "size_mb": 35,
    "windows": "",
    "preinstalled": false,
    "presets": [],
@@ -595,7 +604,7 @@ var data = {
    "about": "Plays every video and music format.",
    "size_mb": 60,
    "windows": "Media Player",
-   "preinstalled": true,
+   "preinstalled": false,
    "presets": [
     "windows",
     "student",
@@ -623,23 +632,6 @@ var data = {
    ],
    "eula": "",
    "min_ram_gb": 4,
-   "optin": false
-  },
-  {
-   "id": "webcam",
-   "category": "media",
-   "name": "Camera",
-   "about": "Take photos and videos with the webcam.",
-   "size_mb": 10,
-   "windows": "Camera",
-   "preinstalled": false,
-   "presets": [
-    "windows",
-    "student",
-    "islamic"
-   ],
-   "eula": "",
-   "min_ram_gb": 0,
    "optin": false
   },
   {
@@ -718,7 +710,7 @@ var data = {
    "about": "Photo editing, like Photoshop — offline on the ISO.",
    "size_mb": 400,
    "windows": "Photoshop",
-   "preinstalled": true,
+   "preinstalled": false,
    "presets": [
     "creator",
     "normal",
@@ -750,7 +742,7 @@ var data = {
    "about": "Vector graphics, like Illustrator — offline on the ISO.",
    "size_mb": 350,
    "windows": "Illustrator",
-   "preinstalled": true,
+   "preinstalled": false,
    "presets": [
     "creator",
     "normal"
@@ -913,28 +905,28 @@ var data = {
    "about": "Main Antigravity — primary Google account, projects, and Gemini profile. Independent from Antigravity IDE (second account). Pipeline slot: antigravity.",
    "size_mb": 500,
    "windows": "Antigravity",
-   "preinstalled": true,
+   "preinstalled": false,
    "presets": [
     "developer"
    ],
    "eula": "",
    "min_ram_gb": 4,
-   "optin": false
+   "optin": true
   },
   {
    "id": "antigravity-kde",
    "category": "developer",
    "name": "Antigravity IDE",
-   "about": "Second Antigravity — separate Google login, projects, and profile (~/.config/Antigravity-KDE, GEMINI_APP_DATA_DIR=antigravity-kde). Runs beside Google Antigravity at the same time. Pipeline slot: antigravity-kde.",
+   "about": "Second Antigravity with its own Google login and projects. Runs beside Google Antigravity at the same time.",
    "size_mb": 50,
    "windows": "Antigravity IDE",
-   "preinstalled": true,
+   "preinstalled": false,
    "presets": [
     "developer"
    ],
    "eula": "",
    "min_ram_gb": 4,
-   "optin": false
+   "optin": true
   },
   {
    "id": "cursor",
@@ -958,7 +950,7 @@ var data = {
    "about": "Cursor's autonomous coding agent CLI (agent / cursor-agent). Runs in the terminal or from the DevOS AI Pipeline alongside Antigravity and the local DevOS agent.",
    "size_mb": 80,
    "windows": "Cursor Agent",
-   "preinstalled": true,
+   "preinstalled": false,
    "presets": [
     "developer"
    ],
@@ -1034,7 +1026,7 @@ var data = {
    "about": "Code editor with DevOS AI built in.",
    "size_mb": 400,
    "windows": "VS Code",
-   "preinstalled": true,
+   "preinstalled": false,
    "presets": [
     "windows",
     "student",
@@ -1054,7 +1046,7 @@ var data = {
    "about": "PHP, MariaDB, PostgreSQL and Redis for local websites (like XAMPP/Laragon). Untick to save ~600 MB and memory if you don't build websites.",
    "size_mb": 600,
    "windows": "XAMPP / Laragon",
-   "preinstalled": true,
+   "preinstalled": false,
    "presets": [
     "windows",
     "student",
@@ -1130,35 +1122,13 @@ var data = {
    "about": "Everyday calculator, like the Windows Calculator.",
    "size_mb": 2,
    "windows": "Calculator",
-   "preinstalled": true,
+   "preinstalled": false,
    "presets": [
     "windows",
     "student",
     "developer",
     "creator",
     "gamer",
-    "minimal",
-    "islamic"
-   ],
-   "eula": "",
-   "min_ram_gb": 0,
-   "optin": false
-  },
-  {
-   "id": "notepad",
-   "category": "utilities",
-   "name": "Notepad",
-   "about": "A simple text editor, like Windows Notepad. Turning it off only hides it from the menu.",
-   "size_mb": 1,
-   "windows": "Notepad",
-   "preinstalled": true,
-   "presets": [
-    "windows",
-    "student",
-    "developer",
-    "creator",
-    "gamer",
-    "minimal",
     "islamic"
    ],
    "eula": "",
@@ -1172,77 +1142,13 @@ var data = {
    "about": "Capture the screen or one area, like the Windows Snipping Tool.",
    "size_mb": 5,
    "windows": "Snipping Tool",
-   "preinstalled": true,
+   "preinstalled": false,
    "presets": [
     "windows",
     "student",
     "developer",
     "creator",
     "gamer",
-    "minimal",
-    "islamic"
-   ],
-   "eula": "",
-   "min_ram_gb": 0,
-   "optin": false
-  },
-  {
-   "id": "photos",
-   "category": "utilities",
-   "name": "Photos",
-   "about": "View your pictures, like Windows Photos. Turning it off only hides it from the menu.",
-   "size_mb": 1,
-   "windows": "Photos",
-   "preinstalled": true,
-   "presets": [
-    "windows",
-    "student",
-    "developer",
-    "creator",
-    "gamer",
-    "minimal",
-    "islamic"
-   ],
-   "eula": "",
-   "min_ram_gb": 0,
-   "optin": false
-  },
-  {
-   "id": "explorer",
-   "category": "utilities",
-   "name": "File Explorer",
-   "about": "Browse your files, drives and USB sticks, like Windows File Explorer (DevOS Files / This PC). Turning it off only hides it from the menu.",
-   "size_mb": 1,
-   "windows": "File Explorer",
-   "preinstalled": true,
-   "presets": [
-    "windows",
-    "student",
-    "developer",
-    "creator",
-    "gamer",
-    "minimal",
-    "islamic"
-   ],
-   "eula": "",
-   "min_ram_gb": 0,
-   "optin": false
-  },
-  {
-   "id": "terminal",
-   "category": "utilities",
-   "name": "Terminal",
-   "about": "A command window, like Windows Terminal. Turning it off only hides it from the menu.",
-   "size_mb": 1,
-   "windows": "Terminal",
-   "preinstalled": true,
-   "presets": [
-    "windows",
-    "student",
-    "developer",
-    "creator",
-    "gamer",
-    "minimal",
     "islamic"
    ],
    "eula": "",
@@ -1370,15 +1276,14 @@ var data = {
    "id": "remmina",
    "category": "utilities",
    "name": "Remote Desktop (Remmina)",
-   "about": "Connect to Windows PCs, Windows 365 and Azure Virtual Desktop over RDP — offline on the ISO.",
+   "about": "Connect to Windows PCs over RDP. For Windows 365 Cloud PCs use Windows App. Install only when you tick it — not part of the base system.",
    "size_mb": 15,
-   "windows": "Windows App / Remote Desktop",
-   "preinstalled": true,
+   "windows": "Remote Desktop",
+   "preinstalled": false,
    "presets": [
     "windows",
     "developer",
     "student",
-    "normal",
     "islamic"
    ],
    "eula": "",
@@ -1406,10 +1311,10 @@ var data = {
    "id": "timeshift",
    "category": "utilities",
    "name": "System restore points (Timeshift)",
-   "about": "Take a snapshot before changes and roll back in one click, like System Restore. On the default ext4 install this is the DevOS restore backend; btrfs installs use Snapper.",
+   "about": "Take a snapshot before changes and roll back in one click, like System Restore.",
    "size_mb": 10,
    "windows": "System Restore",
-   "preinstalled": true,
+   "preinstalled": false,
    "presets": [
     "windows",
     "student",
@@ -1426,17 +1331,16 @@ var data = {
    "id": "access",
    "category": "utilities",
    "name": "Accessibility (screen reader, magnifier, on-screen keyboard)",
-   "about": "Orca reads the screen aloud, KMag enlarges it, and Onboard types by pointer.",
+   "about": "Screen reader, magnifier, and on-screen keyboard for easier access.",
    "size_mb": 80,
    "windows": "Narrator, Magnifier, Touch keyboard",
-   "preinstalled": true,
+   "preinstalled": false,
    "presets": [
     "windows",
     "student",
     "developer",
     "creator",
     "gamer",
-    "minimal",
     "islamic"
    ],
    "eula": "",
@@ -1452,27 +1356,6 @@ var data = {
    "windows": "",
    "preinstalled": false,
    "presets": [],
-   "eula": "",
-   "min_ram_gb": 0,
-   "optin": false
-  },
-  {
-   "id": "firewall",
-   "category": "security",
-   "name": "Firewall (on)",
-   "about": "Blocks incoming connections; Phone Link, the phone companion and DevOS Share keep working.",
-   "size_mb": 5,
-   "windows": "Windows Firewall",
-   "preinstalled": true,
-   "presets": [
-    "windows",
-    "student",
-    "developer",
-    "creator",
-    "gamer",
-    "minimal",
-    "islamic"
-   ],
    "eula": "",
    "min_ram_gb": 0,
    "optin": false
@@ -1530,14 +1413,11 @@ var data = {
    "about": "Sign in with a fingerprint reader, like Windows Hello, on laptops that have one. The password still works.",
    "size_mb": 8,
    "windows": "Windows Hello",
-   "preinstalled": true,
+   "preinstalled": false,
    "presets": [
     "windows",
     "student",
-    "developer",
-    "creator",
-    "gamer",
-    "minimal",
+    "professional",
     "islamic"
    ],
    "eula": "",
@@ -1580,41 +1460,19 @@ var data = {
    "optin": false
   },
   {
-   "id": "notofonts",
-   "category": "language",
-   "name": "Fonts for all languages",
-   "about": "Noto fonts so every website and document shows correctly.",
-   "size_mb": 40,
-   "windows": "",
-   "preinstalled": true,
-   "presets": [
-    "windows",
-    "student",
-    "developer",
-    "creator",
-    "gamer",
-    "minimal",
-    "islamic"
-   ],
-   "eula": "",
-   "min_ram_gb": 0,
-   "optin": false
-  },
-  {
    "id": "winapps",
    "category": "compat",
    "name": "Windows apps (.exe, .msi)",
    "about": "Run Windows programs with a double-click. DirectX 9–11 uses DXVK.",
    "size_mb": 900,
    "windows": ".exe support",
-   "preinstalled": true,
+   "preinstalled": false,
    "presets": [
     "windows",
     "student",
     "developer",
     "creator",
     "gamer",
-    "minimal",
     "islamic"
    ],
    "eula": "",
@@ -1660,7 +1518,7 @@ var data = {
    "about": "Run Android apps in a window (downloads ~850 MB on first use).",
    "size_mb": 30,
    "windows": "Windows Subsystem for Android",
-   "preinstalled": true,
+   "preinstalled": false,
    "presets": [
     "windows",
     "student",
@@ -1671,27 +1529,6 @@ var data = {
    ],
    "eula": "",
    "min_ram_gb": 4,
-   "optin": false
-  },
-  {
-   "id": "taskman",
-   "category": "devos",
-   "name": "Task Manager",
-   "about": "Processes, performance, startup apps, users and services. Opens with Ctrl+Shift+Esc.",
-   "size_mb": 1,
-   "windows": "Task Manager",
-   "preinstalled": true,
-   "presets": [
-    "windows",
-    "student",
-    "developer",
-    "creator",
-    "gamer",
-    "minimal",
-    "islamic"
-   ],
-   "eula": "",
-   "min_ram_gb": 0,
    "optin": false
   },
   {
@@ -1708,28 +1545,6 @@ var data = {
     "developer",
     "creator",
     "gamer",
-    "minimal",
-    "islamic"
-   ],
-   "eula": "",
-   "min_ram_gb": 0,
-   "optin": false
-  },
-  {
-   "id": "security",
-   "category": "devos",
-   "name": "DevOS Security",
-   "about": "Virus scanning of downloads and USB drives, phishing-site blocking, firewall, security updates and Disk Guard in one place.",
-   "size_mb": 1,
-   "windows": "Windows Security",
-   "preinstalled": true,
-   "presets": [
-    "windows",
-    "student",
-    "developer",
-    "creator",
-    "gamer",
-    "minimal",
     "islamic"
    ],
    "eula": "",
@@ -1750,7 +1565,6 @@ var data = {
     "developer",
     "creator",
     "gamer",
-    "minimal",
     "islamic"
    ],
    "eula": "",
@@ -1771,7 +1585,6 @@ var data = {
     "developer",
     "creator",
     "gamer",
-    "minimal",
     "islamic"
    ],
    "eula": "",
@@ -1792,28 +1605,6 @@ var data = {
     "developer",
     "creator",
     "gamer",
-    "minimal",
-    "islamic"
-   ],
-   "eula": "",
-   "min_ram_gb": 0,
-   "optin": false
-  },
-  {
-   "id": "clipboard",
-   "category": "devos",
-   "name": "Clipboard history (Win+V)",
-   "about": "Press Win+V to pick something you copied earlier and paste it back. Stays on this PC.",
-   "size_mb": 1,
-   "windows": "Clipboard history (Win+V)",
-   "preinstalled": true,
-   "presets": [
-    "windows",
-    "student",
-    "developer",
-    "creator",
-    "gamer",
-    "minimal",
     "islamic"
    ],
    "eula": "",
@@ -1834,7 +1625,6 @@ var data = {
     "developer",
     "creator",
     "gamer",
-    "minimal",
     "islamic"
    ],
    "eula": "",
@@ -1933,7 +1723,6 @@ var data = {
     "developer",
     "creator",
     "gamer",
-    "minimal",
     "islamic"
    ],
    "eula": "",
@@ -1954,7 +1743,6 @@ var data = {
     "developer",
     "creator",
     "gamer",
-    "minimal",
     "islamic"
    ],
    "eula": "",
@@ -2035,7 +1823,6 @@ var data = {
   "whatsapp",
   "vlc",
   "spotify",
-  "webcam",
   "recorder",
   "paint",
   "photopea",
@@ -2043,11 +1830,7 @@ var data = {
   "vscode",
   "devservers",
   "calculator",
-  "notepad",
   "snip",
-  "photos",
-  "explorer",
-  "terminal",
   "charmap",
   "alarms",
   "weather",
@@ -2059,21 +1842,16 @@ var data = {
   "scanner",
   "timeshift",
   "access",
-  "firewall",
   "antivirus",
   "fingerprint",
   "bangla",
-  "notofonts",
   "winapps",
   "winvm",
   "android",
-  "taskman",
   "netusage",
-  "security",
   "devosnotes",
   "voicetype",
   "aiactions",
-  "clipboard",
   "emoji",
   "codeagent",
   "phonelink",

@@ -3,8 +3,18 @@
 // and scrub dead pins — otherwise Plasma keeps Dolphin/Kate/Konsole defaults.
 
 var DESKTOP_WALLPAPER = "file:///usr/share/wallpapers/DevOS/DevOS-Default.png";
-var TASKBAR_LAUNCHERS = "applications:devos-search.desktop,applications:devos-taskman.desktop,applications:devos-windows.desktop,applications:google-chrome.desktop,applications:devos-thispc.desktop,applications:devos-chat.desktop,applications:devos-code.desktop,applications:devos-settings.desktop";
-var KICKOFF_FAVORITES = "applications:google-chrome.desktop,applications:devos-thispc.desktop,applications:devos-notepad.desktop,applications:devos-code.desktop,applications:devos-chat.desktop,applications:devos-dashboard.desktop,applications:devos-apps.desktop,applications:devos-settings.desktop";
+var TASKBAR_LAUNCHERS = "applications:devos-search.desktop,applications:devos-taskman.desktop,applications:devos-windows.desktop,applications:devos-browser.desktop,applications:devos-thispc.desktop,applications:devos-chat.desktop,applications:devos-code.desktop,applications:devos-settings.desktop";
+var KICKOFF_FAVORITES = "applications:devos-browser.desktop,applications:devos-thispc.desktop,applications:devos-notepad.desktop,applications:devos-code.desktop,applications:devos-chat.desktop,applications:devos-dashboard.desktop,applications:devos-apps.desktop,applications:devos-settings.desktop";
+
+function availablePin(entry) {
+    if (entry === "applications:google-chrome.desktop" || entry === "applications:devos-code.desktop") {
+        return applicationExists(entry.substring("applications:".length));
+    }
+    return true;
+}
+
+TASKBAR_LAUNCHERS = TASKBAR_LAUNCHERS.split(",").filter(availablePin).join(",");
+KICKOFF_FAVORITES = KICKOFF_FAVORITES.split(",").filter(availablePin).join(",");
 
 function scrubLaunchers(raw) {
     if (!raw) {
@@ -14,7 +24,7 @@ function scrubLaunchers(raw) {
     var keep = [];
     for (var i = 0; i < parts.length; i++) {
         var entry = parts[i].trim();
-        if (!entry) {
+        if (!entry || !availablePin(entry)) {
             continue;
         }
         // Installer pin is removed after disk install — leave it and icons go blank.
@@ -78,7 +88,7 @@ var panelList = panels();
 if (panelList.length === 0) {
     var panel = new Panel;
     panel.location = "bottom";
-    panel.height = 40;
+    panel.height = 48;
     panel.hiding = "none";
     panel.alignment = "left";
 

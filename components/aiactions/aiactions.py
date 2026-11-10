@@ -445,7 +445,14 @@ def _load_gui():
             p.setRenderHint(QtGui.QPainter.Antialiasing)
             r = QtCore.QRectF(self.card.geometry()).adjusted(0.5, 0.5, -0.5, -0.5)
             p.setPen(Qt.NoPen)
-            p.setBrush(QtGui.QColor("#0b0f1a"))
+            fill = "#f8fafc"
+            try:
+                from devos_appearance import current_mode
+                if current_mode() not in ("light", "mac-light"):
+                    fill = "#0b0f1a"
+            except Exception:
+                fill = "#0b0f1a"
+            p.setBrush(QtGui.QColor(fill))
             p.drawRoundedRect(r, 16, 16)
             g = QtGui.QLinearGradient(r.topLeft(), r.topRight())
             g.setColorAt(0, QtGui.QColor(56, 189, 248, 150))

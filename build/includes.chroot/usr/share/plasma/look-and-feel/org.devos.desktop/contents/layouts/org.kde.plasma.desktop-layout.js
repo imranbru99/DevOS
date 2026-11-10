@@ -23,14 +23,14 @@ leftSpace.writeConfig("expanding", true)
 var menu = panel.addWidget("org.kde.plasma.kickoff")
 menu.currentConfigGroup = ["General"]
 menu.writeConfig("icon", "devos-logo")
-menu.writeConfig("favorites", "applications:google-chrome.desktop,applications:devos-thispc.desktop,applications:devos-notepad.desktop,applications:devos-code.desktop,applications:devos-chat.desktop,applications:devos-dashboard.desktop,applications:devos-apps.desktop,applications:devos-settings.desktop")
+menu.writeConfig("favorites", "applications:devos-browser.desktop,applications:devos-thispc.desktop,applications:devos-notepad.desktop,applications:devos-code.desktop,applications:devos-chat.desktop,applications:devos-dashboard.desktop,applications:devos-apps.desktop,applications:devos-settings.desktop")
 menu.writeConfig("favoritesDisplay", 0)
 menu.writeConfig("favoritesPortedToKAstats", false)
 menu.writeConfig("systemFavorites", "hibernate,reboot,shutdown")
 
 var tasks = panel.addWidget("org.kde.plasma.icontasks")
 tasks.currentConfigGroup = ["General"]
-tasks.writeConfig("launchers", "applications:devos-search.desktop,applications:devos-taskman.desktop,applications:devos-windows.desktop,applications:google-chrome.desktop,applications:devos-thispc.desktop,applications:devos-chat.desktop,applications:devos-code.desktop,applications:devos-settings.desktop")
+tasks.writeConfig("launchers", "applications:devos-search.desktop,applications:devos-taskman.desktop,applications:devos-windows.desktop,applications:devos-browser.desktop,applications:devos-thispc.desktop,applications:devos-chat.desktop,applications:devos-code.desktop,applications:devos-settings.desktop")
 // Group by application so Antigravity/Chrome do not spam one icon per window.
 // Status icons belong under system tray (^), not as duplicate taskbar entries.
 tasks.writeConfig("groupingStrategy", 1)

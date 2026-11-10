@@ -133,8 +133,8 @@ Page {
         ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
         ColumnLayout {
             id: form
-            x: 32; y: 32
-            width: Math.max(240, page.width-64)
+            x: InstallerAppearance.pageMargin; y: InstallerAppearance.pageMargin
+            width: Math.max(240, page.width - InstallerAppearance.pageMargin * 2)
             spacing: 14
             PageIntro {
                 Layout.fillWidth: true

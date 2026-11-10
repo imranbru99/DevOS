@@ -2,15 +2,14 @@
 Description=Install the apps chosen in the DevOS installer
 # Enabled by "devos-features installer-plan" when the "Choose your apps" page
 # picked downloads; it disables itself once everything is installed.
-Wants=network-online.target
-After=network-online.target devos-network.service
+After=network.target devos-network.service
 ConditionPathExists=/etc/devos/features.conf
 StartLimitIntervalSec=0
 
 [Service]
-Type=oneshot
+# Start the worker in the background so graphical.target can open while it runs.
+Type=exec
 ExecStart=/usr/local/bin/devos-features apply
-TimeoutStartSec=infinity
 Slice=devos-workloads.slice
 Nice=15
 CPUWeight=20

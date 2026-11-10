@@ -18,11 +18,14 @@ import re
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+# Prefer 8-digit hex before 6-digit so #RRGGBBAA is not truncated to #RRGGBB.
 COLOR = re.compile(
-    r"#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}\b|\b(?:white|black)\b|"
+    r"#[0-9a-fA-F]{8}\b|#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}\b|\b(?:white|black)\b|"
     r"rgba?\(\s*\d+\s*,\s*\d+\s*,\s*\d+(?:\s*,\s*[\d.]+)?\s*\)",
     re.I,
 )
+# CSS authors write #RRGGBBAA; Qt stylesheets read 8-digit hex as #AARRGGBB.
+HEX8 = re.compile(r"#([0-9a-fA-F]{8})\b")
 
 # Canonical dark chrome. Light mode is derived; never ship light-only sheets
 # as the only source or dark mode will stay washed out.
@@ -87,10 +90,11 @@ PALETTE_LIGHT = {
     "ButtonText": "#0f172a",
     "Highlight": "#2563eb",
     "HighlightedText": "#ffffff",
-    "ToolTipBase": "#ffffff",
-    "ToolTipText": "#0f172a",
+    # Match Plasma DevOS-Light frosted menus/tooltips over wallpapers.
+    "ToolTipBase": "#0f172a",
+    "ToolTipText": "#f1f5f9",
     "PlaceholderText": "#64748b",
-    "Link": "#2563eb",
+    "Link": "#1d4ed8",
     "BrightText": "#0f172a",
     "Light": "#e2e8f0",
     "Mid": "#cbd5e1",
@@ -128,13 +132,21 @@ def apply_palette(app: QtWidgets.QApplication, mode: str) -> None:
 
 
 def _parse_color(token: str) -> QtGui.QColor:
-    c = QtGui.QColor(token)
+    raw = token.strip()
+    # CSS #RRGGBBAA (authors) before Qt's #AARRGGBB read of 8-digit hex.
+    m8 = re.fullmatch(r"#([0-9a-fA-F]{8})", raw)
+    if m8:
+        h = m8.group(1)
+        c = QtGui.QColor(int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+        c.setAlpha(int(h[6:8], 16))
+        return c
+    c = QtGui.QColor(raw)
     if c.isValid():
         return c
     # Qt may reject some rgba forms; normalize manually.
     m = re.fullmatch(
         r"rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?\s*\)",
-        token.strip(),
+        raw,
         re.I,
     )
     if not m:
@@ -151,21 +163,43 @@ def _fmt_color(c: QtGui.QColor, prefer_rgba: bool = False) -> str:
     return c.name()
 
 
+def normalize_stylesheet_colors(sheet: str) -> str:
+    """Rewrite CSS #RRGGBBAA to rgba() so Qt does not paint #AARRGGBB."""
+
+    def repl(match):
+        h = match.group(1)
+        r, g, b, a = (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16), int(h[6:8], 16))
+        return f"rgba({r}, {g}, {b}, {a / 255:.3g})"
+
+    return HEX8.sub(repl, sheet or "")
+
+
+def _is_strong_fill(c: QtGui.QColor) -> bool:
+    """True only for solid mid-tone accent fills that need white labels.
+
+    Pastel cyan (#38bdf8) and translucent washes must keep authored dark ink.
+    """
+    if not c.isValid() or c.alphaF() < 0.55:
+        return False
+    sat, val = c.hsvSaturationF(), c.valueF()
+    return sat > 0.55 and 0.4 < val < 0.88
+
+
 def light_stylesheet(sheet: str) -> str:
     """Translate explicit chrome colors by role, preserving colored action buttons."""
+    sheet = normalize_stylesheet_colors(sheet)
 
     def block(match):
         body = match.group(1)
         background = re.search(
-            r"(?:^|;)\s*background(?:-color)?\s*:\s*(#[0-9a-fA-F]{3,6}|rgba?\([^)]+\))",
+            r"(?:^|;)\s*background(?:-color)?\s*:\s*"
+            r"(#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)|white|black)",
             body,
             re.I,
         )
         strong = False
         if background:
-            c = _parse_color(background.group(1))
-            if c.isValid():
-                strong = c.hsvSaturationF() > 0.55 and c.valueF() > 0.4
+            strong = _is_strong_fill(_parse_color(background.group(1)))
 
         def declaration(m):
             prop, value = m.group(1), m.group(2)
@@ -178,6 +212,11 @@ def light_stylesheet(sheet: str) -> str:
                 h, sat, val, _ = c.getHsvF()
                 keep_alpha = c.alpha() < 255
                 if prop.startswith("background") or prop == "selection-background-color":
+                    # White glass on dark chrome → slate glass on light chrome.
+                    if keep_alpha and sat < 0.12 and val > 0.85:
+                        out = QtGui.QColor("#0f172a")
+                        out.setAlpha(c.alpha())
+                        return _fmt_color(out, True)
                     if sat > 0.55 and val > 0.4:
                         return token
                     if val < 0.13:
@@ -204,6 +243,10 @@ def light_stylesheet(sheet: str) -> str:
                         return "#334155"
                     return "#0f172a"
                 if prop.startswith("border"):
+                    if keep_alpha and sat < 0.12 and val > 0.85:
+                        out = QtGui.QColor("#0f172a")
+                        out.setAlpha(max(c.alpha(), 40))
+                        return _fmt_color(out, True)
                     return "#2563eb" if sat > 0.55 and val > 0.55 else "#cbd5e1"
                 return token
 
@@ -218,19 +261,19 @@ def light_stylesheet(sheet: str) -> str:
 
 def dark_stylesheet(sheet: str) -> str:
     """Convert a light-authored sheet back to dark chrome (for apps that shipped light CSS)."""
+    sheet = normalize_stylesheet_colors(sheet)
 
     def block(match):
         body = match.group(1)
         background = re.search(
-            r"(?:^|;)\s*background(?:-color)?\s*:\s*(#[0-9a-fA-F]{3,6}|rgba?\([^)]+\))",
+            r"(?:^|;)\s*background(?:-color)?\s*:\s*"
+            r"(#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)|white|black)",
             body,
             re.I,
         )
         strong = False
         if background:
-            c = _parse_color(background.group(1))
-            if c.isValid():
-                strong = c.hsvSaturationF() > 0.55 and c.valueF() > 0.4
+            strong = _is_strong_fill(_parse_color(background.group(1)))
 
         def declaration(m):
             prop, value = m.group(1), m.group(2)
@@ -259,6 +302,8 @@ def dark_stylesheet(sheet: str) -> str:
                 if prop in ("color", "selection-color"):
                     if strong:
                         return "#ffffff"
+                    if val < 0.2:
+                        return "#f1f5f9"
                     if sat > 0.5 and val < 0.55:
                         r, g, b = colorsys.hsv_to_rgb(max(0, h), max(0.45, sat), 0.78)
                         return QtGui.QColor.fromRgbF(r, g, b).name()
@@ -302,6 +347,8 @@ def sheet_looks_light(sheet: str) -> bool:
 def adapt_stylesheet(sheet: str, mode: str) -> str:
     if not sheet:
         return sheet
+    # Always normalize CSS #RRGGBBAA so Qt never paints 8-digit hex as AARRGGBB.
+    sheet = normalize_stylesheet_colors(sheet)
     light_mode = mode in ("light", "mac-light")
     if light_mode:
         return light_stylesheet(sheet) if not sheet_looks_light(sheet) else sheet

@@ -1,0 +1,93 @@
+#!/bin/bash
+# Rewrite KActivities "initiatingAgent" values so System Settings → Recent Files
+# never shows /usr/bin/spectacle, bare dolphin, or org.kde.* plasma ids without
+# a friendly desktop Name=. Safe to run repeatedly (idempotent).
+set -u
+
+python3 - << 'PY'
+import os
+import sqlite3
+import sys
+
+sys.path.insert(0, "/usr/local/share/devos/components")
+try:
+    from app_friendly_names import canonical_agent
+except ImportError:
+    sys.exit(0)
+
+ROOTS = []
+# System + every user home that has an activities database.
+xdg = os.environ.get("XDG_DATA_HOME")
+if xdg:
+    ROOTS.append(os.path.join(xdg, "kactivitymanagerd", "resources", "database"))
+ROOTS.append("/home")
+ROOTS.append("/root")
+
+db_paths = []
+seen = set()
+for root in ROOTS:
+    if root.endswith("database") and os.path.isfile(root):
+        db_paths.append(root)
+        continue
+    if not os.path.isdir(root):
+        continue
+    try:
+        homes = [root] if root == "/root" else [
+            os.path.join(root, name) for name in os.listdir(root)
+        ]
+    except OSError:
+        continue
+    for home in homes:
+        path = os.path.join(home, ".local", "share", "kactivitymanagerd", "resources", "database")
+        if os.path.isfile(path) and path not in seen:
+            seen.add(path)
+            db_paths.append(path)
+
+TABLES = (
+    "ResourceScoreCache",
+    "ResourceEvent",
+    "ResourceInfo",
+    "ResourceLink",
+)
+
+changed_total = 0
+for db_path in db_paths:
+    try:
+        conn = sqlite3.connect(db_path, timeout=5)
+    except sqlite3.Error:
+        continue
+    try:
+        cols = {}
+        for table, in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall():
+            info = conn.execute(f"PRAGMA table_info({table})").fetchall()
+            names = {row[1] for row in info}
+            if "initiatingAgent" in names:
+                cols[table] = "initiatingAgent"
+            elif "agent" in names:
+                cols[table] = "agent"
+        for table, column in cols.items():
+            rows = conn.execute(f"SELECT DISTINCT {column} FROM {table}").fetchall()
+            for (agent,) in rows:
+                if not agent:
+                    continue
+                want = canonical_agent(agent)
+                if want == agent:
+                    continue
+                conn.execute(
+                    f"UPDATE {table} SET {column}=? WHERE {column}=?",
+                    (want, agent),
+                )
+                changed_total += conn.total_changes
+        conn.commit()
+    except sqlite3.Error:
+        try:
+            conn.rollback()
+        except sqlite3.Error:
+            pass
+    finally:
+        conn.close()
+
+print(f"devos-normalize-recent-agents: updated agents in {len(db_paths)} database(s)")
+PY

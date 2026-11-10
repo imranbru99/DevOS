@@ -19,6 +19,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import wave
@@ -149,11 +150,57 @@ def pcm_to_wav(pcm: bytes, rate: int = RATE) -> bytes:
 # ---------------------------------------------------------------------------
 
 
-def record_command(which: Callable = shutil.which) -> Optional[List[str]]:
+def _preferred_capture_source() -> Optional[str]:
+    """Best PipeWire/Pulse capture source name, if the sound server is up."""
+    try:
+        components = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if components not in sys.path:
+            sys.path.insert(0, components)
+        from audio.mic_defaults import get_default_source, find_preferred_source
+        name = get_default_source()
+        if name and not name.endswith(".monitor"):
+            return name
+        preferred = find_preferred_source()
+        if preferred and preferred.get("name"):
+            return str(preferred["name"])
+    except Exception:
+        pass
+    if shutil.which("pactl"):
+        try:
+            out = subprocess.check_output(
+                ["pactl", "get-default-source"], text=True, stderr=subprocess.DEVNULL, timeout=2,
+            ).strip()
+            if out and not out.endswith(".monitor"):
+                return out
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return None
+
+
+def alsa_capture_device(text: str) -> Optional[str]:
+    cards = re.findall(r"^card\s+(\d+):[^\n]*?device\s+(\d+):([^\n]*)",
+                       text, re.MULTILINE | re.IGNORECASE)
+    if not cards:
+        return None
+    usb_cards = set(re.findall(r"^card\s+(\d+):[^\n]*\busb\b", text, re.MULTILINE | re.IGNORECASE))
+    card, device, _ = next((entry for entry in cards if entry[0] in usb_cards), cards[0])
+    return f"plughw:{card},{device}"
+
+
+def record_command(which: Callable = shutil.which, device: Optional[str] = None,
+                   run: Optional[Callable] = None) -> Optional[List[str]]:
     if which("parecord"):
-        return ["parecord", "--raw", "--format=s16le", f"--rate={RATE}", "--channels=1", "--latency-msec=50"]
+        source = device or _preferred_capture_source()
+        if source and not source.endswith(".monitor"):
+            return ["parecord", f"--device={source}", "--raw", "--format=s16le",
+                    f"--rate={RATE}", "--channels=1", "--latency-msec=50"]
     if which("arecord"):
-        return ["arecord", "-q", "-f", "S16_LE", "-r", str(RATE), "-c", "1", "-t", "raw"]
+        capture = alsa_capture_device((run or _capture)(["arecord", "-l"]) or "")
+        args = ["arecord", "-q", "-f", "S16_LE", "-r", str(RATE), "-c", "1", "-t", "raw"]
+        if capture:
+            return [*args, "-D", capture]
+        if not which("pactl") and not which("parecord"):
+            return args
     return None
 
 
@@ -200,7 +247,7 @@ class Recorder:
         """(pcm, problem)."""
         argv = record_command(self.which)
         if not argv:
-            return b"", "No microphone recorder is available on this PC."
+            return b"", "No microphone input is ready. Open Sound and check Input."
         try:
             self._proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         except OSError:
@@ -261,7 +308,7 @@ class Recorder:
                 err = self._proc.stderr.read() or b""
             except Exception:
                 pass
-            return b"", "No microphone was found." if err else "Nothing was recorded."
+            return b"", "The microphone could not be opened. Check Sound → Input or close other apps using it." if err else "Nothing was recorded."
         # Manual stop: always try to understand whatever was captured.
         if self._manual_stop and len(pcm) >= FRAME_BYTES * 2:
             return bytes(pcm), ""
@@ -328,11 +375,12 @@ def _capture(cmd: List[str], timeout: float = 2.0) -> Optional[str]:
 
 def has_microphone(which: Callable = shutil.which, run: Callable = _capture) -> bool:
     """True when a capture device is found. The sound server is asked first, then the sound cards.
+    If pactl is up but only lists monitors (USB mic not in PipeWire yet), fall through to arecord.
     Without either tool nothing could record anyway, so that counts as no microphone."""
     if which("pactl"):
         out = run(["pactl", "list", "short", "sources"])
-        if out is not None:
-            return parse_pactl_sources(out)
+        if out is not None and parse_pactl_sources(out):
+            return True
     if which("arecord"):
         out = run(["arecord", "-l"])
         if out is not None:
@@ -508,20 +556,44 @@ class Transcriber:
     def transcribe(cls, pcm: bytes, path: str = None) -> str:
         audio = pcm_to_float(pcm)
         prefer = _preferred_stt_language()
+        sticky = cls.last_language if cls.last_language in LANGUAGES else ""
         with cls._lock:
             model = cls.load(path)
-            # Forced language from Voice settings.
+
+            def _one(language: str) -> str:
+                text = clean_segments(model.transcribe(audio, language=language))
+                if text and _HALLUCINATION.search(text):
+                    return ""
+                return text
+
+            # Forced language from Voice settings — single pass first (dual only if empty).
             if prefer in ("bn", "en"):
+                text = _one(prefer)
+                if text:
+                    cls.last_language = prefer
+                    return text
                 text, lang = cls._pick_bn_en(model, audio, prefer=prefer)
                 cls.last_language = lang
                 return text
+
+            # Call / follow-up turns: reuse last language (avoids dual bn+en every time).
+            if sticky:
+                text = _one(sticky)
+                if text:
+                    cls.last_language = sticky
+                    return text
+
             lang = cls.detect(model, audio)
             # Tiny models often mis-label Bangla as hi/ur/as/en — dual-pass when unsure.
             if lang in ("bn", "hi", "as", "ur", "ne") or lang not in LANGUAGES:
                 text, lang = cls._pick_bn_en(model, audio, prefer="auto")
             elif lang == "en":
-                # Still try Bangla: detection frequently prefers English for Bangla speech.
-                text, lang = cls._pick_bn_en(model, audio, prefer="en")
+                # First English pass only; dual-pass if that came up empty.
+                text = _one("en")
+                if text:
+                    lang = "en"
+                else:
+                    text, lang = cls._pick_bn_en(model, audio, prefer="en")
             else:
                 text = clean_segments(model.transcribe(audio, language="auto"))
                 if text and _HALLUCINATION.search(text):
@@ -758,12 +830,13 @@ def plain_for_speech(md: str, limit: int = 480) -> str:
     return text
 
 
-# Spoken replies: stream neural audio while the answer is still typing.
-# Natural pace (+0%); gaps after .!? are hidden by prefetch + fast ffplay handoff.
-_TTS_RATE = "+0%"              # human-readable pace (not rushed)
-_GAP_BRIDGE_S = 0.30           # max wait after .!? before next phrase must start
-_FIRST_CHUNK_MIN = 12
-_CHUNK_SOFT_MIN = 36
+# Spoken replies: start voice as soon as text starts typing (never wait for the
+# full answer). Natural pace for a ~10-year-old — clear, not rushed.
+_TTS_RATE = "+0%"              # natural human pace (do not speed up)
+_GAP_BRIDGE_S = 0.18           # keep .!? handoff tight while staying smooth
+_FIRST_CHUNK_MIN = 3           # start voice as soon as a few chars type
+_FIRST_WORDS = 1               # speak the first whole word while typing continues
+_CHUNK_SOFT_MIN = 28
 _PLAY_PROCS: List["subprocess.Popen"] = []
 _PLAY_LOCK = threading.Lock()
 _WARM_STARTED = False
@@ -772,6 +845,14 @@ _FFPLAY_FAST = [
     "-fflags", "nobuffer", "-flags", "low_delay",
     "-probesize", "32", "-analyzeduration", "0",
 ]
+# Common openers — speak these the instant they land so voice tracks typing.
+_OPENER_RE = re.compile(
+    r"^(Sure|Okay|OK|Yes|Yeah|Yep|Hi|Hello|Hey|Alright|Of course|Absolutely|"
+    r"Right|Got it|No problem|Thanks|Thank you|Please|Well|"
+    r"হ্যাঁ|জি|আচ্ছা|ঠিক আছে|হ্যালো|নমস্কার|জি\s*আচ্ছা)"
+    r"([,.!।]|\s)",
+    re.IGNORECASE | re.UNICODE,
+)
 
 
 def ensure_tts_venv() -> bool:
@@ -1047,18 +1128,16 @@ def speak_reply(text: str, language: Optional[str] = None, stop_first: bool = Tr
 def _next_speak_cut(pending: str, force: bool = False, first: bool = False) -> Tuple[str, int]:
     """Return (ready_chunk, advance) — advance is how many chars of pending were consumed.
 
-    First phrase is eager (a few whole words) so voice starts while text is still
-    typing. Later phrases wait for sentence/comma boundaries so we don't cut
-    mid-thought.
+    First phrase is very eager (opener / 2 words) so voice starts the same moment
+    text starts typing. Later phrases wait for sentence/comma boundaries.
     """
     pending = pending or ""
     if not pending.strip():
         return "", 0
-    min_len = _FIRST_CHUNK_MIN if first else _CHUNK_SOFT_MIN
 
     # Sentence / line end — speak as soon as "Hello!" / "Hi!" lands.
     m = re.search(r"[.!?।؟](?:\s+|$)|[\n]", pending)
-    if m and m.end() >= 4:
+    if m and m.end() >= 3:
         cut = m.end()
         if cut > 160:
             for sep in (", ", "; ", " — ", " এবং "):
@@ -1073,17 +1152,25 @@ def _next_speak_cut(pending: str, force: bool = False, first: bool = False) -> T
         chunk = pending[:cut].strip()
         return (chunk, cut) if chunk else ("", 0)
 
-    # Eager first audio: speak the first few whole words while the model keeps typing.
+    # Eager first audio — voice must start with typing, not after the full reply.
     if first:
+        opener = _OPENER_RE.match(pending)
+        if opener and opener.end() >= 2:
+            cut = opener.end()
+            while cut < len(pending) and pending[cut].isspace():
+                cut += 1
+            chunk = pending[:cut].strip()
+            if chunk:
+                return chunk, cut
         words = pending.split()
-        if len(words) >= 4:
-            take = words[:4]
-            # Locate end of 4th word in the original string (preserve punctuation attach).
+        need = _FIRST_WORDS
+        # Speak the first word as soon as it lands (call mode tracks typing).
+        if len(words) >= need and len(pending.strip()) >= _FIRST_CHUNK_MIN:
+            take = words[:need]
             pattern = r"\s+".join(re.escape(w) for w in take)
             mm = re.search(pattern, pending)
             if mm:
                 cut = mm.end()
-                # Include a following comma if present so we don't strand it.
                 if cut < len(pending) and pending[cut:cut + 1] in ",;":
                     cut += 1
                 while cut < len(pending) and pending[cut].isspace():
@@ -1091,6 +1178,10 @@ def _next_speak_cut(pending: str, force: bool = False, first: bool = False) -> T
                 chunk = pending[:cut].strip()
                 if chunk:
                     return chunk, cut
+        # Single short token already on screen (e.g. "Hi") — speak immediately.
+        stripped = pending.strip()
+        if 2 <= len(stripped) <= 24 and " " not in stripped and re.match(r"^[\w\u0980-\u09FF]+[.!,।]?$", stripped):
+            return stripped, len(pending)
 
     # Only break mid-sentence on commas when the clause is already long —
     # fewer cuts ⇒ fewer gaps after "." / "!" / ",".
@@ -1102,7 +1193,7 @@ def _next_speak_cut(pending: str, force: bool = False, first: bool = False) -> T
                 chunk = pending[:cut].strip()
                 return (chunk, cut) if chunk else ("", 0)
 
-    if force and len(pending.strip()) >= 6:
+    if force and len(pending.strip()) >= 4:
         return pending.strip(), len(pending)
     return "", 0
 
@@ -1172,11 +1263,11 @@ def _speak_espeak(text: str, language: str) -> bool:
     if not bin_name:
         return False
     voice = "bn" if language == "bn" else "en"
-    # Keep local fallback brisk — users prefer fast over slow.
-    speed = "160" if language == "bn" else "200"
+    # Natural pace a ~10-year-old can follow (not rushed).
+    speed = "145" if language == "bn" else "155"
     try:
         proc = _track_proc(subprocess.Popen(
-            [bin_name, "-v", voice, "-s", speed, "-g", "2", text],
+            [bin_name, "-v", voice, "-s", speed, "-g", "4", text],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         ))
         try:
@@ -1248,15 +1339,15 @@ def _speak_stream_edge(text: str, language: str) -> bool:
 
 def _speak_chunk(text: str, language: str, out: Optional[str] = None,
                  edge_wait_s: float = 45.0) -> bool:
-    """Speak one phrase ASAP (streamed neural audio), never skip text."""
+    """Speak one phrase ASAP so voice tracks live typing — never skip text."""
     plain = (text or "").strip()
     if not plain:
         return True
-    # Prefer live stream so speech overlaps the still-typing answer.
-    if _speak_stream_edge(plain, language):
-        return True
     os.makedirs(_TTS_CACHE, exist_ok=True)
     path = out or os.path.join(_TTS_CACHE, "devos-assistant-tts-%d.mp3" % (int(time.time() * 1000) % 100000000))
+
+    # Warm edge-tts worker first (already imported + TLS). Spawning a fresh
+    # Python for live stream was adding 1–3s — voice then started after typing.
     box: Dict[str, object] = {}
 
     def _edge():
@@ -1264,16 +1355,21 @@ def _speak_chunk(text: str, language: str, out: Optional[str] = None,
 
     th = threading.Thread(target=_edge, daemon=True)
     th.start()
-    # Poll — play the moment the file is ready instead of waiting out the timeout.
-    deadline = time.time() + max(0.4, edge_wait_s)
+    # Short phrases (first word / opener): only wait briefly for an mp3, then
+    # live-stream so voice starts with typing instead of after full synth.
+    brief = 0.28 if len(plain) < 90 else min(edge_wait_s, 8.0)
+    deadline = time.time() + brief
     while time.time() < deadline:
         if box.get("ok"):
             break
-        th.join(timeout=0.05)
+        th.join(timeout=0.03)
     if box.get("ok") and _play_file(path):
         return True
+    # Live stream overlaps remaining synth — including short first call chunks.
+    if _speak_stream_edge(plain, language):
+        return True
     if not box.get("ok"):
-        th.join(timeout=6)
+        th.join(timeout=max(1.0, min(edge_wait_s, 6.0)))
     if box.get("ok") and _play_file(path):
         return True
     return _speak_espeak(plain, language)
@@ -1414,14 +1510,14 @@ class StreamSpeaker:
 
             th = threading.Thread(target=prefetch, daemon=True)
             th.start()
-            # First phrase: stream for quick start. Later: play prebuilt file if ready.
+            # First phrase: warm-pool synth (starts with typing). Later: prefetched file.
             if first and not current_path:
-                _speak_chunk(current, self._lang, edge_wait_s=10.0)
+                _speak_chunk(current, self._lang, edge_wait_s=6.0)
                 first = False
             elif current_path and _play_file(current_path):
                 first = False
             else:
-                _speak_chunk(current, self._lang, edge_wait_s=20.0)
+                _speak_chunk(current, self._lang, edge_wait_s=12.0)
                 first = False
             # Critical: do NOT wait out a long synth here — that was the 1–2s .!? gap.
             _wait_prefetch(nxt_box, th, _GAP_BRIDGE_S)

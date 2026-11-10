@@ -29,6 +29,10 @@ ForegroundVisited=196,181,253
 [plasmarc][Theme]
 name=breeze-light
 
+[ksplashrc][KSplash]
+Engine=KSplashQML
+Theme=org.devos.desktop
+
 [plasmarc][Wallpapers]
 usersWallpapers=/usr/share/wallpapers/DevOS/DevOS-Default.png
 defaultWallpaperTheme=DevOS

@@ -760,7 +760,7 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 
 
 def gui(page="overview"):
-    from PyQt5 import QtCore, QtGui, QtWidgets  # lazy: CLI and tests need no Qt
+    from PyQt5 import QtCore, QtGui, QtWidgets, sip  # lazy: CLI and tests need no Qt
 
     class StatusThread(QtCore.QThread):
         done = QtCore.pyqtSignal(object)
@@ -894,7 +894,11 @@ def gui(page="overview"):
             if not icon.isNull():
                 self.setWindowIcon(icon)
             self.resize(1080, 760)
-            self.setStyleSheet(STYLE)
+            try:
+                from devos_appearance import adapt_stylesheet, current_mode
+                self.setStyleSheet(adapt_stylesheet(STYLE, current_mode()))
+            except Exception:
+                self.setStyleSheet(STYLE)
             self.data = None
             self.threads = []
             self.proc = None
@@ -1415,7 +1419,8 @@ def gui(page="overview"):
     from devos_dialogs import install as _install_dialog_style
     from app_identity import prepare as prepare_identity
     prepare_identity("devos-security")
-    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    existing_app = QtWidgets.QApplication.instance()
+    app = existing_app or QtWidgets.QApplication(sys.argv)
     _install_dialog_style(app)
     app.setApplicationName("devos-security")
     app.setApplicationDisplayName(common.APP_NAME)
@@ -1434,7 +1439,24 @@ def gui(page="overview"):
             win.grab().save(os.environ["DEVOS_SECURITY_SCREENSHOT"])
             app.quit()
         QtCore.QTimer.singleShot(int(os.environ.get("DEVOS_SECURITY_SCREENSHOT_MS", "2500")), shot)
-    return app.exec_()
+    result = app.exec_()
+    # The window may close while the initial status checks are still running.
+    for thread in tuple(win.threads):
+        thread.wait()
+    if existing_app is None:
+        # The application-wide style filters must be removed before Qt starts
+        # dismantling the widget style and QApplication.
+        for name in ("_devos_appearance", "_devos_dialog_style"):
+            event_filter = getattr(app, name, None)
+            if event_filter is not None:
+                app.removeEventFilter(event_filter)
+        app.setStyleSheet("")
+    # Tear down queued status callbacks and widgets while Qt is still alive.
+    if not sip.isdeleted(win):
+        sip.delete(win)
+    if existing_app is None:
+        sip.delete(app)
+    return result
 
 
 if __name__ == "__main__":

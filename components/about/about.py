@@ -115,6 +115,7 @@ def gather() -> Dict[str, Any]:
         "power": [],
         "audio_sinks": [],
         "audio_sources": [],
+        "cameras": [],
         "pci": [],
         "sensors": [],
         "interrupts": [],
@@ -314,6 +315,23 @@ def gather() -> Dict[str, Any]:
             if section and re.match(r"^\s*\*?\.?\s*\d+\.", line):
                 name = re.sub(r"^\s*\*?\.?\s*\d+\.\s*", "", line).strip()
                 data[section].append({"id": "", "name": name, "state": "—"})
+
+    # Cameras (V4L2) — always-on OS basic
+    try:
+        components = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if components not in sys.path:
+            sys.path.insert(0, components)
+        from audio.camera_defaults import list_cameras
+        for cam in list_cameras():
+            data["cameras"].append(
+                {
+                    "name": cam.get("name") or cam.get("device") or "Camera",
+                    "device": cam.get("device") or "",
+                    "usb": bool(cam.get("usb")),
+                }
+            )
+    except Exception:
+        pass
 
     # Sensors (thermal zones + optional lm-sensors)
     thermal = "/sys/class/thermal"
@@ -602,6 +620,9 @@ class ContactButton(QPushButton):
         super().__init__(parent)
         self.setObjectName("contactBtn")
         self.setCursor(Qt.PointingHandCursor)
+        self.setMinimumHeight(56)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        # Two-line chip: title + address — readable in both light and dark.
         self.setText(f"{label}\n{display}")
         self.setToolTip(url.replace("mailto:", ""))
         self.clicked.connect(lambda _=False, u=url: open_url(u))
@@ -655,13 +676,13 @@ class AboutWindow(QMainWindow):
             ("Storage", self._page_storage),
             ("Processor", self._page_cpu),
             ("Firmware security", self._page_security),
-            ("Interrupts", self._page_interrupts),
+            ("System interrupts", self._page_interrupts),
             ("Memory", self._page_memory),
-            ("PCI devices", self._page_pci),
+            ("Connected devices", self._page_pci),
             ("Sensors", self._page_sensors),
             ("USB devices", self._page_usb),
             ("Graphics", self._page_graphics),
-            ("Display / EDID", self._page_display),
+            ("Displays", self._page_display),
         ]
         self._page_keys = [
             "overview",
@@ -732,7 +753,11 @@ class AboutWindow(QMainWindow):
         if key == "help":
             self.setWindowTitle("Help Center")
         self._goto(start_idx)
-        self.setStyleSheet(STYLE)
+        try:
+            from devos_appearance import adapt_stylesheet, current_mode
+            self.setStyleSheet(adapt_stylesheet(STYLE, current_mode()))
+        except Exception:
+            self.setStyleSheet(STYLE)
 
     def _goto(self, index: int):
         self.stack.setCurrentIndex(index)
@@ -886,7 +911,8 @@ class AboutWindow(QMainWindow):
         w.setLayout(layout)
         return w
 
-    def _page_help(self, host: QWidget):
+    @staticmethod
+    def _page_help(host: QWidget):
         lay = QVBoxLayout(host)
         lay.setContentsMargins(28, 24, 28, 24)
         lay.setSpacing(16)
@@ -899,7 +925,7 @@ class AboutWindow(QMainWindow):
         title = QLabel("Help Center")
         title.setObjectName("heroTitle")
         hl.addWidget(title)
-        sub = QLabel("About me · get support for DevOS")
+        sub = QLabel("Support, documentation and feedback")
         sub.setObjectName("heroSub")
         hl.addWidget(sub)
         body = QLabel(
@@ -1071,7 +1097,14 @@ class AboutWindow(QMainWindow):
         if not self.data.get("audio_sources"):
             sources.add_widget(EmptyState("No microphones / input devices reported."))
         lay.addWidget(sources)
-        tip = EmptyState("Adjust volume in the taskbar speaker icon, or open Sound settings.")
+        cameras = Card("Cameras")
+        for c in self.data.get("cameras") or []:
+            kind = "USB" if c.get("usb") else "Camera"
+            cameras.add_row(c.get("name") or "Camera", f"{kind} · {c.get('device') or '—'}")
+        if not self.data.get("cameras"):
+            cameras.add_widget(EmptyState("No camera detected. Plug in a USB webcam to use Camera."))
+        lay.addWidget(cameras)
+        tip = EmptyState("Adjust volume in the taskbar speaker icon, or open Sound settings. Cameras open in Camera.")
         lay.addWidget(tip)
         lay.addStretch(1)
 
@@ -1218,23 +1251,23 @@ QPushButton#nav {{
 }}
 QPushButton#nav:hover {{ background: #1e293b; color: {TEXT}; }}
 QPushButton#nav:checked {{
-  background: #0ea5e922; color: {ACCENT}; border: 1px solid #0ea5e955;
+  background: rgba(14, 165, 233, 0.14); color: {ACCENT}; border: 1px solid rgba(14, 165, 233, 0.35);
 }}
 QPushButton#linkBtn {{
   text-align: left; border: none; background: transparent; color: {MUTED}; padding: 8px 4px;
 }}
 QPushButton#linkBtn:hover {{ color: {ACCENT}; }}
 QPushButton#primaryBtn {{
-  text-align: center; padding: 10px 14px; border-radius: 10px; border: 1px solid #0ea5e955;
-  background: #0ea5e922; color: {ACCENT}; font-weight: 700;
+  text-align: center; padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(14, 165, 233, 0.35);
+  background: rgba(14, 165, 233, 0.14); color: {ACCENT}; font-weight: 700;
 }}
-QPushButton#primaryBtn:hover {{ background: #0ea5e933; }}
+QPushButton#primaryBtn:hover {{ background: rgba(14, 165, 233, 0.22); }}
 QPushButton#contactBtn {{
-  text-align: left; padding: 12px 14px; border-radius: 12px;
-  border: 1px solid {CARD_BORDER}; background: #0b1220; color: {TEXT}; font-weight: 650;
+  text-align: left; padding: 14px 16px; border-radius: 12px; min-height: 52px;
+  border: 1px solid {CARD_BORDER}; background: #334155; color: {TEXT}; font-weight: 650;
 }}
 QPushButton#contactBtn:hover {{
-  border-color: #0ea5e955; background: #0ea5e914; color: {ACCENT};
+  border-color: rgba(14, 165, 233, 0.55); background: rgba(14, 165, 233, 0.16); color: {ACCENT};
 }}
 QFrame#hero, QFrame#card {{
   background: {CARD}; border: 1px solid {CARD_BORDER}; border-radius: 16px;
@@ -1277,14 +1310,35 @@ def _parse_start_page(argv: List[str]) -> str:
 def main(argv: Optional[List[str]] = None) -> int:
     argv = list(sys.argv if argv is None else argv)
     start_page = _parse_start_page(argv)
+    desktop_id = "devos-help" if start_page == "help" else APP_ID
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from app_identity import prepare as prepare_identity, apply as apply_identity, show_window
 
-    prepare_identity(APP_ID)
+    prepare_identity(desktop_id)
     app = QApplication(argv)
-    apply_identity(app, APP_ID)
-    win = AboutWindow(start_page=start_page)
-    show_window(win, APP_ID)
+    apply_identity(app, desktop_id)
+    if desktop_id == "devos-help":
+        # Support links can open immediately, independently of hardware probing.
+        win = QMainWindow()
+        win.resize(760, 680)
+        win.setWindowTitle("Help Center")
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        host = QWidget()
+        host.setObjectName("pageHost")
+        AboutWindow._page_help(host)
+        scroll.setWidget(host)
+        win.setCentralWidget(scroll)
+        try:
+            from devos_appearance import adapt_stylesheet, current_mode
+            win.setStyleSheet(adapt_stylesheet(STYLE, current_mode()))
+        except Exception:
+            win.setStyleSheet(STYLE)
+    else:
+        win = AboutWindow(start_page=start_page)
+    win.setAttribute(Qt.WA_DeleteOnClose)
+    show_window(win, desktop_id)
     return app.exec_()
 
 

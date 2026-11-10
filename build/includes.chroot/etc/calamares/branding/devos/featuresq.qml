@@ -1,14 +1,11 @@
 /* DevOS "Choose your apps" page (packagechooserq@features).
-   Like Windows' optional features, but at install time and fitted to this PC:
-   "Recommended for this PC" (the default) ticks the everyday set minus apps
-   this PC's RAM or disk can't run well (features-catalog.js recommended(),
-   "Choose later" keeps only what is already on the PC.
-   "Premium" ticks every app except Family Safety and the modesty filter.
-   same rules as feature_catalog.recommended_ids). aimodel-hw.js holds the RAM
-   and disk measured at live boot by devos-ai-hwprobe.
-   The ticked ids go to global storage as "a,b,c"; preservefiles copies it into
-   the new system and devos-features removes unticked built-ins during install
-   and downloads the rest on the first online boot. */
+   Optional apps start unchecked — only ticked ids are installed. Unticked
+   apps stay available later in DevOS Features.
+   Preset chips (Normal, Premium, …) tick a set; "Choose later" ticks nothing.
+   aimodel-hw.js holds the RAM and disk measured at live boot by devos-ai-hwprobe.
+   Ticked ids go to global storage; devospreserve copies them into the new system
+   and installer-plan enables only those builtins, then downloads the rest on
+   the first online boot. */
 import io.calamares.core 1.0 as Core
 import io.calamares.ui 1.0
 
@@ -25,7 +22,7 @@ Page {
 
     readonly property real ramGb: HW.hw.ram_gb
     readonly property real diskGb: HW.hw.disk_gb
-    // Start empty; applyUserType() fills from saved picks or the PC-type defaults.
+    // Start empty; applyUserType() restores saved picks when revisiting the page.
     // Do not seed with recommended() here — that overwrote Global storage on revisit.
     property var picked: []
     property string preset: ""
@@ -52,17 +49,11 @@ Page {
     }
     function usePreset(p) {
         if (p === "later") {
-            var keep = [];
-            for (var k = 0; k < Cat.data.features.length; k++)
-                if (Cat.data.features[k].preinstalled && !Cat.data.features[k].optin)
-                    keep.push(Cat.data.features[k].id);
-            picked = keep;
+            // Nothing optional now — user can add apps later in DevOS Features.
+            picked = [];
         } else if (p === "minimal") {
-            var bare = [];
-            for (var n = 0; n < Cat.data.features.length; n++)
-                if (Cat.data.features[n].presets.indexOf("minimal") >= 0)
-                    bare.push(Cat.data.features[n].id);
-            picked = bare;
+            // Base system only — optional apps are added later in DevOS Features.
+            picked = [];
         } else if (p === "windows") {
             var win = [];
             for (var w = 0; w < Cat.data.features.length; w++)
@@ -90,17 +81,10 @@ Page {
         return "normal";
     }
     function loadSavedPicks() {
-        var keys = ["packagechooser_features", "features"];
-        for (var i = 0; i < keys.length; i++) {
-            if (!Core.Global.contains(keys[i]))
-                continue;
-            var raw = Core.Global.value(keys[i]);
-            var text = (raw === undefined || raw === null) ? "" : String(raw).replace(/^\s+|\s+$/g, "");
-            if (text.length === 0)
-                continue;
-            return text.split(",").filter(function (x) { return x.length > 0; });
-        }
-        return null;
+        if (!Core.Global.contains("devos_selected_features"))
+            return null;
+        var raw = Core.Global.value("devos_selected_features");
+        return String(raw || "").split(",").filter(function (id) { return page.feature(id) !== null; });
     }
     function featuresKindKey() { return "devos_features_usertype"; }
     function rememberFeaturesKind(kind) {
@@ -115,7 +99,6 @@ Page {
     }
     function applyUserType() {
         var kind = userKind();
-        var chip = kind === "normal" ? "recommended" : kind;
 
         // Same PC type on this page instance: never wipe custom ticks on Back/Next.
         if (kind === appliedKind)
@@ -125,15 +108,17 @@ Page {
         var savedFor = rememberedFeaturesKind();
 
         // Page was recreated after Back: restore the exact apps left for this PC type.
-        if (saved !== null && saved.length > 0 && savedFor === kind) {
-            picked = saved;
+        if (saved !== null && savedFor === kind) {
             appliedKind = kind;
+            picked = saved;
+            save();
             return;
         }
 
-        usePreset(chip);
+        picked = [];
+        preset = "";
         appliedKind = kind;
-        rememberFeaturesKind(kind);
+        save();
     }
     function onActivate() { applyUserType(); }
     function inCategory(cat) {
@@ -159,12 +144,14 @@ Page {
     function freeAfterGb() { return diskGb > 0 ? diskGb - 14 - downloadMb() / 1024 : -1; }
     function human(mb) { return mb >= 1000 ? (mb / 1024).toFixed(1) + " GB" : mb + " MB"; }
     function save() {
-        config.packageChoice = picked.join(",");
+        var choices = picked.join(",");
+        config.packageChoice = choices;
+        Core.Global.insert("devos_selected_features", choices);
         if (appliedKind)
             rememberFeaturesKind(appliedKind);
     }
 
-    onPickedChanged: save()
+    onPickedChanged: { if (appliedKind) save(); }
     Component.onCompleted: applyUserType()
 
     Flickable {
@@ -177,17 +164,17 @@ Page {
 
         ColumnLayout {
             id: form
-            x: Math.max(32, (flick.width - width) / 2)
-            y: 32
-            width: Math.min(flick.width - 64, 780)
+            x: Math.max(InstallerAppearance.pageMargin, (flick.width - width) / 2)
+            y: InstallerAppearance.pageMargin
+            width: Math.min(flick.width - InstallerAppearance.pageMargin * 2, InstallerAppearance.pageMaxWidth)
             spacing: 8
 
             PageIntro {
                 Layout.fillWidth: true
                 eyebrow: "APPS & FEATURES"
                 title: "Choose your apps"
-                subtitle: "These apps follow the kind of PC you just chose. Turn any of them off, or pick another category. "
-                    + "After install you can still add or remove apps in DevOS Features, or ask DevOS AI."
+                subtitle: "Optional apps start unchecked — only what you tick is installed. "
+                    + "Everything else stays available later in DevOS Features."
             }
 
             // ---- this PC
@@ -369,8 +356,8 @@ Page {
                                     color: rowCard.f.optin ? (rowCard.on ? "#86efac" : "#64748b")
                                            : rowCard.f.preinstalled && !rowCard.on ? "#fca5a5" : "#cbd5e1"
                                     font.pixelSize: 12
-                                    text: rowCard.f.optin ? (rowCard.on ? "Turns on" : "Off")
-                                          : rowCard.f.preinstalled ? (rowCard.on ? "Included" : "Will be removed")
+                                    text: rowCard.f.optin ? (rowCard.on ? "Turns on" : "Off — install later")
+                                          : rowCard.f.preinstalled ? (rowCard.on ? "Included" : "Skipped — install later")
                                           : page.human(rowCard.f.size_mb)
                                 }
                             }
@@ -423,8 +410,8 @@ Page {
             }
             Text {
                 visible: page.removedCount() > 0
-                text: page.removedCount() + " built-in left out"
-                color: "#fca5a5"; font.pixelSize: 12
+                text: page.removedCount() + " skipped (install later in Features)"
+                color: "#94a3b8"; font.pixelSize: 12
             }
         }
     }

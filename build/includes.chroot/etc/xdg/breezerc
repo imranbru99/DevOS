@@ -1,0 +1,7 @@
+[Common]
+ShadowSize=Large
+ShadowStrength=64
+
+[Style]
+MenuOpacity=92
+TabBarAltStyle=false

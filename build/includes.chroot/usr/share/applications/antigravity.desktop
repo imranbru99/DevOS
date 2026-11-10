@@ -1,8 +1,13 @@
 [Desktop Entry]
 Type=Application
+# Hidden until Features installs the real /opt binary (wrappers alone are not enough).
+NoDisplay=true
+Hidden=true
+X-DevOS-Hidden=true
 Name=Google Antigravity
 GenericName=AI coding (main account)
 Comment=Primary Antigravity — own Google account, projects, and Gemini profile
+TryExec=/opt/antigravity/antigravity
 Exec=/usr/local/bin/devos-antigravity %U
 Icon=antigravity
 Terminal=false

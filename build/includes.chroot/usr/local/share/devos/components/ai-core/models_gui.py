@@ -25,7 +25,9 @@ CLI = "/usr/local/bin/devos-ai-models"
 STYLE = """
 QWidget { background: #0b0f1a; color: #e2e8f0; font-size: 14px; }
 QLabel#title { font-size: 24px; font-weight: 600; color: #f8fafc; }
+QLabel#section { font-size: 18px; font-weight: 600; color: #f8fafc; }
 QLabel#muted { color: #94a3b8; }
+QLabel#accent { color: #38bdf8; }
 QFrame#card { background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; }
 QPushButton { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 7px 14px; }
 QPushButton#primary { background: #0284c7; border-color: #38bdf8; color: white; }
@@ -67,7 +69,7 @@ class ModelsWindow(QtWidgets.QWidget):
         )
         tip.setObjectName("muted")
         tip.setWordWrap(True)
-        tip.setStyleSheet("color: #38bdf8;")
+        tip.setObjectName("accent")
         layout.addWidget(tip)
 
         self.group = QtWidgets.QButtonGroup(self)
@@ -110,7 +112,7 @@ class ModelsWindow(QtWidgets.QWidget):
 
         # --- local AI API
         api_title = QtWidgets.QLabel("Local AI API")
-        api_title.setStyleSheet("font-size: 18px; font-weight: 600; color: #f8fafc;")
+        api_title.setObjectName("section")
         layout.addWidget(api_title)
         api_help = QtWidgets.QLabel(
             "Apps on this PC can always use DevOS AI at http://127.0.0.1:11434/v1 (OpenAI-compatible, "

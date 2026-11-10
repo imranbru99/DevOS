@@ -1,10 +1,11 @@
-"""Apply reviewed data-disk choices after Calamares has mounted its own layout.
+"""Set the reserve on a new ext4 root and apply reviewed data-disk choices.
 
 Optional extra drives only. Failures here must never abort the install:
 GRUB/bootloader already ran earlier in settings.conf, and DevOS on the system
 disk must stay bootable even if mkfs.ext4 segfaults on a spare HDD/SSD.
 """
 import json
+import subprocess
 import sys
 from pathlib import Path
 import libcalamares
@@ -58,12 +59,14 @@ def run():
     stop the job queue. We never do that for optional storage — mkfs races on
     slow disks (segfault) must not block a bootable DevOS.
     """
+    root = libcalamares.globalstorage.value('rootMountPoint')
+    partitions = libcalamares.globalstorage.value('partitions')
     try:
-        failures = installer_storage.apply(
-            selection(),
-            libcalamares.globalstorage.value('rootMountPoint'),
-            libcalamares.globalstorage.value('partitions'),
-        ) or []
+        installer_storage.cap_system_reserve(root, partitions)
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as exc:
+        libcalamares.utils.warning('Could not adjust the system ext4 reserve: ' + str(exc))
+    try:
+        failures = installer_storage.apply(selection(), root, partitions) or []
         if failures:
             _warn('; '.join(failures))
     except Exception as exc:

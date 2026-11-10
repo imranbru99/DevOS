@@ -98,7 +98,8 @@ ANDROID_SYSTEM_PREFIXES = ("com.android.", "android.", "org.lineageos.",
 _BANNED = [
     (r"apt-get", "installer"), (r"apt", "installer"), (r"dpkg", "installer"),
     (r"flatpak", "app store"), (r"waydroid", "Android"), (r"wine", "Windows support"),
-    (r"ubuntu", "DevOS"), (r"plasma", "desktop"), (r"kde", ""),
+    (r"ubuntu", "DevOS"), (r"plasma", "Desktop"), (r"kde", ""),
+    (r"Allow Plasma to show", "Allow the desktop to show"),
     (r"kcalc", "Calculator"), (r"dolphin", "File Explorer"), (r"kate", "Text Editor"),
     (r"kwrite", "Text Editor"), (r"konsole", "Terminal"), (r"spectacle", "Snipping Tool"),
     (r"gwenview", "Photos"), (r"okular", "PDF Viewer"), (r"ark", "Zip Folders"),
@@ -201,6 +202,12 @@ def scrub(text: str) -> str:
     """Replace tool names with plain words for anything shown to the user."""
     if not text:
         return text
+    try:
+        from app_friendly_names import friendly_app_name, looks_technical
+        if looks_technical(text):
+            return friendly_app_name(text)
+    except ImportError:
+        pass
 
     def repl(m):
         return _BANNED_MAP.get(m.group(1).lower(), "")
@@ -727,7 +734,13 @@ class AppDiscovery:
                 else:
                     app_id = "desktop:" + did[:-8]
                     kind = "desktop"
-            raw_name = scrub(entry.get("Name", did)) or did
+            raw_name = scrub(entry.get("Name", did) or did) or did
+            try:
+                from app_friendly_names import friendly_app_name, looks_technical
+                if looks_technical(raw_name) or looks_technical(did):
+                    raw_name = friendly_app_name(did) if looks_technical(did) else friendly_app_name(raw_name)
+            except ImportError:
+                pass
             name = friendly_pwa_name(raw_name) if app_id.startswith("pwa:") else raw_name
             app = groups.get(app_id)
             if app is None:
@@ -1336,21 +1349,21 @@ QWidget#root, QDialog { background: #0b0f19; }
 QWidget { color: #e5e7eb; font-family: "Inter", "Noto Sans", sans-serif; font-size: 14px; }
 QLabel { background: transparent; }
 QLabel#title { font-size: 26px; font-weight: 600; color: #f9fafb; }
-QLabel#subtitle, QLabel#muted { color: #9ca3af; font-size: 13px; }
+QLabel#subtitle, QLabel#muted { color: #cbd5e1; font-size: 13px; }
 QLabel#appname { font-size: 15px; font-weight: 600; color: #f3f4f6; }
 QLabel#size { color: #cbd5e1; font-size: 13px; }
 QLabel#badge { color: #38bdf8; background: rgba(56,189,248,0.12); border-radius: 8px;
   padding: 2px 8px; font-size: 12px; }
 QLabel#badgeSystem { color: #a78bfa; background: rgba(167,139,250,0.12); border-radius: 8px;
   padding: 2px 8px; font-size: 12px; }
-QLabel#key { color: #9ca3af; font-size: 13px; }
+QLabel#key { color: #94a3b8; font-size: 13px; }
 QLabel#val { color: #e5e7eb; font-size: 13px; }
-QLabel#status { color: #9ca3af; font-size: 13px; }
+QLabel#status { color: #94a3b8; font-size: 13px; }
 QFrame#row { background: #111827; border-radius: 12px; border: 1px solid #1f2937; }
 QFrame#row:hover { background: #1a2335; }
 QFrame#details { background: #0f1626; border-radius: 10px; border: none; }
 QLineEdit { background: #111827; border: 1px solid #1f2937; border-radius: 10px;
-  padding: 9px 12px; color: #f3f4f6; selection-background-color: #38bdf8; }
+  padding: 9px 12px; color: #f3f4f6; selection-background-color: #2563eb; selection-color: #ffffff; }
 QLineEdit:focus { border-color: #38bdf8; }
 QComboBox { background: #111827; border: 1px solid #1f2937; border-radius: 10px;
   padding: 8px 12px; min-width: 150px; }
@@ -1948,7 +1961,11 @@ def run_gui(focus: Optional[str] = None, discovery: Optional[AppDiscovery] = Non
         font = QtGui.QFont("Noto Sans")
     font.setPixelSize(14)
     qapp.setFont(font)
-    qapp.setStyleSheet(STYLE)
+    try:
+        from devos_appearance import adapt_stylesheet, current_mode
+        qapp.setStyleSheet(adapt_stylesheet(STYLE, current_mode()))
+    except Exception:
+        qapp.setStyleSheet(STYLE)
     win = Window()
     show_window(win, "devos-apps")
     if os.environ.get("DEVOS_APPS_SMOKE"):

@@ -22,7 +22,7 @@ import tempfile
 import time
 from typing import Dict, List, Optional, Any
 
-from PyQt5.QtCore import Qt, QTimer, QSize, QPoint, pyqtSignal, QObject
+from PyQt5.QtCore import Qt, QProcess, QTimer, QSize, QPoint, pyqtSignal, QObject
 from PyQt5.QtGui import (
     QColor, QIcon, QPainter, QPainterPath, QPen, QFont, QPalette, QBrush
 )
@@ -442,23 +442,25 @@ class AudioManager:
     @classmethod
     def set_default_sink(cls, sink_name: str):
         try:
-            subprocess.run(["pactl", "set-default-sink", sink_name], check=False)
-        except Exception:
-            pass
+            subprocess.run(["pactl", "set-default-sink", sink_name], check=True, timeout=4)
+        except (OSError, subprocess.SubprocessError):
+            return False
         cls._last_checked_sink = sink_name
         tracked = cls.load_tracked_state()
         dev_vols = tracked.get("device_volumes", {})
         target_vol = dev_vols.get(sink_name, tracked.get("master_volume", 40))
         cls.set_master_volume(target_vol, is_user_action=False)
+        return True
 
     @classmethod
     def set_default_source(cls, source_name: str):
         try:
-            subprocess.run(["pactl", "set-default-source", source_name], check=False)
-        except Exception:
-            pass
+            subprocess.run(["pactl", "set-default-source", source_name], check=True, timeout=4)
+        except (OSError, subprocess.SubprocessError):
+            return False
         if source_name:
             cls.save_tracked_state({"default_source": source_name})
+        return True
 
     @classmethod
     def set_source_volume(cls, percent: int):
@@ -766,6 +768,27 @@ class WindowsSoundSettingsWindow(QMainWindow):
         row_in_vol.addWidget(self.lbl_source_pct)
 
         l_in.addLayout(row_in_vol)
+        self.mic_test = QProcess(self)
+        self.mic_test.finished.connect(self._mic_test_finished)
+        self.mic_test.errorOccurred.connect(self._mic_test_error)
+        self.btn_test_mic = QPushButton("Test microphone")
+        self.btn_test_mic.clicked.connect(self._start_mic_test)
+        self.mic_test_status = QLabel("Speak during the test to check your input level.")
+        self.mic_test_status.setWordWrap(True)
+        self.mic_test_level = QProgressBar()
+        self.mic_test_level.setAccessibleName("Microphone test level")
+        l_in.addWidget(self.btn_test_mic)
+        l_in.addWidget(self.mic_test_status)
+        l_in.addWidget(self.mic_test_level)
+        self.usb_check = QProcess(self)
+        self.usb_check.finished.connect(self._usb_check_finished)
+        self.usb_check.errorOccurred.connect(self._usb_check_error)
+        self.btn_check_usb = QPushButton("Check USB microphone")
+        self.btn_check_usb.clicked.connect(self._check_usb_mic)
+        self.usb_status = QLabel()
+        self.usb_status.setWordWrap(True)
+        l_in.addWidget(self.btn_check_usb)
+        l_in.addWidget(self.usb_status)
         self.content_layout.addWidget(self.card_input)
 
         # -------------------------------------------------------------
@@ -810,6 +833,52 @@ class WindowsSoundSettingsWindow(QMainWindow):
         self.content_layout.addStretch(1)
         scroll.setWidget(content_widget)
         main_layout.addWidget(scroll, 1)
+
+    def _start_mic_test(self):
+        self.btn_test_mic.setEnabled(False)
+        self.mic_test_level.setValue(0)
+        self._tested_input_label = self._active_input_label
+        self.mic_test_status.setText(f"Speak now into {self._tested_input_label}…")
+        self.mic_test.start("/usr/bin/python3", [
+            "/usr/local/share/devos/components/audio/microphone_test.py",
+            self._active_input_name,
+        ])
+
+    def _mic_test_error(self, error):
+        if error == QProcess.FailedToStart:
+            self._mic_test_finished(1)
+
+    def _mic_test_finished(self, code, _status=None):
+        self.btn_test_mic.setEnabled(True)
+        output = bytes(self.mic_test.readAllStandardOutput()).strip()
+        if code != 0 or not output.isdigit():
+            self.mic_test_status.setText("The input could not be opened. Check the connection and close other apps using the microphone.")
+            return
+        level = int(output)
+        self.mic_test_level.setValue(level)
+        self.mic_test_status.setText(f"Sound detected on {self._tested_input_label}." if level else
+                                     f"No signal on {self._tested_input_label}. Check mute or select another input above.")
+
+    def _check_usb_mic(self):
+        self.btn_check_usb.setEnabled(False)
+        self.usb_status.setText("Checking the USB connection and recording inputs…")
+        self.usb_check.start("/usr/local/bin/devos-audio-defaults", ["check-usb-input"])
+
+    def _usb_check_error(self, error):
+        if error == QProcess.FailedToStart:
+            self._usb_check_finished(1)
+
+    def _usb_check_finished(self, code, _status=None):
+        self.btn_check_usb.setEnabled(True)
+        message = bytes(self.usb_check.readAllStandardOutput()).decode("utf-8", errors="replace").strip()
+        self.usb_status.setText(message if code == 0 and message else "Could not check USB audio. Try again after reconnecting the microphone.")
+
+    def closeEvent(self, event):
+        for process in (self.mic_test, self.usb_check):
+            if process.state() != QProcess.NotRunning:
+                process.kill()
+                process.waitForFinished(1000)
+        super().closeEvent(event)
 
     def refresh_audio_state(self):
         """Polls PipeWire state and refreshes UI widgets."""
@@ -864,6 +933,9 @@ class WindowsSoundSettingsWindow(QMainWindow):
                     child.widget().deleteLater()
 
             def_source = state.get("default_source", "")
+            self._active_input_name = def_source
+            self._active_input_label = next((source["desc"] for source in state.get("sources", [])
+                                             if source.get("name") == def_source and source.get("desc")), "the default input")
             for src in state.get("sources", []):
                 src_name = src.get("name", "")
                 src_desc = src.get("desc", src_name)
@@ -935,8 +1007,8 @@ class WindowsSoundSettingsWindow(QMainWindow):
         self.refresh_audio_state()
 
     def _on_sink_selected(self, name: str, checked: bool):
-        if checked and not self._updating:
-            AudioManager.set_default_sink(name)
+        if checked and not self._updating and AudioManager.set_default_sink(name):
+            self._remember_device(name, output=True)
 
     def _on_source_slider_changed(self, value):
         if self._updating:
@@ -956,8 +1028,21 @@ class WindowsSoundSettingsWindow(QMainWindow):
         self.refresh_audio_state()
 
     def _on_source_selected(self, name: str, checked: bool):
-        if checked and not self._updating:
-            AudioManager.set_default_source(name)
+        if checked and not self._updating and AudioManager.set_default_source(name):
+            self._remember_device(name)
+            self.refresh_audio_state()
+
+    @staticmethod
+    def _remember_device(name: str, output=False):
+        sys.path.insert(0, "/usr/local/share/devos/components")
+        try:
+            from audio.mic_defaults import prefer_sink, prefer_source
+            remember = prefer_sink if output else prefer_source
+            remember(name, make_system_default=False)
+        except (ImportError, OSError):
+            pass
+        finally:
+            sys.path.pop(0)
 
     def _on_app_mute_toggle(self, app_id: str, new_mute: bool):
         AudioManager.set_app_mute(app_id, new_mute)

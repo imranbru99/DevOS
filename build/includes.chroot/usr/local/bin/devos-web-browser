@@ -1,0 +1,8 @@
+#!/bin/sh
+# Qt WebEngine needs a compositor even when Chromium renders in software.
+# Use Qt's software backend on virtual GPUs and systems without a render device.
+if ! ls /dev/dri/renderD* >/dev/null 2>&1 ||
+    grep -qsE 'DRIVER=(virtio_gpu|bochs|qxl|vmwgfx)$' /sys/class/drm/card*/device/uevent; then
+    export QT_QUICK_BACKEND="${QT_QUICK_BACKEND:-software}"
+fi
+exec /usr/bin/python3 /usr/local/share/devos/components/browser/web_browser.py "$@"

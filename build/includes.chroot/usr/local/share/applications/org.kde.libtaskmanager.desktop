@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Taskbar
+GenericName=Window list
+Comment=Window list
+Icon=preferences-system-windows
+Exec=true
+Terminal=false
+NoDisplay=true
+X-DevOS-FriendlyAlias=true

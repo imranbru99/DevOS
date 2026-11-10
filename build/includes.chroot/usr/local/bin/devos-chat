@@ -1,7 +1,7 @@
 #!/bin/bash
-# DevOS AI: start the on-device AI service, then open the assistant window.
-# If the Qt assistant cannot start, the simple chat page opens in a DevOS app
-# window (devos-webapp), served by the DevOS Dashboard server on 127.0.0.1:7070.
+# DevOS AI: start the on-device AI service, then open the Qt assistant window.
+# Only if the Qt assistant truly cannot start, open a recovery page in
+# devos-webapp (served by the DevOS Dashboard on 127.0.0.1:7070).
 # Never a browser tab, never an extra port.
 set -u
 
@@ -14,29 +14,157 @@ AI_DIR="${COMPONENTS_DIR}/ai-core"
 ASSISTANT="${COMPONENTS_DIR}/assistant/assistant.py"
 DASHBOARD="${COMPONENTS_DIR}/dashboard/dashboard_server.py"
 PORT=7070
+PYTHON="${DEVOS_CHAT_PYTHON:-/usr/bin/python3}"
+[ -x "${PYTHON}" ] || PYTHON="$(command -v python3 2>/dev/null || true)"
+[ -n "${PYTHON}" ] || PYTHON="python3"
 
+CACHE_DIR="${XDG_CACHE_HOME:-${HOME}/.cache}/devos"
+mkdir -p "${CACHE_DIR}" 2>/dev/null || true
+LAUNCH_LOG="${CACHE_DIR}/chat-launch.log"
+REASON_FILE="${CACHE_DIR}/chat-fallback.reason"
+ASSIST_ERR_LOG="${CACHE_DIR}/chat-assistant.err"
+CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/devos"
+ASSISTANT_JSON="${CONFIG_DIR}/assistant.json"
+
+# Heal voice prefs before Qt starts — first-login seed used to recurse and
+# block the full window (recovery page). Creating a valid file unblocks icon launch.
+heal_voice_prefs() {
+    mkdir -p "${CONFIG_DIR}" 2>/dev/null || true
+    if [ -s "${ASSISTANT_JSON}" ]; then
+        return 0
+    fi
+    if [ -f /var/lib/DevOS/voice-prefs.json ]; then
+        cp -f /var/lib/DevOS/voice-prefs.json "${ASSISTANT_JSON}" 2>/dev/null || true
+    fi
+    if [ ! -s "${ASSISTANT_JSON}" ]; then
+        cat >"${ASSISTANT_JSON}" <<'EOF' 2>/dev/null || true
+{
+ "hands_free": false,
+ "paused": false,
+ "wake_name": "Mira",
+ "tts_gender": "female",
+ "tts_language": "auto"
+}
+EOF
+    fi
+    log_launch "healed voice prefs at ${ASSISTANT_JSON}"
+}
+
+log_launch() {
+    local ts
+    ts="$(date -Is 2>/dev/null || date)"
+    printf '%s %s\n' "${ts}" "$*" >>"${LAUNCH_LOG}" 2>/dev/null || true
+}
+
+write_reason() {
+    printf '%s\n' "$*" >"${REASON_FILE}" 2>/dev/null || true
+    log_launch "fallback: $*"
+}
+
+# Run assistant once. Echoes "ok" / "startup_fail" / "session_fail" on stdout as tag.
+# Exit code of this function mirrors the assistant when it ran a real session.
+try_assistant() {
+    local start now elapsed rc=0
+    start="$(date +%s)"
+    "${PYTHON}" "${ASSISTANT}" "$@" >>"${ASSIST_ERR_LOG}" 2>&1 || rc=$?
+    now="$(date +%s)"
+    elapsed=$((now - start))
+    if [ "${rc}" -eq 0 ]; then
+        echo "ok"
+        return 0
+    fi
+    # Died within ~4s → almost certainly failed to show the window.
+    if [ "${elapsed}" -le 4 ]; then
+        echo "startup_fail ${rc} ${elapsed}s"
+        return "${rc}"
+    fi
+    echo "session_fail ${rc} ${elapsed}s"
+    return "${rc}"
+}
+
+# Keep AI core up so chat/voice can answer.
 if ss -ltn 2>/dev/null | grep -q ':11435'; then
     export DEVOS_AI_URL="${DEVOS_AI_URL:-http://127.0.0.1:11435}"
 fi
 
 if [ -f "${AI_DIR}/server.py" ]; then
     if ! ss -ltn 2>/dev/null | grep -qE ':(11434|11435)'; then
-        (cd "${AI_DIR}" && python3 server.py >/var/tmp/devos-ai-core.log 2>&1 &)
+        (cd "${AI_DIR}" && exec "${PYTHON}" server.py) \
+            </dev/null >"${CACHE_DIR}/chat-ai-core.log" 2>&1 &
         sleep 0.4
     fi
 fi
 
-if [ -f "${ASSISTANT}" ] && python3 -c 'import PyQt5.QtWidgets' >/dev/null 2>&1; then
-    exec -a "$(basename "$0")" /usr/bin/python3 "${ASSISTANT}" "$@"
+NEED_FALLBACK=0
+if [ ! -f "${ASSISTANT}" ]; then
+    write_reason "Full assistant file missing at ${ASSISTANT}."
+    NEED_FALLBACK=1
+elif ! "${PYTHON}" -c 'import PyQt5.QtWidgets' >/dev/null 2>&1; then
+    write_reason "PyQt5 is not installed (python3-pyqt5). Full DevOS AI with voice call needs it."
+    NEED_FALLBACK=1
+else
+    heal_voice_prefs
+    log_launch "starting Qt assistant: ${ASSISTANT}"
+    : >"${ASSIST_ERR_LOG}" 2>/dev/null || true
+    tag1="$(try_assistant "$@" || true)"
+    # try_assistant prints status; capture last line
+    status1="$(printf '%s\n' "${tag1}" | tail -n 1)"
+    case "${status1}" in
+        ok)
+            log_launch "assistant exited cleanly"
+            exit 0
+            ;;
+        session_fail*)
+            log_launch "assistant ${status1} — not falling back to HTML"
+            exit 1
+            ;;
+        startup_fail*)
+            log_launch "assistant ${status1}; retrying once"
+            sleep 0.5
+            tag2="$(try_assistant "$@" || true)"
+            status2="$(printf '%s\n' "${tag2}" | tail -n 1)"
+            case "${status2}" in
+                ok)
+                    log_launch "assistant exited cleanly (attempt 2)"
+                    exit 0
+                    ;;
+                session_fail*)
+                    log_launch "assistant ${status2} after retry — not falling back"
+                    exit 1
+                    ;;
+                *)
+                    tail_err="$(tail -n 12 "${ASSIST_ERR_LOG}" 2>/dev/null | tr '\n' ' ' | cut -c1-400)"
+                    write_reason "Full assistant failed to start. ${tail_err}"
+                    NEED_FALLBACK=1
+                    ;;
+            esac
+            ;;
+        *)
+            tail_err="$(tail -n 12 "${ASSIST_ERR_LOG}" 2>/dev/null | tr '\n' ' ' | cut -c1-400)"
+            write_reason "Full assistant failed to start. ${tail_err}"
+            NEED_FALLBACK=1
+            ;;
+    esac
 fi
 
-START_CMD="python3 ${DASHBOARD} --no-browser --port ${PORT}"
+if [ "${NEED_FALLBACK}" -ne 1 ]; then
+    exit 1
+fi
+
+# Recovery page — not the old fake Send-only chat.
+START_CMD="${PYTHON} ${DASHBOARD} --no-browser --port ${PORT}"
 if ! ss -ltn 2>/dev/null | grep -q ":${PORT} "; then
-    log="${XDG_RUNTIME_DIR:-/tmp}/devos-dashboard.log"
-    setsid ${START_CMD} >>"${log}" 2>&1 < /dev/null &
+    dash_log="${XDG_RUNTIME_DIR:-/tmp}/devos-dashboard.log"
+    setsid ${START_CMD} >>"${dash_log}" 2>&1 < /dev/null &
     sleep 0.6
 fi
 
-exec /usr/local/bin/devos-webapp --app-id chat --title "DevOS AI" --icon preferences-desktop-theme \
+REASON_Q=""
+if [ -f "${REASON_FILE}" ]; then
+    REASON_Q="?reason=$(${PYTHON} -c 'import urllib.parse,sys; print(urllib.parse.quote(open(sys.argv[1],encoding="utf-8",errors="replace").read().strip()[:500]))' "${REASON_FILE}" 2>/dev/null || true)"
+fi
+
+log_launch "opening recovery page"
+exec /usr/local/bin/devos-webapp --app-id chat --title "DevOS AI" --icon devos-chat \
     --desktop-file devos-chat --width 900 --height 760 \
-    --url "http://127.0.0.1:${PORT}/chat.html" --start-cmd "${START_CMD}"
+    --url "http://127.0.0.1:${PORT}/chat.html${REASON_Q}" --start-cmd "${START_CMD}"
