@@ -54,7 +54,11 @@ class TestFeaturesAndNotice(unittest.TestCase):
     def test_empty_installer_choice_does_not_keep_or_download_apps(self):
         with tempfile.TemporaryDirectory(dir=ROOT) as temp:
             path = Path(temp) / "choices.json"
-            path.write_text(json.dumps({"devos_selected_features": "", "packagechooser_features": "whatsapp"}))
+            # Unknown packagechooser ids are ignored; empty primary means none.
+            path.write_text(json.dumps({
+                "devos_selected_features": "",
+                "packagechooser_features": "not-a-real-feature",
+            }))
             with (
                 patch.object(cli, "write_choice") as write_choice,
                 patch.object(cli, "installed_ids", return_value=["vscode", "phonelink"]),
@@ -74,6 +78,20 @@ class TestFeaturesAndNotice(unittest.TestCase):
             visibility.assert_any_call(catalog.feature("libreoffice"), False)
             service.assert_called_once()
             self.assertFalse(path.exists())
+
+    def test_empty_primary_falls_back_to_packagechooser_features(self):
+        # Calamares packageChoice sometimes survives when the DevOS GS key is empty.
+        self.assertEqual(
+            cli.selection_from_gs({
+                "devos_selected_features": "",
+                "packagechooser_features": "chrome,vscode",
+            }),
+            catalog.parse_selection("chrome,vscode"),
+        )
+        self.assertEqual(
+            cli.selection_from_gs({"devos_selected_features": "chrome"}),
+            ["chrome"],
+        )
 
     def test_later_ids_install_nothing_optional(self):
         self.assertEqual(catalog.later_ids(), [])
@@ -111,7 +129,15 @@ class TestFeaturesAndNotice(unittest.TestCase):
             self.assertIn("backup", disabled)
 
     def test_missing_explicit_choice_ignores_legacy_or_unrelated_keys(self):
-        self.assertIsNone(cli.selection_from_gs({"features": "whatsapp", "packagechooser_features": "vscode"}))
+        # Unknown "features" / garbage ids yield nothing; known packagechooser ids count.
+        self.assertEqual(
+            cli.selection_from_gs({"features": "whatsapp", "packagechooser_features": "not-a-feature"}),
+            None,
+        )
+        self.assertEqual(
+            cli.selection_from_gs({"packagechooser_features": "vscode"}),
+            ["vscode"],
+        )
         self.assertIsNone(cli.selection_from_gs({"devos_selected_features": ["vscode", 1]}))
         self.assertEqual(cli.selection_from_gs({"devos_selected_features": ""}), [])
         self.assertEqual(cli.selection_from_gs({"devos_selected_features": ["vscode"]}), ["vscode"])

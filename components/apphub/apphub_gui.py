@@ -62,8 +62,8 @@ class HubWindow(QtWidgets.QWidget):
         title.setObjectName("title")
         root.addWidget(title)
         sub = QtWidgets.QLabel(
-            "Install a downloaded Windows, Android, or Linux app in a few clicks. "
-            "DevOS checks the file and opens it safely."
+            "Install from a file or paste a download link. "
+            "Windows .exe / .msi links install as Windows apps."
         )
         sub.setObjectName("sub")
         sub.setWordWrap(True)
@@ -78,7 +78,7 @@ class HubWindow(QtWidgets.QWidget):
         for label, filt, tip in (
             ("Windows app (.exe / .msi)",
              "Windows (*.exe *.msi *.bat *.cmd);;All files (*)",
-             "Runs with Windows support on DevOS"),
+             "Installs as a Windows app in Start and Apps"),
             ("Android app (.apk)",
              "Android (*.apk *.xapk);;All files (*)",
              "Installs into the Android environment"),
@@ -95,6 +95,18 @@ class HubWindow(QtWidgets.QWidget):
             hint.setObjectName("hint")
             card_l.addWidget(hint)
 
+        paste = QtWidgets.QPushButton("Paste Windows app download link…")
+        paste.setObjectName("action")
+        paste.setCursor(QtCore.Qt.PointingHandCursor)
+        paste.clicked.connect(self._paste_windows_url)
+        card_l.addWidget(paste)
+        paste_hint = QtWidgets.QLabel(
+            "Paste an https://… link to an .exe or .msi — DevOS downloads and installs it"
+        )
+        paste_hint.setObjectName("hint")
+        paste_hint.setWordWrap(True)
+        card_l.addWidget(paste_hint)
+
         root.addWidget(card)
 
         more = QtWidgets.QPushButton("Browse more apps in DevOS Features…")
@@ -103,6 +115,12 @@ class HubWindow(QtWidgets.QWidget):
         more.clicked.connect(self._features)
         root.addWidget(more)
         root.addStretch(1)
+
+    def _resolver_path(self) -> str:
+        here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_resolver.py")
+        if os.path.isfile(here):
+            return here
+        return "/usr/local/share/devos/components/apphub/app_resolver.py"
 
     def _pick(self, file_filter: str) -> None:
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
@@ -116,6 +134,40 @@ class HubWindow(QtWidgets.QWidget):
             )
             return
         subprocess.Popen([OPEN_APP, path], start_new_session=True)
+        self.close()
+
+    def _paste_windows_url(self) -> None:
+        url, ok = QtWidgets.QInputDialog.getText(
+            self,
+            "Install Windows app from link",
+            "Paste a Windows app download link (.exe / .msi):",
+            QtWidgets.QLineEdit.Normal,
+            "",
+        )
+        url = (url or "").strip()
+        if not ok or not url:
+            return
+        if not url.startswith(("http://", "https://")):
+            QtWidgets.QMessageBox.warning(
+                self, "App Hub", "Use a full link that starts with https://"
+            )
+            return
+        resolver = self._resolver_path()
+        if not os.path.isfile(resolver):
+            QtWidgets.QMessageBox.critical(
+                self, "App Hub", "The download helper is missing on this PC."
+            )
+            return
+        try:
+            subprocess.Popen(
+                [sys.executable, resolver, "--install", "--name", "Windows app", "--url", url],
+                start_new_session=True,
+            )
+        except OSError as exc:
+            QtWidgets.QMessageBox.critical(
+                self, "App Hub", f"Could not start the installer.\n\n{exc}"
+            )
+            return
         self.close()
 
     def _features(self) -> None:

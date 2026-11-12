@@ -224,8 +224,60 @@ class DevOSAppHub:
         return {"status": "SUCCESS", "package_name": pick["name"], "runtime": "Linux (apt)",
                 "source": "APT", "message": f"Installed {pick['name']}."}
 
+    def install_url(self, url: str) -> Dict[str, Any]:
+        """Download a package/app URL and install it (Windows .exe/.msi via WinLayer)."""
+        url = (url or "").strip()
+        if not url.startswith(("http://", "https://")):
+            return {"status": "ERROR", "error": "URL must start with http:// or https://"}
+        try:
+            import app_resolver as resolver
+        except ImportError:
+            return {"status": "ERROR", "error": "App resolver is not available."}
+        res = resolver.resolve(link=url)
+        opt = res.get("option") or {}
+        kind = str(opt.get("kind") or "")
+        name = str(opt.get("name") or res.get("name") or "app")
+        if kind == "wine" or str(opt.get("wine") or "").lower().endswith((".exe", ".msi")):
+            target = str(opt.get("wine") or opt.get("url") or url)
+            code = resolver.install_wine(name, target)
+            if code == 0:
+                return {
+                    "status": "LAUNCHED",
+                    "package_name": name,
+                    "runtime": "Windows (WinLayer)",
+                    "message": f"{name} is installing as a Windows app.",
+                }
+            return {"status": "FAILED", "package_name": name, "error": f"Could not install {name}."}
+        if kind == "deb" or opt.get("deb"):
+            code = resolver.install_deb(name, str(opt.get("deb") or opt.get("url") or url))
+            return {"status": "SUCCESS" if code == 0 else "FAILED", "package_name": name,
+                    "runtime": "Linux (deb)"}
+        if kind == "appimage" or opt.get("appimage"):
+            code = resolver.install_appimage(name, str(opt.get("appimage") or opt.get("url") or url))
+            return {"status": "SUCCESS" if code == 0 else "FAILED", "package_name": name,
+                    "runtime": "Linux (AppImage)"}
+        if opt.get("flatpak"):
+            code = resolver.install_main(name, flatpak=str(opt["flatpak"]))
+            return {"status": "SUCCESS" if code == 0 else "FAILED", "package_name": name,
+                    "runtime": "Linux (Flatpak)"}
+        if opt.get("feature"):
+            code = resolver.install_main(name, feature=str(opt["feature"]))
+            return {"status": "SUCCESS" if code == 0 else "FAILED", "package_name": name,
+                    "runtime": "DevOS Features"}
+        return {
+            "status": "NOT_FOUND",
+            "url": url,
+            "message": (
+                "No direct Windows (.exe/.msi) or Linux package found at that link. "
+                "Paste a direct download URL, or ask DevOS AI to install the app by name."
+            ),
+        }
+
     def install(self, target: str, skip_safety: bool = False) -> Dict[str, Any]:
         """Installs or routes an application based on type and safety."""
+        target = (target or "").strip()
+        if target.startswith(("http://", "https://")):
+            return self.install_url(target)
         # 1. Check if target is a local file
         if os.path.exists(target):
             # Step A: Pre-execution Safety Scan

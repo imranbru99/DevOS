@@ -125,6 +125,34 @@ class TestAppHubAndLayers(unittest.TestCase):
         self.assertIn("Debian package (.deb)", reply)
         self.assertIn("Install My Editor", reply)
 
+    def test_09b_windows_exe_url_resolves_to_wine_install(self):
+        import app_resolver
+        url = "https://example.com/downloads/NotepadPlusPlus_Installer.exe"
+        parsed = app_resolver.parse_link(url)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed["store"], "wine")
+        res = app_resolver.resolve(link=url)
+        self.assertEqual(res.get("found_by"), "wine")
+        self.assertEqual(res["option"]["kind"], "wine")
+        self.assertEqual(res["option"]["wine"], url)
+        reply = app_resolver.reply_text(res)
+        self.assertIn("Windows app", reply)
+        self.assertIn("Install", reply)
+
+    def test_09c_hub_routes_http_to_install_url(self):
+        from hub import DevOSAppHub
+        hub = DevOSAppHub(runner=lambda *_a, **_k: (0, "", ""))
+        called = {}
+
+        def fake_install_url(url):
+            called["url"] = url
+            return {"status": "LAUNCHED", "package_name": "Tool", "runtime": "Windows (WinLayer)"}
+
+        hub.install_url = fake_install_url  # type: ignore
+        out = hub.install("https://cdn.example/ToolSetup.exe")
+        self.assertEqual(called["url"], "https://cdn.example/ToolSetup.exe")
+        self.assertEqual(out["status"], "LAUNCHED")
+
     def test_10_ai_server_thread_plan(self):
         SYS_PATH_AI = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../components/ai-core"))
         sys.path.insert(0, SYS_PATH_AI)

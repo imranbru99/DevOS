@@ -65,9 +65,11 @@ Page {
                 onTextChanged: config.setFullName(text)
             }
 
-            RowLayout {
+            GridLayout {
                 Layout.fillWidth: true
-                spacing: 14
+                columns: form.width < 420 ? 1 : 2
+                columnSpacing: 14
+                rowSpacing: 6
                 ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 6
@@ -93,9 +95,11 @@ Page {
             }
 
             Caption { text: "Password (optional)" }
-            RowLayout {
+            GridLayout {
                 Layout.fillWidth: true
-                spacing: 14
+                columns: form.width < 420 ? 1 : 2
+                columnSpacing: 14
+                rowSpacing: 6
                 Field {
                     id: password
                     echoMode: TextInput.Password

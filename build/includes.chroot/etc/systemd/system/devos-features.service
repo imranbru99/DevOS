@@ -2,7 +2,8 @@
 Description=Install the apps chosen in the DevOS installer
 # Enabled by "devos-features installer-plan" when the "Choose your apps" page
 # picked downloads; it disables itself once everything is installed.
-After=network.target devos-network.service
+Wants=network-online.target
+After=network-online.target network.target NetworkManager-wait-online.service devos-network.service
 ConditionPathExists=/etc/devos/features.conf
 StartLimitIntervalSec=0
 

@@ -8,6 +8,8 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
+OFFLINE_DEB=/usr/local/share/devos/offline-apt/chrome.deb
+
 # DevOS sends no telemetry: Chrome's first-run dialog had "send usage statistics
 # to Google" and "make Chrome the default browser" ticked. Pre-answer both (the
 # DevOS Browser wrapper is already the default and opens Chrome).
@@ -49,8 +51,6 @@ keep_cloud_pc_in_app() {
     install -m 755 "$src" "$bin"
 }
 
-keep_cloud_pc_in_app
-
 # Apt's google-chrome.desktop overwrites our ISO copy and would show a second
 # Start-menu tile next to /usr/local/share/.../google-chrome.desktop.
 hide_vendor_chrome_menu() {
@@ -79,32 +79,87 @@ Categories=Network;WebBrowser;
 EOF
 }
 
-if command -v google-chrome-stable >/dev/null 2>&1; then
+finish_chrome() {
     quiet_first_run
+    if [ -f /opt/google/chrome/chrome-sandbox ]; then
+        chown root:root /opt/google/chrome/chrome-sandbox
+        chmod 4755 /opt/google/chrome/chrome-sandbox
+    fi
+    keep_cloud_pc_in_app
     hide_vendor_chrome_menu
+}
+
+install_deb() {
+    local deb="$1"
+    DEBIAN_FRONTEND=noninteractive apt-get update -y || true
+    DEBIAN_FRONTEND=noninteractive apt-get install -y "$deb" \
+        || DEBIAN_FRONTEND=noninteractive apt-get install -fy
+}
+
+chrome_url() {
+    case "$(dpkg --print-architecture)" in
+        amd64) echo "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb" ;;
+        arm64) echo "https://dl.google.com/linux/direct/google-chrome-stable_current_arm64.deb" ;;
+        *)
+            echo "Google Chrome is not available for $(dpkg --print-architecture)." >&2
+            return 1
+            ;;
+    esac
+}
+
+wait_for_network() {
+    local i
+    for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+        if getent hosts dl.google.com >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 5
+    done
+    return 1
+}
+
+keep_cloud_pc_in_app
+
+if command -v google-chrome-stable >/dev/null 2>&1; then
+    finish_chrome
     echo "Google Chrome is already installed."
     echo "Bookmarks, passwords, and history stay in each user's ~/.config/google-chrome folder."
     exit 0
 fi
 
+# Prefer the ISO vendor copy so first boot works without Internet.
+if [ -f "$OFFLINE_DEB" ]; then
+    echo "Installing Google Chrome from offline media..."
+    install_deb "$OFFLINE_DEB" || true
+fi
+
+if command -v google-chrome-stable >/dev/null 2>&1; then
+    finish_chrome
+    echo "Google Chrome is installed."
+    echo "Open it from the menu. Your data stays in ~/.config/google-chrome and is kept after restart."
+    exit 0
+fi
+
+url="$(chrome_url)" || exit 1
 deb="$(mktemp --suffix=.deb)"
 trap 'rm -f "${deb}"' EXIT
 
 echo "Downloading Google Chrome..."
-curl -fL --retry 3 -o "${deb}" \
-    https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+if ! wait_for_network; then
+    echo "Network is not ready; cannot download Google Chrome yet." >&2
+    exit 1
+fi
+curl -fL --retry 5 --retry-delay 5 --connect-timeout 20 -o "${deb}" "$url"
 
 echo "Installing Google Chrome..."
-DEBIAN_FRONTEND=noninteractive apt-get install -y "${deb}" \
-    || DEBIAN_FRONTEND=noninteractive apt-get install -fy
+install_deb "${deb}"
 
-quiet_first_run
-if [ -f /opt/google/chrome/chrome-sandbox ]; then
-    chown root:root /opt/google/chrome/chrome-sandbox
-    chmod 4755 /opt/google/chrome/chrome-sandbox
+if ! command -v google-chrome-stable >/dev/null 2>&1; then
+    echo "Google Chrome failed to install." >&2
+    exit 1
 fi
-keep_cloud_pc_in_app
-hide_vendor_chrome_menu
+
+finish_chrome
 echo "Google Chrome is installed."
 echo "Open it from the menu. Your data stays in ~/.config/google-chrome and is kept after restart."
 echo "Install Chrome only after DevOS itself is installed on the hard disk. A live USB session forgets it on shutdown."

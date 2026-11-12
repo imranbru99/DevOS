@@ -61,10 +61,40 @@ def test_slug_cannot_escape_workspace(tmp_path):
 def test_personal_template_not_bundled(tmp_path,monkeypatch):
     import pipeline_gui
     monkeypatch.setattr(pipeline_gui,'STEPS_25_TEMPLATE_FILE',tmp_path/'private.md')
+    monkeypatch.setattr(pipeline_gui,'STEP_PACK_FILE',tmp_path/'step_pack.json')
     assert pipeline_gui.get_steps_25_template()==''
     pipeline_gui.save_steps_25_template('Synthetic local-only instructions')
     assert pipeline_gui.get_steps_25_template()=='Synthetic local-only instructions'
     assert (tmp_path/'private.md').stat().st_mode & 0o777 == 0o600
+
+
+def test_step_pack_stores_two_to_six(tmp_path,monkeypatch):
+    import pipeline_gui
+    monkeypatch.setattr(pipeline_gui,'STEPS_25_TEMPLATE_FILE',tmp_path/'private.md')
+    monkeypatch.setattr(pipeline_gui,'STEP_PACK_FILE',tmp_path/'step_pack.json')
+    assert pipeline_gui.get_step_pack()==[]
+    saved=pipeline_gui.save_step_pack(['Alpha tests','Beta docker','Gamma docs'])
+    assert saved==['Alpha tests','Beta docker','Gamma docs']
+    assert pipeline_gui.get_step_pack()==saved
+    assert 'Alpha tests' in pipeline_gui.get_steps_25_template()
+    assert pipeline_gui.save_step_pack(['only-one'])==['only-one']
+
+
+def test_step_groups_serial_auto_add(tmp_path,monkeypatch):
+    import pipeline_gui
+    monkeypatch.setattr(pipeline_gui,'STEPS_25_TEMPLATE_FILE',tmp_path/'private.md')
+    monkeypatch.setattr(pipeline_gui,'STEP_PACK_FILE',tmp_path/'step_pack.json')
+    # One pasted block with --- becomes multiple serial steps in a named group.
+    pipeline_gui.save_step_groups([
+        {'id':'eng','name':'Engineering','steps':['Tests\n---\nDocker\n---\nDocs']},
+        {'id':'seo','name':'SEO','steps':['Meta tags','Sitemap']},
+    ], default_group_id='eng')
+    groups=pipeline_gui.list_step_groups()
+    assert [g['name'] for g in groups]==['Engineering','SEO']
+    eng=pipeline_gui.get_step_group('eng')
+    assert eng['steps']==['Tests','Docker','Docs']
+    assert pipeline_gui.get_step_pack()==['Tests','Docker','Docs']
+    assert pipeline_gui.get_step_group('seo')['steps']==['Meta tags','Sitemap']
 
 
 def test_event_callback_and_restart_replay(tmp_path):

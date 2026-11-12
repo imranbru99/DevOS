@@ -1,6 +1,6 @@
 /* DevOS "Choose your apps" page (packagechooserq@features).
-   Optional apps start unchecked — only ticked ids are installed. Unticked
-   apps stay available later in DevOS Features.
+   First visit ticks the apps that match the PC type (Normal includes Chrome).
+   Unticked apps stay available later in DevOS Features.
    Preset chips (Normal, Premium, …) tick a set; "Choose later" ticks nothing.
    aimodel-hw.js holds the RAM and disk measured at live boot by devos-ai-hwprobe.
    Ticked ids go to global storage; devospreserve copies them into the new system
@@ -22,11 +22,14 @@ Page {
 
     readonly property real ramGb: HW.hw.ram_gb
     readonly property real diskGb: HW.hw.disk_gb
-    // Start empty; applyUserType() restores saved picks when revisiting the page.
+    // Start empty; applyUserType() seeds PC-type defaults or restores saved picks.
     // Do not seed with recommended() here — that overwrote Global storage on revisit.
     property var picked: []
     property string preset: ""
     property string appliedKind: ""
+    readonly property var categoryOptions: [{ id: "", name: "All categories" }].concat(Cat.data.categories)
+    readonly property var visibleGroups: appGroups(
+        categoryBox.currentIndex, appSearch.text, hardwareFilter.checked)
 
     readonly property var icons: ({
         office: "✎", internet: "◎", chat: "✉", media: "♫", creative: "✦", games: "♞",
@@ -115,14 +118,29 @@ Page {
             return;
         }
 
-        picked = [];
-        preset = "";
+        // First visit for this PC type: tick the apps that match it (Normal
+        // includes Chrome, etc.). The user can still untick any app.
+        picked = Cat.userTypeIds(kind, ramGb, diskGb);
+        preset = (kind === "normal") ? "recommended" : kind;
         appliedKind = kind;
         save();
     }
     function onActivate() { applyUserType(); }
-    function inCategory(cat) {
-        return Cat.data.features.filter(function (f) { return f.category === cat; });
+    function appGroups(categoryIndex, query, fittedOnly) {
+        var words = query.toLowerCase().trim().split(/\s+/);
+        var category = page.categoryOptions[categoryIndex];
+        var groups = [];
+        Cat.data.categories.forEach(function (cat) {
+            if (category && category.id && category.id !== cat.id) return;
+            var apps = Cat.data.features.filter(function (f) {
+                if (f.category !== cat.id) return false;
+                if (fittedOnly && (page.tooHeavy(f) || Cat.largeForDisk(f, page.diskGb))) return false;
+                var searchable = [f.name, f.windows, f.about, cat.name].join(" ").toLowerCase();
+                return words.every(function (word) { return searchable.indexOf(word) >= 0; });
+            });
+            if (apps.length) groups.push({ id: cat.id, name: cat.name, apps: apps });
+        });
+        return groups;
     }
     function downloadMb() {
         var mb = 0;
@@ -173,8 +191,8 @@ Page {
                 Layout.fillWidth: true
                 eyebrow: "APPS & FEATURES"
                 title: "Choose your apps"
-                subtitle: "Optional apps start unchecked — only what you tick is installed. "
-                    + "Everything else stays available later in DevOS Features."
+                subtitle: "Choose from " + Cat.data.features.length + " apps and features. "
+                    + "Only the optional apps you tick are installed. You can add more later in DevOS Features."
             }
 
             // ---- this PC
@@ -256,8 +274,54 @@ Page {
                 }
             }
 
+            GridLayout {
+                Layout.fillWidth: true
+                Layout.topMargin: 8
+                columns: form.width < 420 ? 1 : 2
+                columnSpacing: 8
+                rowSpacing: 6
+                TextField {
+                    id: appSearch
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    placeholderText: "Search apps or Windows equivalents"
+                    Accessible.name: placeholderText
+                    selectByMouse: true
+                    color: "#f8fafc"
+                    placeholderTextColor: "#94a3b8"
+                    background: Rectangle {
+                        radius: 8
+                        color: "#0f172a"
+                        border.color: appSearch.activeFocus ? "#38bdf8" : "#334155"
+                    }
+                }
+                ComboBox {
+                    id: categoryBox
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    model: page.categoryOptions
+                    textRole: "name"
+                    Accessible.name: "App category"
+                }
+            }
+
+            CheckBox {
+                id: hardwareFilter
+                Layout.fillWidth: true
+                text: "Hide apps with higher RAM or storage needs"
+                palette.windowText: "#e2e8f0"
+            }
+
+            Text {
+                Layout.fillWidth: true
+                visible: page.visibleGroups.length === 0
+                wrapMode: Text.WordWrap
+                color: "#94a3b8"
+                text: "No apps match. Try another search or change the filters."
+            }
+
             Repeater {
-                model: Cat.data.categories
+                model: page.visibleGroups
                 delegate: ColumnLayout {
                     readonly property var cat: modelData
                     Layout.fillWidth: true
@@ -285,17 +349,32 @@ Page {
                         }
                     }
                     Repeater {
-                        model: page.inCategory(cat.id)
+                        model: cat.apps
                         delegate: Rectangle {
                             id: rowCard
                             readonly property var f: modelData
                             readonly property bool on: page.has(f.id)
                             readonly property bool heavy: page.tooHeavy(f)
+                            readonly property bool largeDownload: Cat.largeForDisk(f, page.diskGb)
                             Layout.fillWidth: true
                             implicitHeight: row.implicitHeight + 18
                             radius: 12
                             color: on ? "#0c1a2e" : (rowMouse.containsMouse ? "#111c31" : "#0f172a")
-                            border.color: on ? "#2563eb" : "#1e293b"
+                            border.color: activeFocus ? "#38bdf8" : on ? "#2563eb" : "#1e293b"
+                            activeFocusOnTab: true
+                            Accessible.role: Accessible.CheckBox
+                            Accessible.name: f.name
+                            Accessible.checked: on
+                            Accessible.onPressAction: page.toggle(f.id, !on)
+                            Keys.onSpacePressed: page.toggle(f.id, !on)
+                            onActiveFocusChanged: {
+                                if (!activeFocus) return;
+                                var top = mapToItem(flick.contentItem, 0, 0).y;
+                                if (top < flick.contentY)
+                                    flick.contentY = top;
+                                else if (top + height > flick.contentY + flick.height)
+                                    flick.contentY = top + height - flick.height;
+                            }
                             Behavior on color { ColorAnimation { duration: 120 } }
                             MouseArea {
                                 id: rowMouse
@@ -342,6 +421,14 @@ Page {
                                             implicitWidth: warn.implicitWidth + 12
                                             implicitHeight: warn.implicitHeight + 4
                                             Text { id: warn; anchors.centerIn: parent; text: "Needs " + rowCard.f.min_ram_gb + " GB RAM"; color: "#fbbf24"; font.pixelSize: 11 }
+                                        }
+                                        Rectangle {
+                                            visible: rowCard.largeDownload
+                                            radius: 6
+                                            color: "#3b2506"
+                                            implicitWidth: diskWarn.implicitWidth + 12
+                                            implicitHeight: diskWarn.implicitHeight + 4
+                                            Text { id: diskWarn; anchors.centerIn: parent; text: "Large download"; color: "#fbbf24"; font.pixelSize: 11 }
                                         }
                                     }
                                     Text {

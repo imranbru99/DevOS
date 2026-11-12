@@ -131,6 +131,31 @@ class TestIdleUnload(unittest.TestCase):
         self.assertEqual(eng.last_activity, 0.0)
         self.assertFalse(server.configured_warmup())
 
+    def test_health_reports_model_loaded_without_loading(self):
+        """Chat-off / sleep: /health must say whether GGUF is in RAM, not load it."""
+        src = open(os.path.join(SYS_PATH, "server.py"), encoding="utf-8").read()
+        self.assertIn('"model_loaded": bool(slots.get("loaded"))', src)
+        self.assertIn("sleep mode: model loads on first chat", src)
+        self.assertIn("Preload at boot is OFF unless explicitly enabled", src)
+        self.assertIn("/v1/devos/sleep", src)
+        self.assertIn("/v1/devos/awake", src)
+        self.assertIn("def unload_now", src)
+        self.assertIn("def keep_awake", src)
+
+    def test_keep_awake_only_when_loaded(self):
+        eng = server.DevOSAIEngine()
+        eng.last_activity = 0.0
+        cold = eng.keep_awake()
+        self.assertFalse(cold["kept_awake"])
+        self.assertFalse(cold["model_loaded"])
+        eng._slots[0].llm = object()
+        eng.is_loaded = True
+        before = eng.last_activity
+        warm = eng.keep_awake()
+        self.assertTrue(warm["kept_awake"])
+        self.assertTrue(warm["model_loaded"])
+        self.assertGreater(eng.last_activity, before)
+
     def test_unloads_after_idle_and_not_before(self):
         import time as _time
         eng = server.DevOSAIEngine()
@@ -167,3 +192,24 @@ class TestIdleUnload(unittest.TestCase):
         eng.last_activity = _time.time() - 999
         self.assertFalse(eng.unload_if_idle())
         self.assertIsNotNone(slot.llm)
+
+    def test_unload_now_frees_when_idle_keeps_when_busy(self):
+        eng = server.DevOSAIEngine()
+        slot = eng._slots[0]
+        slot.llm = object()
+        slot.load_tried = True
+        slot.busy = True
+        eng.is_loaded = True
+        held = eng.unload_now("chat-closed")
+        self.assertFalse(held["unloaded"])
+        self.assertTrue(held["busy"])
+        self.assertTrue(held["model_loaded"])
+        self.assertIsNotNone(slot.llm)
+        slot.busy = False
+        freed = eng.unload_now("chat-closed")
+        self.assertTrue(freed["unloaded"])
+        self.assertFalse(freed["model_loaded"])
+        self.assertIsNone(slot.llm)
+        again = eng.unload_now("chat-closed")
+        self.assertFalse(again["unloaded"])
+        self.assertEqual(again["reason"], "nothing_loaded")

@@ -1,12 +1,34 @@
 #!/usr/bin/env python3
 """Installer selection must not force optional toys like emoji as always installed."""
 
+import json
 from pathlib import Path
 import sys
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "components" / "features"))
 import feature_catalog as catalog  # noqa: E402
+
+
+def test_expanded_catalog_exposes_native_apps_without_preselecting_them():
+    js = (ROOT / "build/includes.chroot/etc/calamares/branding/devos/features-catalog.js").read_text(
+        encoding="utf-8"
+    )
+    data, _ = json.JSONDecoder().raw_decode(js.split("var data = ", 1)[1])
+    choices = {entry["id"]: entry for entry in data["features"]}
+    assert len(choices) >= 100
+    assert len(choices) == len(data["features"])
+    assert choices.keys() == {entry["id"] for entry in catalog.FEATURES} - catalog.BASE_FEATURE_IDS
+    new_apps = {
+        "calibre", "scribus", "mpv", "mixxx", "kid3", "darktable",
+        "kicad", "geany", "meld", "nextcloud", "keepassxc", "stellarium",
+    }
+    assert new_apps.isdisjoint(catalog.recommended_ids(32, 1000))
+    for app in new_apps:
+        assert catalog.feature(app)["apt"]
+        assert choices[app]["windows"]
+        assert choices[app]["size_mb"] > 0
+        assert choices[app]["preinstalled"] is False
 
 
 def test_emoji_not_forced_base_feature():

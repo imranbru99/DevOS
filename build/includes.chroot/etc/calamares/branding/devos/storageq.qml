@@ -1,5 +1,5 @@
 /* Explicit, reviewed plans for additional data disks. Calamares owns OS disks. */
-import io.calamares.core 1.0
+import io.calamares.core 1.0 as Core
 import io.calamares.ui 1.0
 import QtQuick 2.15
 import QtQuick.Controls 2.15
@@ -155,7 +155,9 @@ Page {
                     text: "Use Format disk below for optional extra drives (A/B/C volumes). The DevOS system disk is still chosen on Partitions — Erase disk is the default there, like Windows Setup. Manual partitioning remains available for dual-boot. Formatting here runs only after you confirm Install."
                 }
             }
-            RowLayout {
+            Flow {
+                Layout.fillWidth: true
+                spacing: 8
                 Button { padding: 12; font.pixelSize: 14; palette.button: "#14243a"; palette.buttonText: "#f8fafc"; text: "Select all eligible drives"; onClicked: page.selected = page.eligible.map(function(d) { return page.defaultChoice(d); }) }
                 Button { padding: 12; font.pixelSize: 14; palette.button: "#14243a"; palette.buttonText: "#f8fafc"; text: "Keep all other drives"; onClicked: page.selected = [] }
             }
@@ -180,7 +182,7 @@ Page {
                             onToggled: page.toggle(card.disk, checked)
                             contentItem: Text { text: parent.text; leftPadding: parent.indicator.width+parent.spacing; color: "#f8fafc"; font.pixelSize: 14; wrapMode: Text.WordWrap; verticalAlignment: Text.AlignVCenter }
                         }
-                        RowLayout {
+                        Flow {
                             Layout.fillWidth: true
                             spacing: 10
                             Button {
@@ -201,7 +203,6 @@ Page {
                                 palette.buttonText: "#f8fafc"
                                 onClicked: page.clearFormat(card.disk)
                             }
-                            Item { Layout.fillWidth: true }
                         }
                         RowLayout {
                             visible: !!card.chosen
@@ -219,9 +220,9 @@ Page {
                             delegate: RowLayout {
                                 readonly property int volumeIndex: index
                                 Layout.fillWidth: true
-                                TextField { padding: 10; font.pixelSize: 14; Layout.preferredWidth: 140; text: modelData.label; maximumLength: 16; placeholderText: "Volume label"; onEditingFinished: page.editVolume(card.disk.device, parent.volumeIndex, "label", text) }
-                                TextField { padding: 10; font.pixelSize: 14; visible: card.chosen && parent.volumeIndex < card.chosen.volumes.length-1; Layout.preferredWidth: 140; text: String(modelData.size_gib); placeholderText: "Size (GiB)"; onEditingFinished: page.editVolume(card.disk.device, parent.volumeIndex, "size_gib", text) }
-                                Text { visible: card.chosen && parent.volumeIndex === card.chosen.volumes.length-1; text: "Remaining space"; color: "#94a3b8" }
+                                TextField { padding: 10; font.pixelSize: 14; Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.preferredWidth: 140; text: modelData.label; maximumLength: 16; placeholderText: "Volume label"; onEditingFinished: page.editVolume(card.disk.device, parent.volumeIndex, "label", text) }
+                                TextField { padding: 10; font.pixelSize: 14; visible: card.chosen && parent.volumeIndex < card.chosen.volumes.length-1; Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.preferredWidth: 140; text: String(modelData.size_gib); placeholderText: "Size (GiB)"; onEditingFinished: page.editVolume(card.disk.device, parent.volumeIndex, "size_gib", text) }
+                                Text { visible: card.chosen && parent.volumeIndex === card.chosen.volumes.length-1; Layout.fillWidth: true; wrapMode: Text.WordWrap; text: "Remaining space"; color: "#94a3b8" }
                             }
                         }
                     }

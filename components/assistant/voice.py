@@ -830,13 +830,13 @@ def plain_for_speech(md: str, limit: int = 480) -> str:
     return text
 
 
-# Spoken replies: start voice as soon as text starts typing (never wait for the
-# full answer). Natural pace for a ~10-year-old — clear, not rushed.
+# Spoken replies: prefer full sentences end-to-end. Starting after one word caused
+# stop–start gaps and dropped middle sentences when prefetch was abandoned.
 _TTS_RATE = "+0%"              # natural human pace (do not speed up)
-_GAP_BRIDGE_S = 0.18           # keep .!? handoff tight while staying smooth
-_FIRST_CHUNK_MIN = 3           # start voice as soon as a few chars type
-_FIRST_WORDS = 1               # speak the first whole word while typing continues
-_CHUNK_SOFT_MIN = 28
+_GAP_BRIDGE_S = 0.35           # short handoff while next sentence finishes synth
+_FIRST_CHUNK_MIN = 48          # first spoken unit ≈ a short clause, not one word
+_FIRST_WORDS = 10              # wait for a natural phrase before the first cut
+_CHUNK_SOFT_MIN = 40
 _PLAY_PROCS: List["subprocess.Popen"] = []
 _PLAY_LOCK = threading.Lock()
 _WARM_STARTED = False
@@ -845,12 +845,12 @@ _FFPLAY_FAST = [
     "-fflags", "nobuffer", "-flags", "low_delay",
     "-probesize", "32", "-analyzeduration", "0",
 ]
-# Common openers — speak these the instant they land so voice tracks typing.
+# Short greetings with end punctuation may start immediately ("Hi!", "Sure.").
 _OPENER_RE = re.compile(
     r"^(Sure|Okay|OK|Yes|Yeah|Yep|Hi|Hello|Hey|Alright|Of course|Absolutely|"
     r"Right|Got it|No problem|Thanks|Thank you|Please|Well|"
     r"হ্যাঁ|জি|আচ্ছা|ঠিক আছে|হ্যালো|নমস্কার|জি\s*আচ্ছা)"
-    r"([,.!।]|\s)",
+    r"([.!।؟])(?:\s+|$)",
     re.IGNORECASE | re.UNICODE,
 )
 
@@ -1105,19 +1105,17 @@ def speak_reply(text: str, language: Optional[str] = None, stop_first: bool = Tr
             )
 
             def _pre(n=nxt, o=out):
-                box["ok"] = _synthesize_to_file(n, lang, o)
                 box["item"] = n
+                box["ok"] = _synthesize_to_file(n, lang, o)
                 if box["ok"]:
                     box["path"] = o
 
             th = threading.Thread(target=_pre, daemon=True)
             th.start()
-        if i == 0 and not path:
-            _speak_chunk(chunk, lang, edge_wait_s=10.0)
-        elif path and _play_file(path):
+        if path and _play_file(path):
             pass
         else:
-            _speak_chunk(chunk, lang, edge_wait_s=20.0)
+            _speak_chunk(chunk, lang, edge_wait_s=12.0 if i == 0 else 20.0)
         if th is not None:
             _wait_prefetch(box, th, _GAP_BRIDGE_S)
             next_path = box.get("path")  # type: ignore
@@ -1128,31 +1126,32 @@ def speak_reply(text: str, language: Optional[str] = None, stop_first: bool = Tr
 def _next_speak_cut(pending: str, force: bool = False, first: bool = False) -> Tuple[str, int]:
     """Return (ready_chunk, advance) — advance is how many chars of pending were consumed.
 
-    First phrase is very eager (opener / 2 words) so voice starts the same moment
-    text starts typing. Later phrases wait for sentence/comma boundaries.
+    Prefer full sentences so DevOS AI speaks end-to-end. Never cut after a single
+    word while more text is still arriving (that caused stop–start speech).
     """
     pending = pending or ""
     if not pending.strip():
         return "", 0
 
-    # Sentence / line end — speak as soon as "Hello!" / "Hi!" lands.
+    # Sentence / line end — speak a complete sentence as soon as it lands.
     m = re.search(r"[.!?।؟](?:\s+|$)|[\n]", pending)
     if m and m.end() >= 3:
         cut = m.end()
-        if cut > 160:
+        if cut > 220:
             for sep in (", ", "; ", " — ", " এবং "):
-                idx = pending.find(sep, 50, 140)
-                if idx >= 50:
+                idx = pending.find(sep, 80, 200)
+                if idx >= 80:
                     cut = idx + len(sep)
                     break
             else:
-                idx = pending.rfind(" ", 70, 140)
-                if idx >= 70:
+                idx = pending.rfind(" ", 100, 200)
+                if idx >= 100:
                     cut = idx + 1
         chunk = pending[:cut].strip()
         return (chunk, cut) if chunk else ("", 0)
 
-    # Eager first audio — voice must start with typing, not after the full reply.
+    # First audio: short punctuated greeting only, or a full short clause —
+    # never the first word alone.
     if first:
         opener = _OPENER_RE.match(pending)
         if opener and opener.end() >= 2:
@@ -1163,10 +1162,8 @@ def _next_speak_cut(pending: str, force: bool = False, first: bool = False) -> T
             if chunk:
                 return chunk, cut
         words = pending.split()
-        need = _FIRST_WORDS
-        # Speak the first word as soon as it lands (call mode tracks typing).
-        if len(words) >= need and len(pending.strip()) >= _FIRST_CHUNK_MIN:
-            take = words[:need]
+        if len(words) >= _FIRST_WORDS and len(pending.strip()) >= _FIRST_CHUNK_MIN:
+            take = words[:_FIRST_WORDS]
             pattern = r"\s+".join(re.escape(w) for w in take)
             mm = re.search(pattern, pending)
             if mm:
@@ -1178,17 +1175,20 @@ def _next_speak_cut(pending: str, force: bool = False, first: bool = False) -> T
                 chunk = pending[:cut].strip()
                 if chunk:
                     return chunk, cut
-        # Single short token already on screen (e.g. "Hi") — speak immediately.
+        # Whole short reply already on screen (no more text coming yet / force).
         stripped = pending.strip()
-        if 2 <= len(stripped) <= 24 and " " not in stripped and re.match(r"^[\w\u0980-\u09FF]+[.!,।]?$", stripped):
+        if force and 2 <= len(stripped) <= 80:
+            return stripped, len(pending)
+        if 2 <= len(stripped) <= 40 and re.match(
+            r"^[\w\u0980-\u09FF][\w\u0980-\u09FF'’\- ]*[.!?।؟]$", stripped
+        ):
             return stripped, len(pending)
 
-    # Only break mid-sentence on commas when the clause is already long —
-    # fewer cuts ⇒ fewer gaps after "." / "!" / ",".
-    if len(pending) >= 110:
+    # Mid-sentence comma breaks only for long clauses (fewer cuts ⇒ fewer gaps).
+    if len(pending) >= 140:
         for sep in (", ", "; ", " — ", " এবং "):
-            idx = pending.find(sep, 60, 140)
-            if idx >= 60:
+            idx = pending.find(sep, 80, 180)
+            if idx >= 80:
                 cut = idx + len(sep)
                 chunk = pending[:cut].strip()
                 return (chunk, cut) if chunk else ("", 0)
@@ -1243,16 +1243,21 @@ def _play_file(path: str) -> bool:
 
 def _wait_prefetch(box: Dict[str, object], thread: threading.Thread,
                    max_wait_s: float = _GAP_BRIDGE_S) -> None:
-    """After a phrase ends, wait briefly for the next file — never 1–2s of silence."""
+    """After a phrase ends, wait briefly for the next file — avoid long silence gaps."""
     deadline = time.time() + max(0.05, max_wait_s)
     while time.time() < deadline:
-        if "item" in box:
+        if "path" in box or box.get("item") not in (None, "__pending__") or "ok" in box:
             break
         thread.join(timeout=0.02)
-    # If the next sentence is already known, allow a little more for its mp3.
     item = box.get("item", "__pending__")
+    # Next sentence known but mp3 still cooking — give synth a short bridge window.
     if item not in (None, "__none__", "__pending__") and "path" not in box:
-        extra = time.time() + min(0.45, max_wait_s + 0.2)
+        extra = time.time() + min(0.9, max_wait_s + 0.5)
+        while time.time() < extra and "path" not in box and box.get("ok") is not False:
+            thread.join(timeout=0.02)
+    elif "ok" in box and box.get("ok") and "path" not in box:
+        # speak_reply sets ok/path without always setting item first
+        extra = time.time() + min(0.9, max_wait_s + 0.5)
         while time.time() < extra and "path" not in box:
             thread.join(timeout=0.02)
     thread.join(timeout=0.01)
@@ -1355,9 +1360,9 @@ def _speak_chunk(text: str, language: str, out: Optional[str] = None,
 
     th = threading.Thread(target=_edge, daemon=True)
     th.start()
-    # Short phrases (first word / opener): only wait briefly for an mp3, then
-    # live-stream so voice starts with typing instead of after full synth.
-    brief = 0.28 if len(plain) < 90 else min(edge_wait_s, 8.0)
+    # Short clauses: wait a bit for warm-pool mp3; longer sentences get more time.
+    # Avoid bouncing to live-stream after one word — that caused stop–start gaps.
+    brief = 0.75 if len(plain) < 140 else min(edge_wait_s, 10.0)
     deadline = time.time() + brief
     while time.time() < deadline:
         if box.get("ok"):
@@ -1468,7 +1473,11 @@ class StreamSpeaker:
         self._cursor = 0
 
     def _worker(self):
-        """Natural pace; prefetch next sentence so .!? pauses stay ~0.3s, not 1–2s."""
+        """Speak every queued sentence in order; prefetch next audio during playback.
+
+        Never abandon an in-flight queue read — that stole middle sentences when the
+        first short chunk finished before the next sentence was queued.
+        """
         import queue as _queue
         q = self._q
         if q is None:
@@ -1495,44 +1504,40 @@ class StreamSpeaker:
             nxt_box: Dict[str, object] = {}
 
             def prefetch():
-                # Pull the next sentence as soon as the model queues it, synth during play.
+                # Block until the next sentence (or finish sentinel) is queued.
                 try:
-                    nxt = q.get(timeout=0.05)
+                    nxt = q.get(timeout=240)
                 except _queue.Empty:
-                    try:
-                        nxt = q.get(timeout=180)
-                    except _queue.Empty:
-                        nxt_box["item"] = "__none__"
-                        return
+                    nxt_box["item"] = "__none__"
+                    return
                 nxt_box["item"] = nxt
                 if nxt is not None:
                     nxt_box["path"] = synth_path(nxt)
 
             th = threading.Thread(target=prefetch, daemon=True)
             th.start()
-            # First phrase: warm-pool synth (starts with typing). Later: prefetched file.
-            if first and not current_path:
-                _speak_chunk(current, self._lang, edge_wait_s=6.0)
-                first = False
-            elif current_path and _play_file(current_path):
+            # Prefer prefetched mp3; otherwise synthesize/stream this sentence fully.
+            if current_path and _play_file(current_path):
                 first = False
             else:
-                _speak_chunk(current, self._lang, edge_wait_s=12.0)
+                _speak_chunk(current, self._lang, edge_wait_s=12.0 if first else 20.0)
                 first = False
-            # Critical: do NOT wait out a long synth here — that was the 1–2s .!? gap.
+
+            # Wait until prefetch has taken the next queue item. Abandoning early
+            # let the orphan thread consume sentence N+1 while we skipped to N+2.
+            while self._active and "item" not in nxt_box:
+                th.join(timeout=0.05)
+            if not self._active:
+                break
             _wait_prefetch(nxt_box, th, _GAP_BRIDGE_S)
 
             nxt = nxt_box.get("item", "__none__")
             if nxt == "__none__":
-                # Still no next sentence from the model — keep listening without fake silence.
                 current = current_path = None
                 continue
             if nxt is None:
                 break
             current = nxt  # type: ignore
             current_path = nxt_box.get("path")  # type: ignore
-            # If prefetch had the text but not the file yet, speak via stream (no long pause).
-            if current and not current_path:
-                # Leave path None → next loop iteration uses _speak_chunk / stream.
-                pass
+            # Missing path → next loop uses _speak_chunk (never skip the text).
 

@@ -118,12 +118,20 @@ def open_windows(path, name):
         busy = Busy("Preparing Windows support. This happens only once and takes about a minute...")
     else:
         popup(f"Starting {name}...", 5)
-    result = run_json("winlayer/prefix_manager.py", "launch", path)
+    launch_args = ["launch", path]
+    preferred = (os.environ.get("DEVOS_WIN_APP_NAME") or "").strip()
+    if preferred:
+        launch_args.extend(["--name", preferred])
+        name = preferred
+    result = run_json("winlayer/prefix_manager.py", *launch_args)
     if busy:
         busy.close()
     if result.get("status") != "LAUNCHED":
         dialog("--error", f"{name} could not start.\n\n{result.get('error', 'Unknown error')}")
         return 1
+    shown = result.get("app_name") or name
+    if result.get("registered") or first_time:
+        popup(f"{shown} is installed as a Windows app. Open it from Start or Apps.", 7)
     return 0
 
 

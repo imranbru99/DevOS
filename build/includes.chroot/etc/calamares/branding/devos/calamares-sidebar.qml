@@ -10,6 +10,7 @@ Rectangle {
     id: sideBar
     anchors.fill: parent
     implicitWidth: InstallerAppearance.sidebarWidth
+    readonly property bool narrow: width < 160
     gradient: Gradient {
         GradientStop { position: 0.0; color: "#0a0f1d" }
         GradientStop { position: 1.0; color: "#070912" }
@@ -24,7 +25,7 @@ Rectangle {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: InstallerAppearance.tiny ? 12 : (InstallerAppearance.compact ? 14 : 22)
+        anchors.margins: sideBar.narrow || InstallerAppearance.tiny ? 12 : (InstallerAppearance.compact ? 14 : 22)
         spacing: 0
 
         RowLayout {
@@ -37,7 +38,7 @@ Rectangle {
                 Layout.preferredHeight: InstallerAppearance.tiny ? 32 : 44
             }
             Column {
-                visible: !InstallerAppearance.tiny || sideBar.width >= 160
+                visible: !sideBar.narrow
                 Text {
                     text: "DevOS"
                     color: "#f8fafc"

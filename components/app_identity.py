@@ -188,11 +188,10 @@ def fit_to_screen(window, *, margin=24, max_ratio=0.92, min_width=480, min_heigh
         y = rect.y() + max(margin, (rect.height() - h) // 2)
     x = min(max(x, rect.x() + margin), rect.right() - w - margin)
     y = min(max(y, rect.y() + margin), rect.bottom() - h - margin)
+    # QWidget rejects a resize below its current minimum. Lower the minimum
+    # first so a window designed for a tall display can actually shrink.
+    window.setMinimumSize(min(min_width, w), min(min_height, h))
     window.setGeometry(x, y, w, h)
-    try:
-        window.setMinimumSize(min(min_width, w), min(min_height, h))
-    except Exception:
-        pass
 
 
 def apply(app, desktop_id):

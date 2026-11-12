@@ -1684,6 +1684,17 @@ def run_gui(focus: Optional[str] = None, discovery: Optional[AppDiscovery] = Non
             self.count.setObjectName("muted")
             info.addWidget(self.count)
             info.addStretch(1)
+            install = QtWidgets.QToolButton()
+            install.setText("Install Windows app…")
+            install.setObjectName("primary")
+            install.setPopupMode(QtWidgets.QToolButton.MenuButtonPopup)
+            install.setToolTip("Install from a file or paste a download link")
+            install_menu = QtWidgets.QMenu(install)
+            install_menu.addAction("From file (.exe / .msi)…", self.install_windows_app)
+            install_menu.addAction("From download link…", self.install_windows_app_url)
+            install.setMenu(install_menu)
+            install.clicked.connect(self.install_windows_app)
+            info.addWidget(install)
             refresh = QtWidgets.QPushButton("Refresh")
             refresh.clicked.connect(self.reload)
             info.addWidget(refresh)
@@ -1711,6 +1722,7 @@ def run_gui(focus: Optional[str] = None, discovery: Optional[AppDiscovery] = Non
             self.empty = QtWidgets.QLabel("No apps match your search.")
             self.empty.setObjectName("muted")
             self.empty.setAlignment(QtCore.Qt.AlignCenter)
+            self.empty.setWordWrap(True)
             self.empty.setVisible(False)
             lay.addWidget(self.empty)
 
@@ -1810,10 +1822,88 @@ def run_gui(focus: Optional[str] = None, discovery: Optional[AppDiscovery] = Non
                 shown += ok
             self.list.addStretch(1)
             self.count.setText(f"{shown} app{'s' if shown != 1 else ''} found")
-            self.empty.setVisible(shown == 0 and bool(self.apps or text))
+            windows_filter = plat == PLATFORM_WINDOWS
+            if shown == 0 and windows_filter and not text:
+                self.empty.setText(
+                    "No Windows apps yet. Click Install Windows app… to add a .exe or .msi."
+                )
+                self.empty.setVisible(True)
+            elif shown == 0 and bool(self.apps or text):
+                self.empty.setText("No apps match your search.")
+                self.empty.setVisible(True)
+            else:
+                self.empty.setVisible(False)
 
         def ensure_visible(self, row):
             QtCore.QTimer.singleShot(30, lambda: self.scroll.ensureWidgetVisible(row, 0, 40))
+
+        def _schedule_windows_refresh(self):
+            self.notify("Installing Windows app… it will appear here when ready.")
+            for delay in (2500, 8000, 20000):
+                QtCore.QTimer.singleShot(delay, self.reload)
+
+        def install_windows_app(self):
+            """Install a local .exe/.msi from this Apps console as a Windows app."""
+            path, _ = QtWidgets.QFileDialog.getOpenFileName(
+                self,
+                "Install Windows app",
+                os.path.expanduser("~/Downloads"),
+                "Windows apps (*.exe *.msi *.bat *.cmd);;All files (*)",
+            )
+            if not path:
+                return
+            opener = "/usr/local/bin/devos-open-app"
+            if not os.path.isfile(opener):
+                self.error_box(
+                    "Install Windows app",
+                    "The Windows app helper is missing on this PC.",
+                )
+                return
+            try:
+                subprocess.Popen([opener, path], start_new_session=True)
+            except OSError as exc:
+                self.error_box("Install Windows app", f"Could not start the installer.\n\n{exc}")
+                return
+            self._schedule_windows_refresh()
+
+        def install_windows_app_url(self):
+            """Paste a direct .exe/.msi (or download-page) URL and install as a Windows app."""
+            url, ok = QtWidgets.QInputDialog.getText(
+                self,
+                "Install Windows app from link",
+                "Paste a Windows app download link (.exe / .msi):",
+                QtWidgets.QLineEdit.Normal,
+                "",
+            )
+            url = (url or "").strip()
+            if not ok or not url:
+                return
+            if not url.startswith(("http://", "https://")):
+                self.error_box(
+                    "Install Windows app",
+                    "Use a full link that starts with https://",
+                )
+                return
+            resolver = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "..",
+                "apphub",
+                "app_resolver.py",
+            )
+            if not os.path.isfile(resolver):
+                resolver = "/usr/local/share/devos/components/apphub/app_resolver.py"
+            if not os.path.isfile(resolver):
+                self.error_box("Install Windows app", "The download helper is missing on this PC.")
+                return
+            try:
+                subprocess.Popen(
+                    [sys.executable, resolver, "--install", "--name", "Windows app", "--url", url],
+                    start_new_session=True,
+                )
+            except OSError as exc:
+                self.error_box("Install Windows app", f"Could not start the installer.\n\n{exc}")
+                return
+            self._schedule_windows_refresh()
 
         # -- actions --
         def do_open(self, app):

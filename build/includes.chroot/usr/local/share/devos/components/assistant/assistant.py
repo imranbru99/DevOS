@@ -28,6 +28,8 @@ if HERE not in sys.path:
 from PyQt5 import QtCore, QtGui, QtWidgets  # noqa: E402
 from PyQt5.QtCore import Qt  # noqa: E402
 
+import agents  # noqa: E402
+from agent_dialog import AgentDialog  # noqa: E402
 import documents  # noqa: E402
 import engine  # noqa: E402
 import markdown_lite  # noqa: E402
@@ -2059,6 +2061,10 @@ class Header(QtWidgets.QWidget):
         self.status = StatusPill()
         h.addWidget(self.status, 0, Qt.AlignVCenter)
         h.addStretch(1)
+        self.agents = QtWidgets.QPushButton("Agents")
+        self.agents.setObjectName("textBtn")
+        self.agents.setCheckable(True)
+        h.addWidget(self.agents)
         self.new_btn = IconButton("new", "New chat (Ctrl+N)", size=34, icon_size=19, radius=10)
         h.addWidget(self.new_btn)
 
@@ -2877,6 +2883,9 @@ class AssistantWindow(QtWidgets.QWidget):
         self.assistant = assistant or engine.Assistant()
         self.store = store if store is not None else engine.ChatStore().load()
         self.history = history if history is not None else self.store.new_history()
+        self.agent_profile = None
+        self.agent_store = agents.ProfileStore(
+            os.path.join(getattr(self.store, "data_dir", engine.DATA_DIR), "agents.json"))
         self.attachments = []
         self.chips = {}
         self.workers = set()
@@ -2944,6 +2953,7 @@ class AssistantWindow(QtWidgets.QWidget):
         self.header = Header()
         self.header.toggle.clicked.connect(self.toggle_sidebar)
         self.header.new_btn.clicked.connect(self.new_chat)
+        self.header.agents.clicked.connect(self.open_agents)
         self.status = self.header.status
         root.addWidget(self.header)
 
@@ -3225,6 +3235,14 @@ class AssistantWindow(QtWidgets.QWidget):
         def done(h):
             if h:
                 self._set_status("ready")
+                # While chat stays open and the model is already in RAM, refresh
+                # the idle timer so reply 2+ stay fast (first load may still wait).
+                if h.get("model_loaded") and self.isVisible() and not self._closing:
+                    threading.Thread(
+                        target=engine.request_ai_awake,
+                        daemon=True,
+                        name="devos-ai-awake",
+                    ).start()
             elif not self._service_started:
                 self._service_started = engine.start_ai_service()
                 self._set_status("starting" if self._service_started else "offline")
@@ -3391,11 +3409,11 @@ class AssistantWindow(QtWidgets.QWidget):
                 r.set_can_regenerate(r is latest and self._last_prompt() is not None)
                 r.set_pinned(r is latest)
 
-    def add_user(self, text, files=None, save=True):
+    def add_user(self, text, files=None, save=True, **metadata):
         self._add_row(UserRow(text, files=files, ts=time.time()))
         if save:
             self.history.add("user", text, files=[os.path.basename(f) for f in (files or [])],
-                             paths=list(files or []))
+                             paths=list(files or []), **metadata)
             self._save()
 
     def add_bot(self, text, ok=True, buttons=None, save=True, level=None, animate=True):
@@ -3659,6 +3677,77 @@ class AssistantWindow(QtWidgets.QWidget):
 
     # -- sending ------------------------------------------------------------
 
+    def open_agents(self):
+        self.header.agents.setChecked(self.agent_profile is not None)
+        if self.busy or self._closing:
+            return
+        try:
+            profiles = self.agent_store.load()
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            QtWidgets.QMessageBox.warning(self, "DevOS AI Agents", f"Could not load agents. {exc}")
+            return
+        dialog = AgentDialog(self.agent_store, profiles, agents.app_choices(self.assistant.ctx),
+                             self.agent_profile, self)
+        dialog.exec_()
+        self.agent_profile = dialog.active
+        self.header.agents.setChecked(self.agent_profile is not None)
+        self.input.setPlaceholderText(
+            f"Ask {self.agent_profile.name}…" if self.agent_profile else PLACEHOLDER)
+        self.input.setFocus()
+
+    def _dispatch_agent(self, text):
+        profile = self.agent_profile
+        hist = self.history
+        handle = engine.StreamHandle()
+        self._handle = handle
+        self.show_thinking(f"{profile.name} is working")
+        deliver = self._replies_for(hist)
+
+        def done(result):
+            if self._closing:
+                return
+            log = list(result.actions)
+            if not handle.stopped and hist is self.history:
+                available = agents.app_choices(self.assistant.ctx) if result.launches else {}
+                for app_id in result.launches:
+                    app = available.get(app_id)
+                    if app is None:
+                        log.append(f"Unavailable · {app_id}")
+                        continue
+                    box = QtWidgets.QMessageBox(QtWidgets.QMessageBox.Question, "Agent app launch",
+                                                "", parent=self)
+                    box.setTextFormat(Qt.PlainText)
+                    box.setText(f"{profile.name} wants to open {app.name}.\n{app.path}")
+                    box.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.Cancel)
+                    box.setDefaultButton(QtWidgets.QMessageBox.Cancel)
+                    if box.exec_() != QtWidgets.QMessageBox.Yes or handle.stopped:
+                        log.append(f"Declined · {app.name}")
+                        continue
+                    try:
+                        agents.launch_app(profile, app_id, self.assistant.ctx, (app.path, app.exec))
+                    except (OSError, ValueError) as exc:
+                        log.append(f"Launch failed · {app.name} · {exc}")
+                    else:
+                        log.append(f"Opened · {app.name}")
+            elif result.launches:
+                log.append("App launch requests expired.")
+            answer = "Stopped." if handle.stopped else result.answer
+            details = ""
+            if log:
+                # Render paths and tool arguments as text, without interpreting them as links.
+                safe = [re.sub(r"[\r\n`\[\]<>]", " ", line) for line in log]
+                details = "\n\n**Agent actions**\n" + "\n".join(f"- {line}" for line in safe)
+            buttons = [] if handle.stopped else [("Save report…", ("agent_report", answer))]
+            deliver([engine.Reply(answer + details, buttons=buttons, source="agent")])
+
+        def failed(message):
+            if not self._closing:
+                deliver([engine.Reply("Stopped." if handle.stopped else message,
+                                      ok=handle.stopped, source="agent")])
+
+        self._run(lambda _w: agents.run(profile, text, self.assistant.model, self.assistant.ctx, handle),
+                  done, on_fail=failed)
+
     def send(self, text=None, from_voice=False):
         if self.busy:
             return
@@ -3668,10 +3757,27 @@ class AssistantWindow(QtWidgets.QWidget):
         files = list(self.attachments)
         if not text and not files:
             return
+        if self.agent_profile is not None:
+            if files:
+                self.add_bot("Agents read from their approved folder. Remove attachments or switch to regular chat.",
+                             ok=False, save=False)
+                return
+            self._speak_reply = bool(from_voice)
+            self.input.clear()
+            self.add_user(text, [], agent=self.agent_profile.name)
+            self._dispatch_agent(text)
+            return
         self._speak_reply = bool(from_voice)
         if self._stream_speaker is not None:
             self._stream_speaker.stop()
             self._stream_speaker = None
+        # If the model is already in RAM, keep it awake so this reply stays fast.
+        # First cold reply may load once; we do not force a dummy preload here.
+        threading.Thread(
+            target=engine.nudge_session_model,
+            daemon=True,
+            name="devos-llm-session-nudge",
+        ).start()
         # Warm TTS + start stream speaker before the first token so call voice
         # begins the same moment typing appears (not after the full answer).
         if from_voice:
@@ -3822,7 +3928,7 @@ class AssistantWindow(QtWidgets.QWidget):
             still = streamed and i == len(replies) - 1 and getattr(r, "source", "") == "model"
             self.add_bot(r.text, ok=r.ok, buttons=r.buttons, animate=not still,
                          level="info" if r.text == "Stopped." else None)
-            if speak and not streamed_speech and r.ok and getattr(r, "source", "") in ("model", "tool", ""):
+            if speak and not streamed_speech and r.ok and getattr(r, "source", "") in ("model", "tool", "agent", ""):
                 plain = voice.plain_for_speech(r.text or "")
                 if plain and not re.match(r"^(Opening|Saved to|Typing)\b", plain, re.I):
                     spoken_parts.append(plain)
@@ -3860,6 +3966,12 @@ class AssistantWindow(QtWidgets.QWidget):
             return
         m = self.history.messages[idx]
         text = m.get("text") or ""
+        if m.get("agent"):
+            if self.agent_profile is None or self.agent_profile.name != m["agent"]:
+                self.add_bot("Select the original agent to rerun this request.", ok=False, save=False)
+                return
+            self.send(text)
+            return
         files = [p for p in (m.get("paths") or []) if os.path.isfile(p)]
         if not text and not files:
             return
@@ -3887,7 +3999,15 @@ class AssistantWindow(QtWidgets.QWidget):
         return box.clickedButton() is yes_b
 
     def on_button(self, payload, btn):
-        if isinstance(payload, tools.Action):
+        if isinstance(payload, tuple) and len(payload) == 2 and payload[0] == "agent_report":
+            path, _ = QtWidgets.QFileDialog.getSaveFileName(
+                self, "Save agent report", "agent-report.md", "Markdown (*.md);;All files (*)")
+            if path:
+                destination = QtCore.QSaveFile(path)
+                data = payload[1].encode("utf-8")
+                if not destination.open(QtCore.QIODevice.WriteOnly) or destination.write(data) != len(data) or not destination.commit():
+                    QtWidgets.QMessageBox.warning(self, "Save agent report", destination.errorString())
+        elif isinstance(payload, tools.Action):
             if payload.confirm and not self.confirm(payload.confirm, payload.label):
                 return
             self._run(lambda _w: [engine.Reply(tools.execute(payload, self.assistant.ctx).text)],
@@ -4079,11 +4199,18 @@ class AssistantWindow(QtWidgets.QWidget):
                 pass
 
         def _warm_llm():
+            # Only load weights if they are not already in RAM. /health now reports
+            # model_loaded; never fire a dummy chat when the model is already warm
+            # or when the AI service is intentionally asleep.
             try:
                 model = engine.LocalModel()
                 health = model.health(timeout=1.0) or {}
-                if not health.get("model_loaded"):
-                    model.chat([{"role": "user", "content": "ok"}], max_tokens=1, temperature=0)
+                if health.get("model_loaded"):
+                    return
+                slots = health.get("slots") if isinstance(health.get("slots"), dict) else {}
+                if int(slots.get("loaded") or 0) > 0:
+                    return
+                model.chat([{"role": "user", "content": "ok"}], max_tokens=1, temperature=0)
             except Exception:
                 pass
 
@@ -4377,6 +4504,19 @@ class AssistantWindow(QtWidgets.QWidget):
                 self._handle.stop()
             if self.history.messages:
                 self.history.save()
+            # Chat stopped and no in-window work left: drop the local model so it
+            # does not keep burning CPU/RAM. Other apps reload it on next use.
+            try:
+                if self._stream_speaker is not None:
+                    self._stream_speaker.stop()
+                    self._stream_speaker = None
+            except Exception:
+                pass
+            threading.Thread(
+                target=lambda: engine.request_ai_sleep("chat-closed"),
+                daemon=True,
+                name="devos-ai-sleep",
+            ).start()
         if any(worker.isRunning() for worker in self.workers):
             # A running QThread cannot be destroyed with its parent window.
             # Hide promptly while startup probes or a cancelled reply finish.

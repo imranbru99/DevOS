@@ -1328,6 +1328,7 @@ start();
 STYLE = """
 QWidget#root { background: #0b0f1a; color: #e5e7eb;
   font-family: "Inter", "Noto Sans", sans-serif; font-size: 10.5pt; }
+QScrollArea, QWidget#phoneLinkContent { background: #0b0f1a; }
 QFrame#card { background: #111827; border-radius: 12px; border: 1px solid #1f2937; }
 QLabel { color: #e5e7eb; background: transparent; }
 QLabel#title { font-size: 18pt; font-weight: 600; color: #f9fafb; }
@@ -1423,7 +1424,7 @@ def run_gui():
             self.setAttribute(QtCore.Qt.WA_StyledBackground, True)
             self.setWindowTitle("Phone Link")
             self.setWindowIcon(QtGui.QIcon.fromTheme("smartphone", QtGui.QIcon.fromTheme("phone")))
-            self.setMinimumSize(560, 760)
+            self.resize(560, 760)
             self.setStyleSheet(STYLE)
             self.store = TokenStore()
             self.codes = PairingCodes()
@@ -1432,7 +1433,15 @@ def run_gui():
             self.known_ids = {d["id"] for d in self.store.devices()}
             self.running = False
 
-            outer = QtWidgets.QVBoxLayout(self)
+            frame = QtWidgets.QVBoxLayout(self)
+            frame.setContentsMargins(0, 0, 0, 0)
+            scroll = QtWidgets.QScrollArea()
+            scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+            scroll.setWidgetResizable(True)
+            content = QtWidgets.QWidget()
+            content.setObjectName("phoneLinkContent")
+            frame.addWidget(scroll)
+            outer = QtWidgets.QVBoxLayout(content)
             outer.setContentsMargins(24, 22, 24, 22)
             outer.setSpacing(14)
             title = QtWidgets.QLabel("Phone Link")
@@ -1515,6 +1524,7 @@ def run_gui():
             self.error_label.setObjectName("warn")
             self.error_label.setWordWrap(True)
             outer.addWidget(self.error_label)
+            scroll.setWidget(content)
 
             self.tick_timer = QtCore.QTimer(self)
             self.tick_timer.timeout.connect(self.tick)

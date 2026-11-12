@@ -278,10 +278,15 @@ done
 
 # Full media carries the older optional apps as unopened packages. The target
 # installs only the features the user selected, including when it is offline.
+# Slim ISOs still ship Chrome/VS Code vendor DEBs so installer ticks work
+# without waiting on first-boot network.
 if [ "${DEVOS_BUNDLE_OPTIONAL_APPS:-0}" = 1 ]; then
     python3 "${SCRIPT_DIR}/cache-optional-apps.py" "${CHROOT_DIR}"
 else
     rm -rf "${CHROOT_DIR}/usr/local/share/devos/offline-apt"
+    if ! python3 "${SCRIPT_DIR}/cache-optional-apps.py" --vendor-only "${CHROOT_DIR}"; then
+        echo "  WARNING: could not cache Chrome/VS Code for offline first-boot install."
+    fi
 fi
 
 # Fail closed after branding and hooks: never edit packaged ELF binaries.

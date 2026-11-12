@@ -264,6 +264,84 @@ def start_ai_service(server_py: str = AI_SERVER_PY) -> bool:
         return False
 
 
+def request_ai_sleep(reason: str = "chat-closed", timeout: float = 2.0) -> bool:
+    """Ask AI Core to unload the GGUF when chat/API users are gone.
+
+    Safe no-op if the server is down, busy answering, or already asleep.
+    Keeps the cheap HTTP listener; only drops model CPU/RAM weight.
+    """
+    body = json.dumps({"reason": str(reason or "chat-closed")[:80]}).encode("utf-8")
+    req = urllib.request.Request(
+        AI_URL.rstrip("/") + "/v1/devos/sleep",
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    if data.get("busy"):
+        return False
+    return (not data.get("model_loaded")) or bool(data.get("unloaded"))
+
+
+def request_ai_awake(timeout: float = 1.5) -> bool:
+    """Keep an already-loaded model warm during an open chat/API session.
+
+    Does not load weights. First call may still be slow; later replies stay fast.
+    """
+    req = urllib.request.Request(
+        AI_URL.rstrip("/") + "/v1/devos/awake",
+        data=b"{}",
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except (OSError, ValueError):
+        return False
+    return bool(isinstance(data, dict) and data.get("kept_awake"))
+
+
+def nudge_session_model() -> bool:
+    """While chat is open: ensure the HTTP service is up and keep a loaded model awake.
+
+    Does not preload weights. The first real chat/API call may take a little
+    longer to load; later replies reuse the in-RAM GGUF and stay faster.
+    """
+    start_ai_service()
+    model = LocalModel()
+    health = model.health(timeout=1.0) or {}
+    if health.get("model_loaded"):
+        return request_ai_awake()
+    slots = health.get("slots") if isinstance(health.get("slots"), dict) else {}
+    if int(slots.get("loaded") or 0) > 0:
+        return request_ai_awake()
+    return False
+
+
+def ensure_model_warm(timeout: float = 120.0) -> bool:
+    """Optional preload for voice-call start so the first spoken reply is ready.
+
+    Typed chat should use nudge_session_model() instead — first typed reply may
+    wait on load once, then stay fast without a dummy extra inference.
+    """
+    if nudge_session_model():
+        return True
+    model = LocalModel(timeout=timeout)
+    try:
+        model.chat([{"role": "user", "content": "ok"}], max_tokens=1, temperature=0)
+        request_ai_awake()
+        return True
+    except Exception:
+        return False
+
+
 # ---------------------------------------------------------------------------
 # "Smarter DevOS AI": the optional bigger chat model (installed by a root helper)
 # ---------------------------------------------------------------------------

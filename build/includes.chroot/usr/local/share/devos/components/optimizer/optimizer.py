@@ -2003,7 +2003,10 @@ def run_gui(open_cleanup=False):
             if self.dialog is None:
                 self.dialog = CleanupDialog(self)
                 self.dialog.finished.connect(self._dialog_closed)
-            self.dialog.show()
+                self.dialog.show()
+                fit_to_screen(self.dialog)
+            else:
+                self.dialog.show()
             self.dialog.raise_()
             self.dialog.activateWindow()
 
@@ -2073,7 +2076,7 @@ def run_gui(open_cleanup=False):
     from pathlib import Path as _DialogPath
     _dialog_sys.path.insert(0, str(_DialogPath(__file__).resolve().parent.parent))
     from devos_dialogs import install as _install_dialog_style
-    from app_identity import prepare as prepare_identity
+    from app_identity import fit_to_screen, prepare as prepare_identity
     prepare_identity("devos-optimizer")
     qapp = QtWidgets.QApplication(sys.argv)
     _install_dialog_style(qapp)
@@ -2093,6 +2096,7 @@ def run_gui(open_cleanup=False):
         if open_cleanup:
             dlg = CleanupDialog(None)
             dlg.show()
+            fit_to_screen(dlg)
             qapp.setQuitOnLastWindowClosed(True)
             return qapp.exec_()
         return 0

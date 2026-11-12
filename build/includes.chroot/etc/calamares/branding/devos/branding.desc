@@ -5,11 +5,10 @@ componentName: devos
 welcomeStyleCalamares: false
 welcomeExpandingLogo: true
 
-# Never use fullscreen — it hid Cancel/Back/Next under bezels and panels.
-# noexpand + a height that fits 1366x768 work areas keeps Next on-screen;
-# users can still maximize manually on large displays.
+# Leave space for the title bar and panel on 1024x600 displays.
+# Users can maximize manually on larger displays.
 windowExpanding: noexpand
-windowSize: 960px,580px
+windowSize: 800px,520px
 windowPlacement: center
 
 # Sidebar and the Back/Next bar are drawn by calamares-sidebar.qml and

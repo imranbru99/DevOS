@@ -78,6 +78,20 @@ def test_show_window_applies_chrome(qt_app):
     win.deleteLater()
 
 
+def test_show_window_shrinks_below_original_minimum(qt_app, monkeypatch):
+    from PyQt5.QtCore import QRect
+    from PyQt5.QtWidgets import QWidget
+
+    work_area = QRect(0, 0, 1024, 560)
+    monkeypatch.setattr("app_identity.available_screen_rect", lambda window: work_area)
+    win = QWidget()
+    win.setMinimumSize(1100, 760)
+    show_window(win)
+    assert work_area.contains(win.frameGeometry())
+    win.close()
+    win.deleteLater()
+
+
 def test_kwinrc_keeps_titlebar_when_maximized():
     for relative in (
         "build/includes.chroot/etc/xdg/kwinrc",

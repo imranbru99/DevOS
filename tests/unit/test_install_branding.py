@@ -227,7 +227,7 @@ class TestInstalledSystemBoot(unittest.TestCase):
         self.assertIn('slideshow: "show.qml"', branding)
         self.assertIn("images:", branding)
         self.assertIn("windowExpanding: noexpand", branding)
-        self.assertIn("windowSize: 960px,580px", branding)
+        self.assertIn("windowSize: 800px,520px", branding)
         self.assertNotIn("windowExpanding: fullscreen", branding)
         self.assertNotIn("windowExpanding: normal", branding)
         self.assertIn('productIcon: "logo.png"', branding)
@@ -284,6 +284,7 @@ class TestInstalledSystemBoot(unittest.TestCase):
         mime = read("build/includes.chroot/etc/xdg/mimeapps.list")
         code = read("build/includes.chroot/usr/local/bin/devos-code")
         win = read("build/includes.chroot/usr/share/applications/devos-winlayer.desktop")
+        self.assertIn("Name=Windows apps", win)
         apk = read("build/includes.chroot/usr/share/applications/devos-apphub.desktop")
 
         self.assertIn("initialPartitioningChoice: erase", partition)
@@ -654,6 +655,11 @@ class TestInstalledSystemBoot(unittest.TestCase):
         self.assertIn("x-scheme-handler/https=devos-browser.desktop", mime)
         chrome = read("build/includes.chroot/usr/local/sbin/devos-install-chrome")
         self.assertIn("google-chrome-stable_current_amd64.deb", chrome)
+        self.assertIn("offline-apt/chrome.deb", chrome)
+        self.assertIn("wait_for_network", chrome)
+        self.assertIn("cache-optional-apps.py\" --vendor-only", read("build/build-iso.sh"))
+        self.assertIn("network-online.target", read(
+            "build/includes.chroot/etc/systemd/system/devos-features.service"))
         browser = read("build/includes.chroot/usr/local/bin/devos-browser")
         self.assertIn("--accept-lang", browser)
         self.assertIn("cdn-cgi/trace", browser)

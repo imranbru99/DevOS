@@ -20,6 +20,10 @@ PREFIXES_ROOT = os.path.expanduser("~/.local/share/winlayer/prefixes")
 DESKTOP_DIR = os.path.expanduser("~/.local/share/applications")
 # Ready-made Windows environment copied for each new app (see prepare_prefix).
 BASE_PREFIX = os.path.expanduser("~/.local/share/winlayer/base")
+OPEN_APP = "/usr/local/bin/devos-open-app"
+INSTALLER_NAME = re.compile(
+    r"(?:^|[-_\s.])(setup|install|installer|msiexec)(?:$|[-_\s.])", re.I
+)
 
 
 class WinLayerManager:
@@ -33,8 +37,89 @@ class WinLayerManager:
     def sanitize_name(name: str) -> str:
         return re.sub(r"[^a-zA-Z0-9_\-]", "_", name).lower()
 
+    @staticmethod
+    def display_name(filename: str, override: str = None) -> str:
+        """Turn Notepad++.Installer.exe into a Start-menu name."""
+        if override and override.strip():
+            return override.strip()
+        name = os.path.splitext(os.path.basename(filename))[0]
+        name = re.sub(
+            r"[-_](?:amd64|x86_64|x86|i386|win32|win64|windows|x64)",
+            "",
+            name,
+            flags=re.I,
+        )
+        name = re.sub(r"[-_]?(?:setup|installer|install)$", "", name, flags=re.I)
+        name = re.sub(r"[-_]v?\d+(?:\.\d+)*(?:[-_][a-z0-9.]+)*", "", name, flags=re.I)
+        name = re.sub(r"[-_.]+", " ", name).strip() or "Windows app"
+        if name.islower() or (name.isupper() and len(name) > 4):
+            name = name.title()
+        return name
+
+    @staticmethod
+    def is_installer(path: str) -> bool:
+        ext = os.path.splitext(path)[1].lower()
+        if ext == ".msi":
+            return True
+        return bool(INSTALLER_NAME.search(os.path.basename(path)))
+
     def get_prefix_dir(self, app_name: str) -> str:
         return os.path.join(PREFIXES_ROOT, self.sanitize_name(app_name))
+
+    def stage_executable(self, abs_exe: str, prefix_dir: str, app_id: str) -> str:
+        """Keep portable apps inside the Windows prefix so Start-menu entries survive Downloads cleanup."""
+        if self.is_installer(abs_exe):
+            return abs_exe
+        dest_dir = os.path.join(
+            prefix_dir, "drive_c", "Program Files", "DevOSApps", self.sanitize_name(app_id)
+        )
+        os.makedirs(dest_dir, exist_ok=True)
+        dest = os.path.join(dest_dir, os.path.basename(abs_exe))
+        try:
+            if os.path.realpath(abs_exe) != os.path.realpath(dest):
+                shutil.copy2(abs_exe, dest)
+            return dest
+        except OSError:
+            return abs_exe
+
+    def write_desktop_entry(
+        self, app_id: str, display: str, abs_exe: str, prefix_dir: str
+    ) -> Dict[str, Any]:
+        """Register the program as a Windows app in the Start menu and Apps console."""
+        desktop_file = os.path.join(DESKTOP_DIR, f"winlayer-{self.sanitize_name(app_id)}.desktop")
+        created = not os.path.isfile(desktop_file)
+        if os.path.isfile(OPEN_APP) and os.access(OPEN_APP, os.X_OK):
+            exec_line = f'{OPEN_APP} "{abs_exe}"'
+        else:
+            exec_line = f'env WINEPREFIX="{prefix_dir}" wine "{abs_exe}"'
+        safe_name = display.replace("\n", " ").strip() or app_id
+        desktop_content = (
+            "[Desktop Entry]\n"
+            f"Name={safe_name}\n"
+            "GenericName=Windows app\n"
+            f"Exec={exec_line}\n"
+            "Type=Application\n"
+            "Icon=application-x-msdownload\n"
+            "Categories=Utility;Wine;DevOS-Windows;\n"
+            "Keywords=windows;exe;msi;winlayer;\n"
+            "StartupNotify=true\n"
+            "Comment=Windows app on DevOS\n"
+            f"Path={os.path.dirname(abs_exe)}\n"
+        )
+        with open(desktop_file, "w", encoding="utf-8") as handle:
+            handle.write(desktop_content)
+        try:
+            os.chmod(desktop_file, 0o644)
+        except OSError:
+            pass
+        if shutil.which("update-desktop-database"):
+            subprocess.run(
+                ["update-desktop-database", DESKTOP_DIR],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+        return {"path": desktop_file, "created": created}
 
     def launch(self, executable_path: str, app_name: str = None, force: bool = False) -> Dict[str, Any]:
         """Runs a Windows executable inside its dedicated prefix with desktop integration."""
@@ -42,56 +127,68 @@ class WinLayerManager:
         if not os.path.exists(abs_exe):
             return {"status": "ERROR", "error": f"Executable '{abs_exe}' not found."}
 
-        # 1. Analyze PE compatibility
-        analysis = WinLayerDoctor.analyze_pe(abs_exe)
-        if not analysis.get("is_pe", False):
-            return {"status": "ERROR", "error": f"File '{abs_exe}' is not a valid Windows PE binary."}
-        if analysis.get("anti_cheat_flagged") and not force:
-            return {
-                "status": "USE_VM",
-                "compatibility": analysis.get("compatibility_rating"),
-                "recommendation": analysis.get("recommendation"),
-                "native_alternative": analysis.get("native_alternative"),
-                "message": analysis.get("recommendation"),
+        # 1. Analyze PE compatibility (.msi / .bat skip PE; still install as Windows apps)
+        ext = os.path.splitext(abs_exe)[1].lower()
+        if ext in (".msi", ".bat", ".cmd"):
+            analysis = {
+                "is_pe": False,
+                "compatibility_rating": "Works",
+                "architecture": "installer" if ext == ".msi" else "script",
+                "anti_cheat_flagged": False,
             }
+        else:
+            analysis = WinLayerDoctor.analyze_pe(abs_exe)
+            if not analysis.get("is_pe", False):
+                return {
+                    "status": "ERROR",
+                    "error": f"File '{abs_exe}' is not a valid Windows PE binary.",
+                }
+            if analysis.get("anti_cheat_flagged") and not force:
+                return {
+                    "status": "USE_VM",
+                    "compatibility": analysis.get("compatibility_rating"),
+                    "recommendation": analysis.get("recommendation"),
+                    "native_alternative": analysis.get("native_alternative"),
+                    "message": analysis.get("recommendation"),
+                }
 
-        # 2. Derive App Name
+        # 2. Derive App Name / prefix id
         base_name = os.path.basename(abs_exe)
-        app_id = app_name or os.path.splitext(base_name)[0]
+        stem = os.path.splitext(base_name)[0]
+        display = self.display_name(base_name, app_name)
+        app_id = self.sanitize_name(app_name or stem) or "windows_app"
         prefix_dir = self.get_prefix_dir(app_id)
         os.makedirs(prefix_dir, exist_ok=True)
 
-        # 3. Start it under Wine. Earlier versions only wrote the menu entry
-        # below and reported LAUNCHED, so no .exe ever ran.
-        started = self.run_in_wine(abs_exe, prefix_dir, app_id)
+        # 3. Prepare prefix, stage portable apps, then start under Wine.
+        prepared = self.prepare_prefix(prefix_dir)
+        if prepared.get("status") != "READY":
+            return prepared
+        run_exe = self.stage_executable(abs_exe, prefix_dir, app_id)
+        started = self.run_in_wine(run_exe, prefix_dir, app_id, prepare=False)
         if started.get("status") != "STARTED":
             return started
 
-        # 4. Create .desktop Start menu shortcut
-        desktop_file = os.path.join(DESKTOP_DIR, f"winlayer-{self.sanitize_name(app_id)}.desktop")
-        desktop_content = f"""[Desktop Entry]
-Name={app_id} (Windows)
-Exec=python3 "{os.path.abspath(__file__)}" launch "{abs_exe}"
-Type=Application
-Icon=application-x-msdownload
-Categories=Utility;DevOS-Windows;
-StartupNotify=true
-Comment=Windows Application running via DevOS WinLayer
-"""
-        with open(desktop_file, "w") as f:
-            f.write(desktop_content)
+        # 4. Start-menu + Apps console entry (type: Windows app)
+        desktop = self.write_desktop_entry(app_id, display, run_exe, prefix_dir)
 
         return {
             "status": "LAUNCHED",
-            "app_name": app_id,
+            "app_name": display,
+            "app_id": app_id,
             "prefix": prefix_dir,
-            "executable": abs_exe,
+            "executable": run_exe,
             "compatibility": analysis.get("compatibility_rating"),
             "architecture": analysis.get("architecture"),
             "pid": started.get("pid"),
             "log": started.get("log"),
-            "desktop_shortcut": desktop_file,
-            "message": f"Windows app '{app_id}' launched in isolated prefix."
+            "desktop_shortcut": desktop["path"],
+            "registered": desktop["created"],
+            "message": (
+                f"Windows app '{display}' is installed and ready."
+                if desktop["created"]
+                else f"Windows app '{display}' launched."
+            ),
         }
 
     @staticmethod
@@ -209,16 +306,19 @@ Comment=Windows Application running via DevOS WinLayer
             self.install_graphics(prefix_dir)
         return {"status": "READY"}
 
-    def run_in_wine(self, abs_exe: str, prefix_dir: str, app_id: str) -> Dict[str, Any]:
+    def run_in_wine(
+        self, abs_exe: str, prefix_dir: str, app_id: str, prepare: bool = True
+    ) -> Dict[str, Any]:
         """Start the program detached so it keeps running after this CLI exits."""
         if shutil.which("wine") is None:
             return {
                 "status": "ERROR",
                 "error": "Windows support (Wine) is not installed on this system.",
             }
-        prepared = self.prepare_prefix(prefix_dir)
-        if prepared["status"] != "READY":
-            return prepared
+        if prepare:
+            prepared = self.prepare_prefix(prefix_dir)
+            if prepared["status"] != "READY":
+                return prepared
         log_dir = os.path.expanduser("~/.local/share/winlayer/logs")
         os.makedirs(log_dir, exist_ok=True)
         log_path = os.path.join(log_dir, f"{self.sanitize_name(app_id)}.log")

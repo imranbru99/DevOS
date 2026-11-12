@@ -1,7 +1,7 @@
 [Desktop Entry]
-Name=WinLayer (Windows Compatibility Starter)
-GenericName=Windows Compatibility Starter
-Comment=Run Windows Executables (.exe, .msi) and Installers
+Name=Windows apps
+GenericName=Windows apps
+Comment=Install and run Windows programs (.exe, .msi) as Windows apps
 Exec=/usr/local/bin/devos-open-app %f
 Icon=devos-winlayer
 Terminal=false
@@ -10,5 +10,5 @@ StartupWMClass=devos-winlayer
 
 MimeType=application/x-msdownload;application/x-ms-dos-executable;application/vnd.microsoft.portable-executable;application/x-msdos-program;application/x-msi;application/x-ms-installer;application/x-bat;
 Categories=System;Emulator;Utility;
-Keywords=windows;wine;exe;msi;winlayer;starter;compat;
+Keywords=windows;wine;exe;msi;winlayer;console;install;apps;
 StartupNotify=true

@@ -686,8 +686,11 @@ def reply_text(res: Dict[str, object]) -> str:
             lines.append(f"Click **Install {oname}** below to install it.")
         elif kind == "wine" or res.get("found_by") == "wine":
             detail = f" {why}" if why and not why.lower().startswith("windows application") else ""
-            lines.append(f"**{oname}** is a Windows application. DevOS can run it directly through WinLayer (Wine).{detail}".strip())
-            lines.append(f"Click **Install {oname}** below to set it up.")
+            lines.append(
+                f"**{oname}** is a Windows application. DevOS can download it and install it as a "
+                f"Windows app (Start menu and Apps).{detail}".strip()
+            )
+            lines.append(f"Click **Install {oname}** below to download and install it.")
         elif store == "flathub" or res.get("found_by") == "flathub":
             text = f"**{oname}** is on Flathub, the app store DevOS uses. {why}".strip()
             if store != "flathub" and native.normalize_name(oname) != native.normalize_name(name):
@@ -911,11 +914,41 @@ def install_apt(name: str, package: str) -> int:
     return 0
 
 
+def _launch_windows_file(name: str, exe_path: str) -> int:
+    """Hand a local .exe/.msi to WinLayer so it registers as a Windows app."""
+    opener = "/usr/local/bin/devos-open-app"
+    env = os.environ.copy()
+    if name:
+        env["DEVOS_WIN_APP_NAME"] = name
+    if os.path.isfile(opener) and os.access(opener, os.X_OK):
+        try:
+            subprocess.Popen([opener, exe_path], env=env, start_new_session=True)
+            return 0
+        except OSError as exc:
+            _kdialog("--error", f"Could not start the Windows app helper.\n\n{exc}")
+            return 1
+    winlayer = os.path.join(HERE, "..", "winlayer", "prefix_manager.py")
+    if os.path.isfile(winlayer):
+        argv = [sys.executable, winlayer, "launch", exe_path]
+        if name:
+            argv.extend(["--name", name])
+        try:
+            subprocess.Popen(argv, env=env, start_new_session=True)
+            return 0
+        except OSError as exc:
+            _kdialog("--error", f"Could not start WinLayer.\n\n{exc}")
+            return 1
+    _kdialog("--error", "Windows app support is not installed on this PC.")
+    return 1
+
+
 def install_wine(name: str, target: str) -> int:
+    """Download a Windows .exe/.msi URL (or use a local path) and install as a Windows app."""
     busy = _Progress(f"Setting up {name}…", 100)
-    downloads_dir = os.path.expanduser("~/Downloads")
+    downloads_dir = os.path.expanduser("~/Downloads/DevOS-WindowsApps")
     os.makedirs(downloads_dir, exist_ok=True)
-    filename = os.path.basename(urllib.parse.urlsplit(target).path) or f"{name}.exe"
+    filename = os.path.basename(urllib.parse.unquote(urllib.parse.urlsplit(target).path)) or f"{name}.exe"
+    filename = re.sub(r"[^\w.\-()+ ]+", "_", filename).strip("._") or f"{name}.exe"
     exe_path = os.path.join(downloads_dir, filename)
     try:
         if target.startswith(("http://", "https://")):
@@ -926,21 +959,24 @@ def install_wine(name: str, target: str) -> int:
                 _kdialog("--error", f"Could not download {name}. Check the link and try again.")
                 return 1
         else:
-            exe_path = target
+            exe_path = os.path.abspath(os.path.expanduser(target))
+            if not os.path.isfile(exe_path):
+                busy.close()
+                _kdialog("--error", f"File not found:\n{exe_path}")
+                return 1
+        busy.update(95, f"Installing {name} as a Windows app…")
         busy.close()
-        _kdialog("--passivepopup", f"Starting {name} with WinLayer…", "4")
-        devos_cli = shutil.which("devos")
-        if devos_cli:
-            subprocess.Popen([devos_cli, "win", exe_path], start_new_session=True)
-        elif shutil.which("wine"):
-            subprocess.Popen(["wine", exe_path], start_new_session=True)
-        else:
-            _kdialog("--error", "WinLayer (Wine) is not installed on this PC.")
-            return 1
-        return 0
+        code = _launch_windows_file(name, exe_path)
+        if code == 0:
+            _kdialog(
+                "--passivepopup",
+                f"{name} is installing as a Windows app. It will appear in Start and Apps.",
+                "7",
+            )
+        return code
     except Exception as exc:
         busy.close()
-        _kdialog("--error", f"Could not launch {name}: {exc}")
+        _kdialog("--error", f"Could not install {name}: {exc}")
         return 1
 
 

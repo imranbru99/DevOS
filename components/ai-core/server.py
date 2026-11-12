@@ -954,25 +954,13 @@ class DevOSAIEngine:
             timeout = max(timeout, marker_timeout or AGENT_ENDURANCE_IDLE_SECONDS)
         return timeout
 
-    def unload_if_idle(self) -> bool:
-        """Sleep policy: free the GGUF after idle_timeout with no chat/embed use.
-
-        The HTTP daemon stays up (cheap). Only the multi-GB model leaves RAM.
-        Next DevOS AI message loads it again in about a second.
-        """
-        now = time.time()
+    def _release_models(self, reason: str) -> bool:
+        """Drop every free GGUF/embed copy from RAM. Skips slots that are answering."""
         freed = False
-        idle_limit = self.effective_idle_timeout()
-        # Never-used activity stamp → treat as already idle (covers mistaken warm-up).
-        last = self.last_activity if self.last_activity > 0 else 0.0
         for slot in self._slots:
             if slot.llm is None:
                 continue
-            if slot.index == 0:
-                idle = (now - last) >= idle_limit if last > 0 else True
-            else:
-                idle = now - slot.last_used >= min(self.EXTRA_SLOT_IDLE_SECONDS, idle_limit)
-            if not idle or slot.busy or not slot.lock.acquire(blocking=False):
+            if slot.busy or not slot.lock.acquire(blocking=False):
                 continue  # answering right now
             try:
                 slot.llm = None
@@ -980,14 +968,13 @@ class DevOSAIEngine:
                 freed = True
             finally:
                 slot.lock.release()
-        # Embedding model can also sit at hundreds of MB.
         if getattr(self, "_embed_llm", None) is not None:
-            embed_idle = (now - last) >= idle_limit if last > 0 else True
-            if embed_idle:
-                self._embed_llm = None
-                freed = True
+            self._embed_llm = None
+            freed = True
         if freed:
             self.is_loaded = any(s.llm is not None for s in self._slots)
+            if not self.is_loaded:
+                self.last_activity = 0.0
             import gc
             gc.collect()
             try:
@@ -996,10 +983,74 @@ class DevOSAIEngine:
             except Exception:
                 pass
             sys.stderr.write(
-                f"[ai-core] sleep: model unloaded after {idle_limit}s idle "
-                "(next chat loads again)\n"
+                f"[ai-core] sleep: model unloaded ({reason}) — next chat loads again\n"
             )
         return freed
+
+    def unload_now(self, reason: str = "requested") -> Dict[str, Any]:
+        """Immediate sleep: free the model when nothing is generating.
+
+        Used when DevOS AI chat closes and no other app/API needs the weights.
+        The HTTP daemon stays up (cheap); only the multi-GB GGUF leaves RAM/CPU.
+        """
+        if any(s.busy for s in self._slots):
+            return {
+                "unloaded": False,
+                "busy": True,
+                "model_loaded": True,
+                "reason": "busy",
+            }
+        freed = self._release_models(reason)
+        loaded = any(s.llm is not None for s in self._slots)
+        return {
+            "unloaded": freed,
+            "busy": False,
+            "model_loaded": loaded,
+            "reason": reason if freed else ("nothing_loaded" if not loaded else "busy"),
+        }
+
+    def keep_awake(self) -> Dict[str, Any]:
+        """Refresh idle timer while a chat/API session is active — does not load.
+
+        First reply may pay load cost; later replies stay fast because the GGUF
+        is not dropped mid-session by the idle watchdog.
+        """
+        loaded = any(s.llm is not None for s in self._slots) or getattr(self, "_embed_llm", None) is not None
+        if loaded:
+            self.last_activity = time.time()
+        return {"kept_awake": loaded, "model_loaded": loaded}
+
+    def unload_if_idle(self) -> bool:
+        """Sleep policy: free the GGUF after idle_timeout with no chat/embed use.
+
+        The HTTP daemon stays up (cheap). Only the multi-GB model leaves RAM.
+        Next DevOS AI message loads it again in about a second.
+        """
+        now = time.time()
+        idle_limit = self.effective_idle_timeout()
+        # Never-used activity stamp → treat as already idle (covers mistaken warm-up).
+        last = self.last_activity if self.last_activity > 0 else 0.0
+        if last > 0 and (now - last) < idle_limit:
+            # Primary slot still inside the keep-alive window — only free extras.
+            freed = False
+            for slot in self._slots:
+                if slot.index == 0 or slot.llm is None:
+                    continue
+                idle = now - slot.last_used >= min(self.EXTRA_SLOT_IDLE_SECONDS, idle_limit)
+                if not idle or slot.busy or not slot.lock.acquire(blocking=False):
+                    continue
+                try:
+                    slot.llm = None
+                    slot.load_tried = False
+                    freed = True
+                finally:
+                    slot.lock.release()
+            if freed:
+                self.is_loaded = any(s.llm is not None for s in self._slots)
+                import gc
+                gc.collect()
+            return freed
+        return self._release_models(f"idle {idle_limit}s")
 
     def idle_watch(self):
         # Check often so a 10‑minute policy is felt within ~15s of the deadline.
@@ -1531,12 +1582,15 @@ class OpenAIHandler(BaseHTTPRequestHandler):
             self._send_json(200, api_index())
             return
         if path in ("/health", "/v1/health"):
+            slots = engine.status()
             self._send_json(200, {
                 "status": "healthy",
                 "tier": engine.tier_info["tier"],
                 "active_model": engine.active_model,
                 "uptime_seconds": round(time.time() - engine.start_time, 1),
-                "slots": engine.status(),
+                # Clients must not treat "server up" as "GGUF in RAM".
+                "model_loaded": bool(slots.get("loaded")),
+                "slots": slots,
                 "speed": engine.speed_info(),
                 "batch": {"endpoint": "/v1/devos/batch", "max_branches": MAX_BATCH_BRANCHES},
                 "docs": f"http://127.0.0.1:{PORT}/docs",
@@ -1666,6 +1720,13 @@ class OpenAIHandler(BaseHTTPRequestHandler):
                 inputs = [inputs]
             res = engine.generate_embeddings(inputs)
             self._send_json(200, res)
+        elif path in ("/v1/devos/sleep", "/devos/sleep", "/v1/devos/unload", "/devos/unload"):
+            # Chat closed / no API users: drop GGUF so CPU/RAM stay clear.
+            reason = str(req_data.get("reason") or "requested")[:80] or "requested"
+            self._send_json(200, engine.unload_now(reason=reason))
+        elif path in ("/v1/devos/awake", "/devos/awake"):
+            # Open chat / active API client: keep loaded weights warm (no extra load).
+            self._send_json(200, engine.keep_awake())
         else:
             self._send_json(404, {"error": "Endpoint not found"})
 

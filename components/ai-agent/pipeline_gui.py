@@ -12,6 +12,7 @@ Features:
 
 import datetime
 import functools
+import json
 import os
 import re
 import shutil
@@ -958,12 +959,182 @@ class TaskCard(QtWidgets.QFrame):
 
 
 DEFAULT_STEPS_25 = ""  # Personal steps are loaded only from this PC’s config.
+MIN_STEP_PACK = 1
+MAX_STEP_PACK = 6
+MAX_STEP_GROUPS = 20
 
 STEPS_25_TEMPLATE_FILE = Path.home() / ".config/devos/pipeline_steps_25.md"
+STEP_PACK_FILE = Path.home() / ".config/devos/pipeline_step_pack.json"
+
+
+def _write_private_file(path: Path, content: str):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as stream:
+        stream.write(content)
+    path.chmod(0o600)
+
+
+def _new_group_id() -> str:
+    return f"g{int(time.time() * 1000) % 10_000_000_000}"
+
+
+def _clean_steps(raw_steps) -> list:
+    cleaned = []
+    for item in raw_steps or []:
+        text = str(item).strip()
+        if not text:
+            continue
+        # One pasted block may contain multiple serial steps separated by ---
+        parts = split_prompts(text)
+        for part in parts:
+            if part and len(cleaned) < MAX_STEP_PACK:
+                cleaned.append(part)
+        if len(cleaned) >= MAX_STEP_PACK:
+            break
+    return cleaned[:MAX_STEP_PACK]
+
+
+def _normalize_group(raw, fallback_name="Default") -> dict:
+    if not isinstance(raw, dict):
+        return {}
+    name = str(raw.get("name") or fallback_name).strip() or fallback_name
+    steps = _clean_steps(raw.get("steps") or [])
+    if not steps:
+        return {}
+    gid = str(raw.get("id") or "").strip() or _new_group_id()
+    return {"id": gid, "name": name, "steps": steps}
+
+
+def _load_step_pack_data() -> dict:
+    """Load versioned step-group store; migrate flat v1 / markdown."""
+    if STEP_PACK_FILE.exists():
+        try:
+            data = json.loads(STEP_PACK_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+        if isinstance(data, dict):
+            groups = []
+            for raw in data.get("groups") or []:
+                group = _normalize_group(raw)
+                if group:
+                    groups.append(group)
+            if groups:
+                default_id = str(data.get("default_group_id") or groups[0]["id"])
+                if not any(g["id"] == default_id for g in groups):
+                    default_id = groups[0]["id"]
+                return {"version": 2, "default_group_id": default_id, "groups": groups}
+            # v1 flat list
+            flat = _clean_steps(data.get("steps") or [])
+            if flat:
+                gid = _new_group_id()
+                return {
+                    "version": 2,
+                    "default_group_id": gid,
+                    "groups": [{"id": gid, "name": "Default", "steps": flat}],
+                }
+
+    md = ""
+    if STEPS_25_TEMPLATE_FILE.exists():
+        try:
+            md = STEPS_25_TEMPLATE_FILE.read_text(encoding="utf-8")
+        except Exception:
+            md = ""
+    flat = split_prompts(md)[:MAX_STEP_PACK] if md.strip() else []
+    if flat:
+        gid = _new_group_id()
+        return {
+            "version": 2,
+            "default_group_id": gid,
+            "groups": [{"id": gid, "name": "Default", "steps": flat}],
+        }
+    return {"version": 2, "default_group_id": "", "groups": []}
+
+
+def _sync_markdown_mirror(steps):
+    cleaned = _clean_steps(steps)
+    if not cleaned:
+        _write_private_file(STEPS_25_TEMPLATE_FILE, "")
+        return
+    _write_private_file(STEPS_25_TEMPLATE_FILE, "\n---\n" + "\n---\n".join(cleaned))
+
+
+def save_step_groups(groups, default_group_id=None) -> dict:
+    """Persist named step groups. Each group’s steps queue serially on Auto-add."""
+    normalized = []
+    for raw in groups or []:
+        group = _normalize_group(raw, fallback_name=f"Group {len(normalized) + 1}")
+        if group:
+            normalized.append(group)
+        if len(normalized) >= MAX_STEP_GROUPS:
+            break
+    if not normalized:
+        raise ValueError("Save at least one group with 1–6 steps.")
+    default_id = str(default_group_id or "").strip()
+    if not any(g["id"] == default_id for g in normalized):
+        default_id = normalized[0]["id"]
+    payload = {
+        "version": 2,
+        "default_group_id": default_id,
+        "groups": normalized,
+    }
+    _write_private_file(STEP_PACK_FILE, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+    default = next(g for g in normalized if g["id"] == default_id)
+    _sync_markdown_mirror(default["steps"])
+    return payload
+
+
+def list_step_groups() -> list:
+    return list(_load_step_pack_data().get("groups") or [])
+
+
+def get_step_group(group_id=None) -> dict:
+    """Return one group dict {id,name,steps}. Default group when group_id is None."""
+    data = _load_step_pack_data()
+    groups = data.get("groups") or []
+    if not groups:
+        return {}
+    if group_id:
+        for group in groups:
+            if group["id"] == group_id:
+                return dict(group)
+    default_id = data.get("default_group_id")
+    for group in groups:
+        if group["id"] == default_id:
+            return dict(group)
+    return dict(groups[0])
+
+
+def get_step_pack() -> list:
+    """Return default group steps (serial Auto-add list) for this PC only."""
+    group = get_step_group()
+    return list(group.get("steps") or [])
+
+
+def save_step_pack(steps) -> list:
+    """Persist steps into the default group (compat helper)."""
+    cleaned = _clean_steps(steps)
+    if not cleaned:
+        raise ValueError(f"Save at least {MIN_STEP_PACK} step (up to {MAX_STEP_PACK}).")
+    data = _load_step_pack_data()
+    groups = list(data.get("groups") or [])
+    default_id = data.get("default_group_id") or ""
+    updated = False
+    for group in groups:
+        if group["id"] == default_id:
+            group["steps"] = cleaned
+            updated = True
+            break
+    if not updated:
+        gid = _new_group_id()
+        groups = [{"id": gid, "name": "Default", "steps": cleaned}] + groups
+        default_id = gid
+    save_step_groups(groups, default_id)
+    return cleaned
 
 
 def get_steps_25_template() -> str:
-    """Load this PC’s private Steps 2–5 template; no personal prompts ship in source."""
+    """Load this PC’s private step template; no personal prompts ship in source."""
     if STEPS_25_TEMPLATE_FILE.exists():
         try:
             content = STEPS_25_TEMPLATE_FILE.read_text(encoding="utf-8")
@@ -971,83 +1142,298 @@ def get_steps_25_template() -> str:
                 return content
         except Exception:
             pass
-    return DEFAULT_STEPS_25
+    steps = get_step_pack()
+    if not steps:
+        return DEFAULT_STEPS_25
+    return "\n---\n" + "\n---\n".join(steps)
 
 
 def save_steps_25_template(content: str):
-    """Save user-customized Steps 2–5 template to persistent config."""
-    STEPS_25_TEMPLATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(STEPS_25_TEMPLATE_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as stream:
-        stream.write(content)
-    STEPS_25_TEMPLATE_FILE.chmod(0o600)
+    """Save user-customized step template (markdown) and sync default group."""
+    text = content if content is not None else ""
+    _write_private_file(STEPS_25_TEMPLATE_FILE, text)
+    steps = split_prompts(text)
+    if steps:
+        save_step_pack(steps)
+
+
+def format_step_pack_for_editor(steps) -> str:
+    """Join pack steps with --- for paste into a single text editor."""
+    cleaned = _clean_steps(steps)
+    if not cleaned:
+        return ""
+    return "\n---\n" + "\n---\n".join(cleaned)
+
+
+def choose_step_group(parent=None):
+    """Pick a saved group. One group → return it; many → menu; none → None."""
+    groups = list_step_groups()
+    if not groups:
+        return None
+    if len(groups) == 1:
+        return groups[0]
+
+    selected = {"group": None}
+    menu = QtWidgets.QMenu(parent)
+    menu.setStyleSheet(
+        "QMenu { background-color: #0f172a; color: #e2e8f0; border: 1px solid #334155; }"
+        "QMenu::item:selected { background-color: #1e3a5f; }"
+    )
+    for group in groups:
+        count = len(group.get("steps") or [])
+        action = menu.addAction(f"{group['name']}  ({count} steps)")
+        action.setData(group["id"])
+
+    def _picked(action):
+        gid = action.data()
+        for group in groups:
+            if group["id"] == gid:
+                selected["group"] = group
+                break
+
+    menu.triggered.connect(_picked)
+    # Prefer button-anchored popup when caller is a widget with a geometry.
+    if parent is not None and hasattr(parent, "mapToGlobal") and hasattr(parent, "rect"):
+        menu.exec_(parent.mapToGlobal(parent.rect().bottomLeft()))
+    else:
+        menu.exec_(QtGui.QCursor.pos())
+    return selected["group"]
 
 
 class Steps25TemplateDialog(QtWidgets.QDialog):
-    """Dialog to customize and persist the master Steps 2–5 prompt template."""
+    """Manage named step groups. Each group’s steps Auto-add serially."""
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("⚙ Master Steps 2–5 Template Editor")
-        self.resize(820, 580)
+        self.setWindowTitle("⚙ Step groups (Auto-add)")
+        self.resize(920, 660)
         self.setStyleSheet(STYLE)
+        self._groups = []
+        self._current_id = ""
+        self._loading = False
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(18, 16, 18, 16)
         layout.setSpacing(10)
 
-        header = QtWidgets.QLabel("⚙ Master Steps 2–5 Shared Template Editor")
+        header = QtWidgets.QLabel("⚙ Step groups")
         header.setStyleSheet("font-size: 15px; font-weight: 700; color: #38bdf8;")
         layout.addWidget(header)
 
         desc = QtWidgets.QLabel(
-            "Customize your private steps 2–5 on this computer only. "
-            "Separate each step with '---' on a new line. When saved, this template will be used whenever "
-            "you click '✨ Steps 2–5' or run the Batch Generator."
+            "Save reusable groups of 1–6 steps. Paste several prompts in one box separated by --- "
+            "and they become serial steps. Click Auto-add → pick a group → every step queues in order."
         )
         desc.setStyleSheet("color: #94a3b8; font-size: 11px;")
         desc.setWordWrap(True)
         layout.addWidget(desc)
 
-        self.editor = QtWidgets.QTextEdit()
-        self.editor.setPlainText(get_steps_25_template().strip())
-        self.editor.setFont(QtGui.QFont("Monospace", 10))
-        layout.addWidget(self.editor, stretch=1)
+        body = QtWidgets.QHBoxLayout()
+        body.setSpacing(12)
+
+        left = QtWidgets.QVBoxLayout()
+        left.addWidget(QtWidgets.QLabel("Groups"))
+        self.group_list = QtWidgets.QListWidget()
+        self.group_list.currentRowChanged.connect(self._on_group_selected)
+        left.addWidget(self.group_list, stretch=1)
+
+        left_btns = QtWidgets.QHBoxLayout()
+        btn_new = QtWidgets.QPushButton("+ New group")
+        btn_new.clicked.connect(self._new_group)
+        left_btns.addWidget(btn_new)
+        btn_del = QtWidgets.QPushButton("Delete")
+        btn_del.clicked.connect(self._delete_group)
+        left_btns.addWidget(btn_del)
+        left.addLayout(left_btns)
+        body.addLayout(left, stretch=1)
+
+        right = QtWidgets.QVBoxLayout()
+        name_row = QtWidgets.QHBoxLayout()
+        name_row.addWidget(QtWidgets.QLabel("Group name"))
+        self.name_input = QtWidgets.QLineEdit()
+        self.name_input.setPlaceholderText("e.g. Engineering follow-ups")
+        self.name_input.textChanged.connect(self._on_name_changed)
+        name_row.addWidget(self.name_input, stretch=1)
+        right.addLayout(name_row)
+
+        hint = QtWidgets.QLabel(
+            "Steps in this group (separate with --- on its own line). "
+            "Auto-add inserts them one after another."
+        )
+        hint.setStyleSheet("color: #64748b; font-size: 11px;")
+        hint.setWordWrap(True)
+        right.addWidget(hint)
+
+        self.steps_editor = QtWidgets.QPlainTextEdit()
+        self.steps_editor.setFont(QtGui.QFont("Monospace", 10))
+        self.steps_editor.setPlaceholderText(
+            "Step 2 prompt text…\n"
+            "---\n"
+            "Step 3 prompt text…\n"
+            "---\n"
+            "Step 4 prompt text…"
+        )
+        self.steps_editor.textChanged.connect(self._on_steps_changed)
+        right.addWidget(self.steps_editor, stretch=1)
+
+        self.step_count_lbl = QtWidgets.QLabel("")
+        self.step_count_lbl.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        right.addWidget(self.step_count_lbl)
+
+        self.default_check = QtWidgets.QCheckBox("Default group for one-click Auto-add")
+        right.addWidget(self.default_check)
+
+        body.addLayout(right, stretch=3)
+        layout.addLayout(body, stretch=1)
 
         bottom = QtWidgets.QHBoxLayout()
-        btn_reset = QtWidgets.QPushButton("Reset to Default")
-        btn_reset.setStyleSheet("background-color: #334155; color: #f1f5f9; font-size: 11px; padding: 5px 12px; border-radius: 4px;")
-        btn_reset.clicked.connect(self._reset_default)
-        bottom.addWidget(btn_reset)
-
         bottom.addStretch()
-
         btn_cancel = QtWidgets.QPushButton("Cancel")
         btn_cancel.clicked.connect(self.reject)
         bottom.addWidget(btn_cancel)
-
-        btn_save = QtWidgets.QPushButton("💾 Save Template")
+        btn_save = QtWidgets.QPushButton("💾 Save groups")
         btn_save.setObjectName("primary")
-        btn_save.setStyleSheet("background-color: #2563eb; color: white; font-weight: 700; padding: 6px 16px; border-radius: 5px;")
+        btn_save.setStyleSheet(
+            "background-color: #2563eb; color: white; font-weight: 700; padding: 6px 16px; border-radius: 5px;"
+        )
         btn_save.clicked.connect(self._save)
         bottom.addWidget(btn_save)
-
         layout.addLayout(bottom)
 
-    def _reset_default(self):
-        self.editor.setPlainText(DEFAULT_STEPS_25.strip())
+        data = _load_step_pack_data()
+        self._groups = [dict(g) for g in (data.get("groups") or [])]
+        self._default_id = data.get("default_group_id") or ""
+        if not self._groups:
+            gid = _new_group_id()
+            self._groups = [{"id": gid, "name": "Default", "steps": []}]
+            self._default_id = gid
+        self._refresh_group_list(select_id=self._default_id or self._groups[0]["id"])
+
+    def _refresh_group_list(self, select_id=None):
+        self._loading = True
+        self.group_list.clear()
+        select_row = 0
+        for index, group in enumerate(self._groups):
+            count = len(group.get("steps") or [])
+            mark = " ★" if group["id"] == self._default_id else ""
+            self.group_list.addItem(f"{group.get('name') or 'Untitled'} ({count}){mark}")
+            if select_id and group["id"] == select_id:
+                select_row = index
+        self.group_list.setCurrentRow(select_row)
+        self._loading = False
+        self._on_group_selected(select_row)
+
+    def _current_group(self):
+        row = self.group_list.currentRow()
+        if 0 <= row < len(self._groups):
+            return self._groups[row]
+        return None
+
+    def _flush_editor_into_current(self):
+        group = None
+        for item in self._groups:
+            if item["id"] == self._current_id:
+                group = item
+                break
+        if not group:
+            return
+        name = self.name_input.text().strip() or group.get("name") or "Untitled"
+        group["name"] = name
+        group["steps"] = _clean_steps(split_prompts(self.steps_editor.toPlainText()))
+        if self.default_check.isChecked():
+            self._default_id = group["id"]
+
+    def _on_group_selected(self, row):
+        if self._loading:
+            return
+        if self._current_id:
+            self._flush_editor_into_current()
+        if not (0 <= row < len(self._groups)):
+            return
+        group = self._groups[row]
+        self._current_id = group["id"]
+        self._loading = True
+        self.name_input.setText(group.get("name") or "")
+        self.steps_editor.setPlainText("\n---\n".join(group.get("steps") or []))
+        self.default_check.setChecked(group["id"] == self._default_id)
+        self._loading = False
+        self._update_step_count()
+
+    def _on_name_changed(self, _text=""):
+        if self._loading:
+            return
+        self._flush_editor_into_current()
+        row = self.group_list.currentRow()
+        if 0 <= row < len(self._groups):
+            group = self._groups[row]
+            count = len(group.get("steps") or [])
+            mark = " ★" if group["id"] == self._default_id else ""
+            self.group_list.item(row).setText(f"{group.get('name') or 'Untitled'} ({count}){mark}")
+
+    def _on_steps_changed(self):
+        if self._loading:
+            return
+        self._flush_editor_into_current()
+        self._update_step_count()
+        self._on_name_changed()
+
+    def _update_step_count(self):
+        steps = _clean_steps(split_prompts(self.steps_editor.toPlainText()))
+        self.step_count_lbl.setText(f"{len(steps)} serial step(s) in this group (max {MAX_STEP_PACK})")
+
+    def _new_group(self):
+        if len(self._groups) >= MAX_STEP_GROUPS:
+            QtWidgets.QMessageBox.information(self, "Limit", f"At most {MAX_STEP_GROUPS} groups.")
+            return
+        self._flush_editor_into_current()
+        gid = _new_group_id()
+        self._groups.append({"id": gid, "name": f"Group {len(self._groups) + 1}", "steps": []})
+        self._refresh_group_list(select_id=gid)
+
+    def _delete_group(self):
+        if len(self._groups) <= 1:
+            QtWidgets.QMessageBox.information(self, "Keep one", "Keep at least one group.")
+            return
+        row = self.group_list.currentRow()
+        if not (0 <= row < len(self._groups)):
+            return
+        removed = self._groups.pop(row)
+        if self._default_id == removed["id"]:
+            self._default_id = self._groups[0]["id"]
+        self._current_id = ""
+        self._refresh_group_list(select_id=self._groups[min(row, len(self._groups) - 1)]["id"])
 
     def _save(self):
-        text = self.editor.toPlainText().strip()
-        if not text:
-            QtWidgets.QMessageBox.warning(self, "Empty Template", "Template cannot be empty.")
+        self._flush_editor_into_current()
+        if self.default_check.isChecked() and self._current_id:
+            self._default_id = self._current_id
+        valid = []
+        for group in self._groups:
+            steps = _clean_steps(group.get("steps") or [])
+            if not steps:
+                continue
+            valid.append({
+                "id": group["id"],
+                "name": (group.get("name") or "Untitled").strip() or "Untitled",
+                "steps": steps,
+            })
+        if not valid:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Empty groups",
+                "Each saved group needs at least one step. Separate multiple steps with ---.",
+            )
             return
-        # Ensure leading separator for clean concatenation
-        if not text.startswith("---"):
-            text = "\n---\n" + text
-        else:
-            text = "\n" + text
-        save_steps_25_template(text)
-        QtWidgets.QMessageBox.information(self, "Template Saved", "Master Steps 2–5 template updated successfully!")
+        try:
+            save_step_groups(valid, self._default_id)
+        except ValueError as exc:
+            QtWidgets.QMessageBox.warning(self, "Cannot save", str(exc))
+            return
+        QtWidgets.QMessageBox.information(
+            self,
+            "Groups saved",
+            f"Saved {len(valid)} group(s). Auto-add queues every step in the chosen group in order.",
+        )
         self.accept()
 
 
@@ -1133,12 +1519,15 @@ class BatchProjectDialog(QtWidgets.QDialog):
         )
         rl.addWidget(self.step1_input)
 
-        step25_lbl = QtWidgets.QLabel("Steps 2–5 Shared Engineering Steps (Applied to ALL projects):")
+        step25_lbl = QtWidgets.QLabel("Shared follow-up steps 2–6 (applied to ALL projects; separate with ---):")
         step25_lbl.setStyleSheet("font-weight: 700; color: #a78bfa;")
         rl.addWidget(step25_lbl)
 
         self.step25_text = QtWidgets.QTextEdit()
-        self.step25_text.setPlainText(get_steps_25_template().strip())
+        pack = get_step_pack()
+        self.step25_text.setPlainText(
+            "\n---\n".join(pack) if pack else get_steps_25_template().strip()
+        )
         rl.addWidget(self.step25_text)
 
         # Agent & GitHub options
@@ -1287,8 +1676,9 @@ class PromptEditorDialog(QtWidgets.QDialog):
         btn_sep.clicked.connect(self.insert_step_separator)
         hdr.addWidget(btn_sep)
 
-        btn_steps25 = QtWidgets.QPushButton("✨ Append Steps 2–5")
+        btn_steps25 = QtWidgets.QPushButton("✨ Auto-add group")
         btn_steps25.setObjectName("small_btn")
+        btn_steps25.setToolTip("Pick a saved step group; append all its steps serially")
         btn_steps25.setStyleSheet("background-color: #064e3b; color: #6ee7b7; font-size: 11px; padding: 4px 10px; border: 1px solid #047857; border-radius: 5px;")
         btn_steps25.clicked.connect(self.append_steps_25)
         hdr.addWidget(btn_steps25)
@@ -1355,8 +1745,26 @@ class PromptEditorDialog(QtWidgets.QDialog):
         self.editor.setFocus()
 
     def append_steps_25(self):
+        steps = split_prompts(get_steps_25_template())
+        if not steps:
+            groups = list_step_groups()
+            if not groups:
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "No saved steps",
+                    "Save a step group with ⚙ on the pipeline window first.",
+                )
+                return
+            group = choose_step_group(self.sender() if isinstance(self.sender(), QtWidgets.QWidget) else self)
+            steps = list((group or {}).get("steps") or [])
+            if not steps:
+                return
+        elif len(list_step_groups()) > 1:
+            group = choose_step_group(self.sender() if isinstance(self.sender(), QtWidgets.QWidget) else self)
+            if group:
+                steps = list(group.get("steps") or []) or steps
         current = self.editor.toPlainText().rstrip()
-        append_txt = get_steps_25_template()
+        append_txt = format_step_pack_for_editor(steps)
         self.editor.setPlainText(current + append_txt if current else append_txt.lstrip())
 
     def load_from_file(self):
@@ -1754,16 +2162,16 @@ class PipelineWindow(QtWidgets.QMainWindow):
         btn_cur_down.clicked.connect(self.navigate_cur_prompt_next)
         cur_tools_row.addWidget(btn_cur_down)
 
-        btn_cur_steps = QtWidgets.QPushButton("✨ Steps 2–5")
+        btn_cur_steps = QtWidgets.QPushButton("✨ Auto-add group")
         btn_cur_steps.setObjectName("small_btn")
-        btn_cur_steps.setToolTip("Append shared engineering steps 2-5 (Tests, Docker, Security, Docs)")
+        btn_cur_steps.setToolTip("Pick a saved step group; all its steps append serially")
         btn_cur_steps.setStyleSheet("background-color: #064e3b; color: #6ee7b7; font-size: 10px; padding: 2px 7px; border: 1px solid #047857; border-radius: 4px;")
         btn_cur_steps.clicked.connect(self.append_cur_steps_25)
         cur_tools_row.addWidget(btn_cur_steps)
 
         btn_cur_steps_edit = QtWidgets.QPushButton("⚙")
         btn_cur_steps_edit.setObjectName("small_btn")
-        btn_cur_steps_edit.setToolTip("Edit & customize master Steps 2–5 template")
+        btn_cur_steps_edit.setToolTip("Create/edit named step groups (1–6 steps each)")
         btn_cur_steps_edit.setStyleSheet("background-color: #1e1b4b; color: #a5b4fc; font-size: 10px; padding: 2px 6px; border: 1px solid #312e81; border-radius: 4px;")
         btn_cur_steps_edit.clicked.connect(self.open_steps_25_template_editor)
         cur_tools_row.addWidget(btn_cur_steps_edit)
@@ -1868,16 +2276,16 @@ class PipelineWindow(QtWidgets.QMainWindow):
         btn_next_load.clicked.connect(self.load_next_prompt_file)
         next_tools_row.addWidget(btn_next_load)
 
-        btn_next_steps = QtWidgets.QPushButton("✨ Steps 2–5")
+        btn_next_steps = QtWidgets.QPushButton("✨ Auto-add group")
         btn_next_steps.setObjectName("small_btn")
-        btn_next_steps.setToolTip("Append shared engineering steps 2-5 (Tests, Docker, Security, Docs)")
+        btn_next_steps.setToolTip("Pick a saved step group; stages Step 1 then appends that group’s steps in order")
         btn_next_steps.setStyleSheet("background-color: #064e3b; color: #6ee7b7; font-size: 10px; padding: 2px 7px; border: 1px solid #047857; border-radius: 4px;")
         btn_next_steps.clicked.connect(self.append_next_steps_25)
         next_tools_row.addWidget(btn_next_steps)
 
         btn_next_steps_edit = QtWidgets.QPushButton("⚙")
         btn_next_steps_edit.setObjectName("small_btn")
-        btn_next_steps_edit.setToolTip("Edit & customize master Steps 2–5 template")
+        btn_next_steps_edit.setToolTip("Create/edit named step groups (1–6 steps each)")
         btn_next_steps_edit.setStyleSheet("background-color: #1e1b4b; color: #a5b4fc; font-size: 10px; padding: 2px 6px; border: 1px solid #312e81; border-radius: 4px;")
         btn_next_steps_edit.clicked.connect(self.open_steps_25_template_editor)
         next_tools_row.addWidget(btn_next_steps_edit)
@@ -2392,9 +2800,38 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.next_prompt_input.setFocus()
 
     def append_next_steps_25(self):
-        self.stage_prompt()
-        self.draft_prompts.extend(split_prompts(get_steps_25_template()))
+        anchor = self.sender() if isinstance(self.sender(), QtWidgets.QWidget) else self
+        group = choose_step_group(anchor)
+        if not group:
+            if not list_step_groups():
+                self.open_steps_25_template_editor()
+                if hasattr(self, "toast_banner"):
+                    self.toast_banner.setText("Save a step group, then click Auto-add again.")
+                    self.toast_banner.setStyleSheet(
+                        "background-color: #451a03; color: #fcd34d; font-weight: 700; font-size: 12px; "
+                        "padding: 8px 14px; border-radius: 8px; border: 1px solid #d97706;"
+                    )
+                    self.toast_banner.show()
+                    QtCore.QTimer.singleShot(3500, self.toast_banner.hide)
+            return
+        steps = list(group.get("steps") or [])
+        if not steps:
+            return
+        # Keep Step 1 from the editor as its own draft item, then add group steps serially.
+        if self.next_prompt_input.toPlainText().strip():
+            self.stage_prompt()
+        self.draft_prompts.extend(steps)
         self.refresh_draft_prompts(len(self.draft_prompts) - 1)
+        if hasattr(self, "toast_banner"):
+            self.toast_banner.setText(
+                f"✔ Added group “{group.get('name', 'Group')}”: {len(steps)} step(s) in order."
+            )
+            self.toast_banner.setStyleSheet(
+                "background-color: #064e3b; color: #34d399; font-weight: 700; font-size: 13px; "
+                "padding: 8px 16px; border-radius: 8px; border: 1px solid #059669;"
+            )
+            self.toast_banner.show()
+            QtCore.QTimer.singleShot(3500, self.toast_banner.hide)
 
     def open_next_prompt_editor(self):
         title = self.next_title_input.text().strip() or "Next Project"
@@ -2422,9 +2859,37 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.current_prompt_input.setFocus()
 
     def append_cur_steps_25(self):
+        anchor = self.sender() if isinstance(self.sender(), QtWidgets.QWidget) else self
+        group = choose_step_group(anchor)
+        if not group:
+            if not list_step_groups():
+                self.open_steps_25_template_editor()
+                if hasattr(self, "toast_banner"):
+                    self.toast_banner.setText("Save a step group, then click Auto-add again.")
+                    self.toast_banner.setStyleSheet(
+                        "background-color: #451a03; color: #fcd34d; font-weight: 700; font-size: 12px; "
+                        "padding: 8px 14px; border-radius: 8px; border: 1px solid #d97706;"
+                    )
+                    self.toast_banner.show()
+                    QtCore.QTimer.singleShot(3500, self.toast_banner.hide)
+            return
+        steps = list(group.get("steps") or [])
+        if not steps:
+            return
         current = self.current_prompt_input.toPlainText().rstrip()
-        append_txt = get_steps_25_template()
+        append_txt = format_step_pack_for_editor(steps)
         self.current_prompt_input.setPlainText(current + append_txt if current else append_txt.lstrip())
+        if hasattr(self, "toast_banner"):
+            self.toast_banner.setText(
+                f"✔ Appended “{group.get('name', 'Group')}” ({len(steps)} steps). "
+                "Queue to Current runs them serially."
+            )
+            self.toast_banner.setStyleSheet(
+                "background-color: #064e3b; color: #34d399; font-weight: 700; font-size: 13px; "
+                "padding: 8px 16px; border-radius: 8px; border: 1px solid #059669;"
+            )
+            self.toast_banner.show()
+            QtCore.QTimer.singleShot(3500, self.toast_banner.hide)
 
     def open_steps_25_template_editor(self):
         dlg = Steps25TemplateDialog(parent=self)

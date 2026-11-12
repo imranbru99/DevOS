@@ -14,7 +14,7 @@ Rectangle {
     readonly property int barHeight: InstallerAppearance.navBarHeight
     readonly property int buttonHeight: InstallerAppearance.navButtonHeight
     readonly property int sideMargin: InstallerAppearance.tiny ? 10 : (InstallerAppearance.compact ? 14 : 24)
-    readonly property bool compact: InstallerAppearance.compact
+    readonly property bool compact: InstallerAppearance.compact || width < 640
     readonly property string powerBase: "http://127.0.0.1:41777"
 
     height: barHeight
@@ -47,6 +47,8 @@ Rectangle {
         text: label.replace(/&/g, "")
         Accessible.name: text
         implicitWidth: Math.max(navigationBar.compact ? 78 : 108, caption.implicitWidth + (navigationBar.compact ? 20 : 36))
+        Layout.minimumWidth: 0
+        Layout.fillWidth: parent === navigationRow && navigationBar.width < 500
         implicitHeight: navigationBar.buttonHeight
         Layout.preferredHeight: navigationBar.buttonHeight
         Layout.minimumHeight: navigationBar.buttonHeight
@@ -83,6 +85,7 @@ Rectangle {
     }
 
     RowLayout {
+        id: navigationRow
         anchors.fill: parent
         anchors.leftMargin: navigationBar.sideMargin
         anchors.rightMargin: navigationBar.sideMargin

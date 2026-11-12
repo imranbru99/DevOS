@@ -1532,6 +1532,162 @@ var data = {
    "optin": false
   },
   {
+   "id": "calibre",
+   "category": "office",
+   "name": "Calibre",
+   "about": "Read, convert and organize ebooks and sync compatible e-readers.",
+   "size_mb": 57,
+   "windows": "Kindle for PC / eBook manager",
+   "preinstalled": false,
+   "presets": [],
+   "eula": "",
+   "min_ram_gb": 0,
+   "optin": false
+  },
+  {
+   "id": "scribus",
+   "category": "creative",
+   "name": "Scribus",
+   "about": "Lay out brochures, newsletters and print-ready PDFs.",
+   "size_mb": 72,
+   "windows": "Publisher / InDesign",
+   "preinstalled": false,
+   "presets": [],
+   "eula": "",
+   "min_ram_gb": 4,
+   "optin": false
+  },
+  {
+   "id": "mpv",
+   "category": "media",
+   "name": "mpv",
+   "about": "Play local video with a lightweight interface and hardware decoding when supported.",
+   "size_mb": 2,
+   "windows": "MPC-HC",
+   "preinstalled": false,
+   "presets": [],
+   "eula": "",
+   "min_ram_gb": 0,
+   "optin": false
+  },
+  {
+   "id": "mixxx",
+   "category": "media",
+   "name": "Mixxx",
+   "about": "Mix tracks with decks, beat matching and DJ controller support.",
+   "size_mb": 14,
+   "windows": "VirtualDJ",
+   "preinstalled": false,
+   "presets": [],
+   "eula": "",
+   "min_ram_gb": 4,
+   "optin": false
+  },
+  {
+   "id": "kid3",
+   "category": "media",
+   "name": "Kid3",
+   "about": "Batch-edit music tags, cover art and filenames.",
+   "size_mb": 3,
+   "windows": "Mp3tag",
+   "preinstalled": false,
+   "presets": [],
+   "eula": "",
+   "min_ram_gb": 0,
+   "optin": false
+  },
+  {
+   "id": "darktable",
+   "category": "creative",
+   "name": "Darktable",
+   "about": "Organize photos and edit RAW files without changing the originals.",
+   "size_mb": 54,
+   "windows": "Lightroom",
+   "preinstalled": false,
+   "presets": [],
+   "eula": "",
+   "min_ram_gb": 8,
+   "optin": false
+  },
+  {
+   "id": "kicad",
+   "category": "developer",
+   "name": "KiCad",
+   "about": "Draw schematics and design printed circuit boards with symbol and footprint libraries.",
+   "size_mb": 95,
+   "windows": "Altium Designer",
+   "preinstalled": false,
+   "presets": [],
+   "eula": "",
+   "min_ram_gb": 8,
+   "optin": false
+  },
+  {
+   "id": "geany",
+   "category": "developer",
+   "name": "Geany",
+   "about": "A lightweight native editor with syntax highlighting and build commands.",
+   "size_mb": 4,
+   "windows": "Notepad++",
+   "preinstalled": false,
+   "presets": [],
+   "eula": "",
+   "min_ram_gb": 0,
+   "optin": false
+  },
+  {
+   "id": "meld",
+   "category": "developer",
+   "name": "Meld",
+   "about": "Compare and merge files, directories and source changes.",
+   "size_mb": 2,
+   "windows": "WinMerge",
+   "preinstalled": false,
+   "presets": [],
+   "eula": "",
+   "min_ram_gb": 0,
+   "optin": false
+  },
+  {
+   "id": "nextcloud",
+   "category": "utilities",
+   "name": "Nextcloud Desktop",
+   "about": "Sync folders with an existing Nextcloud server.",
+   "size_mb": 5,
+   "windows": "OneDrive / Dropbox",
+   "preinstalled": false,
+   "presets": [],
+   "eula": "",
+   "min_ram_gb": 0,
+   "optin": false
+  },
+  {
+   "id": "keepassxc",
+   "category": "security",
+   "name": "KeePassXC",
+   "about": "Store passwords in an encrypted database on this PC.",
+   "size_mb": 12,
+   "windows": "KeePass",
+   "preinstalled": false,
+   "presets": [],
+   "eula": "",
+   "min_ram_gb": 0,
+   "optin": false
+  },
+  {
+   "id": "stellarium",
+   "category": "utilities",
+   "name": "Stellarium",
+   "about": "Explore an interactive night sky and plan stargazing sessions.",
+   "size_mb": 356,
+   "windows": "WorldWide Telescope",
+   "preinstalled": false,
+   "presets": [],
+   "eula": "",
+   "min_ram_gb": 4,
+   "optin": false
+  },
+  {
    "id": "netusage",
    "category": "devos",
    "name": "Network Usage",
@@ -1859,7 +2015,9 @@ var data = {
   "backup",
   "vault",
   "restore"
- ]
+ ],
+ "smallDiskGb": 64,
+ "bigDownloadMb": 500
 };
 
 function recommended(ramGb, diskGb) {
@@ -1868,11 +2026,15 @@ function recommended(ramGb, diskGb) {
         var f = data.features[i];
         if (f.presets.indexOf("windows") < 0) continue;
         if (ramGb + 0.5 < f.min_ram_gb) continue;
-        if (diskGb > 0 && diskGb < 64 && !f.preinstalled && f.size_mb > 500) continue;
+        if (largeForDisk(f, diskGb)) continue;
         ids.push(f.id);
     }
     if (ids.indexOf("onlyoffice") < 0) ids.unshift("libreoffice");
     return ids;
+}
+
+function largeForDisk(f, diskGb) {
+    return diskGb > 0 && diskGb < data.smallDiskGb && !f.preinstalled && f.size_mb > data.bigDownloadMb;
 }
 
 function idsWith(preset) {

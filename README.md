@@ -347,6 +347,7 @@ Shut down, restart and uninstall always ask for confirmation first.
 
 ### 7. For developers & AI Engineers
 - **DevOS AI Code Agent**: Autonomous pair programming and development agent with repository planning, interactive diff reviews, prompt queuing, cancellation, retry/rerun, live dev server preview, and terminal execution (`devos-ai-code-agent` or desktop shortcut). Supports both local offline LLMs and optional cloud providers (Google Gemini, Groq, DeepSeek, OpenAI).
+- **Custom agents in DevOS AI Chat**. Open **Agents**, name a profile, enter its instructions, and choose its read-only folder, PC diagnostics, or permitted app launches. Select **Save and use** to run the agent in Chat with the local model. Review the actions below each reply, approve individual app launches, and use **Save report** to export a reply as Markdown.
 
 <p align="center">
   <img src="docs/images/devos_code_agent.png" alt="DevOS AI Code Agent" width="880">

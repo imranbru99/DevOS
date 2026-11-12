@@ -480,7 +480,12 @@ def add_feature(feature: dict) -> bool:
     if ok and feature["script"]:
         vendor = OFFLINE_VENDOR.get(feature["id"])
         if vendor and not deb_installed(vendor):
-            install_from_media([vendor])
+            if install_from_media([vendor]):
+                log(f"  {feature['name']}: installed from offline media")
+            else:
+                log(f"  {feature['name']}: offline media unavailable; using install script")
+        # Script still runs when the vendor package is present — it applies
+        # DevOS policies / menu cleanup and is a no-op install when already there.
         ok = run(["/bin/bash", feature["script"]]) == 0
     if ok and feature.get("builtin"):
         ok = set_builtin(feature, True)
@@ -682,11 +687,43 @@ def _apply(selected, remove_unselected: bool) -> bool:
     return not missing
 
 
-def selection_from_gs(data: dict):
-    value = data.get(INSTALLER_CHOICE_KEY)
+def _selection_value(value):
     if isinstance(value, list) and all(isinstance(item, str) for item in value):
-        value = ",".join(value)
-    return catalog.parse_selection(value) if isinstance(value, str) else None
+        return ",".join(value)
+    return value if isinstance(value, str) else None
+
+
+def _parsed_feature_ids(data: dict, key: str):
+    value = _selection_value(data.get(key))
+    if not isinstance(value, str) or not value.strip():
+        return None
+    parsed = catalog.parse_selection(value)
+    return parsed or None
+
+
+def selection_from_gs(data: dict):
+    """Read the installer app ticks from preserved global storage.
+
+    featuresq.qml writes both ``devos_selected_features`` and Calamares'
+    ``packagechooser_features``. Prefer the DevOS key when it lists apps.
+    When it is missing or empty, fall back to Calamares' packageChoice so a
+    ticked Chrome (or other app) is not dropped if only one key survived.
+    """
+    if INSTALLER_CHOICE_KEY in data:
+        primary = _selection_value(data.get(INSTALLER_CHOICE_KEY))
+        if isinstance(primary, str) and primary.strip():
+            return catalog.parse_selection(primary)
+        for key in ("packagechooser_features", "features"):
+            parsed = _parsed_feature_ids(data, key)
+            if parsed:
+                return parsed
+        # Explicit empty string → no optional apps. Wrong types → unknown.
+        return [] if isinstance(primary, str) else None
+    for key in ("packagechooser_features", "features"):
+        parsed = _parsed_feature_ids(data, key)
+        if parsed:
+            return parsed
+    return None
 
 
 # Skel Desktop shortcuts tied to optional installer features (never core DevOS).

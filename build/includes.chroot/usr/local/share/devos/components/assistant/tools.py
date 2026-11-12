@@ -917,7 +917,7 @@ APP_ALIASES = {
     "system monitor": ["devos-taskman", "org.kde.plasma-systemmonitor", "org.kde.ksysguard"],
     "calculator": ["org.kde.kcalc", "kcalc", "org.gnome.Calculator"],
     "dashboard": ["devos-dashboard"],
-    "windows apps": ["devos-winlayer", "devos-windows"],
+    "windows apps": ["devos-apps", "devos-winlayer", "devos-windows"],
     "disk": ["devos-disk"],
     "disks": ["devos-disk"],
     "screenshot tool": ["org.kde.spectacle"],
@@ -3593,7 +3593,8 @@ def _x_install_app(a, ctx, dry):
             target_wine = str(opt.get("wine") or opt.get("url") or "")
             buttons.append((f"Install {oname}", Action(
                 "install_package", {"name": oname, "wine": target_wine},
-                confirm=f"Install {oname} with DevOS WinLayer?", label=f"Install {oname}")))
+                confirm=f"Download and install {oname} as a Windows app?",
+                label=f"Install {oname}")))
         elif opt.get("feature") or opt.get("flatpak"):
             size = int(opt.get("size_mb") or 0)
             about = f" It downloads about {size} MB." if size else " It downloads from the internet."
@@ -3604,8 +3605,16 @@ def _x_install_app(a, ctx, dry):
     if res.get("web"):
         buttons.append(("Open web version", Action("open_url", {"url": str(res["web"]), "browser": "default"},
                                                     label="Open the web version")))
-    if res.get("download"):
-        buttons.append(("Open download page", Action("open_url", {"url": str(res["download"]), "browser": "default"},
+    download = str(res.get("download") or "").strip()
+    if download.lower().endswith((".exe", ".msi")) and not (
+            opt and (opt.get("kind") == "wine" or opt.get("wine"))):
+        dname = str((opt or {}).get("name") or res.get("name") or "app").strip() or "app"
+        buttons.append((f"Install {dname} (Windows app)", Action(
+            "install_package", {"name": dname, "wine": download},
+            confirm=f"Download and install {dname} as a Windows app?",
+            label=f"Install {dname} as a Windows app")))
+    if download:
+        buttons.append(("Open download page", Action("open_url", {"url": download, "browser": "default"},
                                                       label="Open the download page")))
     name = str(res.get("name") or "").strip()
     if name and res.get("known") and not (opt and opt.get("preinstalled")):
@@ -3617,6 +3626,9 @@ def _x_install_app(a, ctx, dry):
         buttons.append(("Find the Windows download", Action(
             "web_search", {"engine": "google", "query": q, "url": google_search_url(q), "browser": "default"},
             label="Search for the download")))
+        buttons.append(("Paste a Windows app link…", Action(
+            "open_app", {"name": "Apps", "strong": True},
+            label="Open Apps to paste a Windows download link")))
     return ToolResult(text, buttons=buttons, data={"resolution": res})
 
 

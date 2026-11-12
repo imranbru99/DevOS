@@ -151,7 +151,7 @@ Presentation {
         { tag: "APPS & FEATURES", icon: "⚙", a: "#fbbf24", b: "#f97316",
           title: "Add or remove anything",
           body: "DevOS Features works like Windows' optional features: Office, browsers, games, creative and developer apps in one place.",
-          points: ["60+ apps, verified", "Set your default apps", "Your picks download after install"] },
+          points: [Cat.data.features.length + " apps and features", "Set your default apps", "Your picks install after setup"] },
         { tag: "ALWAYS FAST", icon: "⚡", a: "#facc15", b: "#f59e0b",
           title: "Optimizer keeps it quick",
           body: "Apps you have not used for a while are pointed out before they slow you down, and leftover files are cleaned in one click.",
@@ -271,6 +271,8 @@ Presentation {
         Rectangle {
             id: stage
             readonly property var c: presentation.cards[presentation.current]
+            readonly property bool compact: width < 620 || height < 280
+            readonly property int inset: compact ? 18 : Math.max(36, width * 0.06)
             anchors.fill: parent
             clip: true
             radius: 18
@@ -307,11 +309,11 @@ Presentation {
                     id: textCol
                     // below the progress row at the top, centred in the rest
                     anchors.verticalCenter: parent.verticalCenter
-                    anchors.verticalCenterOffset: 14
+                    anchors.verticalCenterOffset: stage.compact ? 10 : 14
                     anchors.left: parent.left
-                    anchors.leftMargin: Math.max(36, parent.width * 0.06)
-                    width: parent.width * 0.54
-                    spacing: 10
+                    anchors.leftMargin: stage.inset
+                    width: stage.compact ? parent.width - stage.inset * 2 : parent.width * 0.54
+                    spacing: stage.compact ? 6 : 10
 
                     Text {
                         text: stage.c.tag
@@ -325,7 +327,7 @@ Presentation {
                         wrapMode: Text.WordWrap
                         text: stage.c.title
                         color: "#f8fafc"
-                        font.pixelSize: Math.max(24, Math.min(34, stage.width / 28))
+                        font.pixelSize: stage.compact ? 20 : Math.max(24, Math.min(34, stage.width / 28))
                         font.weight: Font.Bold
                     }
                     Text {
@@ -344,13 +346,15 @@ Presentation {
                             model: stage.c.points
                             Rectangle {
                                 radius: 13
-                                height: 26
-                                width: chip.implicitWidth + 24
+                                height: Math.max(26, chip.implicitHeight + 8)
+                                width: Math.min(textCol.width, chip.implicitWidth + 24)
                                 color: "#141c30"
                                 border.color: "#26324a"
                                 Text {
                                     id: chip
                                     anchors.centerIn: parent
+                                    width: parent.width - 24
+                                    wrapMode: Text.Wrap
                                     text: "✓  " + modelData
                                     color: "#e2e8f0"
                                     font.pixelSize: 12
@@ -363,6 +367,7 @@ Presentation {
                 // ---- feature tile
                 Rectangle {
                     id: tile
+                    visible: !stage.compact
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.right: parent.right
                     anchors.rightMargin: Math.max(36, parent.width * 0.07)
@@ -409,7 +414,7 @@ Presentation {
 
             // ---- progress through the tour
             Row {
-                visible: presentation.cards.length <= 18
+                visible: !stage.compact && presentation.cards.length <= 18
                 anchors.top: parent.top
                 anchors.topMargin: 22
                 anchors.left: parent.left

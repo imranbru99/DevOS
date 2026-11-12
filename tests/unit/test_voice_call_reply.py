@@ -1,4 +1,4 @@
-"""Voice call must speak answers and keep listening for the next prompt."""
+"""Voice call must speak answers smoothly end-to-end and keep listening."""
 from pathlib import Path
 
 
@@ -13,30 +13,68 @@ def test_voice_module_auto_installs_tts_venv():
     assert "def speak_reply" in text
     assert "StreamSpeaker" in text
     assert "_speak_espeak" in text
-    # Voice must start with typing (eager first cut), at natural pace.
-    assert "_FIRST_WORDS = 2" in text
+    # Prefer full sentences — never cut after a single word.
+    assert "_FIRST_WORDS = 10" in text
     assert '_TTS_RATE = "+0%"' in text
     assert "_OPENER_RE" in text
     assert "feed_delta_total" in text
+    assert "Never abandon an in-flight queue read" in text
 
 
-def test_first_speak_cut_starts_with_typing():
+def test_first_speak_cut_prefers_sentences_not_one_word():
     import importlib.util
     path = ROOT / "components/assistant/voice.py"
     spec = importlib.util.spec_from_file_location("devos_voice_cut", path)
     mod = importlib.util.module_from_spec(spec)
-    # Avoid running heavy side effects; load via exec of just the cut helper is hard.
-    # Import the module (no GUI); TTS venv checks are lazy.
     spec.loader.exec_module(mod)
-    chunk, advance = mod._next_speak_cut("Sure, I can help with that later.", first=True)
-    assert chunk.lower().startswith("sure")
-    assert advance > 0
-    chunk2, adv2 = mod._next_speak_cut("Hello there friend how are you", first=True)
-    assert len(chunk2.split()) <= 3
-    assert adv2 > 0
+
+    # Punctuated greeting may start immediately.
     chunk3, adv3 = mod._next_speak_cut("Hi! How can I help you today?", first=True)
     assert "hi" in chunk3.lower()
     assert adv3 > 0
+
+    # Full sentence is spoken as one unit.
+    chunk, advance = mod._next_speak_cut(
+        "Sure, I can help with that later. Next we can open Chrome.", first=True
+    )
+    assert "sure" in chunk.lower()
+    assert "." in chunk or "later" in chunk.lower()
+    assert advance > 0
+
+    # Incomplete phrase: do NOT speak only the first word while more is coming.
+    chunk2, adv2 = mod._next_speak_cut("Hello there friend", first=True)
+    assert chunk2 == ""
+    assert adv2 == 0
+
+    # Longer unfinished phrase can cut at a natural word boundary.
+    long = "Hello there friend how are you doing today my friend again"
+    chunk4, adv4 = mod._next_speak_cut(long, first=True)
+    assert adv4 > 0
+    assert len(chunk4.split()) >= 8
+
+    # Middle sentences must remain when splitting a full reply.
+    plain = (
+        "First sentence is here. Second sentence has more detail. "
+        "Third sentence wraps it up."
+    )
+    chunks = []
+    cursor = 0
+    first = True
+    while cursor < len(plain):
+        piece, advance = mod._next_speak_cut(plain[cursor:], force=False, first=first)
+        if not piece or advance <= 0:
+            tail = plain[cursor:].strip()
+            if tail:
+                chunks.append(tail)
+            break
+        chunks.append(piece)
+        cursor += advance
+        first = False
+    joined = " ".join(chunks)
+    assert "First sentence" in joined
+    assert "Second sentence" in joined
+    assert "Third sentence" in joined
+    assert len(chunks) >= 3
 
 
 def test_chat_call_speaks_voice_turns_and_resumes():

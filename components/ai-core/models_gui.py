@@ -52,7 +52,14 @@ class ModelsWindow(QtWidgets.QWidget):
         self.choice = catalog.read_choice()
         self.proc = None
 
-        layout = QtWidgets.QVBoxLayout(self)
+        outer = QtWidgets.QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QtWidgets.QScrollArea()
+        scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+        scroll.setWidgetResizable(True)
+        content = QtWidgets.QWidget()
+        outer.addWidget(scroll)
+        layout = QtWidgets.QVBoxLayout(content)
         layout.setContentsMargins(24, 20, 24, 20)
         title = QtWidgets.QLabel("AI Models")
         title.setObjectName("title")
@@ -75,9 +82,7 @@ class ModelsWindow(QtWidgets.QWidget):
         self.group = QtWidgets.QButtonGroup(self)
         for model in self.info["models"]:
             have = model.get("built_in") or catalog.installed_file(model["file"])
-            text = f"{model['name']} · {model['params']} — {model['about']}"
-            if model["id"] == self.info["recommended"]:
-                text += "  (recommended for faster replies)"
+            text = f"{model['name']} · {model['params']}"
             size = "Included" if model.get("built_in") else f"{model['size_mb'] / 1024:.1f} GB"
             radio = QtWidgets.QRadioButton(f"{text}\n{size}{' · downloaded' if have else ''}"
                                            f"{'' if model['fits'] else ' · needs ' + str(model['min_ram_gb']) + ' GB RAM'}")
@@ -86,14 +91,27 @@ class ModelsWindow(QtWidgets.QWidget):
             radio.setProperty("model_id", model["id"])
             self.group.addButton(radio)
             layout.addWidget(radio)
+            description = model["about"]
+            if model["id"] == self.info["recommended"]:
+                description += " (recommended for faster replies)"
+            details = QtWidgets.QLabel(description)
+            details.setObjectName("muted")
+            details.setWordWrap(True)
+            details.setIndent(20)
+            layout.addWidget(details)
 
         self.extras = {}
         for extra in self.info["extras"]:
-            box = QtWidgets.QCheckBox(f"{extra['name']} — {extra['about']}")
+            box = QtWidgets.QCheckBox(extra["name"])
             box.setEnabled(extra["fits"])
             box.setChecked(bool(self.choice.get(extra["id"])))
             self.extras[extra["id"]] = box
             layout.addWidget(box)
+            details = QtWidgets.QLabel(extra["about"])
+            details.setObjectName("muted")
+            details.setWordWrap(True)
+            details.setIndent(20)
+            layout.addWidget(details)
 
         row = QtWidgets.QHBoxLayout()
         self.apply = QtWidgets.QPushButton("Use and download")
@@ -125,23 +143,24 @@ class ModelsWindow(QtWidgets.QWidget):
         self.endpoint = QtWidgets.QLineEdit("http://127.0.0.1:11434/v1")
         self.endpoint.setReadOnly(True)
         layout.addWidget(self.endpoint)
-        api_row = QtWidgets.QHBoxLayout()
+        api_actions = QtWidgets.QGridLayout()
         self.lan_on = QtWidgets.QPushButton("Share on my network")
         self.lan_on.clicked.connect(lambda: self.api(["lan", "on"]))
         self.lan_off = QtWidgets.QPushButton("This PC only")
         self.lan_off.clicked.connect(lambda: self.api(["lan", "off"]))
         show = QtWidgets.QPushButton("Show address and key")
         show.clicked.connect(lambda: self.api([]))
-        api_row.addWidget(self.lan_on)
-        api_row.addWidget(self.lan_off)
-        api_row.addWidget(show)
-        api_row.addStretch(1)
-        layout.addLayout(api_row)
+        api_actions.addWidget(self.lan_on, 0, 0)
+        api_actions.addWidget(self.lan_off, 0, 1)
+        api_actions.addWidget(show, 1, 0, 1, 2, QtCore.Qt.AlignLeft)
+        api_actions.setColumnStretch(2, 1)
+        layout.addLayout(api_actions)
         self.api_text = QtWidgets.QPlainTextEdit()
         self.api_text.setReadOnly(True)
         self.api_text.setMaximumHeight(150)
         layout.addWidget(self.api_text)
         layout.addStretch(1)
+        scroll.setWidget(content)
 
     def selected(self) -> dict:
         button = self.group.checkedButton()

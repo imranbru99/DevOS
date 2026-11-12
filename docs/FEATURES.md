@@ -88,13 +88,13 @@ Business, Family, Normal + Islamic and Premium. DevOS Features also supports
 Windows-like, Minimal and Choose later. Normal filters heavier apps by hardware;
 Premium selects the catalog except opt-in family controls. The installer starts
 with optional apps unchecked. Applying a preset fills the choices, which can then
-be edited individually.
+be edited individually. Search by app name or Windows equivalent, browse a
+category, or hide apps with higher RAM or storage needs.
 
-The following **97 entries** come from
-[`components/features/feature_catalog.py`](../components/features/feature_catalog.py).
-They list selection options, not 97 preinstalled apps. Some small packages marked
-Download may already be present as dependencies; the table follows the catalog's
-delivery contract. Check `devos features list` on the installed system for state.
+The installer lists 111 selectable apps and features from the
+[feature catalog](../components/features/feature_catalog.py). The tables below
+describe common choices and how they are delivered. Check `devos features list`
+on the installed system for current availability.
 
 ### Office & documents
 

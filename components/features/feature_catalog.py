@@ -426,6 +426,35 @@ FEATURES: List[Dict] = [
       30, win="Windows Subsystem for Android", apt=["waydroid", "weston"], preinstalled=True, presets=EVERYONE, min_ram_gb=4),
 ]
 
+# Additional native apps people can pick individually. Estimates include the
+# downloads needed on the DevOS base image and are rounded up.
+FEATURES += [
+    F("calibre", "office", "Calibre", "Read, convert and organize ebooks and sync compatible e-readers.",
+      57, win="Kindle for PC / eBook manager", apt=["calibre"]),
+    F("scribus", "creative", "Scribus", "Lay out brochures, newsletters and print-ready PDFs.",
+      72, win="Publisher / InDesign", apt=["scribus"], min_ram_gb=4),
+    F("mpv", "media", "mpv", "Play local video with a lightweight interface and hardware decoding when supported.",
+      2, win="MPC-HC", apt=["mpv"]),
+    F("mixxx", "media", "Mixxx", "Mix tracks with decks, beat matching and DJ controller support.",
+      14, win="VirtualDJ", apt=["mixxx"], min_ram_gb=4),
+    F("kid3", "media", "Kid3", "Batch-edit music tags, cover art and filenames.",
+      3, win="Mp3tag", apt=["kid3"]),
+    F("darktable", "creative", "Darktable", "Organize photos and edit RAW files without changing the originals.",
+      54, win="Lightroom", apt=["darktable"], min_ram_gb=8),
+    F("kicad", "developer", "KiCad", "Draw schematics and design printed circuit boards with symbol and footprint libraries.",
+      95, win="Altium Designer", apt=["kicad", "kicad-symbols", "kicad-footprints"], min_ram_gb=8),
+    F("geany", "developer", "Geany", "A lightweight native editor with syntax highlighting and build commands.",
+      4, win="Notepad++", apt=["geany"]),
+    F("meld", "developer", "Meld", "Compare and merge files, directories and source changes.",
+      2, win="WinMerge", apt=["meld"]),
+    F("nextcloud", "utilities", "Nextcloud Desktop", "Sync folders with an existing Nextcloud server.",
+      5, win="OneDrive / Dropbox", apt=["nextcloud-desktop"]),
+    F("keepassxc", "security", "KeePassXC", "Store passwords in an encrypted database on this PC.",
+      12, win="KeePass", apt=["keepassxc"]),
+    F("stellarium", "utilities", "Stellarium", "Explore an interactive night sky and plan stargazing sessions.",
+      356, win="WorldWide Telescope", apt=["stellarium"], min_ram_gb=4),
+]
+
 # DevOS's own tools. Hiding one only removes it from the menu (and stops its
 # services): the code stays, so ticking it again needs no download.
 DEVOS = "/usr/local/bin/"

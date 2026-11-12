@@ -246,7 +246,8 @@ class TestDiscovery(AppsManagerBase):
         os.makedirs(os.path.join(prefixes, "notepadpp", "drive_c"))
         os.makedirs(os.path.join(self.home, ".wine-office", "drive_c"))
         write(os.path.join(self.user_apps, "winlayer-notepadpp.desktop"),
-              desktop("notepadpp (Windows)", 'python3 "/x/prefix_manager.py" launch "/d/n.exe"'))
+              desktop("Notepad++", '/usr/local/bin/devos-open-app "/d/n.exe"',
+                      "GenericName=Windows app\n"))
         office = os.path.join(self.home, ".wine-office")
         progs = os.path.join(self.user_apps, "wine", "Programs", "Office")
         write(os.path.join(progs, "Word.desktop"),
@@ -258,7 +259,8 @@ class TestDiscovery(AppsManagerBase):
         disc = self.discovery()
         apps = {a.prefix: a for a in disc.discover_windows()}
         self.assertEqual(set(apps), {os.path.join(prefixes, "notepadpp"), office})
-        self.assertEqual(apps[os.path.join(prefixes, "notepadpp")].name, "notepadpp")
+        self.assertEqual(apps[os.path.join(prefixes, "notepadpp")].name, "Notepad++")
+        self.assertEqual(apps[os.path.join(prefixes, "notepadpp")].type_label, "Windows app")
         o = apps[office]
         self.assertEqual(o.name, "Word")
         self.assertEqual(len(o.desktop_files), 3)

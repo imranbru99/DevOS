@@ -93,7 +93,10 @@ select a row to move it up/down, edit it, or remove it. **Add Project to Pipelin
 is the final submission and queues every draft prompt under one project. Any
 text still in the editor is included as one final prompt. Markdown `---` inside
 a draft is preserved, not interpreted as a project or step separator. The
-optional local Steps 2–5 template explicitly adds its separate steps to the draft.
+optional local Auto-add **step groups** (`~/.config/devos/pipeline_step_pack.json`).
+Each named group holds 1–6 prompts (paste several in one editor separated by `---`).
+**Auto-add group** picks a group and stages every step in that group in order after
+Step 1. Edit groups with ⚙.
 
 The queue displays one project per page; Previous/Next changes only the view,
 not execution order. **Clear Logs** clears current and rotated activity history
