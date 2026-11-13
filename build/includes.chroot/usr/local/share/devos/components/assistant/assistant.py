@@ -3791,9 +3791,12 @@ class AssistantWindow(QtWidgets.QWidget):
             self._stream_speaker = voice.StreamSpeaker()
             self._stream_speaker.start(language=lang)
         else:
-            # Typed: still honour Always EN/BN preference for the model reply.
+            # Typed: honour forced EN/BN; otherwise detect Bangla script, Romanized Bangla, or other.
             pref = voice_prefs.tts_language_pref()
-            self._voice_reply_lang = pref if pref in ("en", "bn") else voice.reply_language(text or "")
+            if pref in ("en", "bn"):
+                self._voice_reply_lang = pref
+            else:
+                self._voice_reply_lang = voice.detect_user_language(text or "")
         self.input.clear()
         self.clear_files()
         # Typed action commands (open Chrome, search, …) run quietly — no chat clutter.
@@ -3860,8 +3863,22 @@ class AssistantWindow(QtWidgets.QWidget):
                     if a.name == "type_text":
                         a.args["avoid_window"] = str(int(self.winId()))
                 self.showMinimized()
+            # Typed "pore sunao" / read aloud: speak the summary even without the mic.
+            if any(a.name == "read_url" and a.args.get("speak") for a in actions):
+                self._speak_reply = True
+                if self._stream_speaker is None:
+                    lang = self._voice_reply_lang or voice.detect_user_language(text or "")
+                    if lang not in ("en", "bn"):
+                        lang = "bn" if voice.looks_romanized_bangla(text or "") else "en"
+                    try:
+                        voice.warm_tts(lang if lang in ("en", "bn") else "en")
+                    except Exception:
+                        pass
+                    self._stream_speaker = voice.StreamSpeaker()
+                    self._stream_speaker.start(language=lang if lang in ("en", "bn") else "en")
             if not quiet_actions:
-                self.show_thinking("Working on it")
+                label = "Reading the page" if any(a.name == "read_url" for a in actions) else "Working on it"
+                self.show_thinking(label)
             self._handle = handle
             # Pure do-it actions from voice still should not be narrated ("Opening Chrome…").
             # Call mode still resumes listening in _replies even when speak is False.
@@ -4514,7 +4531,7 @@ class AssistantWindow(QtWidgets.QWidget):
                 pass
             threading.Thread(
                 target=lambda: engine.request_ai_sleep("chat-closed"),
-                daemon=True,
+                daemon=False,
                 name="devos-ai-sleep",
             ).start()
         if any(worker.isRunning() for worker in self.workers):

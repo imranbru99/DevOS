@@ -13,4 +13,10 @@ if [ "${1:-}" = "--reminder" ]; then
     shift
     exec -a "$(basename "$0")" /usr/bin/python3 "$component" "$@"
 fi
+if [ "$#" -eq 0 ] || [ "${1:-}" = "--install-client" ]; then
+    client="$(dirname "$component")/linux_client.py"
+    if [ -f "$client" ]; then
+        exec -a "$(basename "$0")" /usr/bin/python3 "$client" "$@"
+    fi
+fi
 exec -a "$(basename "$0")" /usr/bin/python3 "$(dirname "$component")/browser_launch.py" "$@"

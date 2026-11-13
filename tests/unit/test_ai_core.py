@@ -213,3 +213,13 @@ class TestIdleUnload(unittest.TestCase):
         again = eng.unload_now("chat-closed")
         self.assertFalse(again["unloaded"])
         self.assertEqual(again["reason"], "nothing_loaded")
+
+    def test_sleep_requested_while_busy_releases_after_generation(self):
+        eng = server.DevOSAIEngine()
+        slot = eng._slots[0]
+        slot.llm = object()
+        slot.busy = True
+        self.assertTrue(eng.unload_now("chat-closed")["busy"])
+        self.assertIsNotNone(slot.llm)
+        eng._release(slot)
+        self.assertIsNone(slot.llm)

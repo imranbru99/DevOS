@@ -6,6 +6,44 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[2]/'components/ai-agent')
 from task_pipeline import TaskPipeline, get_grouped_projects
 
 
+def test_open_project_fields_queue_distinct_folders_and_preserve_incomplete_drafts(tmp_path):
+    from PyQt5 import QtWidgets
+    import pipeline_gui as gui
+
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    pipeline = TaskPipeline(tmp_path / "queue.json", tmp_path / "context.json")
+    workspace = tmp_path / "workspace"
+    old = workspace / "same"
+    other = tmp_path / "elsewhere" / "same"
+    old.mkdir(parents=True)
+    other.mkdir(parents=True)
+    pipeline.set_base_dir(str(workspace))
+    with patch.object(gui, "TaskPipeline", return_value=pipeline), \
+         patch.object(gui, "discover_agents", return_value={}), \
+         patch.object(gui, "detect_current_project", return_value=(None, None, None)), \
+         patch.object(gui, "notify"):
+        window = gui.PipelineWindow()
+        window.timer.stop()
+        window.runner_timer.stop()
+        first, second = window.open_project_fields
+        with patch.object(QtWidgets.QInputDialog, "getItem", return_value=(str(old), True)):
+            first.location.select_existing()
+        first.prompt_input.setPlainText("First step\n---\nSecond step")
+        second.location.path.setText(str(other))
+        second.prompt_input.setPlainText("Other folder")
+        window.add_open_project_field()
+        incomplete = window.open_project_fields[-1]
+        incomplete.title_input.setText("Keep this draft")
+        window.add_all_open_project_fields()
+
+        groups = get_grouped_projects(TaskPipeline(pipeline.state_file, pipeline.context_file).list())
+        assert [group["dir"] for group in groups] == [str(old), str(other)]
+        assert len({group["slug"] for group in groups}) == 2
+        assert [step["prompt"] for step in groups[0]["tasks"]] == ["First step", "Second step"]
+        assert incomplete.title_input.text() == "Keep this draft"
+        window.close()
+
+
 def test_append_stays_in_project_before_next_project_and_preserves_long_prompt(tmp_path):
     p=TaskPipeline(tmp_path/'queue.json',tmp_path/'context.json')
     first=p.add('First',project_slug='one',project=str(tmp_path/'custom'))

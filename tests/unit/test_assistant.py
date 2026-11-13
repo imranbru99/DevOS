@@ -459,6 +459,25 @@ class TestToolsDryRun(unittest.TestCase):
         self.assertFalse(res.ok)
         self.assertIn("couldn't find", res.text)
 
+    def test_open_app_missing_binary_offers_install(self):
+        # Menu shortcut exists but TryExec binary is gone (Snipping Tool / spectacle case).
+        self.ctx.which = fake_which(ALL_TOOLS - {"spectacle"})
+        desk = os.path.join(self.home, ".local/share/applications")
+        os.makedirs(desk, exist_ok=True)
+        with open(os.path.join(desk, "devos-snip.desktop"), "w", encoding="utf-8") as fh:
+            fh.write(
+                "[Desktop Entry]\nType=Application\nName=Snipping Tool\n"
+                "Exec=spectacle\nTryExec=/usr/bin/spectacle\n"
+            )
+        self.ctx.app_dirs = [desk]
+        res = tools.execute(tools.Action("open_app", {"name": "Snipping Tool", "strong": True}), self.ctx)
+        self.assertFalse(res.ok)
+        self.assertIn("missing", res.text.lower())
+        self.assertTrue(any(b[1].name == "install_package" for b in res.buttons))
+        r = tools.route("snipping tool failed to open")
+        self.assertEqual(r.actions[0].name, "open_app")
+        self.assertEqual(r.actions[0].args["name"], "snipping tool")
+
     def test_settings_and_quick_actions_plans(self):
         self.assertEqual(self.run_action("open bluetooth settings")[0].plan, [["systemsettings5", "kcm_bluetooth"]])
         self.assertEqual(self.run_action("volume up")[0].plan, [["pactl", "set-sink-volume", "@DEFAULT_SINK@", "+10%"]])

@@ -46,15 +46,18 @@ MODEL_OFFLINE = ("The DevOS AI service isn't responding. I've asked it to start;
                  "Actions and PC questions still work.")
 
 APP_PROMPT = (
-    "You are answering inside the DevOS AI app on the user's PC. The app itself (not you) can open apps and "
-    "websites, search Google or YouTube, show this PC's details, count installed apps, install or remove "
-    "apps after you agree, change volume and "
-    "brightness, take screenshots, open settings and read attached files. If the user asks for one of those "
-    "and it did not happen, tell them to say it directly, for example “open Chrome and search for ...”. "
-    "Problems with this PC (security, a link, Wi-Fi, an error) are checked by the app itself. "
-    "Never invent repair steps or menus. Never invent facts about this PC; only use the PC facts given here. "
-    "Use short Markdown: short paragraphs, "
-    "bullet lists, **bold** for key words."
+    "You are **DevOS AI**, the on-device agent for this DevOS PC — private, local-first, built to be the "
+    "best everyday desktop agent (think Copilot Tasks + Claude Cowork style, but everything stays here).\n"
+    "The app (not you) already runs tools for: open/close apps, web search, read/summarize URLs and speak "
+    "them, PC specs, install/remove apps (with confirm), volume/brightness/screenshot/lock, settings, "
+    "notes/typing/email drafts, one-shot reminders, **recurring schedules**, **durable memory**, "
+    "Optimizer/Security, and OS problem checks (Wi-Fi, sound, display, Bluetooth, printer, slow PC, "
+    "app launch gaps). If they ask for a tool and it did not run, tell them the exact phrase to say.\n"
+    "Be a capable agent: clear next step, short plan when useful, never invent menus, repair steps, or "
+    "PC facts — only use facts given here or from tools. Prefer doing over lecturing.\n"
+    "Language: always match the user (Bangla/বাংলা, English, Hindi, Arabic, Chinese, …). Romanized Bangla "
+    "(“ami kemon acho”) → reply in clear বাংলা. Messy voice transcripts: infer intent; do not force English.\n"
+    "Use short Markdown: short paragraphs, bullets, **bold** for key words."
 )
 
 
@@ -769,6 +772,9 @@ class Assistant:
                         a.args["text"] = draft
                 except Exception:
                     pass
+            if a.name == "read_url" and not dry_run:
+                replies.append(self.handle_read_url(a, original, on_delta=on_delta, cancel=cancel))
+                continue
             res = tools.execute(a, self.ctx, dry_run=dry_run)
             if res.data and res.data.get("url"):
                 setattr(self.ctx, "last_website", res.data["url"])
@@ -858,15 +864,38 @@ class Assistant:
             return fast
 
         system = APP_PROMPT
-        if reply_lang == "bn":
+        # Prefer explicit voice/settings lang; otherwise detect from this message
+        # (Bangla script, Romanized Bangla, or other scripts).
+        lang = reply_lang
+        if lang not in ("bn", "en", "auto"):
+            try:
+                from voice import detect_user_language
+                lang = detect_user_language(text)
+            except Exception:
+                lang = "en"
+        if lang == "bn":
             system += (
-                "\n\n[Language]: The user spoke or wrote in Bangla. Reply entirely in clear Bangla (বাংলা). "
+                "\n\n[Language]: The user spoke or wrote in Bangla (বাংলা script and/or Romanized Bangla "
+                "like “kemon acho”). Reply entirely in clear Bangla script (বাংলা). "
+                "If the text is a rough voice transcript with wrong spelling, still understand the intent. "
                 "Keep Markdown. Do not switch to English unless they ask."
             )
-        elif reply_lang == "en":
+        elif lang == "en":
             system += (
                 "\n\n[Language]: Reply in clear English. Keep Markdown."
             )
+        else:
+            system += (
+                "\n\n[Language]: Match the user's language exactly (whatever language or script they used). "
+                "Keep Markdown. Do not translate into English unless they ask."
+            )
+        try:
+            import memory as _mem
+            mem_block = _mem.summary_for_prompt()
+            if mem_block:
+                system += mem_block
+        except Exception:
+            pass
         doc_ctx = self._recent_file_context(history)
         if doc_ctx:
             system += (
@@ -904,6 +933,94 @@ class Assistant:
             {"role": "system", "content": "You read documents for the user. Be accurate and brief. Use Markdown bullets."},
             {"role": "user", "content": prompt},
         ])
+
+    def _ask_spoken(self, prompt: str) -> str:
+        return self.model.chat([
+            {"role": "system", "content": (
+                "You read web pages aloud for the user. Write clear spoken prose "
+                "(short paragraphs, no bullet lists, no URLs). Match the user's language. "
+                "Stay faithful to the page; do not invent facts."
+            )},
+            {"role": "user", "content": prompt},
+        ])
+
+    def handle_read_url(self, action: tools.Action, original: str = "",
+                        on_delta: Optional[Callable[[str], None]] = None,
+                        cancel: Optional[StreamHandle] = None) -> Reply:
+        """Fetch a page, then summarize or rewrite it for TTS (pore sunao)."""
+        res = tools.execute(action, self.ctx, dry_run=False)
+        if not res.ok:
+            return Reply(res.text, ok=False, source="tool", data=dict(res.data or {}))
+        data = dict(res.data or {})
+        url = str(data.get("url") or action.args.get("url") or "")
+        title = str(data.get("title") or "")
+        page = str(data.get("text") or "")
+        speak = bool(data.get("speak") or action.args.get("speak"))
+        question = str(data.get("question") or original or "")
+        words = int(data.get("words") or len(page.split()))
+        if url:
+            setattr(self.ctx, "last_website", url)
+        if page:
+            self._doc_cache[url or title or "page"] = page
+        name = f"“{title}”" if title else "this page"
+        open_btn = [("Open page", tools.Action("open_url", {"url": url, "browser": "default"},
+                                               label="Open page"))] if url else []
+        try:
+            if speak:
+                # Spoken rewrite: keep length friendly for TTS (~2–4 min max).
+                plan = documents.summary_plan(page, budget=5000, max_calls=3)
+                if len(plan) == 1:
+                    prompt = (
+                        f"Read {name} out loud for the user. Write a clear spoken summary "
+                        f"in 8–14 short sentences (or fewer if the page is short). "
+                        f"Match the language of this request: {question[:200] or 'English'}.\n\n"
+                        f"---\n{plan[0]}\n---"
+                    )
+                    body = self._ask_spoken(prompt).strip()
+                else:
+                    partials = []
+                    for i, section in enumerate(plan, 1):
+                        partials.append(self._ask_spoken(
+                            f"Part {i}/{len(plan)} of {name}. List the key facts in 3–5 short spoken sentences.\n\n---\n{section}\n---"
+                        ).strip())
+                    joined = "\n\n".join(partials)
+                    body = self._ask_spoken(
+                        f"Combine these notes into one spoken reading of {name}: "
+                        f"smooth paragraphs, no bullets, no repetition. "
+                        f"Match the language of: {question[:200] or 'English'}.\n\n{joined[:5000]}"
+                    ).strip()
+                if on_delta is not None and body:
+                    on_delta(body)
+                header = f"**{title or 'Web page'}** — reading aloud\n\n" if title else ""
+                return Reply(header + scrub(body, os_names=False), source="tool",
+                             buttons=open_btn, data={"url": url, "speak": True, "words": words})
+            # Default: summarize the page. Only answer a specific question when
+            # the user clearly asks who/what/when/… beyond “read/summarize this”.
+            specific = bool(re.search(
+                r"\b(?:what|who|when|where|why|how many|how much|which|does|did|is there|"
+                r"কী|কি|কে|কখন|কোথায়|কেন|কত)\b",
+                question or "", re.I,
+            )) and not documents.wants_summary(question)
+            if specific:
+                answer = documents.answer_question(page, question, self._ask, name=name)
+                if on_delta is not None and answer:
+                    on_delta(answer)
+                body = f"**From {title or url}:**\n\n{scrub(answer, os_names=False)}"
+            else:
+                summary, _calls = documents.summarize(page, self._ask, name=name)
+                if on_delta is not None and summary:
+                    on_delta(summary)
+                body = f"**Summary of {title or url}** ({words:,} words)\n\n{scrub(summary, os_names=False)}"
+            return Reply(body, source="tool", buttons=open_btn,
+                         data={"url": url, "speak": False, "words": words})
+        except ModelUnavailable as exc:
+            if str(exc) == MODEL_OFFLINE:
+                start_ai_service()
+            preview = page[:1200].strip()
+            return Reply(
+                f"{exc}\n\nHere is the start of the page:\n\n```\n{preview}\n```",
+                ok=False, source="tool", buttons=open_btn, data={"url": url},
+            )
 
     # -- attachments ------------------------------------------------------
 

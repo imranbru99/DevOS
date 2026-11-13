@@ -534,6 +534,73 @@ def normalize_url(raw: str) -> Optional[str]:
     return urllib.parse.urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path, parts.query, parts.fragment))
 
 
+# Read / summarize / speak a web page (EN + Bangla + Romanized Bangla).
+_URL_IN_TEXT = re.compile(
+    r"https?://[^\s\"'<>]+|(?:www\.)?(?:[a-z0-9-]+\.)+[a-z]{2,24}(?::\d{1,5})?(?:/[^\s\"'<>]*)?",
+    re.I,
+)
+_READ_URL_INTENT = re.compile(
+    r"(?:"
+    r"\b(?:read|summar(?:y|ise|ize)|recap|tldr|overview)\b.{0,60}\b(?:url|link|page|article|news|webpage|website|site)\b"
+    r"|\b(?:url|link|page|article|news|webpage|website|site)\b.{0,60}\b(?:read|summar|aloud|out\s+loud|to\s+me|for\s+me)\b"
+    r"|\b(?:read\s+(?:this|that|it|the)\s+(?:to\s+me|aloud|out)|read\s+aloud|read\s+(?:it|this|that)\s+out)\b"
+    r"|\b(?:summar(?:y|ise|ize)|sum\s+up|tl;?dr)\b.{0,40}\b(?:https?://|www\.)"
+    r"|\b(?:pore|poro|poriya|poriye)\s+(?:sunao|shunao|dao|dile|de)\b"
+    r"|\b(?:amake|amakeo)\b.{0,50}\b(?:pore|poro|poriya)\b"
+    r"|\b(?:news|article|page|link|webpage)\s*(?:ta|ti)?\s*(?:pore|poro)\b"
+    r"|পড়ে?\s*শো(?:নাও|নাও)|পড়ে?\s*শো(?:নাও|নাও)|পড়ে?\s*দাও|পড়ে?\s*দাও"
+    r"|সারাংশ|সংক্ষেপ"
+    r")",
+    re.I | re.UNICODE,
+)
+_SPEAK_PAGE_RE = re.compile(
+    r"(?:"
+    r"\b(?:read(?:\s+[\w'-]+){0,5}\s+(?:aloud|out)|speak|tell\s+me|sunao|shunao|por(?:e|o|iya|iye)?\s+(?:sunao|shunao))\b"
+    r"|শোনাও|শুনাও|পড়ে?\s*শো|পড়ে?\s*শো"
+    r")",
+    re.I | re.UNICODE,
+)
+
+
+def extract_url_from_text(text: str) -> Optional[str]:
+    """First http(s) / www URL in free text, normalized, or None."""
+    if not text:
+        return None
+    for m in _URL_IN_TEXT.finditer(text):
+        raw = m.group(0).rstrip(".,;:!?)]}'\"")
+        norm = normalize_url(raw)
+        if norm:
+            return norm
+    return None
+
+
+def wants_read_url(text: str) -> bool:
+    """True when the user asks to read/summarize/speak a page (not merely open it)."""
+    raw = (text or "").strip()
+    if not raw:
+        return False
+    if _READ_URL_INTENT.search(raw):
+        return True
+    # Romanized / mixed without normalize destroying Bangla script
+    t = normalize(raw)
+    return bool(t and _READ_URL_INTENT.search(t))
+
+
+def parse_read_url(text: str, context: Optional[List[str]] = None) -> Optional[Action]:
+    """Route 'read this URL / pore sunao' to fetch+summarize (not open_url)."""
+    raw = (text or "").strip()
+    if not raw or not wants_read_url(raw):
+        return None
+    url = extract_url_from_text(raw) or _find_recent_website(context)
+    if not url:
+        return None
+    speak = bool(_SPEAK_PAGE_RE.search(raw) or _SPEAK_PAGE_RE.search(normalize(raw)))
+    mode = "speak" if speak else "summarize"
+    host = urllib.parse.urlsplit(url).hostname or url
+    label = f"Read {host}" if speak else f"Summarize {host}"
+    return Action("read_url", {"url": url, "mode": mode, "speak": speak, "question": raw}, label=label)
+
+
 _ENGINE_WORDS = r"(?:google|youtube|the web|web|internet|the internet|online|chrome|the browser|browser|firefox)"
 _SEARCH_VERB = re.compile(
     r"\b(?:search(?:\s+(?:for|about))?|google|look\s+up|find\s+(?:me\s+)?(?=.+\b(?:on|in|using)\s+" + _ENGINE_WORDS + r"\b))\b")
@@ -838,6 +905,7 @@ class DesktopApp:
     generic: str = ""
     keywords: List[str] = field(default_factory=list)
     exec: str = ""
+    tryexec: str = ""
     hidden: bool = False
     wmclass: str = ""
 
@@ -870,10 +938,93 @@ def scan_desktop_entries(dirs: List[str]) -> Dict[str, DesktopApp]:
                     desktop_id=did, path=path, name=e.get("Name", ""), generic=e.get("GenericName", ""),
                     keywords=[k.strip().lower() for k in e.get("Keywords", "").split(";") if k.strip()],
                     exec=e.get("Exec", ""),
+                    tryexec=e.get("TryExec", ""),
                     hidden=e.get("NoDisplay", "").lower() == "true" or e.get("Hidden", "").lower() == "true",
                     wmclass=e.get("StartupWMClass", ""),
                 )
     return found
+
+
+# Menu / shortcut present but binary package missing → install fix for the AI agent.
+# Keys: desktop_id, TryExec/Exec basename, or StartupWMClass (lowercase).
+APP_LAUNCH_FIXES = {
+    "devos-snip": {"name": "Snipping Tool", "apt": "kde-spectacle", "feature": "snip"},
+    "spectacle": {"name": "Snipping Tool", "apt": "kde-spectacle", "feature": "snip"},
+    "org.kde.spectacle": {"name": "Snipping Tool", "apt": "kde-spectacle", "feature": "snip"},
+}
+
+
+def app_required_binary(app: DesktopApp) -> str:
+    """Program path/name the shortcut needs (TryExec preferred, else Exec[0])."""
+    te = (app.tryexec or "").strip()
+    if te:
+        return te
+    argv = exec_to_argv(app.exec)
+    return argv[0] if argv else ""
+
+
+def binary_is_available(binary: str, which: Callable) -> bool:
+    if not binary:
+        return True
+    if os.path.isabs(binary):
+        return os.path.isfile(binary) and os.access(binary, os.X_OK)
+    return bool(which(binary))
+
+
+def launch_fix_for(app: DesktopApp) -> Optional[Dict[str, str]]:
+    keys = [
+        (app.desktop_id or "").lower(),
+        (app.wmclass or "").lower(),
+        os.path.basename(app_required_binary(app) or "").lower(),
+    ]
+    for key in keys:
+        if key and key in APP_LAUNCH_FIXES:
+            return dict(APP_LAUNCH_FIXES[key])
+    return None
+
+
+def missing_app_result(app: DesktopApp, binary: str, fix: Optional[Dict[str, str]] = None) -> "ToolResult":
+    """Explain a menu shortcut whose program file is missing; offer install."""
+    fix = fix or launch_fix_for(app) or {}
+    label = fix.get("name") or app.name or "this app"
+    text = (
+        f"**{app.name}** is on the menu, but its program is missing"
+        + (f" (`{binary}`)" if binary else "")
+        + ". That is why launch fails — the shortcut exists, the package does not."
+    )
+    buttons = []
+    apt = str(fix.get("apt") or "")
+    feature = str(fix.get("feature") or "")
+    if apt or feature:
+        args = {"name": label}
+        if apt:
+            args["apt"] = apt
+        if feature:
+            args["feature"] = feature
+        buttons.append((
+            f"Install {label}",
+            Action(
+                "install_package",
+                args,
+                confirm=f"Install {label} so it can open?",
+                label=f"Install {label}",
+            ),
+        ))
+        text += f" I can install **{label}** for you."
+    buttons.append((
+        "Open DevOS Features",
+        Action("open_app", {"name": "DevOS Features", "strong": True}, label="Open DevOS Features"),
+    ))
+    buttons.append((
+        "Open App Hub",
+        Action("open_app", {"name": "App Hub", "strong": True}, label="Open App Hub"),
+    ))
+    return ToolResult(
+        text,
+        ok=False,
+        buttons=buttons,
+        data={"missing_binary": binary, "desktop_id": app.desktop_id, "fix": fix},
+    )
 
 
 # DevOS names -> desktop ids, in preference order.
@@ -1308,8 +1459,15 @@ HELP_TEXT = (
     "I'm **DevOS AI**. I run on this PC, so what you type or say stays here. Things I can do:\n"
     "- **Your PC:** “what is my PC config”, “how much RAM”, “disk space”, “battery”\n"
     "- **Apps:** “how many apps are installed”, “list my Windows apps”, “open Notepad”, "
-    "“install Zoom”, “uninstall Spotify” (I ask before I install or remove anything)\n"
+    "“install Zoom”, “uninstall Spotify” (I ask before I install or remove anything). "
+    "If an app fails to open (“Could not find the program”), say so — I can install the missing package.\n"
     "- **Web:** “go to Chrome and search HP latest laptop”, “play lo-fi on YouTube”, “directions to the airport”\n"
+    "- **Read a page:** paste a link and say “summarize this page”, “read this aloud”, or “ei news ta pore sunao” — I fetch it, summarize, and can speak it\n"
+    "- **Schedules:** “every day at 8am remind me to stretch”, “every weekday at 9 open chrome”, "
+    "“list scheduled tasks”, “cancel schedule stretch”\n"
+    "- **Memory:** “remember that I prefer Bangla”, “what do you remember”, “forget Bangla”\n"
+    "- **Fix this PC:** “Wi-Fi not working”, “no sound”, “PC is slow”, “Snipping Tool failed to open”, "
+    "“is this link safe” + the address\n"
     "- **Notes & typing:** “open Notepad and write: buy milk”, “take a note: call the bank”, “type hello here”\n"
     "- **Reminders:** “remind me in 10 minutes to call mom”, “set a timer for 5 minutes”\n"
     "- **More:** “send an email to name@example.com about the meeting”, “make a folder called Projects”, "
@@ -1471,6 +1629,9 @@ def _modesty_action(c: str) -> Optional[Action]:
 def route_clause(c: str, ctx: Optional[ToolContext] = None, context: Optional[List[str]] = None) -> Optional[List[Action]]:
     if not c:
         return None
+    ru = parse_read_url(c, context=context)
+    if ru:
+        return [ru]
     if _has(r"^(?:help|\?|what can you do|what can u do|how (?:do i|to) use (?:you|this)|commands|what are your (?:features|commands))$", c) \
             or _has(r"^what (?:can|do) you (?:do|help with)", c):
         return [Action("help", label="Show what I can do")]
@@ -1657,6 +1818,29 @@ def route_clause(c: str, ctx: Optional[ToolContext] = None, context: Optional[Li
         if site in KNOWN_SITES:
             return [Action("open_url", {"url": KNOWN_SITES[site], "browser": _browser_for(c)},
                            label=f"Open {site.title()}")]
+
+    # “Snipping Tool failed to open” / “couldn’t open terminal” → diagnose + offer install.
+    m = re.match(
+        r"^(?:.+?\s+)?(?:failed to (?:open|launch|start|run)|(?:could(?:\s*not|n't)|cannot|can'?t|unable to)\s+(?:open|launch|start|run)|"
+        r"won'?t open|not opening|not working)\s+(?:the\s+|my\s+|a\s+)?(.+?)$",
+        c,
+    ) or re.match(
+        r"^(?:the\s+|my\s+)?(.+?)\s+(?:failed to open|won'?t open|not opening|not working|could not find(?: the)? program)$",
+        c,
+    ) or re.match(
+        r"^could not find(?: the)? program\s+['\"]?(/usr/bin/\S+|\S+)['\"]?$",
+        c,
+    )
+    if m:
+        raw = m.group(1).strip()
+        raw = re.sub(r"^(?:the|my|a|an)\s+", "", raw)
+        raw = re.sub(r"\s+(?:app|application|program|window|tool)$", "", raw).strip()
+        if raw.startswith("/usr/bin/"):
+            raw = os.path.basename(raw)
+        if raw in ("spectacle", "snipping"):
+            raw = "snipping tool"
+        if raw:
+            return [Action("open_app", {"name": raw, "strong": True}, label=f"Fix / open {raw}")]
 
     m = re.match(r"^(open|launch|start|run|go to|switch to|fire up|bring up)\s+(.+?)(?:\s+(?:app|application|program))?$", c) \
         or re.match(r"^(.+?)\s+(খোলো|খুলো|খোল|চালু করো|চালু কর|ওপেন করো|ওপেন কর)$", c)
@@ -1983,10 +2167,54 @@ def _valid_name(name: str) -> Optional[str]:
     return n
 
 
+_REMEMBER_RE = re.compile(
+    r"(?i)^\s*(?:please\s+)?"
+    r"(?:remember(?:\s+that)?|save(?:\s+this)?(?:\s+fact)?|note(?:\s+that)?)\s*[:=]?\s*(?P<fact>.+?)\s*$"
+)
+_FORGET_RE = re.compile(
+    r"(?i)^\s*(?:please\s+)?(?:forget|delete memory(?: of)?|clear memory(?: of)?)\s+(?P<q>.+?)\s*$"
+)
+_RECALL_RE = re.compile(
+    r"(?i)^\s*(?:what do you remember(?: about me)?|show(?: my)? memory|list(?: my)?(?: saved)? facts|"
+    r"my (?:saved )?preferences)\s*$"
+)
+
+
 def route_content(raw: str, ctx: Optional[ToolContext] = None) -> Optional[RouteResult]:
     """Notes, typing, email, reminders, folders and files, from the case-preserved request."""
     if not raw:
         return None
+    # Recurring schedules (premium agent feature) — before one-shot reminders
+    try:
+        if HERE not in sys.path:
+            sys.path.insert(0, HERE)
+        import schedule as sched
+    except Exception:
+        sched = None
+    if sched is not None:
+        if sched.wants_list_schedules(raw):
+            return RouteResult([Action("schedule_list", label="List scheduled tasks")])
+        cancel_q = sched.parse_cancel(raw)
+        if cancel_q is not None:
+            return RouteResult([Action("schedule_cancel", {"query": cancel_q},
+                                       label="Cancel scheduled task")])
+        fields = sched.parse_schedule_request(raw)
+        if fields:
+            return RouteResult([Action("schedule_add", fields,
+                                       label=f"Schedule: {fields.get('title', 'task')}")])
+    # Durable memory
+    if _RECALL_RE.match(raw):
+        return RouteResult([Action("memory_list", label="Show what I remember")])
+    m = _FORGET_RE.match(raw)
+    if m:
+        return RouteResult([Action("memory_forget", {"query": m.group("q").strip()},
+                                   label="Forget a memory")])
+    m = _REMEMBER_RE.match(raw)
+    if m:
+        fact = (m.group("fact") or "").strip()
+        if len(fact) >= 2:
+            return RouteResult([Action("memory_remember", {"fact": fact},
+                                       label="Remember this")])
     m = _EMAIL_RE.match(raw)
     if m:
         to = spoken_email(m.group("to"))
@@ -2188,6 +2416,14 @@ def _find_recent_website(context: Optional[List[str]]) -> str:
 
 def route_single_clause(c: str, ctx: Optional[ToolContext] = None, context: Optional[List[str]] = None,
                         last_query: str = "", last_website: str = "") -> Optional[List[Action]]:
+    # 0. Read / summarize / speak a linked page (before open_url)
+    ru = parse_read_url(c, context=context)
+    if ru:
+        if not ru.args.get("url") and last_website:
+            ru.args["url"] = last_website
+        if ru.args.get("url"):
+            return [ru]
+
     # 1. Search Result / Web Page navigation
     m = _RANK_NAV_RE.match(c)
     if m:
@@ -2244,6 +2480,10 @@ def route(text: str, ctx: Optional[ToolContext] = None, context: Optional[List[s
     raw = preprocess(text)
     if not raw:
         return RouteResult()
+    # Read/summarize/speak page — must beat open_url and bare link handling.
+    ru = parse_read_url(raw, context=context) or parse_read_url(text, context=context)
+    if ru:
+        return RouteResult([ru])
     content = route_content(raw, ctx)
     if content:
         return content
@@ -2530,6 +2770,50 @@ def _x_open_url(a, ctx, dry):
     return _done(ok, f"Opening **{host}**.", "I couldn't open the browser.", [argv], data={"url": url})
 
 
+def _x_read_url(a, ctx, dry):
+    """Fetch page text for the engine to summarize / speak. Does not open a browser."""
+    url = normalize_url(str(a.args.get("url", "")))
+    if not url:
+        return ToolResult("Paste a link and ask me to read or summarize it.", ok=False)
+    verdict = _link_verdict(url)
+    if verdict and verdict.get("level") in ("block", "warn"):
+        return ToolResult("I did not read that address. " + verdict.get("summary", ""),
+                          ok=False, data={"url": url, "linkguard": verdict.get("level")})
+    mode = str(a.args.get("mode") or "summarize")
+    speak = bool(a.args.get("speak")) or mode == "speak"
+    question = str(a.args.get("question") or "")
+    host = urllib.parse.urlsplit(url).hostname or url
+    plan = [["devos-ai", "read_url", url]]
+    if dry:
+        return ToolResult(
+            f"Would read **{host}** and {'speak' if speak else 'summarize'} it.",
+            plan=plan,
+            data={"url": url, "mode": mode, "speak": speak, "question": question},
+        )
+    try:
+        if HERE not in sys.path:
+            sys.path.insert(0, HERE)
+        import web_read
+    except Exception as exc:
+        return ToolResult(f"Page reader isn't available ({exc}).", ok=False, data={"url": url})
+    text, title, err = web_read.fetch_page_text(url)
+    if err:
+        return ToolResult(err, ok=False, data={"url": url}, plan=plan)
+    return ToolResult(
+        f"Fetched **{title or host}**.",
+        plan=plan,
+        data={
+            "url": url,
+            "title": title or host,
+            "text": text,
+            "mode": mode,
+            "speak": speak,
+            "question": question,
+            "words": len(text.split()),
+        },
+    )
+
+
 def _x_open_search_result(a, ctx, dry):
     query = str(a.args.get("query", "")).strip()
     rank = int(a.args.get("rank", 1))
@@ -2588,6 +2872,25 @@ def _x_open_web_page(a, ctx, dry):
     return _done(ok, msg, "I couldn't open the browser.", [argv], data={"url": url, "page": page})
 
 
+def _named_launch_fix(name: str) -> Optional[Dict[str, str]]:
+    key = (name or "").strip().lower()
+    if not key:
+        return None
+    aliases = {
+        "snipping tool": "devos-snip",
+        "screenshot": "devos-snip",
+        "screenshot tool": "devos-snip",
+        "snip": "devos-snip",
+        "spectacle": "spectacle",
+    }
+    if key in aliases:
+        return dict(APP_LAUNCH_FIXES[aliases[key]])
+    for fix in APP_LAUNCH_FIXES.values():
+        if key == str(fix.get("name", "")).lower():
+            return dict(fix)
+    return None
+
+
 def _x_open_app(a, ctx, dry):
     name = str(a.args.get("name", "")).strip()
     apps = scan_desktop_entries(ctx.app_dirs)
@@ -2596,13 +2899,51 @@ def _x_open_app(a, ctx, dry):
         site = KNOWN_SITES.get(name.lower())
         if site:
             return _x_open_url(Action("open_url", {"url": site, "browser": "default"}), ctx, dry)
+        fix = _named_launch_fix(name)
+        if fix and fix.get("apt") == "kde-spectacle":
+            if not binary_is_available("/usr/bin/spectacle", ctx.which) and not binary_is_available("spectacle", ctx.which):
+                fake = DesktopApp(
+                    desktop_id="devos-snip", path="", name=fix.get("name") or "Snipping Tool",
+                    exec="spectacle", tryexec="/usr/bin/spectacle",
+                )
+                return missing_app_result(fake, "/usr/bin/spectacle", fix)
         hint = f" Did you mean {', '.join('**' + c + '**' for c in close)}?" if close else ""
         return ToolResult(f"I couldn't find an app called **{name}** on this PC.{hint} "
                           "You can install apps from the App Hub.", ok=False, data={"not_found": True})
+    binary = app_required_binary(app)
+    if binary and not binary_is_available(binary, ctx.which):
+        return missing_app_result(app, binary)
     argv = launch_command(app, ctx.which)
     ok = _launch(ctx, argv, dry)
-    return _done(ok, f"Opening **{app.name}**.", f"I couldn't start {app.name}.", [argv],
-                 data={"desktop_id": app.desktop_id})
+    if ok:
+        return _done(True, f"Opening **{app.name}**.", f"I couldn't start {app.name}.", [argv],
+                     data={"desktop_id": app.desktop_id})
+    # Launcher returned false — still check for a missing target binary (common Plasma case).
+    if binary and not binary_is_available(binary, ctx.which):
+        return missing_app_result(app, binary)
+    fix = launch_fix_for(app)
+    buttons = []
+    if fix:
+        args = {"name": fix.get("name") or app.name}
+        if fix.get("apt"):
+            args["apt"] = fix["apt"]
+        if fix.get("feature"):
+            args["feature"] = fix["feature"]
+        buttons.append((
+            f"Install {args['name']}",
+            Action("install_package", args, confirm=f"Install {args['name']}?", label=f"Install {args['name']}"),
+        ))
+    buttons.append((
+        "Open DevOS Features",
+        Action("open_app", {"name": "DevOS Features", "strong": True}, label="Open DevOS Features"),
+    ))
+    return ToolResult(
+        f"I couldn't start **{app.name}**. If you saw “Could not find the program”, the package is missing — I can reinstall it.",
+        ok=False,
+        plan=[argv],
+        buttons=buttons,
+        data={"desktop_id": app.desktop_id, "launch_failed": True},
+    )
 
 
 def _x_system_info(a, ctx, dry):
@@ -2730,10 +3071,32 @@ def _x_screenshot(a, ctx, dry):
     stamp = ctx.now().strftime("%Y-%m-%d_%H-%M-%S")
     path = os.path.join(folder, f"Screenshot_{stamp}.png")
     argv = ["spectacle", "-b", "-n", "-f", "-d", "700", "-o", path]
+    if not binary_is_available("spectacle", ctx.which) and not binary_is_available("/usr/bin/spectacle", ctx.which):
+        fake = DesktopApp(
+            desktop_id="devos-snip", path="", name="Snipping Tool",
+            exec="spectacle", tryexec="/usr/bin/spectacle",
+        )
+        return missing_app_result(fake, "/usr/bin/spectacle", APP_LAUNCH_FIXES["devos-snip"])
     if not dry:
         os.makedirs(folder, exist_ok=True)
     ok = _launch(ctx, argv, dry)
-    return _done(ok, f"Screenshot saved to **Pictures/Screenshots/{os.path.basename(path)}**.",
+    if not ok:
+        return ToolResult(
+            "I couldn't take a screenshot. If Spectacle is missing, install Snipping Tool first.",
+            ok=False,
+            plan=[argv],
+            buttons=[
+                ("Install Snipping Tool", Action(
+                    "install_package",
+                    {"name": "Snipping Tool", "apt": "kde-spectacle", "feature": "snip"},
+                    confirm="Install Snipping Tool (kde-spectacle)?",
+                    label="Install Snipping Tool",
+                )),
+                ("Open Screenshots", Action("open_folder", {"folder": "screenshots"})),
+            ],
+            data={"path": path},
+        )
+    return _done(True, f"Screenshot saved to **Pictures/Screenshots/{os.path.basename(path)}**.",
                  "I couldn't take a screenshot.", [argv], data={"path": path},
                  buttons=[("Open Screenshots", Action("open_folder", {"folder": "screenshots"}))])
 
@@ -2886,6 +3249,12 @@ def _x_solve(a, ctx, dry):
                          ctx, dry)
     elif opened == "security":
         _x_open_tool(Action("open_tool", {"tool": "security"}), ctx, dry)
+    elif opened == "settings":
+        for spec in result.get("buttons") or []:
+            if spec.get("settings"):
+                _x_open_settings(Action("open_settings", {
+                    "page": spec["settings"], "title": spec.get("title") or "Settings"}), ctx, dry)
+                break
     return ToolResult(result.get("text") or "I checked this PC.", ok=True, buttons=buttons,
                       data={"solve": result.get("topic"), "blocked": bool(result.get("blocked"))})
 
@@ -3298,6 +3667,133 @@ def reminder_command(ctx: ToolContext, secs: int, title: str, message: str, unit
     return [PYTHON, TOOLS_PY, "--notify-after", str(secs), title, message]
 
 
+def _x_schedule_add(a, ctx, dry):
+    try:
+        if HERE not in sys.path:
+            sys.path.insert(0, HERE)
+        import schedule as sched
+    except Exception as exc:
+        return ToolResult(f"Scheduler isn't available ({exc}).", ok=False)
+    fields = {
+        "title": a.args.get("title"),
+        "prompt": a.args.get("prompt"),
+        "kind": a.args.get("kind") or "notify",
+        "recur": a.args.get("recur") or "daily",
+        "hour": int(a.args.get("hour", 9)),
+        "minute": int(a.args.get("minute", 0)),
+        "weekday": a.args.get("weekday"),
+    }
+    if dry:
+        when = sched.human_when(sched.Task(
+            id="x", title=str(fields["title"]), prompt=str(fields["prompt"]),
+            recur=str(fields["recur"]), hour=fields["hour"], minute=fields["minute"],
+            weekday=fields.get("weekday"),
+        ))
+        return ToolResult(f"Would schedule **{fields['title']}** ({when}).", plan=[["schedule", "add"]])
+    task = sched.add_task(fields)
+    when = sched.human_when(task)
+    kind_note = "I'll run the action when due" if task.kind == "agent" else "I'll notify you"
+    return ToolResult(
+        f"Scheduled **{task.title}** — {when}. {kind_note}.\n"
+        f"Jobs run while this PC is awake (local agent schedule). "
+        f"Say **list scheduled tasks** or **cancel schedule {task.title[:30]}** anytime.",
+        data={"id": task.id, "when": when},
+    )
+
+
+def _x_schedule_list(a, ctx, dry):
+    try:
+        if HERE not in sys.path:
+            sys.path.insert(0, HERE)
+        import schedule as sched
+    except Exception as exc:
+        return ToolResult(f"Scheduler isn't available ({exc}).", ok=False)
+    tasks = sched.load_tasks()
+    if not tasks:
+        return ToolResult(
+            "No scheduled tasks yet. Try: **every day at 8am remind me to stretch** "
+            "or **every weekday at 9 open chrome**."
+        )
+    lines = ["**Your scheduled tasks** (local, on this PC):"]
+    for t in tasks:
+        flag = "" if t.enabled else " _(paused)_"
+        lines.append(f"- `{t.id}` · **{t.title}** · {sched.human_when(t)} · {t.kind}{flag}")
+    return ToolResult("\n".join(lines), data={"count": len(tasks)})
+
+
+def _x_schedule_cancel(a, ctx, dry):
+    try:
+        if HERE not in sys.path:
+            sys.path.insert(0, HERE)
+        import schedule as sched
+    except Exception as exc:
+        return ToolResult(f"Scheduler isn't available ({exc}).", ok=False)
+    q = str(a.args.get("query") or "").strip()
+    if dry:
+        return ToolResult(f"Would cancel schedules matching **{q}**.", plan=[["schedule", "cancel", q]])
+    n = sched.cancel_tasks(q)
+    if n == 0:
+        return ToolResult(f"No schedule matched **{q}**. Say **list scheduled tasks** to see them.")
+    return ToolResult(f"Cancelled **{n}** scheduled task" + ("s" if n != 1 else "") + ".")
+
+
+def _x_memory_remember(a, ctx, dry):
+    try:
+        if HERE not in sys.path:
+            sys.path.insert(0, HERE)
+        import memory as mem
+    except Exception as exc:
+        return ToolResult(f"Memory isn't available ({exc}).", ok=False)
+    fact = str(a.args.get("fact") or "")
+    if dry:
+        return ToolResult(f"Would remember: {fact}", plan=[["memory", "remember"]])
+    try:
+        saved = mem.remember(fact)
+    except ValueError as exc:
+        return ToolResult(str(exc), ok=False)
+    return ToolResult(f"Got it — I'll remember: **{saved}**")
+
+
+def _x_memory_forget(a, ctx, dry):
+    try:
+        if HERE not in sys.path:
+            sys.path.insert(0, HERE)
+        import memory as mem
+    except Exception as exc:
+        return ToolResult(f"Memory isn't available ({exc}).", ok=False)
+    q = str(a.args.get("query") or "")
+    if dry:
+        return ToolResult(f"Would forget memories matching **{q}**.", plan=[["memory", "forget"]])
+    n = mem.forget(q)
+    if n == 0:
+        return ToolResult(f"Nothing matched **{q}** in memory.")
+    return ToolResult(f"Forgot **{n}** memor" + ("ies" if n != 1 else "y") + f" matching **{q}**.")
+
+
+def _x_memory_list(a, ctx, dry):
+    try:
+        if HERE not in sys.path:
+            sys.path.insert(0, HERE)
+        import memory as mem
+    except Exception as exc:
+        return ToolResult(f"Memory isn't available ({exc}).", ok=False)
+    facts = mem.list_facts()
+    data = mem.load()
+    prefs = data.get("prefs") or {}
+    if not facts and not prefs:
+        return ToolResult(
+            "I don't have saved memory yet. Say **remember that I prefer Bangla replies** "
+            "or any short fact about you."
+        )
+    lines = ["**What I remember** (stays on this PC):"]
+    if prefs:
+        for k, v in list(prefs.items())[:12]:
+            lines.append(f"- prefer **{k}**: {v}")
+    for f in facts[-20:]:
+        lines.append(f"- {f}")
+    return ToolResult("\n".join(lines))
+
+
 def _x_reminder(a, ctx, dry):
     try:
         secs = int(a.args.get("seconds", 0))
@@ -3666,7 +4162,8 @@ def _x_install_package(a, ctx, dry):
 _EXECUTORS = {
     "install_app": _x_install_app, "install_package": _x_install_package,
     "help": _x_help, "about": _x_about, "pc_owner": _x_pc_owner,
-    "web_search": _x_web_search, "open_url": _x_open_url, "open_app": _x_open_app,
+    "web_search": _x_web_search, "open_url": _x_open_url, "read_url": _x_read_url,
+    "open_app": _x_open_app,
     "open_search_result": _x_open_search_result, "open_web_page": _x_open_web_page,
     "system_info": _x_system_info, "count_apps": _x_count_apps, "list_apps": _x_list_apps,
     "open_settings": _x_open_settings, "open_folder": _x_open_folder, "volume": _x_volume,
@@ -3677,6 +4174,8 @@ _EXECUTORS = {
     "compose_email": _x_compose_email, "reminder": _x_reminder, "create_folder": _x_create_folder,
     "open_path": _x_open_path, "media": _x_media, "close_app": _x_close_app,
     "social_post": _x_social_post,
+    "schedule_add": _x_schedule_add, "schedule_list": _x_schedule_list, "schedule_cancel": _x_schedule_cancel,
+    "memory_remember": _x_memory_remember, "memory_forget": _x_memory_forget, "memory_list": _x_memory_list,
 }
 
 ACTION_NAMES = frozenset(_EXECUTORS)

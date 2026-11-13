@@ -1175,6 +1175,15 @@ class TaskPipeline:
         project_slug: str = "",
         notify_desktop: bool = False,
     ) -> str:
+        item = self._append_task(prompt, agent, project, delay_seconds, create_repo, repo_name,
+                                 repo_desc, project_title, project_slug)
+        self._save()
+        if notify_desktop:
+            notify("Task Queued", f"[{item['project_slug']}] [{agent.upper()}] {prompt[:60]}...")
+        return item["id"]
+
+    def _append_task(self, prompt, agent, project, delay_seconds=0, create_repo=False,
+                     repo_name="", repo_desc="", project_title="", project_slug=""):
         task_id = "task_" + uuid.uuid4().hex[:16]
         run_at = (datetime.datetime.now() + datetime.timedelta(seconds=delay_seconds)).isoformat()
 
@@ -1217,10 +1226,55 @@ class TaskPipeline:
             "github_url": None,
         }
         self.queue.append(item)
-        self._save()
-        if notify_desktop:
-            notify("Task Queued", f"[{p_slug}] [{agent.upper()}] {prompt[:60]}...")
-        return task_id
+        return item
+
+    @queue_transaction
+    def add_project_drafts(self, drafts):
+        """Save all draft prompts together and keep folder identities distinct."""
+        groups = get_grouped_projects(self.queue)
+        used = {group["slug"] for group in groups}
+        paths = {Path(group["dir"]).resolve(): group["slug"] for group in groups if group["dir"]}
+        prepared = []
+        for draft in drafts:
+            slug = to_slug(draft["slug"])
+            location = draft.get("project")
+            if location:
+                folder = Path(location).expanduser()
+                if not folder.is_absolute() or not folder.is_dir():
+                    raise ValueError(f"Choose an existing absolute project folder: {location}")
+                folder = folder.resolve()
+            else:
+                base = Path(self.get_base_dir()).resolve()
+                folder = (base / slug).resolve()
+                if folder.parent != base:
+                    raise ValueError(f"Choose this linked folder explicitly: {folder}")
+            if folder in paths:
+                slug = paths[folder]
+            else:
+                original = slug
+                suffix = 2
+                while slug in used:
+                    slug = f"{original}-{suffix}"
+                    suffix += 1
+                paths[folder] = slug
+                used.add(slug)
+            prepared.append((draft, folder, slug))
+        original_queue = self.queue[:]
+        try:
+            for draft, folder, slug in prepared:
+                if not draft.get("project"):
+                    folder.mkdir(parents=True, exist_ok=True)
+                for index, (prompt, agent) in enumerate(draft["steps"]):
+                    create_repo = bool(draft.get("create_repo")) and index == 0
+                    self._append_task(prompt, agent, str(folder), create_repo=create_repo,
+                                      repo_name=draft.get("repo_name", "") if create_repo else "",
+                                      repo_desc=draft.get("repo_desc", "") if create_repo else "",
+                                      project_title=draft["title"], project_slug=slug)
+            self._save()
+        except (OSError, RuntimeError, ValueError):
+            self.queue = original_queue
+            raise
+        return [slug for _, _, slug in prepared]
 
     def add_commands(
         self,

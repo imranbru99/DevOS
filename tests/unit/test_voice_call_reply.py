@@ -28,9 +28,10 @@ def test_first_speak_cut_prefers_sentences_not_one_word():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
 
-    # Punctuated greeting may start immediately.
+    # A greeting shares the first playback with the sentence that follows.
+    assert mod._next_speak_cut("Hi!", first=True) == ("", 0)
     chunk3, adv3 = mod._next_speak_cut("Hi! How can I help you today?", first=True)
-    assert "hi" in chunk3.lower()
+    assert chunk3 == "Hi! How can I help you today?"
     assert adv3 > 0
 
     # Full sentence is spoken as one unit.
@@ -51,6 +52,12 @@ def test_first_speak_cut_prefers_sentences_not_one_word():
     chunk4, adv4 = mod._next_speak_cut(long, first=True)
     assert adv4 > 0
     assert len(chunk4.split()) >= 8
+
+    # Do not consume the tenth word while its last token is still arriving.
+    incomplete = "This sentence has several complete words before the final frag"
+    assert mod._next_speak_cut(incomplete, first=True) == ("", 0)
+    bangla = "আমি আজ সকালে বাজারে গেলাম, তারপর বাসায় ফিরলাম; সবাই অপেক্ষা করছিল।"
+    assert mod._next_speak_cut(bangla, first=True)[0] == bangla
 
     # Middle sentences must remain when splitting a full reply.
     plain = (
@@ -75,6 +82,65 @@ def test_first_speak_cut_prefers_sentences_not_one_word():
     assert "Second sentence" in joined
     assert "Third sentence" in joined
     assert len(chunks) >= 3
+
+
+def test_plain_for_speech_keeps_long_answers():
+    import importlib.util
+    path = ROOT / "components/assistant/voice.py"
+    spec = importlib.util.spec_from_file_location("devos_voice_plain", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    body = " ".join(f"Sentence number {i} is spoken fully." for i in range(1, 40))
+    plain = mod.plain_for_speech(body)
+    assert "Sentence number 1" in plain
+    assert "Sentence number 30" in plain
+    assert len(plain) > 480
+
+
+def test_stream_speaker_keeps_delayed_middle_sentence_and_flushes_tail(monkeypatch):
+    import importlib.util
+    import threading
+    from unittest.mock import Mock
+
+    path = ROOT / "components/assistant/voice.py"
+    spec = importlib.util.spec_from_file_location("devos_voice_stream", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    played = []
+    first_played = threading.Event()
+
+    def play(text, *args, **kwargs):
+        played.append(text)
+        first_played.set()
+        return True
+
+    monkeypatch.setattr(mod, "warm_tts", Mock())
+    monkeypatch.setattr(mod, "_synthesize_to_file", Mock(return_value=False))
+    monkeypatch.setattr(mod, "_speak_chunk", play)
+    speaker = mod.StreamSpeaker()
+    speaker.start("bn")
+    try:
+        speaker.feed_delta_total("প্রথম বাক্য।")
+        assert first_played.wait(2)
+        threading.Event().wait(0.25)
+        speaker.feed_delta_total("প্রথম বাক্য। দ্বিতীয় বাক্য। শেষ কথাটি")
+        speaker.finish()
+        assert played == ["প্রথম বাক্য।", "দ্বিতীয় বাক্য।", "শেষ কথাটি"]
+    finally:
+        speaker.stop(kill_audio=False)
+
+
+def test_detects_bangla_script_and_romanized():
+    import importlib.util
+    path = ROOT / "components/assistant/voice.py"
+    spec = importlib.util.spec_from_file_location("devos_voice_lang", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert mod.detect_user_language("আমি ভালো আছি") == "bn"
+    assert mod.detect_user_language("ami kemon acho bhai") == "bn"
+    assert mod.detect_user_language("thik ache dhonnobad") == "bn"
+    assert mod.detect_user_language("Open Chrome and search laptops") == "en"
+    assert mod.detect_user_language("السلام عليكم") == "auto"
 
 
 def test_chat_call_speaks_voice_turns_and_resumes():

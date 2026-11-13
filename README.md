@@ -16,13 +16,105 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/devos_desktop.png" alt="DevOS Desktop Environment" width="950">
-  <br><em>Desktop screenshot from an earlier DevOS build with the Sapphire Waves wallpaper and centered Plasma taskbar.</em>
+  <img src="docs/images/devos_desktop_hero.jpg" alt="DevOS Flagship desktop look — Tidal Glass" width="950">
+  <br><em>Current Flagship look — Tidal Glass (default-class wallpaper from the DevOS collection).</em>
+</p>
+
+<p align="center">
+  <img src="docs/images/devos_login_preview.png" alt="DevOS sign-in screen" width="460">&nbsp;
+  <img src="docs/images/devos_dashboard_overview.png" alt="DevOS Desktop overview dashboard" width="460">
+  <br><em>Sign-in · Opening dashboard (Overview)</em>
+</p>
+
+<p align="center">
+  <img src="docs/images/gallery_azure_ribbon.jpg" alt="Azure Ribbon wallpaper" width="300">&nbsp;
+  <img src="docs/images/gallery_glass_kernel.jpg" alt="Glass Kernel wallpaper" width="300">&nbsp;
+  <img src="docs/images/gallery_terminal_glow.jpg" alt="Terminal Glow wallpaper" width="300">
+  <br>
+  <img src="docs/images/gallery_pearl_dawn_home.jpg" alt="Pearl Dawn wallpaper" width="300">&nbsp;
+  <img src="docs/images/gallery_cyan_orbit_home.jpg" alt="Cyan Orbit wallpaper" width="300">&nbsp;
+  <img src="docs/images/gallery_home-bloom.jpg" alt="Home Bloom wallpaper" width="300">
+  <br><em>Homepage / Flagship wallpaper samples from the current collection.</em>
 </p>
 
 ---
 
-## Current source — November 10, 2026
+## Screenshots
+
+<p align="center">
+  <img src="docs/images/devos_ai_models.png" alt="DevOS AI Models" width="900">
+  <br><em>DevOS AI Models — choose Tiny → Extra large, vision & coding packs, local OpenAI API.</em>
+</p>
+
+<p align="center">
+  <img src="docs/images/devos_code_agent.png" alt="DevOS Code Agent" width="900">
+  <br><em>DevOS Code — local agent with plan / run / preview, diffs and private offline engine.</em>
+</p>
+
+<p align="center">
+  <img src="docs/images/devos_features.png" alt="DevOS Features" width="440">&nbsp;
+  <img src="docs/images/devos_apps.png" alt="DevOS Apps" width="440">
+  <br><em>Features & default apps · Installed Apps manager</em>
+</p>
+
+<p align="center">
+  <img src="docs/images/devos_dashboard_storage.png" alt="Storage dashboard" width="440">&nbsp;
+  <img src="docs/images/devos_dashboard_subsystems.png" alt="Subsystems dashboard" width="440">
+  <br><em>Storage & disks · Subsystems & runtime</em>
+</p>
+
+<p align="center">
+  <img src="docs/images/devos_storage_doctor.png" alt="Storage & Boot Doctor" width="440">&nbsp;
+  <img src="docs/images/devos_thispc_light.png" alt="This PC light mode" width="440">
+  <br><em>Storage & Boot Doctor · This PC (light)</em>
+</p>
+
+<p align="center">
+  <img src="docs/images/devos_thispc_dark.png" alt="This PC dark mode" width="440">&nbsp;
+  <img src="docs/images/devos_windows_app.png" alt="Windows App companion" width="440">
+  <br><em>This PC (dark) · Windows App companion</em>
+</p>
+
+<p align="center">
+  <img src="docs/images/devos_broadband.png" alt="Broadband PPPoE" width="360">&nbsp;
+  <img src="docs/images/devos_authentication_vm.png" alt="Authentication dialog" width="520">
+  <br><em>Broadband PPPoE · Native authentication dialog</em>
+</p>
+
+<p align="center">
+  <img src="docs/images/gallery_installer_welcome.png" alt="Installer welcome" width="900">
+  <br><em>Calamares installer welcome branding (current image).</em>
+</p>
+
+<p align="center">
+  <img src="docs/images/gallery_install_slide_01.jpg" alt="Install slide 1" width="300">&nbsp;
+  <img src="docs/images/gallery_install_slide_02.jpg" alt="Install slide 2" width="300">&nbsp;
+  <img src="docs/images/gallery_install_slide_03.jpg" alt="Install slide 3" width="300">
+  <br>
+  <img src="docs/images/gallery_install_slide_04.jpg" alt="Install slide 4" width="300">&nbsp;
+  <img src="docs/images/gallery_install_slide_05.jpg" alt="Install slide 5" width="300">&nbsp;
+  <img src="docs/images/gallery_install_slide_06.jpg" alt="Install slide 6" width="300">
+  <br><em>Installer slideshow backgrounds.</em>
+</p>
+
+<p align="center">
+  <img src="docs/images/gallery_flagship_tidal_glass.jpg" alt="Tidal Glass" width="300">&nbsp;
+  <img src="docs/images/gallery_flagship_lattice_dawn.jpg" alt="Lattice Dawn" width="300">&nbsp;
+  <img src="docs/images/gallery_flagship_obsidian_pool.jpg" alt="Obsidian Pool" width="300">
+  <br>
+  <img src="docs/images/gallery_flagship_silver_cascade.jpg" alt="Silver Cascade" width="300">&nbsp;
+  <img src="docs/images/gallery_flagship_prism_dock.jpg" alt="Prism Dock" width="300">&nbsp;
+  <img src="docs/images/gallery_flagship_aurora_shell.jpg" alt="Aurora Shell" width="300">
+  <br>
+  <img src="docs/images/gallery_flagship_cyan_orbit.jpg" alt="Cyan Orbit" width="300">&nbsp;
+  <img src="docs/images/gallery_flagship_pearl_dawn.jpg" alt="Pearl Dawn" width="300">&nbsp;
+  <img src="docs/images/gallery_wallpaper_preview.jpg" alt="Wallpaper preview strip" width="300">
+  <br><em>Flagship desktop wallpapers (current packages).</em>
+</p>
+
+---
+
+## Current source — November 13, 2026
 
 DevOS targets **Ubuntu 26.04 LTS (Resolute), amd64**. The current source is
 for 64-bit Intel and AMD laptops, desktops and mini PCs. The build includes
@@ -32,7 +124,10 @@ The November 10 full build produced `out/devos-26.04-amd64-final-2026-11-10-usb.
 and a matching SHA-256 file. The full image includes an offline archive for
 selected optional apps.
 The standard build writes `out/devos-26.04-amd64.iso` and a matching SHA-256
-file. The Google Drive folder above contains previously published images.
+file. Source after that date (including this tree) adds pipeline multi-project
+drafting, DevOS AI schedules/memory/read-URL, and the README gallery below —
+rebuild or `devos update` when a matching signed bundle is published.
+The Google Drive folder above contains previously published images.
 Compare the checksum and build date before assuming a download contains these
 changes. [Build instructions](#build-the-iso-from-source)
 
@@ -56,8 +151,8 @@ changes. [Build instructions](#build-the-iso-from-source)
   input, and PipeWire source. DevOS restores selected USB microphones and speakers
   on reconnect without changing mute or gain. Pair Bluetooth audio devices in
   Settings before choosing them as an input or output.
-- **Default wallpaper.** Fresh desktops use Glass Ribbon from the DevOS
-  Flagship collection, with a 3840 × 2160 desktop image.
+- **Default wallpaper.** Fresh desktops use Flagship looks such as **Tidal Glass**
+  / Azure Ribbon from the DevOS collection (3840 × 2160 variants included).
   The installer image uses Memory Saver, a RAM-based tab discard threshold and
   zram sized at 50% of RAM. Chrome manages renderer isolation and background
   scheduling with its own defaults. Tab reloads and throughput depend on the
@@ -73,6 +168,22 @@ changes. [Build instructions](#build-the-iso-from-source)
   workflow queue support editor and agent workflows. Agent Endurance can
   inhibit sleep during long-running coding sessions. Local model availability
   depends on the installed or downloaded model.
+- **AI Pipeline (multi-project).** Section 3 keeps **several project title +
+  prompt fields open at once** (`---` splits steps inside a field) — then
+  **Add all open fields to Pipeline**. Also: classic Add Prompt / Add Project,
+  **Hold & prepare another** + Add all prepared, **named step groups** (up to 20
+  groups, 1–6 prompts each) with Auto-add chips, **Batch 20-Projects**,
+  **Import Specs…** (folder of `.md` files), optional **Auto-create GitHub Repo**,
+  blueprints, Balanced/Quality/Overnight/Speed modes, parallel Antigravity +
+  Antigravity KDE slots, and a success scorecard. See [`docs/AI_PIPELINE.md`](docs/AI_PIPELINE.md).
+- **DevOS AI agent.** Read/summarize/speak a pasted URL (“pore sunao”); recurring
+  schedules (daily / weekday / weekly; notify or safe action); durable memory
+  (remember / list / forget); OS self-heal (Wi-Fi, sound, display, Bluetooth,
+  printer, updates, slow PC, crashed apps, missing binaries → install offer);
+  install/uninstall apps from chat (with confirm); draft social posts; media
+  next/previous; smoother end-to-end TTS with Bangla neural voice; dual-pass
+  Bangla+English STT; Auto/EN/BN reply language; Romanized Bangla routing.
+  Prefer **Small** or **Medium** models for multilingual quality.
 
 The final ISO passed its checksum and 38 boot-layout checks. QEMU reached the
 DevOS boot menu in BIOS and with the image attached as a UEFI USB drive.
@@ -86,18 +197,8 @@ A complete install and desktop boot on the ASRock test machine and a
 [Download counts](docs/DOWNLOAD-STATS.md)
 
 <p align="center">
-  <img src="docs/images/devos_boot_menu_2026-11-09.png" alt="DevOS final ISO graphical GRUB menu with Try or Install and Safe Graphics entries" width="900">
-  <br><em>Graphical boot menu captured from the November 9 ISO in QEMU.</em>
-</p>
-
-<p align="center">
-  <img src="docs/images/devos_login_preview.png" alt="Rendered preview of the DevOS dark sign-in screen" width="900">
-  <br><em>Rendered SDDM theme preview with sample account and session data.</em>
-</p>
-
-<p align="center">
-  <img src="tools/wallpapers/premium-collection/originals/devos-home50-20-home-bloom.jpg" alt="Home Bloom from the new DevOS homepage wallpaper collection" width="900">
-  <br><em>Home Bloom from the new 50-image homepage wallpaper collection.</em>
+  <img src="docs/images/gallery_installer_wallpaper.jpg" alt="DevOS installer wallpaper" width="900">
+  <br><em>Installer / live session wallpaper from the current branding pack.</em>
 </p>
 
 ## Latest changes and daily-use guide
@@ -112,17 +213,20 @@ A complete install and desktop boot on the ASRock test machine and a
 | Storage after installation | Open **This PC** for files or `devos disk` for Storage & Boot Doctor. Formatting deletes the selected volume; back up its contents first. A/B/C are volume labels, rather than Windows drive letters. See [storage instructions](docs/STORAGE_MANAGEMENT.md). |
 | Screen recording and editing | Run `devos recorder`. Select audio, turn on listening to inspect the live signal meter, then record. Use the recording toolbar/tray to stop and save. Open the clip editor to trim, copy or cut ranges, retain/mute sound, or replace/mix a voice track. Export creates a new MP4. [Recorder guide](docs/SCREEN_RECORDER.md). |
 | Optimizer and safe automatic cleanup | Open Optimizer from the tray or run `devos optimizer --cleanup`. Review sizes and categories before manual deletion. Toggle automatic cleanup in its tray menu; `devos optimizer --auto-scan` previews the bounded automatic policy. Automatic cleanup only targets aged disposable thumbnail/DevOS temporary caches; personal files, recordings, models, Trash and Downloads require separate choices. [Performance and cleanup guide](docs/HEAVY_LOAD_AND_STORAGE_OPTIMIZATION.md). |
-| AI workflow queue | Run `devos pipeline gui`, add tasks, select provider/project and optional delay, then run the queue. Tasks run in order; failed or submitted tasks block successors until resolved. Antigravity submission requires **Confirm completed** after the work actually finishes. Codex dispatch requires its installed, authenticated CLI. [Pipeline guide](docs/AI_PIPELINE.md). |
+| AI workflow queue | Run `devos pipeline gui`. Open **several project fields** at once; Hold tray; named step groups; **Import Specs…**; Batch 20; blueprints; Balanced/Quality/Overnight/Speed. Antigravity needs **Confirm completed**. [Pipeline guide](docs/AI_PIPELINE.md). |
+| DevOS AI schedules & memory | `every day at 8am remind me to stretch`, `every weekday at 9 open chrome`, `every Friday at 5pm…`, `list scheduled tasks`, `cancel schedule stretch`. `remember that…`, `what do you remember`, `forget Bangla`. Local; schedules while PC is awake. |
+| Read a web page aloud | Paste a link: `summarize this page`, `read this aloud`, or `ei news ta pore sunao` — fetch, summarize, optional TTS. |
+| Fix this PC | `Wi-Fi not working`, `no sound`, `PC is slow`, `Bluetooth won’t pair`, `printer not working`, `Snipping Tool failed to open`, `is this link safe` + URL — checks, settings, or install missing package. |
+| Apps from chat | `install Zoom`, `uninstall Spotify` (asks first). Draft: `post on X about DevOS` (opens composer + clipboard; you publish). `next song` / `previous track`. |
+| Kids Mode | **Win+K** starts Kids Mode; **Esc** exits (parent PIN exit when configured). Or say “start kids mode”. |
 | Heavy workloads | Hardware tuning adapts to SSD/HDD and CPU capabilities; compressed RAM, bounded logs and separate AI workload limits reduce resource contention. Use `devos doctor` for health checks. Keep backups and updates; ten years of daily use requires ongoing maintenance and supported hardware. [Maintenance guide](docs/LONG_TERM_MAINTENANCE.md). |
 
 The native authentication style requires KDE/Qt 6. Older Qt 5 agents keep their
 normal interface until the supported base upgrade; the wrapper falls back to
 the installed agent.
 
-The authentication screenshot below was captured from the real KDE/Polkit
-agent in the installed disposable VM, using the DevOS style (not a mock password form).
-
-![Native DevOS authentication dialog](docs/images/devos_authentication_vm.png)
+Native KDE/Polkit authentication uses the DevOS Quick Controls style (see
+[Screenshots](#screenshots) above).
 
 ### Enable Islamic features and prayer reminders
 
@@ -212,7 +316,7 @@ DevOS exists to give people — especially Windows users and developers — **an
 |---|---|
 | 🪟 **Windows apps** | `.exe` / `.msi` open with a double-click (32- and 64-bit). Popular apps such as AnyDesk, Zoom, Discord, Spotify and Steam get their **native DevOS version** offered instead. |
 | 🤖 **Android apps** | `.apk` files install into a built-in Android system (downloaded once on first use, ~850 MB). WhatsApp, Telegram, Spotify and similar APKs are offered as native DevOS apps — no Android download needed. |
-| ✨ **DevOS AI** | Private on-device assistant: PC questions, actions, notes, web search, reminders, PDFs, text-in-images, photos, voice (Bangla + English), Islamic daily Ayah & Hadith with Muhiuddin Khan Bangla translation, **Win+H** push-to-talk and optional **“Hey DevOS”**. |
+| ✨ **DevOS AI** | Private on-device assistant: PC questions, actions, notes, web search, reminders & **schedules**, **memory**, **read/speak URLs**, PDFs, text-in-images, photos, OS self-heal, voice (Bangla + English + Romanized Bangla), Islamic daily Ayah & Hadith with Muhiuddin Khan Bangla translation, **Win+H** push-to-talk and optional **“Hey DevOS”**. |
 | 🎙️ **Voice Typing** | **Win+Alt+A** / **Win+Alt+H** — dictate into WhatsApp, Chrome, Cursor, mail or Notepad; green mic; click anywhere to stop; offline Bangla + English on Plasma Wayland. |
 | 🌙 **Islamic & Modesty** | Authentic Quran & Hadith with verified **Muhiuddin Khan Bangla translation** & Arabic, offline prayer times & Qibla. Intelligent on-device modesty filter for Chrome/Brave/Edge with selectable detection modes and text-image exclusions. Detection can miss content or blur it incorrectly. |
 | 🧹 **DevOS Optimizer** | Finds apps you haven't used for 15+ minutes and offers to close them (with real app names like *This PC*, *Notepad*); cleans temp files, caches, the Recycle Bin and Windows-app leftovers. |
@@ -251,6 +355,7 @@ DevOS exists to give people — especially Windows users and developers — **an
   | `Win + Shift + S` | Screenshot of a region |
   | `Win + ← → ↑ ↓` | Snap / maximise / minimise windows |
   | `Win + H` | **DevOS AI voice command** |
+  | `Win + K` | **Kids Mode** — full-screen playground (work keeps running) |
   | `Win + V` | **Clipboard history** — pick something you copied and paste it back |
   | `Win + .` | **Emoji** — search and paste a smile, a heart, food, or the Bangladesh flag |
   | `Win + Alt + A` | **Voice Typing** — green mic; speak into the text box under the mouse |
@@ -258,7 +363,7 @@ DevOS exists to give people — especially Windows users and developers — **an
   | `Win + Alt + Shift + A` | **AI on selected text** — rewrite, fix, shorten, translate, summarize |
   | `Ctrl + Shift + Esc` | **Task Manager** |
 
-- **250+ wallpapers**: Sapphire Waves default plus designs such as Golden Cloudscape, Cosmic Orbit, Alpine Floral Terrace, Kids Learning Room, Aurora Veil, Silk Current, Nebula Drift… Previews in *Configure Desktop and Wallpaper*. See [`tools/wallpapers/preview.jpg`](tools/wallpapers/preview.jpg).
+- **250+ wallpapers**: Flagship defaults such as Tidal Glass, Azure Ribbon, Glass Kernel, Pearl Dawn, plus the homepage collection. Previews in *Configure Desktop and Wallpaper* and in [Screenshots](#screenshots) (`docs/images/gallery_wallpaper_preview.jpg`).
 - **Night light** warms the screen from 7:00 pm to 6:30 am, the way Windows does, and leaves daytime colour alone. Turn it off in Settings → Display & Monitor → Night Light.
 - **Your work comes back.** After a restart or shutdown, DevOS opens the same applications again. Browsers reopen their tabs, Notepad and DevOS Code reopen the same files (including unsaved text), and Files, Terminal, Kate and the other KDE apps reopen the documents that were on screen.
 - Everything is called **DevOS**: the sign-in session, “About this PC”, and apps named by what they do — *Files, Terminal, Text Editor, Photos, Document Viewer, Settings, Task Manager*.
@@ -304,12 +409,22 @@ Open **DevOS AI** from the desktop, or press **Win + H** and just speak.
 | “Open Notepad and save my name Imran Ahmed, number 0151…” | Saves a note in *Documents/Notes* and opens it |
 | “Take a note: buy milk, eggs and bread” | Same, as a note |
 | “Remind me in 10 minutes to call mom” / “Set a timer for 5 minutes” | Desktop reminder, even if the window is closed |
+| “Every day at 8am remind me to stretch” / “every weekday at 9 open Chrome” | Recurring local schedule (notify or safe action while awake) |
+| “Every Friday at 5pm remind me…” / “list scheduled tasks” / “cancel schedule stretch” | Weekly schedules; list or cancel |
+| “Remember that I prefer Bangla” / “what do you remember” / “forget Bangla” | Durable on-PC memory across chats |
+| “https://… pore sunao” / “summarize this page https://…” | Fetches the page, summarizes; speaks when you ask to read aloud |
+| “Install Zoom” / “uninstall Spotify” | Finds/installs or removes (always asks before changing the system) |
+| “Draft a post on X about DevOS” / “post on Facebook about …” | Opens the site with a draft + clipboard — you review and publish |
+| “Next song” / “previous track” / “play music” | Media controls |
+| “Enable modesty filter” / “modesty status” / “disable blur” | Browser Modesty filter from chat (or `sudo devos modesty …`) |
 | “Send an email to x@y.com about the meeting” | Opens a ready email draft (never sends by itself) |
 | “Open my Downloads” / “Make a folder called Projects on the desktop” | Files and folders |
 | “Open Wi-Fi settings”, “Volume up”, “Brightness down”, “Take a screenshot”, “Lock the screen” | Settings and system actions |
-| “Close Chrome”, “Free up space”, “Open Apps” | App and cleanup actions |
+| “Close Chrome”, “Free up space”, “Open Apps”, “Start kids mode” | App, cleanup, and Kids Mode |
 | “Today's Islamic” / “Today's ayah” / “আজকের আয়াত” | Shows authentic Quran Ayah & Hadith of the day with Arabic, English, and **Muhiuddin Khan Bangla translation** directly from verified local datasets with zero AI hallucination |
-| “Help me, Wi-Fi is not working”, “Is my PC safe?”, “Is this link safe?” plus the address | Checks this PC and does the safe next step |
+| “Wi-Fi not working”, “no sound”, “PC is slow”, “Bluetooth won’t pair”, “printer not working” | Opens the right settings / Optimizer / Security with a real check |
+| “Snipping Tool failed to open” / “Could not find the program …” | Offers **Install** for the known package, or Features / App Hub |
+| “Is this link safe?” plus the address | LinkGuard on this PC — will not open disguised/short scam links |
 
 For long dictation into WhatsApp, Chrome, Cursor or mail, use **Voice Typing** (**Win+Alt+A**) instead of DevOS AI chat — the green mic types while you speak.
 
@@ -321,17 +436,21 @@ Shut down, restart and uninstall always ask for confirmation first.
 - **Describe photos** (“What's in this picture?”) with an optional one-time download (about 520 MB including the vision model assets).
 
 **Voice**
-- Offline speech recognition for **Bangla and English** (included in the ISO).
+- Offline speech recognition for **Bangla and English** (included in the ISO), with a **dual-pass** STT path that keeps the clearer Bangla or English transcript.
 - **Win + H**: speak a *command* to DevOS AI; a small pill shows what was heard and the result.
 - **Win + Alt + A** / **Win + Alt + H**: **Voice Typing** into the text box under the mouse (not a chat reply) — see §16.
 - **“Hey DevOS”** hands-free mode (off by default, one switch in the sidebar), with battery and CPU guards and a tray icon to pause it.
+- **Reply language** in the sidebar: **Auto** (match what you spoke/typed), **English**, or **Bangla**.
+- Spoken answers use neural TTS (Bangla **Nabanita** when the reply is বাংলা / Romanized Bangla); long replies stream sentence-by-sentence without cutting mid-thought. espeak is the offline fallback.
 
 **Experience**
 - Modern chat window: conversation history sidebar with search, rename and delete; answers stream in word by word; Stop button; copy and regenerate; drag-and-drop files.
 - **Starter Cards:** One-click suggestion cards for common actions on new chats (*Today's Islamic*, *What's my PC config?*, *How many apps are installed?*, *Start kids mode*).
+- **Language:** replies match what you type or speak — বাংলা script, Romanized Bangla (`ami kemon acho`), English, and other scripts.
 - **Fast and light:** the built-in model is small (0.5B, ~490 MB); response speed depends on your hardware, and its memory is **released after 5 idle minutes**.
-- **Smarter DevOS AI:** one click adds a larger model (1.1 GB) for better free-form answers; one click removes it again.
-- **Local assistant:** chat, speech and document processing run on this PC. Web actions open online services; the separate Code Agent can use configured cloud providers.
+- **Smarter DevOS AI:** one click adds a larger model (Small 1.5B / Medium 3B+) for better free-form and multilingual answers; one click removes it again.
+- **Local assistant:** chat, speech and document processing run on this PC. Web actions open online services; reading a URL fetches the page for summary/speak. The separate Code Agent can use configured cloud providers.
+- **Custom agents:** open **Agents**, set instructions, folder access, diagnostics and allowed apps (up to 8 tool steps per turn); approve launches; **Save report** as Markdown.
 - Also available to apps: an OpenAI-compatible local API at `http://127.0.0.1:11434/v1` (used by DevOS Code's AI features). Reference: `http://127.0.0.1:11434/docs` and [`docs/LOCAL_AI.md`](docs/LOCAL_AI.md).
 
 ### 5. DevOS Optimizer
@@ -556,9 +675,9 @@ download when needed. Build this edition with `DEVOS_BUNDLE_OPTIONAL_APPS=1`.
 | Storage Doctor | What is using the disk, with a way to clean it |
 | Broadband Connection | PPPoE dial-up for direct ONU / fiber modems (`devos-broadband`) |
 | Screen Recorder | Record the screen, then trim / mute / replace voice (`devos recorder`) |
-| AI Pipeline | Ordered Antigravity / Codex / Cursor Agent / Claude queue (`devos pipeline gui`) |
+| AI Pipeline | Multi-project open fields, step groups, Hold, Import Specs, Batch 20, blueprints, premium modes (`devos pipeline gui`) |
 | Display & Power | Resolution, refresh, scale; battery vs plugged-in sleep (`devos-display`, `devos-power`) |
-| Kids Mode | Full-screen space playground; work keeps running behind it |
+| Kids Mode | Full-screen space playground (**Win+K**); work keeps running behind it |
 | Settings, Files, This PC, Terminal, Photos | The everyday desktop, named as what they do |
 | Night light | Warmer screen from 7:00 pm to 6:30 am |
 | Islamic DevOS | Prayer times, Qibla, Hijri date, daily ayah and hadith. Islamic family preset |
@@ -598,7 +717,7 @@ download when needed. Build this edition with `DEVOS_BUNDLE_OPTIONAL_APPS=1`.
 
 ### 15b. Kids Mode (`devos-kids-mode`)
 - **Cosmic interactive playground:** A full-screen space-themed canvas with glowing star constellations, shooting star trails, interactive floating celestial bodies, and dynamic mouse gravity physics.
-- **Play without closing your work:** Background developer servers, downloads and desktop applications continue running. Kids Mode is an interactive full-screen activity, not a restricted account or security lock. Start with the desktop shortcut or ask DevOS AI *"Start kids mode"*. Exit easily with `Esc`.
+- **Play without closing your work:** Background developer servers, downloads and desktop applications continue running. Kids Mode is an interactive full-screen activity, not a restricted account or security lock. Start with **Win+K**, the desktop shortcut, or ask DevOS AI *"Start kids mode"*. Exit with `Esc` (parent PIN exit when configured).
 
 ### 15c. Opening Dashboard & System Control (`devos-dashboard`)
 DevOS includes a dark dashboard for hardware status, storage tools, local runtimes and first-boot onboarding:
@@ -636,8 +755,8 @@ DevOS includes a dark dashboard for hardware status, storage tools, local runtim
 - **Clipboard history (Win+V)** — the copies you already made, one click to paste one back into the app you were using.
 - **Emoji panel (Win+.)** — search “love”, “laugh”, “food” or “bd” and it pastes the emoji. Say “open emoji” to DevOS AI.
 - **DevOS AI Code Agent** — a Cursor-style coding agent on the local model: plans, reads code, shows every change as a diff to accept, asks before running commands. Appears only on PCs with 8 GB+ RAM and a Medium+ or Coding AI model.
-- **AI Pipeline** — ordered queue of Antigravity / Codex / Cursor Agent / Claude tasks (`devos pipeline gui`).
-- **Install anything:** paste a Microsoft Store, Google Play, App Store or Flathub link (or say "install Zoom") and DevOS AI finds the DevOS version, the web version, or tells you honestly when an app can't run on DevOS.
+- **AI Pipeline** — multi-project queue for Antigravity / Antigravity KDE / Codex / Cursor Agent / Claude / local (`devos pipeline gui`): several open title+prompt fields, Hold tray, named step groups, Import Specs, Batch 20, blueprints, GitHub repo option, Balanced/Quality/Overnight/Speed, parallel agent slots.
+- **Install anything:** paste a Microsoft Store, Google Play, App Store or Flathub link (or say "install Zoom") and DevOS AI finds the DevOS version, the web version, or tells you honestly when an app can't run on DevOS. If a shortcut says *Could not find the program*, say so in chat — DevOS AI can offer the known package (e.g. Snipping Tool → Spectacle).
 - DevOS's own tools (Dashboard, Storage Doctor, Broadband, Security, Phone Link, Share, Backup…) open in their **own DevOS windows**, not browser tabs.
 
 ### 17. Cloud Backup — optional Google Drive / OneDrive

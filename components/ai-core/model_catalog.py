@@ -122,7 +122,11 @@ CODER_MODELS = {
 
 # Always available, nothing to download: shown on the installer page so people
 # know PDFs and text in images work with every choice.
-BUILT_IN_SKILLS = "Reading PDFs and text in images (Bangla + English) and voice commands work with every choice."
+BUILT_IN_SKILLS = (
+    "Reading PDFs and text in images (Bangla + English) and voice commands work with every choice. "
+    "Tiny is weakest at Bangla and other languages; Small/Medium+ understand Bangla, Romanized Bangla, "
+    "and multilingual chat much better."
+)
 
 DISK_RESERVE_MB = 8000  # room left for apps and updates after the download
 

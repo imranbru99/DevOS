@@ -87,16 +87,21 @@ not personal queue prompts. They validate dispatch and handoff, not the correctn
 of an arbitrary generated application. Claude/Aider require separate installed,
 authenticated CLIs; their live execution was not tested on this PC.
 
-Drafting a project: paste one full prompt and click **Add Prompt**. Repeat for
-additional prompts. The draft list shows the first five words of each prompt;
-select a row to move it up/down, edit it, or remove it. **Add Project to Pipeline**
-is the final submission and queues every draft prompt under one project. Any
-text still in the editor is included as one final prompt. Markdown `---` inside
+Drafting a project: section 3 keeps **multiple open project fields** on screen
+(title + command/prompt each). Click **+ Open another project field** to add more;
+fill several at once, then **Add all open fields to Pipeline**. Steps inside one
+field can be split with a `---` line. The classic single form (**Add Prompt** →
+**Add Project**) still works below. **Hold & prepare another** saves into a tray.
+Each editor has its own folder. Use **Existing…** for folders in the current
+workspace or **Browse…** for an existing folder elsewhere. Leave the location
+empty to create the project under **WORKSPACE**.
+**Batch 20-Projects** generates many folders at once.
+Any text still in the editor is included as one final prompt. Markdown `---` inside
 a draft is preserved, not interpreted as a project or step separator. The
 optional local Auto-add **step groups** (`~/.config/devos/pipeline_step_pack.json`).
-Each named group holds 1–6 prompts (paste several in one editor separated by `---`).
-**Auto-add group** picks a group and stages every step in that group in order after
-Step 1. Edit groups with ⚙.
+Saved groups appear as chips on the draft form — click one to append its prompts
+after **Add Prompt** drafts. **+ Add group** opens a modal: name the group, paste
+one multi-line prompt, save into group, repeat (1–6). Old **Add Prompt** is unchanged.
 
 The queue displays one project per page; Previous/Next changes only the view,
 not execution order. **Clear Logs** clears current and rotated activity history

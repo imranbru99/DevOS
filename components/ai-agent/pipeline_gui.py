@@ -980,16 +980,13 @@ def _new_group_id() -> str:
 
 
 def _clean_steps(raw_steps) -> list:
+    """Keep each entry as one whole prompt (multi-line OK; do not split on ---)."""
     cleaned = []
     for item in raw_steps or []:
         text = str(item).strip()
         if not text:
             continue
-        # One pasted block may contain multiple serial steps separated by ---
-        parts = split_prompts(text)
-        for part in parts:
-            if part and len(cleaned) < MAX_STEP_PACK:
-                cleaned.append(part)
+        cleaned.append(text)
         if len(cleaned) >= MAX_STEP_PACK:
             break
     return cleaned[:MAX_STEP_PACK]
@@ -1151,10 +1148,10 @@ def get_steps_25_template() -> str:
 def save_steps_25_template(content: str):
     """Save user-customized step template (markdown) and sync default group."""
     text = content if content is not None else ""
-    _write_private_file(STEPS_25_TEMPLATE_FILE, text)
     steps = split_prompts(text)
     if steps:
         save_step_pack(steps)
+    _write_private_file(STEPS_25_TEMPLATE_FILE, text)
 
 
 def format_step_pack_for_editor(steps) -> str:
@@ -1201,15 +1198,14 @@ def choose_step_group(parent=None):
 
 
 class Steps25TemplateDialog(QtWidgets.QDialog):
-    """Manage named step groups. Each group’s steps Auto-add serially."""
+    """Add multi-line prompts one-by-one into named groups; Auto-add runs them serially."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("⚙ Step groups (Auto-add)")
-        self.resize(920, 660)
+        self.resize(920, 680)
         self.setStyleSheet(STYLE)
         self._groups = []
-        self._current_id = ""
         self._loading = False
 
         layout = QtWidgets.QVBoxLayout(self)
@@ -1221,207 +1217,317 @@ class Steps25TemplateDialog(QtWidgets.QDialog):
         layout.addWidget(header)
 
         desc = QtWidgets.QLabel(
-            "Save reusable groups of 1–6 steps. Paste several prompts in one box separated by --- "
-            "and they become serial steps. Click Auto-add → pick a group → every step queues in order."
+            "1) Create or choose a group name.  "
+            "2) Paste one full prompt (multi-line OK).  "
+            "3) Click Save prompt into group.  "
+            "Repeat for the next prompt. Auto-add later queues every prompt in that group in order."
         )
         desc.setStyleSheet("color: #94a3b8; font-size: 11px;")
         desc.setWordWrap(True)
         layout.addWidget(desc)
 
-        body = QtWidgets.QHBoxLayout()
-        body.setSpacing(12)
-
-        left = QtWidgets.QVBoxLayout()
-        left.addWidget(QtWidgets.QLabel("Groups"))
-        self.group_list = QtWidgets.QListWidget()
-        self.group_list.currentRowChanged.connect(self._on_group_selected)
-        left.addWidget(self.group_list, stretch=1)
-
-        left_btns = QtWidgets.QHBoxLayout()
-        btn_new = QtWidgets.QPushButton("+ New group")
-        btn_new.clicked.connect(self._new_group)
-        left_btns.addWidget(btn_new)
-        btn_del = QtWidgets.QPushButton("Delete")
-        btn_del.clicked.connect(self._delete_group)
-        left_btns.addWidget(btn_del)
-        left.addLayout(left_btns)
-        body.addLayout(left, stretch=1)
-
-        right = QtWidgets.QVBoxLayout()
+        # Step 1 — group name
+        step1 = QtWidgets.QGroupBox("1. Group name")
+        step1.setStyleSheet(
+            "QGroupBox { font-weight: 700; color: #38bdf8; border: 1px solid #1e293b; "
+            "border-radius: 6px; margin-top: 10px; padding-top: 10px; }"
+        )
+        s1 = QtWidgets.QVBoxLayout(step1)
         name_row = QtWidgets.QHBoxLayout()
-        name_row.addWidget(QtWidgets.QLabel("Group name"))
-        self.name_input = QtWidgets.QLineEdit()
-        self.name_input.setPlaceholderText("e.g. Engineering follow-ups")
-        self.name_input.textChanged.connect(self._on_name_changed)
-        name_row.addWidget(self.name_input, stretch=1)
-        right.addLayout(name_row)
+        self.new_group_name = QtWidgets.QLineEdit()
+        self.new_group_name.setPlaceholderText("Engineering follow-ups")
+        name_row.addWidget(self.new_group_name, stretch=1)
+        btn_create = QtWidgets.QPushButton("Create group")
+        btn_create.setStyleSheet(
+            "background-color: #064e3b; color: #6ee7b7; font-size: 11px; padding: 5px 12px; "
+            "border: 1px solid #047857; border-radius: 4px;"
+        )
+        btn_create.clicked.connect(self._create_group)
+        name_row.addWidget(btn_create)
+        s1.addLayout(name_row)
 
+        pick_row = QtWidgets.QHBoxLayout()
+        pick_row.addWidget(QtWidgets.QLabel("Or choose existing:"))
+        self.group_combo = QtWidgets.QComboBox()
+        self.group_combo.currentIndexChanged.connect(self._on_combo_changed)
+        pick_row.addWidget(self.group_combo, stretch=1)
+        btn_del = QtWidgets.QPushButton("Delete group")
+        btn_del.setStyleSheet(
+            "background-color: #334155; color: #f1f5f9; font-size: 11px; padding: 5px 12px; border-radius: 4px;"
+        )
+        btn_del.clicked.connect(self._delete_group)
+        pick_row.addWidget(btn_del)
+        s1.addLayout(pick_row)
+        self.default_check = QtWidgets.QCheckBox("Default group for Auto-add")
+        s1.addWidget(self.default_check)
+        layout.addWidget(step1)
+
+        # Step 2 — paste one prompt
+        step2 = QtWidgets.QGroupBox("2. Paste one prompt (multi-line OK)")
+        step2.setStyleSheet(
+            "QGroupBox { font-weight: 700; color: #a5b4fc; border: 1px solid #1e293b; "
+            "border-radius: 6px; margin-top: 10px; padding-top: 10px; }"
+        )
+        s2 = QtWidgets.QVBoxLayout(step2)
         hint = QtWidgets.QLabel(
-            "Steps in this group (separate with --- on its own line). "
-            "Auto-add inserts them one after another."
+            "Paste the full prompt for the next step only. Newlines stay inside this one step — "
+            "do not use --- here. Then save it into the group chosen above."
         )
-        hint.setStyleSheet("color: #64748b; font-size: 11px;")
+        hint.setStyleSheet("color: #64748b; font-size: 11px; font-weight: 400;")
         hint.setWordWrap(True)
-        right.addWidget(hint)
-
-        self.steps_editor = QtWidgets.QPlainTextEdit()
-        self.steps_editor.setFont(QtGui.QFont("Monospace", 10))
-        self.steps_editor.setPlaceholderText(
-            "Step 2 prompt text…\n"
-            "---\n"
-            "Step 3 prompt text…\n"
-            "---\n"
-            "Step 4 prompt text…"
+        s2.addWidget(hint)
+        self.prompt_editor = QtWidgets.QPlainTextEdit()
+        self.prompt_editor.setFont(QtGui.QFont("Monospace", 10))
+        self.prompt_editor.setMinimumHeight(180)
+        self.prompt_editor.setPlaceholderText(
+            "Paste one complete multi-line prompt here…\n\n"
+            "Example:\n"
+            "Add unit and integration tests for all new modules.\n"
+            "Cover edge cases and keep CI green."
         )
-        self.steps_editor.textChanged.connect(self._on_steps_changed)
-        right.addWidget(self.steps_editor, stretch=1)
+        s2.addWidget(self.prompt_editor, stretch=1)
 
+        save_row = QtWidgets.QHBoxLayout()
+        self.target_lbl = QtWidgets.QLabel("")
+        self.target_lbl.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        save_row.addWidget(self.target_lbl, stretch=1)
+        btn_add = QtWidgets.QPushButton("💾 Save prompt into group")
+        btn_add.setObjectName("primary")
+        btn_add.setStyleSheet(
+            "background-color: #2563eb; color: white; font-weight: 700; padding: 7px 16px; border-radius: 5px;"
+        )
+        btn_add.clicked.connect(self._add_prompt_to_group)
+        save_row.addWidget(btn_add)
+        s2.addLayout(save_row)
+        layout.addWidget(step2, stretch=1)
+
+        # Step 3 — prompts already in group
+        step3 = QtWidgets.QGroupBox("3. Prompts already in this group (serial order)")
+        step3.setStyleSheet(
+            "QGroupBox { font-weight: 700; color: #6ee7b7; border: 1px solid #1e293b; "
+            "border-radius: 6px; margin-top: 10px; padding-top: 10px; }"
+        )
+        s3 = QtWidgets.QVBoxLayout(step3)
+        self.step_list = QtWidgets.QListWidget()
+        self.step_list.setMinimumHeight(110)
+        s3.addWidget(self.step_list)
+        step_btns = QtWidgets.QHBoxLayout()
         self.step_count_lbl = QtWidgets.QLabel("")
-        self.step_count_lbl.setStyleSheet("color: #94a3b8; font-size: 11px;")
-        right.addWidget(self.step_count_lbl)
-
-        self.default_check = QtWidgets.QCheckBox("Default group for one-click Auto-add")
-        right.addWidget(self.default_check)
-
-        body.addLayout(right, stretch=3)
-        layout.addLayout(body, stretch=1)
+        self.step_count_lbl.setStyleSheet("color: #94a3b8; font-size: 11px; font-weight: 400;")
+        step_btns.addWidget(self.step_count_lbl, stretch=1)
+        btn_up = QtWidgets.QPushButton("▲")
+        btn_up.setFixedWidth(36)
+        btn_up.clicked.connect(lambda: self._move_step(-1))
+        step_btns.addWidget(btn_up)
+        btn_down = QtWidgets.QPushButton("▼")
+        btn_down.setFixedWidth(36)
+        btn_down.clicked.connect(lambda: self._move_step(1))
+        step_btns.addWidget(btn_down)
+        btn_remove_step = QtWidgets.QPushButton("Remove selected")
+        btn_remove_step.clicked.connect(self._remove_selected_step)
+        step_btns.addWidget(btn_remove_step)
+        s3.addLayout(step_btns)
+        layout.addWidget(step3)
 
         bottom = QtWidgets.QHBoxLayout()
         bottom.addStretch()
         btn_cancel = QtWidgets.QPushButton("Cancel")
         btn_cancel.clicked.connect(self.reject)
         bottom.addWidget(btn_cancel)
-        btn_save = QtWidgets.QPushButton("💾 Save groups")
-        btn_save.setObjectName("primary")
-        btn_save.setStyleSheet(
+        btn_done = QtWidgets.QPushButton("✔ Done — keep groups")
+        btn_done.setObjectName("primary")
+        btn_done.setStyleSheet(
             "background-color: #2563eb; color: white; font-weight: 700; padding: 6px 16px; border-radius: 5px;"
         )
-        btn_save.clicked.connect(self._save)
-        bottom.addWidget(btn_save)
+        btn_done.clicked.connect(self._save)
+        bottom.addWidget(btn_done)
         layout.addLayout(bottom)
 
         data = _load_step_pack_data()
-        self._groups = [dict(g) for g in (data.get("groups") or [])]
+        self._groups = [dict(g, steps=list(g.get("steps") or [])) for g in (data.get("groups") or [])]
         self._default_id = data.get("default_group_id") or ""
         if not self._groups:
             gid = _new_group_id()
             self._groups = [{"id": gid, "name": "Default", "steps": []}]
             self._default_id = gid
-        self._refresh_group_list(select_id=self._default_id or self._groups[0]["id"])
+        self._refresh_combo(select_id=self._default_id or self._groups[0]["id"])
 
-    def _refresh_group_list(self, select_id=None):
+    def _group_by_id(self, gid):
+        for group in self._groups:
+            if group["id"] == gid:
+                return group
+        return None
+
+    def _current_group(self):
+        gid = self.group_combo.currentData()
+        return self._group_by_id(gid) if gid else None
+
+    def _refresh_combo(self, select_id=None):
         self._loading = True
-        self.group_list.clear()
-        select_row = 0
+        current = select_id or self.group_combo.currentData()
+        self.group_combo.clear()
+        select_index = 0
         for index, group in enumerate(self._groups):
             count = len(group.get("steps") or [])
             mark = " ★" if group["id"] == self._default_id else ""
-            self.group_list.addItem(f"{group.get('name') or 'Untitled'} ({count}){mark}")
-            if select_id and group["id"] == select_id:
-                select_row = index
-        self.group_list.setCurrentRow(select_row)
+            self.group_combo.addItem(
+                f"{group.get('name') or 'Untitled'} ({count}){mark}",
+                group["id"],
+            )
+            if current and group["id"] == current:
+                select_index = index
+        self.group_combo.setCurrentIndex(select_index)
         self._loading = False
-        self._on_group_selected(select_row)
+        self._reload_step_list()
+        self._update_target_label()
 
-    def _current_group(self):
-        row = self.group_list.currentRow()
-        if 0 <= row < len(self._groups):
-            return self._groups[row]
-        return None
+    def _on_combo_changed(self, _index=-1):
+        if self._loading:
+            return
+        group = self._current_group()
+        if group:
+            self.default_check.setChecked(group["id"] == self._default_id)
+            self.new_group_name.setText(group.get("name") or "")
+        self._reload_step_list()
+        self._update_target_label()
 
-    def _flush_editor_into_current(self):
-        group = None
-        for item in self._groups:
-            if item["id"] == self._current_id:
-                group = item
-                break
+    def _update_target_label(self):
+        group = self._current_group()
         if not group:
+            self.target_lbl.setText("Create or choose a group first.")
             return
-        name = self.name_input.text().strip() or group.get("name") or "Untitled"
-        group["name"] = name
-        group["steps"] = _clean_steps(split_prompts(self.steps_editor.toPlainText()))
-        if self.default_check.isChecked():
-            self._default_id = group["id"]
+        count = len(group.get("steps") or [])
+        self.target_lbl.setText(
+            f"Will add as step {count + 1} in “{group.get('name') or 'Untitled'}” "
+            f"(max {MAX_STEP_PACK})."
+        )
 
-    def _on_group_selected(self, row):
-        if self._loading:
+    def _reload_step_list(self):
+        self.step_list.clear()
+        group = self._current_group()
+        steps = list((group or {}).get("steps") or [])
+        for index, prompt in enumerate(steps):
+            words = prompt.split()
+            preview = " ".join(words[:8]) + (" …" if len(words) > 8 else "")
+            lines = prompt.count("\n") + 1
+            self.step_list.addItem(
+                f"{index + 1}. {preview}  ({len(words):,} words, {lines} line{'s' if lines != 1 else ''})"
+            )
+        self.step_count_lbl.setText(f"{len(steps)} prompt(s) in this group (max {MAX_STEP_PACK})")
+        self.default_check.setChecked(bool(group) and group["id"] == self._default_id)
+
+    def _create_group(self):
+        name = self.new_group_name.text().strip()
+        if not name:
+            QtWidgets.QMessageBox.warning(self, "Group name", "Type a group name first.")
+            self.new_group_name.setFocus()
             return
-        if self._current_id:
-            self._flush_editor_into_current()
-        if not (0 <= row < len(self._groups)):
-            return
-        group = self._groups[row]
-        self._current_id = group["id"]
-        self._loading = True
-        self.name_input.setText(group.get("name") or "")
-        self.steps_editor.setPlainText("\n---\n".join(group.get("steps") or []))
-        self.default_check.setChecked(group["id"] == self._default_id)
-        self._loading = False
-        self._update_step_count()
-
-    def _on_name_changed(self, _text=""):
-        if self._loading:
-            return
-        self._flush_editor_into_current()
-        row = self.group_list.currentRow()
-        if 0 <= row < len(self._groups):
-            group = self._groups[row]
-            count = len(group.get("steps") or [])
-            mark = " ★" if group["id"] == self._default_id else ""
-            self.group_list.item(row).setText(f"{group.get('name') or 'Untitled'} ({count}){mark}")
-
-    def _on_steps_changed(self):
-        if self._loading:
-            return
-        self._flush_editor_into_current()
-        self._update_step_count()
-        self._on_name_changed()
-
-    def _update_step_count(self):
-        steps = _clean_steps(split_prompts(self.steps_editor.toPlainText()))
-        self.step_count_lbl.setText(f"{len(steps)} serial step(s) in this group (max {MAX_STEP_PACK})")
-
-    def _new_group(self):
         if len(self._groups) >= MAX_STEP_GROUPS:
             QtWidgets.QMessageBox.information(self, "Limit", f"At most {MAX_STEP_GROUPS} groups.")
             return
-        self._flush_editor_into_current()
         gid = _new_group_id()
-        self._groups.append({"id": gid, "name": f"Group {len(self._groups) + 1}", "steps": []})
-        self._refresh_group_list(select_id=gid)
+        self._groups.append({"id": gid, "name": name, "steps": []})
+        if not self._default_id:
+            self._default_id = gid
+        self._refresh_combo(select_id=gid)
+        self.prompt_editor.setFocus()
+
+    def _add_prompt_to_group(self):
+        group = self._current_group()
+        if not group:
+            QtWidgets.QMessageBox.warning(self, "Choose group", "Create or choose a group name first.")
+            return
+        # Optional rename from the name field before saving the prompt.
+        typed = self.new_group_name.text().strip()
+        if typed:
+            group["name"] = typed
+        prompt = self.prompt_editor.toPlainText().strip()
+        if not prompt:
+            QtWidgets.QMessageBox.warning(self, "Empty prompt", "Paste a prompt into the text area first.")
+            self.prompt_editor.setFocus()
+            return
+        steps = list(group.get("steps") or [])
+        if len(steps) >= MAX_STEP_PACK:
+            QtWidgets.QMessageBox.information(
+                self, "Limit", f"This group already has {MAX_STEP_PACK} prompts."
+            )
+            return
+        steps.append(prompt)
+        group["steps"] = steps
+        if self.default_check.isChecked():
+            self._default_id = group["id"]
+        self.prompt_editor.clear()
+        self._refresh_combo(select_id=group["id"])
+        self.prompt_editor.setFocus()
+
+    def _move_step(self, direction):
+        group = self._current_group()
+        if not group:
+            return
+        index = self.step_list.currentRow()
+        target = index + direction
+        steps = list(group.get("steps") or [])
+        if not (0 <= index < len(steps) and 0 <= target < len(steps)):
+            return
+        steps[index], steps[target] = steps[target], steps[index]
+        group["steps"] = steps
+        self._reload_step_list()
+        self.step_list.setCurrentRow(target)
+
+    def _remove_selected_step(self):
+        group = self._current_group()
+        if not group:
+            return
+        index = self.step_list.currentRow()
+        steps = list(group.get("steps") or [])
+        if not (0 <= index < len(steps)):
+            return
+        steps.pop(index)
+        group["steps"] = steps
+        self._refresh_combo(select_id=group["id"])
 
     def _delete_group(self):
         if len(self._groups) <= 1:
-            QtWidgets.QMessageBox.information(self, "Keep one", "Keep at least one group.")
+            # Allow clearing the last group's steps, but keep a shell group.
+            group = self._current_group()
+            if group:
+                group["steps"] = []
+                group["name"] = self.new_group_name.text().strip() or group.get("name") or "Default"
+                self._reload_step_list()
+                self._update_target_label()
             return
-        row = self.group_list.currentRow()
+        row = self.group_combo.currentIndex()
         if not (0 <= row < len(self._groups)):
             return
         removed = self._groups.pop(row)
         if self._default_id == removed["id"]:
             self._default_id = self._groups[0]["id"]
-        self._current_id = ""
-        self._refresh_group_list(select_id=self._groups[min(row, len(self._groups) - 1)]["id"])
+        self._refresh_combo(select_id=self._groups[min(row, len(self._groups) - 1)]["id"])
 
     def _save(self):
-        self._flush_editor_into_current()
-        if self.default_check.isChecked() and self._current_id:
-            self._default_id = self._current_id
+        if self.default_check.isChecked():
+            group = self._current_group()
+            if group:
+                self._default_id = group["id"]
+        # Persist rename on current group.
+        group = self._current_group()
+        if group and self.new_group_name.text().strip():
+            group["name"] = self.new_group_name.text().strip()
         valid = []
-        for group in self._groups:
-            steps = _clean_steps(group.get("steps") or [])
+        for item in self._groups:
+            steps = _clean_steps(item.get("steps") or [])
             if not steps:
                 continue
             valid.append({
-                "id": group["id"],
-                "name": (group.get("name") or "Untitled").strip() or "Untitled",
+                "id": item["id"],
+                "name": (item.get("name") or "Untitled").strip() or "Untitled",
                 "steps": steps,
             })
         if not valid:
             QtWidgets.QMessageBox.warning(
                 self,
-                "Empty groups",
-                "Each saved group needs at least one step. Separate multiple steps with ---.",
+                "No prompts yet",
+                "Create a group, paste a prompt, then click Save prompt into group.",
             )
             return
         try:
@@ -1432,7 +1538,7 @@ class Steps25TemplateDialog(QtWidgets.QDialog):
         QtWidgets.QMessageBox.information(
             self,
             "Groups saved",
-            f"Saved {len(valid)} group(s). Auto-add queues every step in the chosen group in order.",
+            f"Saved {len(valid)} group(s). Use Auto-add group to queue their prompts in order.",
         )
         self.accept()
 
@@ -1519,7 +1625,7 @@ class BatchProjectDialog(QtWidgets.QDialog):
         )
         rl.addWidget(self.step1_input)
 
-        step25_lbl = QtWidgets.QLabel("Shared follow-up steps 2–6 (applied to ALL projects; separate with ---):")
+        step25_lbl = QtWidgets.QLabel("Shared follow-up steps from your saved groups (applied to ALL projects):")
         step25_lbl.setStyleSheet("font-weight: 700; color: #a78bfa;")
         rl.addWidget(step25_lbl)
 
@@ -1782,6 +1888,155 @@ class PromptEditorDialog(QtWidgets.QDialog):
         return self.editor.toPlainText().strip()
 
 
+class ProjectLocation(QtWidgets.QWidget):
+    def __init__(self, base_dir, parent=None):
+        super().__init__(parent)
+        self.base_dir = base_dir
+        row = QtWidgets.QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        self.path = QLineEdit()
+        self.path.setPlaceholderText("Project folder (defaults to WORKSPACE / slug)")
+        row.addWidget(self.path, 1)
+        existing = QtWidgets.QPushButton("Existing…")
+        existing.clicked.connect(self.select_existing)
+        row.addWidget(existing)
+        browse = QtWidgets.QPushButton("Browse…")
+        browse.clicked.connect(self.browse)
+        row.addWidget(browse)
+
+    def browse(self):
+        path = QtWidgets.QFileDialog.getExistingDirectory(
+            self, "Choose project folder", self.path.text().strip() or self.base_dir())
+        if path:
+            self.path.setText(path)
+
+    def select_existing(self):
+        try:
+            projects = list_existing_projects(self.base_dir())
+        except OSError as exc:
+            QtWidgets.QMessageBox.warning(self, "Project folders", str(exc))
+            return
+        if not projects:
+            self.browse()
+            return
+        paths = [project["path"] for project in projects]
+        path, accepted = QtWidgets.QInputDialog.getItem(
+            self, "Existing project", "Project folder", paths, 0, False)
+        if accepted:
+            self.path.setText(path)
+
+
+class OpenProjectFieldCard(QtWidgets.QFrame):
+    """One always-open project title + command/prompt field (multi-project draft UI)."""
+
+    removed = QtCore.pyqtSignal(object)
+
+    def __init__(self, index: int = 1, parent=None, base_dir=None):
+        super().__init__(parent)
+        self.setObjectName("section_next")
+        self.setStyleSheet(
+            "QFrame#section_next { background-color: #0f172a; border: 1px solid #312e81; "
+            "border-radius: 8px; }"
+        )
+        lay = QtWidgets.QVBoxLayout(self)
+        lay.setContentsMargins(10, 8, 10, 8)
+        lay.setSpacing(6)
+
+        head = QtWidgets.QHBoxLayout()
+        self.badge = QtWidgets.QLabel(f"Project field #{index}")
+        self.badge.setStyleSheet(
+            "color: #a5b4fc; font-weight: 700; font-size: 11px; background: #1e1b4b; "
+            "padding: 2px 8px; border-radius: 4px;"
+        )
+        head.addWidget(self.badge)
+        head.addStretch()
+        btn_x = QtWidgets.QPushButton("Remove field")
+        btn_x.setObjectName("small_btn")
+        btn_x.setStyleSheet(
+            "background-color: #334155; color: #f1f5f9; font-size: 10px; padding: 2px 8px; border-radius: 4px;"
+        )
+        btn_x.clicked.connect(lambda: self.removed.emit(self))
+        head.addWidget(btn_x)
+        lay.addLayout(head)
+
+        meta = QtWidgets.QHBoxLayout()
+        self.title_input = QLineEdit()
+        self.title_input.setPlaceholderText("Project title (e.g. Laravel Auth API)")
+        self.title_input.textChanged.connect(self._sync_slug)
+        meta.addWidget(self.title_input, stretch=2)
+        self.slug_input = QLineEdit()
+        self.slug_input.setPlaceholderText("folder-slug")
+        self.slug_input.setProperty("auto", True)
+        self.slug_input.textEdited.connect(lambda _: self.slug_input.setProperty("auto", False))
+        meta.addWidget(self.slug_input, stretch=1)
+        lay.addLayout(meta)
+        self.location = ProjectLocation(base_dir or (lambda: str(Path.home())), self)
+        lay.addWidget(self.location)
+
+        self.prompt_input = QTextEdit()
+        self.prompt_input.setPlaceholderText(
+            "Commands / prompts for this project (multi-line OK).\n"
+            "Separate steps with a line containing only ---"
+        )
+        self.prompt_input.setMinimumHeight(72)
+        self.prompt_input.setMaximumHeight(110)
+        lay.addWidget(self.prompt_input)
+
+    def _sync_slug(self, text=""):
+        if not self.slug_input.text().strip() or self.slug_input.property("auto"):
+            self.slug_input.setProperty("auto", True)
+            self.slug_input.setText(to_slug(self.title_input.text().strip()) if self.title_input.text().strip() else "")
+        # If user typed slug manually, stop auto — detect via editingFinished elsewhere
+
+    def set_index(self, index: int):
+        self.badge.setText(f"Project field #{index}")
+
+    def to_snapshot(self):
+        title = self.title_input.text().strip()
+        raw = self.prompt_input.toPlainText().strip()
+        if not raw and not title:
+            return None
+        # Split on --- lines into multiple prompts (optional)
+        parts = []
+        buf = []
+        for line in (raw or "").splitlines():
+            if line.strip() == "---":
+                chunk = "\n".join(buf).strip()
+                if chunk:
+                    parts.append(chunk)
+                buf = []
+            else:
+                buf.append(line)
+        tail = "\n".join(buf).strip()
+        if tail:
+            parts.append(tail)
+        if not parts and title:
+            return None  # title only, no prompts
+        if not parts:
+            return None
+        project = self.location.path.text().strip()
+        slug = self.slug_input.text().strip() or to_slug(title or (Path(project).name if project else parts[0][:35]))
+        if not title:
+            title = slug.replace("-", " ").title()
+        return {
+            "title": title,
+            "slug": slug,
+            "project": project,
+            "prompts": parts,
+            "create_repo": False,
+            "repo_name": "",
+            "repo_desc": "",
+            "agent": None,
+        }
+
+    def clear(self):
+        self.title_input.clear()
+        self.slug_input.clear()
+        self.slug_input.setProperty("auto", True)
+        self.prompt_input.clear()
+        self.location.path.clear()
+
+
 class PipelineWindow(QtWidgets.QMainWindow):
     pipeline_activity = QtCore.pyqtSignal(str)
     def __init__(self):
@@ -1827,6 +2082,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.setStyleSheet(STYLE)
         self.is_running = False
         self.draft_prompts = []
+        self.held_projects = []  # multi-project drafts waiting to queue together
         self.project_page = 0
         self.card_nav_states = {}
         self.last_grouped_sig = None
@@ -2162,19 +2418,15 @@ class PipelineWindow(QtWidgets.QMainWindow):
         btn_cur_down.clicked.connect(self.navigate_cur_prompt_next)
         cur_tools_row.addWidget(btn_cur_down)
 
-        btn_cur_steps = QtWidgets.QPushButton("✨ Auto-add group")
-        btn_cur_steps.setObjectName("small_btn")
-        btn_cur_steps.setToolTip("Pick a saved step group; all its steps append serially")
-        btn_cur_steps.setStyleSheet("background-color: #064e3b; color: #6ee7b7; font-size: 10px; padding: 2px 7px; border: 1px solid #047857; border-radius: 4px;")
-        btn_cur_steps.clicked.connect(self.append_cur_steps_25)
-        cur_tools_row.addWidget(btn_cur_steps)
-
-        btn_cur_steps_edit = QtWidgets.QPushButton("⚙")
-        btn_cur_steps_edit.setObjectName("small_btn")
-        btn_cur_steps_edit.setToolTip("Create/edit named step groups (1–6 steps each)")
-        btn_cur_steps_edit.setStyleSheet("background-color: #1e1b4b; color: #a5b4fc; font-size: 10px; padding: 2px 6px; border: 1px solid #312e81; border-radius: 4px;")
-        btn_cur_steps_edit.clicked.connect(self.open_steps_25_template_editor)
-        cur_tools_row.addWidget(btn_cur_steps_edit)
+        btn_cur_add_group = QtWidgets.QPushButton("+ Add group")
+        btn_cur_add_group.setObjectName("small_btn")
+        btn_cur_add_group.setToolTip("Open modal to create a group and save multi-line prompts into it")
+        btn_cur_add_group.setStyleSheet(
+            "background-color: #1e1b4b; color: #a5b4fc; font-size: 10px; padding: 2px 8px; "
+            "border: 1px solid #312e81; border-radius: 4px;"
+        )
+        btn_cur_add_group.clicked.connect(self.open_steps_25_template_editor)
+        cur_tools_row.addWidget(btn_cur_add_group)
 
         btn_cur_expand = QtWidgets.QPushButton("⛶ Expand")
         btn_cur_expand.setObjectName("small_btn")
@@ -2184,6 +2436,13 @@ class PipelineWindow(QtWidgets.QMainWindow):
         cur_tools_row.addWidget(btn_cur_expand)
 
         cur_layout.addLayout(cur_tools_row)
+
+        # Saved groups shown in place — click to append (old Add Prompt flow stays below).
+        self.cur_groups_bar = QtWidgets.QWidget()
+        self.cur_groups_layout = QtWidgets.QHBoxLayout(self.cur_groups_bar)
+        self.cur_groups_layout.setContentsMargins(0, 2, 0, 2)
+        self.cur_groups_layout.setSpacing(6)
+        cur_layout.addWidget(self.cur_groups_bar)
 
         cur_cmd_row = QtWidgets.QHBoxLayout()
         cur_cmd_row.setSpacing(8)
@@ -2233,7 +2492,46 @@ class PipelineWindow(QtWidgets.QMainWindow):
         next_header.addWidget(self.next_badge_lbl)
 
         next_header.addStretch()
+        btn_open_field = QtWidgets.QPushButton("+ Open another project field")
+        btn_open_field.setObjectName("small_btn")
+        btn_open_field.setToolTip("Keep multiple project title + command/prompt editors open at once")
+        btn_open_field.setStyleSheet(
+            "background-color: #312e81; color: #e0e7ff; font-size: 11px; font-weight: 700; "
+            "padding: 4px 10px; border: 1px solid #6366f1; border-radius: 5px;"
+        )
+        btn_open_field.clicked.connect(self.add_open_project_field)
+        next_header.addWidget(btn_open_field)
         next_layout.addLayout(next_header)
+
+        open_hint = QtWidgets.QLabel(
+            "Open several project fields below and fill them together — then Add all open fields to Pipeline."
+        )
+        open_hint.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        open_hint.setWordWrap(True)
+        next_layout.addWidget(open_hint)
+
+        self.open_fields_host = QtWidgets.QWidget()
+        self.open_fields_layout = QtWidgets.QVBoxLayout(self.open_fields_host)
+        self.open_fields_layout.setContentsMargins(0, 0, 0, 0)
+        self.open_fields_layout.setSpacing(8)
+        next_layout.addWidget(self.open_fields_host)
+        self.open_project_fields = []
+        # Start with two open fields so multi-project drafting is obvious
+        self.add_open_project_field()
+        self.add_open_project_field()
+
+        open_all_row = QtWidgets.QHBoxLayout()
+        open_all_row.addStretch()
+        self.btn_add_all_open_fields = QtWidgets.QPushButton("+ Add all open fields to Pipeline")
+        self.btn_add_all_open_fields.setObjectName("primary")
+        self.btn_add_all_open_fields.setToolTip("Queue every non-empty open project field")
+        self.btn_add_all_open_fields.clicked.connect(self.add_all_open_project_fields)
+        open_all_row.addWidget(self.btn_add_all_open_fields)
+        next_layout.addLayout(open_all_row)
+
+        single_lbl = QtWidgets.QLabel("Or use the classic single-project form:")
+        single_lbl.setStyleSheet("color: #64748b; font-size: 10px; font-weight: 600; margin-top: 4px;")
+        next_layout.addWidget(single_lbl)
 
         # Project Title & Slug inputs
         meta_row = QtWidgets.QHBoxLayout()
@@ -2252,6 +2550,9 @@ class PipelineWindow(QtWidgets.QMainWindow):
         meta_row.addWidget(self.next_slug_input, stretch=1)
 
         next_layout.addLayout(meta_row)
+        self.next_location = ProjectLocation(self.pipeline.get_base_dir, self)
+        self.next_location.path.textChanged.connect(self.update_next_target_preview)
+        next_layout.addWidget(self.next_location)
 
         # Folder location preview
         self.next_target_preview_lbl = QtWidgets.QLabel("")
@@ -2276,19 +2577,15 @@ class PipelineWindow(QtWidgets.QMainWindow):
         btn_next_load.clicked.connect(self.load_next_prompt_file)
         next_tools_row.addWidget(btn_next_load)
 
-        btn_next_steps = QtWidgets.QPushButton("✨ Auto-add group")
-        btn_next_steps.setObjectName("small_btn")
-        btn_next_steps.setToolTip("Pick a saved step group; stages Step 1 then appends that group’s steps in order")
-        btn_next_steps.setStyleSheet("background-color: #064e3b; color: #6ee7b7; font-size: 10px; padding: 2px 7px; border: 1px solid #047857; border-radius: 4px;")
-        btn_next_steps.clicked.connect(self.append_next_steps_25)
-        next_tools_row.addWidget(btn_next_steps)
-
-        btn_next_steps_edit = QtWidgets.QPushButton("⚙")
-        btn_next_steps_edit.setObjectName("small_btn")
-        btn_next_steps_edit.setToolTip("Create/edit named step groups (1–6 steps each)")
-        btn_next_steps_edit.setStyleSheet("background-color: #1e1b4b; color: #a5b4fc; font-size: 10px; padding: 2px 6px; border: 1px solid #312e81; border-radius: 4px;")
-        btn_next_steps_edit.clicked.connect(self.open_steps_25_template_editor)
-        next_tools_row.addWidget(btn_next_steps_edit)
+        btn_next_add_group = QtWidgets.QPushButton("+ Add group")
+        btn_next_add_group.setObjectName("small_btn")
+        btn_next_add_group.setToolTip("Open modal to create a group and save multi-line prompts into it")
+        btn_next_add_group.setStyleSheet(
+            "background-color: #1e1b4b; color: #a5b4fc; font-size: 10px; padding: 2px 8px; "
+            "border: 1px solid #312e81; border-radius: 4px;"
+        )
+        btn_next_add_group.clicked.connect(self.open_steps_25_template_editor)
+        next_tools_row.addWidget(btn_next_add_group)
 
         btn_next_expand = QtWidgets.QPushButton("⛶ Expand")
         btn_next_expand.setObjectName("small_btn")
@@ -2299,7 +2596,14 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
         next_layout.addLayout(next_tools_row)
 
-        # Commands input for next project
+        # Saved groups in place — click a chip to add that group after your prompts.
+        self.next_groups_bar = QtWidgets.QWidget()
+        self.next_groups_layout = QtWidgets.QHBoxLayout(self.next_groups_bar)
+        self.next_groups_layout.setContentsMargins(0, 2, 0, 2)
+        self.next_groups_layout.setSpacing(6)
+        next_layout.addWidget(self.next_groups_bar)
+
+        # Commands input for next project (old Add Prompt flow kept as-is)
         next_cmd_row = QtWidgets.QHBoxLayout()
         next_cmd_row.setSpacing(8)
 
@@ -2320,7 +2624,10 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
         next_layout.addLayout(next_cmd_row)
 
-        self.next_prompt_metrics_lbl = QtWidgets.QLabel("💡 Tip: Multi-line / 5,000+ word specs preserved as 1 step. Use '---' to separate sequential steps.")
+        self.next_prompt_metrics_lbl = QtWidgets.QLabel(
+            "💡 One project form at a time: Add Prompt → (repeat) → Add Project to Pipeline. "
+            "Form clears — fill the next project the same way. Or Hold several, then Add all."
+        )
         self.next_prompt_metrics_lbl.setStyleSheet("color: #64748b; font-size: 10px;")
         self.next_prompt_metrics_lbl.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
         self.next_prompt_metrics_lbl.setWordWrap(True)
@@ -2343,6 +2650,49 @@ class PipelineWindow(QtWidgets.QMainWindow):
         next_layout.addWidget(self.draft_controls)
         self.draft_list.hide()
         self.draft_controls.hide()
+
+        # Multi-project hold tray — prepare several projects, then queue them together
+        held_hdr = QtWidgets.QHBoxLayout()
+        held_lbl = QtWidgets.QLabel("Prepared projects (multi):")
+        held_lbl.setStyleSheet("color: #a5b4fc; font-size: 11px; font-weight: 700;")
+        held_hdr.addWidget(held_lbl)
+        held_hdr.addStretch()
+        self.btn_hold_project = QtWidgets.QPushButton("📌 Hold & prepare another")
+        self.btn_hold_project.setObjectName("small_btn")
+        self.btn_hold_project.setToolTip(
+            "Save this project's title + prompts into the tray below, clear the form, "
+            "and fill the next project. Then use Add all prepared."
+        )
+        self.btn_hold_project.setStyleSheet(
+            "background-color: #1e1b4b; color: #c7d2fe; font-size: 10px; padding: 4px 10px; "
+            "border: 1px solid #4338ca; border-radius: 4px; font-weight: 700;"
+        )
+        self.btn_hold_project.clicked.connect(self.hold_current_project_draft)
+        held_hdr.addWidget(self.btn_hold_project)
+        next_layout.addLayout(held_hdr)
+
+        self.held_list = QtWidgets.QListWidget()
+        self.held_list.setMinimumHeight(56)
+        self.held_list.setMaximumHeight(72)
+        self.held_list.setToolTip("Projects waiting to be added to the pipeline")
+        next_layout.addWidget(self.held_list)
+        self.held_list.hide()
+
+        held_btns = QtWidgets.QHBoxLayout()
+        self.btn_remove_held = QtWidgets.QPushButton("Remove selected")
+        self.btn_remove_held.setObjectName("small_btn")
+        self.btn_remove_held.clicked.connect(self.remove_held_project)
+        held_btns.addWidget(self.btn_remove_held)
+        held_btns.addStretch()
+        self.btn_add_all_held = QtWidgets.QPushButton("+ Add all prepared to Pipeline")
+        self.btn_add_all_held.setObjectName("primary")
+        self.btn_add_all_held.setToolTip("Queue every held project, then the project in the form (if any)")
+        self.btn_add_all_held.clicked.connect(self.add_all_held_projects)
+        held_btns.addWidget(self.btn_add_all_held)
+        next_layout.addLayout(held_btns)
+        self.btn_remove_held.hide()
+        self.btn_add_all_held.hide()
+        self.refresh_held_projects()
 
         # GitHub Automation Row for next project
         gh_row = QtWidgets.QHBoxLayout()
@@ -2512,6 +2862,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.agent_combo.currentIndexChanged.connect(self.on_agent_changed)
         self.on_agent_changed(self.agent_combo.currentIndex())
         self.refresh_queue()
+        self.refresh_step_group_chips()
 
     # Compatibility aliases
     @property
@@ -2669,9 +3020,10 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
     def update_next_target_preview(self):
         slug = self.next_slug_input.text().strip()
+        custom = self.next_location.path.text().strip()
         base = self.pipeline.get_base_dir()
-        if slug:
-            target_path = Path(base) / slug
+        if custom or slug:
+            target_path = Path(custom).expanduser() if custom else Path(base) / to_slug(slug)
             exists_tag = " [EXISTS]" if target_path.exists() else " [WILL AUTO-CREATE LOCAL FOLDER ON EXECUTION]"
             self.next_target_preview_lbl.setText(f"Target Folder: {target_path}{exists_tag}")
         else:
@@ -2709,8 +3061,265 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
     def update_next_prompt_metrics(self):
         words = len(self.next_prompt_input.toPlainText().split())
+        held_n = len(getattr(self, "held_projects", []) or [])
+        held_bit = f" · {held_n} project(s) held" if held_n else ""
         self.next_prompt_metrics_lbl.setText(
-            f"{len(self.draft_prompts)} prompts staged • {words:,} words in editor • Add Prompt keeps the full text as one step.")
+            f"{len(self.draft_prompts)} prompts staged • {words:,} words in editor{held_bit}. "
+            "Add Prompt = one step. Hold = prepare another project. Add Project / Add all = queue."
+        )
+
+    def refresh_held_projects(self):
+        held = getattr(self, "held_projects", None)
+        if held is None:
+            self.held_projects = []
+            held = self.held_projects
+        has = bool(held)
+        if hasattr(self, "held_list"):
+            self.held_list.setVisible(has)
+            self.held_list.clear()
+            for i, proj in enumerate(held):
+                n = len(proj.get("prompts") or [])
+                self.held_list.addItem(
+                    f"{i + 1}. {proj.get('title') or proj.get('slug')}  ({n} prompt{'s' if n != 1 else ''})  [{proj.get('slug')}]"
+                )
+        if hasattr(self, "btn_remove_held"):
+            self.btn_remove_held.setVisible(has)
+        if hasattr(self, "btn_add_all_held"):
+            self.btn_add_all_held.setVisible(has or bool(self.draft_prompts) or bool(
+                getattr(self, "next_prompt_input", None) and self.next_prompt_input.toPlainText().strip()
+            ))
+            if has:
+                self.btn_add_all_held.show()
+        self.update_next_prompt_metrics()
+
+    def _snapshot_form_project(self):
+        """Build one project dict from the current next-project form, or None if empty."""
+        raw_text = self.next_prompt_input.toPlainText().strip()
+        commands = list(self.draft_prompts) + ([raw_text] if raw_text else [])
+        if not commands:
+            return None
+        title = self.next_title_input.text().strip()
+        project = self.next_location.path.text().strip()
+        slug = self.next_slug_input.text().strip()
+        if not slug:
+            slug = to_slug(title or (Path(project).name if project else commands[0][:35]))
+        if not title:
+            title = slug.replace("-", " ").title()
+        return {
+            "title": title,
+            "slug": slug,
+            "project": project,
+            "prompts": commands,
+            "create_repo": self.gh_check.isChecked(),
+            "repo_name": self.gh_name_input.text().strip() or (slug if self.gh_check.isChecked() else ""),
+            "repo_desc": self.gh_desc_input.text().strip(),
+            "agent": self.agent_combo.currentData(),
+        }
+
+    def _clear_next_project_form(self):
+        self.draft_prompts.clear()
+        self.refresh_draft_prompts()
+        self.next_prompt_input.clear()
+        self.next_title_input.clear()
+        self.next_slug_input.clear()
+        self.next_location.path.clear()
+        self.next_target_preview_lbl.setText("")
+        self.gh_name_input.clear()
+        self.gh_desc_input.clear()
+        self.gh_check.setChecked(False)
+
+    def add_open_project_field(self):
+        """Keep another project title + command/prompt editor open on screen."""
+        if not hasattr(self, "open_project_fields"):
+            self.open_project_fields = []
+        card = OpenProjectFieldCard(index=len(self.open_project_fields) + 1, parent=self.open_fields_host,
+                                    base_dir=self.pipeline.get_base_dir)
+        card.removed.connect(self.remove_open_project_field)
+        self.open_fields_layout.addWidget(card)
+        self.open_project_fields.append(card)
+        self._renumber_open_project_fields()
+
+    def remove_open_project_field(self, card):
+        fields = getattr(self, "open_project_fields", [])
+        if card not in fields:
+            return
+        # Always keep at least one open field
+        if len(fields) <= 1:
+            card.clear()
+            return
+        fields.remove(card)
+        self.open_fields_layout.removeWidget(card)
+        card.setParent(None)
+        card.deleteLater()
+        self._renumber_open_project_fields()
+
+    def _renumber_open_project_fields(self):
+        for i, card in enumerate(getattr(self, "open_project_fields", []) or []):
+            card.set_index(i + 1)
+
+    @queue_error_to_log
+    def add_all_open_project_fields(self):
+        """Queue every filled open project field into the pipeline."""
+        if self.busy():
+            self.log_box.append("Wait for the current task to finish before changing the queue.")
+            return
+        agent = self.agent_combo.currentData()
+        snaps = []
+        submitted = []
+        for card in getattr(self, "open_project_fields", []) or []:
+            snap = card.to_snapshot()
+            if snap:
+                snap["agent"] = agent
+                snaps.append(snap)
+                submitted.append(card)
+        if not snaps:
+            if hasattr(self, "toast_banner"):
+                self.toast_banner.setText("⚠️ Fill at least one open project field (title + prompt).")
+                self.toast_banner.setStyleSheet(
+                    "background-color: #451a03; color: #fcd34d; font-weight: 700; font-size: 12px; "
+                    "padding: 8px 14px; border-radius: 8px; border: 1px solid #d97706;"
+                )
+                self.toast_banner.show()
+                QtCore.QTimer.singleShot(3500, self.toast_banner.hide)
+            return
+        total_steps = self._queue_project_snapshots(snaps)
+        last_slug = snaps[-1]["slug"]
+        for snap in snaps:
+            self.log_box.append(
+                f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Queued open-field project "
+                f"'{snap.get('title')}' ({len(snap.get('prompts') or [])} step(s))"
+            )
+        for card in submitted:
+            card.clear()
+        # Keep two empty fields ready
+        while len(self.open_project_fields) < 2:
+            self.add_open_project_field()
+        groups = get_grouped_projects(self.pipeline.list())
+        if last_slug:
+            for i, group in enumerate(groups):
+                if group["slug"] == last_slug:
+                    self.project_page = i
+                    break
+        self.refresh_queue()
+        if hasattr(self, "toast_banner"):
+            self.toast_banner.setText(
+                f"✔ Added {len(snaps)} project(s) from open fields ({total_steps} step(s))."
+            )
+            self.toast_banner.setStyleSheet(
+                "background-color: #064e3b; color: #34d399; font-weight: 700; font-size: 13px; "
+                "padding: 10px 16px; border-radius: 8px; border: 1px solid #059669;"
+            )
+            self.toast_banner.show()
+            QtCore.QTimer.singleShot(4000, self.toast_banner.hide)
+        notify("Projects Added", f"Queued {len(snaps)} project(s) from open fields")
+
+    def hold_current_project_draft(self):
+        """Save current form as a prepared project and clear the form for the next one."""
+        snap = self._snapshot_form_project()
+        if not snap:
+            if hasattr(self, "toast_banner"):
+                self.toast_banner.setText("⚠️ Add a title and at least one prompt before Hold.")
+                self.toast_banner.setStyleSheet(
+                    "background-color: #451a03; color: #fcd34d; font-weight: 700; font-size: 12px; "
+                    "padding: 8px 14px; border-radius: 8px; border: 1px solid #d97706;"
+                )
+                self.toast_banner.show()
+                QtCore.QTimer.singleShot(3500, self.toast_banner.hide)
+            return
+        self.held_projects.append(snap)
+        self._clear_next_project_form()
+        self.refresh_held_projects()
+        n = len(self.held_projects)
+        self.log_box.append(
+            f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Held project '{snap['title']}' "
+            f"({len(snap['prompts'])} prompt(s)). {n} prepared — fill the next project."
+        )
+        if hasattr(self, "toast_banner"):
+            self.toast_banner.setText(
+                f"📌 Held '{snap['title']}'. Form cleared — prepare project #{n + 1}, then Add all."
+            )
+            self.toast_banner.setStyleSheet(
+                "background-color: #1e1b4b; color: #c7d2fe; font-weight: 700; font-size: 13px; "
+                "padding: 8px 16px; border-radius: 8px; border: 1px solid #4338ca;"
+            )
+            self.toast_banner.show()
+            QtCore.QTimer.singleShot(4000, self.toast_banner.hide)
+        self.next_title_input.setFocus()
+
+    def remove_held_project(self):
+        row = self.held_list.currentRow() if hasattr(self, "held_list") else -1
+        if row < 0 or row >= len(self.held_projects):
+            return
+        removed = self.held_projects.pop(row)
+        self.refresh_held_projects()
+        self.log_box.append(
+            f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Removed held project '{removed.get('title')}'."
+        )
+
+    def _queue_project_snapshot(self, snap: dict) -> int:
+        return self._queue_project_snapshots([snap])
+
+    def _queue_project_snapshots(self, snapshots):
+        cycle = ("antigravity", "antigravity", "local", "local", "antigravity")
+        drafts = []
+        for snap in snapshots:
+            agent = snap.get("agent") or self.agent_combo.currentData()
+            steps = [(prompt, cycle[i % len(cycle)] if agent == "multi" else agent)
+                     for i, prompt in enumerate(snap["prompts"])]
+            drafts.append(dict(snap, steps=steps))
+        for snap, slug in zip(snapshots, self.pipeline.add_project_drafts(drafts)):
+            snap["slug"] = slug
+        return sum(len(draft["steps"]) for draft in drafts)
+
+    @queue_error_to_log
+    def add_all_held_projects(self):
+        """Queue every held project, then the form project if filled."""
+        if self.busy():
+            self.log_box.append("Wait for the current task to finish before changing the queue.")
+            return
+        batch = list(self.held_projects)
+        current = self._snapshot_form_project()
+        if current:
+            batch.append(current)
+        if not batch:
+            if hasattr(self, "toast_banner"):
+                self.toast_banner.setText("⚠️ Nothing to add — Hold projects or fill the form first.")
+                self.toast_banner.setStyleSheet(
+                    "background-color: #451a03; color: #fcd34d; font-weight: 700; font-size: 12px; "
+                    "padding: 8px 14px; border-radius: 8px; border: 1px solid #d97706;"
+                )
+                self.toast_banner.show()
+                QtCore.QTimer.singleShot(3500, self.toast_banner.hide)
+            return
+        total_steps = self._queue_project_snapshots(batch)
+        last_slug = batch[-1]["slug"]
+        for snap in batch:
+            self.log_box.append(
+                f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Queued prepared project "
+                f"'{snap.get('title')}' ({len(snap.get('prompts') or [])} step(s))"
+            )
+        self.held_projects.clear()
+        if current:
+            self._clear_next_project_form()
+        self.refresh_held_projects()
+        groups = get_grouped_projects(self.pipeline.list())
+        if last_slug:
+            for i, group in enumerate(groups):
+                if group["slug"] == last_slug:
+                    self.project_page = i
+                    break
+        self.refresh_queue()
+        if hasattr(self, "toast_banner"):
+            self.toast_banner.setText(
+                f"✔ Added {len(batch)} project(s) ({total_steps} step(s)) to the pipeline."
+            )
+            self.toast_banner.setStyleSheet(
+                "background-color: #064e3b; color: #34d399; font-weight: 700; font-size: 13px; "
+                "padding: 10px 16px; border-radius: 8px; border: 1px solid #059669;"
+            )
+            self.toast_banner.show()
+            QtCore.QTimer.singleShot(4000, self.toast_banner.hide)
+        notify("Projects Added", f"Queued {len(batch)} project(s) ({total_steps} steps)")
 
     def refresh_draft_prompts(self, selected=-1):
         has_prompts = bool(self.draft_prompts)
@@ -2799,25 +3408,65 @@ class PipelineWindow(QtWidgets.QMainWindow):
         cursor.insertText("\n\n---\n\n")
         self.next_prompt_input.setFocus()
 
-    def append_next_steps_25(self):
-        anchor = self.sender() if isinstance(self.sender(), QtWidgets.QWidget) else self
-        group = choose_step_group(anchor)
-        if not group:
-            if not list_step_groups():
-                self.open_steps_25_template_editor()
-                if hasattr(self, "toast_banner"):
-                    self.toast_banner.setText("Save a step group, then click Auto-add again.")
-                    self.toast_banner.setStyleSheet(
-                        "background-color: #451a03; color: #fcd34d; font-weight: 700; font-size: 12px; "
-                        "padding: 8px 14px; border-radius: 8px; border: 1px solid #d97706;"
-                    )
-                    self.toast_banner.show()
-                    QtCore.QTimer.singleShot(3500, self.toast_banner.hide)
-            return
-        steps = list(group.get("steps") or [])
+    def _clear_layout(self, layout):
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+    def refresh_step_group_chips(self):
+        """Show saved groups in place; click adds that group. Empty → hint + Add group."""
+        groups = [g for g in list_step_groups() if g.get("steps")]
+        chip_style = (
+            "background-color: #064e3b; color: #6ee7b7; font-size: 10px; font-weight: 600; "
+            "padding: 3px 10px; border: 1px solid #047857; border-radius: 12px;"
+        )
+        hint_style = "color: #64748b; font-size: 10px;"
+
+        for bar_attr, layout_attr, target in (
+            ("next_groups_bar", "next_groups_layout", "next"),
+            ("cur_groups_bar", "cur_groups_layout", "current"),
+        ):
+            layout = getattr(self, layout_attr, None)
+            bar = getattr(self, bar_attr, None)
+            if layout is None or bar is None:
+                continue
+            self._clear_layout(layout)
+            if not groups:
+                hint = QtWidgets.QLabel("No saved groups yet — use + Add group")
+                hint.setStyleSheet(hint_style)
+                layout.addWidget(hint)
+                layout.addStretch()
+                bar.show()
+                continue
+            label = QtWidgets.QLabel("Groups:")
+            label.setStyleSheet("color: #64748b; font-size: 10px; font-weight: 600;")
+            layout.addWidget(label)
+            for group in groups:
+                count = len(group.get("steps") or [])
+                btn = QtWidgets.QPushButton(f"{group.get('name') or 'Untitled'} ({count})")
+                btn.setObjectName("small_btn")
+                btn.setToolTip(
+                    f"Add all {count} prompt(s) from “{group.get('name')}” in order "
+                    "(after any text already in the editor / draft list)"
+                )
+                btn.setStyleSheet(chip_style)
+                gid = group["id"]
+                if target == "next":
+                    btn.clicked.connect(lambda _=False, group_id=gid: self.apply_next_step_group(group_id))
+                else:
+                    btn.clicked.connect(lambda _=False, group_id=gid: self.apply_cur_step_group(group_id))
+                layout.addWidget(btn)
+            layout.addStretch()
+            bar.show()
+
+    def apply_next_step_group(self, group_id):
+        group = get_step_group(group_id)
+        steps = list((group or {}).get("steps") or [])
         if not steps:
+            self.open_steps_25_template_editor()
             return
-        # Keep Step 1 from the editor as its own draft item, then add group steps serially.
         if self.next_prompt_input.toPlainText().strip():
             self.stage_prompt()
         self.draft_prompts.extend(steps)
@@ -2832,6 +3481,52 @@ class PipelineWindow(QtWidgets.QMainWindow):
             )
             self.toast_banner.show()
             QtCore.QTimer.singleShot(3500, self.toast_banner.hide)
+
+    def apply_cur_step_group(self, group_id):
+        group = get_step_group(group_id)
+        steps = list((group or {}).get("steps") or [])
+        if not steps:
+            self.open_steps_25_template_editor()
+            return
+        current = self.current_prompt_input.toPlainText().rstrip()
+        append_txt = format_step_pack_for_editor(steps)
+        self.current_prompt_input.setPlainText(current + append_txt if current else append_txt.lstrip())
+        if hasattr(self, "toast_banner"):
+            self.toast_banner.setText(
+                f"✔ Appended “{group.get('name', 'Group')}” ({len(steps)} steps). "
+                "Queue to Current runs them serially."
+            )
+            self.toast_banner.setStyleSheet(
+                "background-color: #064e3b; color: #34d399; font-weight: 700; font-size: 13px; "
+                "padding: 8px 16px; border-radius: 8px; border: 1px solid #059669;"
+            )
+            self.toast_banner.show()
+            QtCore.QTimer.singleShot(3500, self.toast_banner.hide)
+
+    def append_next_steps_25(self):
+        """Compat: open group picker or modal if none saved."""
+        groups = [g for g in list_step_groups() if g.get("steps")]
+        if not groups:
+            self.open_steps_25_template_editor()
+            return
+        if len(groups) == 1:
+            self.apply_next_step_group(groups[0]["id"])
+            return
+        group = choose_step_group(self.sender() if isinstance(self.sender(), QtWidgets.QWidget) else self)
+        if group:
+            self.apply_next_step_group(group["id"])
+
+    def append_cur_steps_25(self):
+        groups = [g for g in list_step_groups() if g.get("steps")]
+        if not groups:
+            self.open_steps_25_template_editor()
+            return
+        if len(groups) == 1:
+            self.apply_cur_step_group(groups[0]["id"])
+            return
+        group = choose_step_group(self.sender() if isinstance(self.sender(), QtWidgets.QWidget) else self)
+        if group:
+            self.apply_cur_step_group(group["id"])
 
     def open_next_prompt_editor(self):
         title = self.next_title_input.text().strip() or "Next Project"
@@ -2858,42 +3553,10 @@ class PipelineWindow(QtWidgets.QMainWindow):
         cursor.insertText("\n\n---\n\n")
         self.current_prompt_input.setFocus()
 
-    def append_cur_steps_25(self):
-        anchor = self.sender() if isinstance(self.sender(), QtWidgets.QWidget) else self
-        group = choose_step_group(anchor)
-        if not group:
-            if not list_step_groups():
-                self.open_steps_25_template_editor()
-                if hasattr(self, "toast_banner"):
-                    self.toast_banner.setText("Save a step group, then click Auto-add again.")
-                    self.toast_banner.setStyleSheet(
-                        "background-color: #451a03; color: #fcd34d; font-weight: 700; font-size: 12px; "
-                        "padding: 8px 14px; border-radius: 8px; border: 1px solid #d97706;"
-                    )
-                    self.toast_banner.show()
-                    QtCore.QTimer.singleShot(3500, self.toast_banner.hide)
-            return
-        steps = list(group.get("steps") or [])
-        if not steps:
-            return
-        current = self.current_prompt_input.toPlainText().rstrip()
-        append_txt = format_step_pack_for_editor(steps)
-        self.current_prompt_input.setPlainText(current + append_txt if current else append_txt.lstrip())
-        if hasattr(self, "toast_banner"):
-            self.toast_banner.setText(
-                f"✔ Appended “{group.get('name', 'Group')}” ({len(steps)} steps). "
-                "Queue to Current runs them serially."
-            )
-            self.toast_banner.setStyleSheet(
-                "background-color: #064e3b; color: #34d399; font-weight: 700; font-size: 13px; "
-                "padding: 8px 16px; border-radius: 8px; border: 1px solid #059669;"
-            )
-            self.toast_banner.show()
-            QtCore.QTimer.singleShot(3500, self.toast_banner.hide)
-
     def open_steps_25_template_editor(self):
         dlg = Steps25TemplateDialog(parent=self)
         dlg.exec_()
+        self.refresh_step_group_chips()
 
     def open_cur_prompt_editor(self):
         title = getattr(self, "current_title", "Current Project")
@@ -2986,22 +3649,14 @@ class PipelineWindow(QtWidgets.QMainWindow):
         if not commands:
             return
 
-        os.makedirs(self.current_path, exist_ok=True)
-        agent = self.agent_combo.currentData()
-        for idx, prompt in enumerate(commands):
-            step_agent = agent
-            if agent == "multi":
-                hybrid_cycle = ["antigravity", "antigravity", "local", "local", "antigravity"]
-                step_agent = hybrid_cycle[idx % len(hybrid_cycle)]
-            self.pipeline.add(
-                prompt=prompt,
-                agent=step_agent,
-                project=self.current_path,
-                project_title=self.current_title,
-                project_slug=self.current_slug,
-                create_repo=False,
-                notify_desktop=False,
-            )
+        current = Path(self.current_path).resolve()
+        default = Path(self.pipeline.get_base_dir()).resolve() / to_slug(self.current_slug)
+        self._queue_project_snapshot({
+            "project": "" if current == default and not current.exists() else str(current),
+            "title": self.current_title,
+            "slug": self.current_slug,
+            "prompts": commands,
+        })
 
         self.current_prompt_input.clear()
         count = len(commands)
@@ -3025,8 +3680,8 @@ class PipelineWindow(QtWidgets.QMainWindow):
             self.log_box.append("Wait for the current task to finish before changing the queue.")
             return
 
-        raw_text = self.next_prompt_input.toPlainText().strip()
-        if not raw_text and not self.draft_prompts:
+        snap = self._snapshot_form_project()
+        if not snap:
             if hasattr(self, "toast_banner"):
                 self.toast_banner.setText("⚠️ Please enter command(s) or prompt before clicking Add.")
                 self.toast_banner.setStyleSheet(
@@ -3038,61 +3693,13 @@ class PipelineWindow(QtWidgets.QMainWindow):
             self.next_prompt_input.setFocus()
             return
 
-        commands = list(self.draft_prompts) + ([raw_text] if raw_text else [])
-        if not commands:
-            return
+        title = snap["title"]
+        count = self._queue_project_snapshot(snap)
+        slug = snap["slug"]
+        self._clear_next_project_form()
+        self.refresh_held_projects()
 
-        title = self.next_title_input.text().strip()
-        slug = self.next_slug_input.text().strip()
-
-        if not slug:
-            if title:
-                slug = to_slug(title)
-            else:
-                slug = to_slug(commands[0][:35])
-
-        if not title:
-            title = slug.replace("-", " ").title()
-
-        agent = self.agent_combo.currentData()
-        create_repo = self.gh_check.isChecked()
-        repo_name = self.gh_name_input.text().strip() or (slug if create_repo else "")
-        repo_desc = self.gh_desc_input.text().strip()
-
-        base_dir = self.pipeline.get_base_dir()
-        proj_dir = str(Path(base_dir) / slug)
-        os.makedirs(proj_dir, exist_ok=True)
-
-        for idx, prompt in enumerate(commands):
-            is_repo = create_repo if idx == 0 else False
-            step_agent = agent
-            if agent == "multi":
-                hybrid_cycle = ["antigravity", "antigravity", "local", "local", "antigravity"]
-                step_agent = hybrid_cycle[idx % len(hybrid_cycle)]
-            self.pipeline.add(
-                prompt=prompt,
-                agent=step_agent,
-                project=proj_dir,
-                project_title=title,
-                project_slug=slug,
-                create_repo=is_repo,
-                repo_name=repo_name if is_repo else "",
-                repo_desc=repo_desc if is_repo else "",
-                notify_desktop=False,
-            )
-
-        self.draft_prompts.clear()
-        self.refresh_draft_prompts()
-        self.next_prompt_input.clear()
-        self.next_title_input.clear()
-        self.next_slug_input.clear()
-        self.next_target_preview_lbl.setText("")
-        self.gh_name_input.clear()
-        self.gh_desc_input.clear()
-        self.gh_check.setChecked(False)
-
-        count = len(commands)
-        tag = f" [GH Repo: {repo_name}]" if create_repo else ""
+        tag = f" [GH Repo: {snap.get('repo_name')}]" if snap.get("create_repo") else ""
         self.log_box.append(
             f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Queued project '{title}' [folder: {slug}] with {count} step(s){tag}"
         )
@@ -3106,7 +3713,10 @@ class PipelineWindow(QtWidgets.QMainWindow):
         next_num = total_projects + 1
 
         if hasattr(self, "toast_banner"):
-            self.toast_banner.setText(f"✔ Successfully added Project #{total_projects} '{title}' ({count} step(s))! Ready for Project #{next_num}.")
+            self.toast_banner.setText(
+                f"✔ Added Project #{total_projects} '{title}' ({count} step(s))! "
+                f"Form ready for Project #{next_num} — or Hold several then Add all."
+            )
             self.toast_banner.setStyleSheet(
                 "background-color: #064e3b; color: #34d399; font-weight: 700; font-size: 13px; "
                 "padding: 10px 16px; border-radius: 8px; border: 1px solid #059669;"
@@ -3114,7 +3724,6 @@ class PipelineWindow(QtWidgets.QMainWindow):
             self.toast_banner.show()
             QtCore.QTimer.singleShot(4000, self.toast_banner.hide)
 
-        # Smooth auto-scroll down to the newly queued project in the list!
         QtCore.QTimer.singleShot(100, lambda: self.scroll.verticalScrollBar().setValue(
             self.scroll.verticalScrollBar().maximum()
         ))

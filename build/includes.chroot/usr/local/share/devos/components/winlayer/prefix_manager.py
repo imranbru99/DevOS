@@ -22,7 +22,7 @@ DESKTOP_DIR = os.path.expanduser("~/.local/share/applications")
 BASE_PREFIX = os.path.expanduser("~/.local/share/winlayer/base")
 OPEN_APP = "/usr/local/bin/devos-open-app"
 INSTALLER_NAME = re.compile(
-    r"(?:^|[-_\s.])(setup|install|installer|msiexec)(?:$|[-_\s.])", re.I
+    r"(?:setup|installer)(?:$|[-_\s.])|(?:^|[-_\s.])(?:install|msiexec)(?:$|[-_\s.])", re.I
 )
 
 
@@ -49,8 +49,8 @@ class WinLayerManager:
             name,
             flags=re.I,
         )
-        name = re.sub(r"[-_]?(?:setup|installer|install)$", "", name, flags=re.I)
         name = re.sub(r"[-_]v?\d+(?:\.\d+)*(?:[-_][a-z0-9.]+)*", "", name, flags=re.I)
+        name = re.sub(r"[-_. ]?(?:setup|installer|install)$", "", name, flags=re.I)
         name = re.sub(r"[-_.]+", " ", name).strip() or "Windows app"
         if name.islower() or (name.isupper() and len(name) > 4):
             name = name.title()

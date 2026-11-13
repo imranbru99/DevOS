@@ -563,6 +563,7 @@ class DevOSAIEngine:
         self._slots = [_Slot(i) for i in range(self.parallel)]
         self._cond = threading.Condition()
         self._waiting = 0
+        self._sleep_requested = False
         self.max_waiting = 32
         self.wait_timeout_seconds = 600
 
@@ -639,6 +640,9 @@ class DevOSAIEngine:
         with self._cond:
             slot.busy = False
             slot.last_used = time.time()
+            if self._sleep_requested and not self._waiting and not any(s.busy for s in self._slots):
+                self._sleep_requested = False
+                self._release_models("chat closed after generation")
             self._cond.notify_all()
 
     def _gpu_layers(self) -> int:
@@ -993,15 +997,18 @@ class DevOSAIEngine:
         Used when DevOS AI chat closes and no other app/API needs the weights.
         The HTTP daemon stays up (cheap); only the multi-GB GGUF leaves RAM/CPU.
         """
-        if any(s.busy for s in self._slots):
-            return {
-                "unloaded": False,
-                "busy": True,
-                "model_loaded": True,
-                "reason": "busy",
-            }
-        freed = self._release_models(reason)
-        loaded = any(s.llm is not None for s in self._slots)
+        with self._cond:
+            if any(s.busy for s in self._slots):
+                self._sleep_requested = True
+                return {
+                    "unloaded": False,
+                    "busy": True,
+                    "model_loaded": any(s.llm is not None for s in self._slots),
+                    "reason": "busy",
+                }
+            self._sleep_requested = False
+            freed = self._release_models(reason)
+            loaded = any(s.llm is not None for s in self._slots)
         return {
             "unloaded": freed,
             "busy": False,
@@ -1017,7 +1024,9 @@ class DevOSAIEngine:
         """
         loaded = any(s.llm is not None for s in self._slots) or getattr(self, "_embed_llm", None) is not None
         if loaded:
-            self.last_activity = time.time()
+            with self._cond:
+                self._sleep_requested = False
+                self.last_activity = time.time()
         return {"kept_awake": loaded, "model_loaded": loaded}
 
     def unload_if_idle(self) -> bool:
@@ -1340,7 +1349,8 @@ def devos_identity_prompt(ram=None, tier=None) -> str:
         "Never invent DevOS menus, buttons or step-by-step instructions you are not sure of: to add or "
         "remove apps, point to DevOS Features (Start menu) or the Apps window, and say plainly when "
         "something cannot work on DevOS (for example Microsoft Store-only apps). "
-        "Answer directly and briefly, in the user's language. Do not greet unless the user greeted you. "
+        "Answer directly and briefly, in the user's language — Bangla (বাংলা or Romanized), English, "
+        "or any other language they used. Do not force English. Do not greet unless the user greeted you. "
         "Write only your reply: never start with a speaker label such as 'me:', 'AI:' or 'DevOS AI:'."
         + hardware
     )

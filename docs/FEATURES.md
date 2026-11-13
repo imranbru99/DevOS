@@ -1,6 +1,6 @@
 # DevOS current feature inventory
 
-Reviewed against the source tree on **November 9, 2026**. This inventory describes
+Reviewed against the source tree on **November 13, 2026**. This inventory describes
 implemented components and configured installation options. It is not a claim
 that every app, hardware device or installation path has been tested. The current
 source targets Ubuntu 26.04 LTS (Resolute), amd64. An older published ISO may not
@@ -9,7 +9,7 @@ contain these changes.
 ## Desktop, sign-in and installer
 
 - KDE Plasma with DevOS branding, Windows-style keyboard shortcuts, compact taskbar,
-  Sapphire Waves wallpaper and the bundled wallpaper collection.
+  Flagship wallpapers (e.g. Tidal Glass, Azure Ribbon) and the bundled homepage collection.
 - SDDM dark sign-in theme: centered account card, date/time, password visibility,
   login failure feedback, account and session selection, restart and shutdown,
   animated wallpaper Ken Burns pan/zoom with soft drifting color washes.
@@ -27,8 +27,9 @@ contain these changes.
 - Shared Qt application dialogs with clearer delete actions and safe defaults;
   native Qt 5/6 theme support and a targeted migration of old default fonts.
 - See the [README daily-use guide](../README.md#latest-changes-and-daily-use-guide)
-  for current recorder editing, cache care, ordered AI workflow queues, Islamic
-  reminders, live Modesty Filter controls, and component update/recovery commands.
+  for current recorder editing, cache care, AI Pipeline multi-project drafting,
+  schedules/memory/read-URL, Islamic reminders, live Modesty Filter controls,
+  and component update/recovery commands.
 
 ## Everyday tools and hardware
 
@@ -42,22 +43,34 @@ contain these changes.
 | Monitoring | Task Manager with process/performance/startup/service views; Optimizer with friendly application names, idle-memory suggestions, cache cleanup and storage warnings. |
 | Productivity | Notepad session recovery (Voice Typing socket insert), Notes, clipboard history, emoji search, screenshots, Voice Typing (Win+Alt+A/H, click-to-stop, Wayland `kwtypr`) and AI actions on selected text (Win+Alt+Shift+A). |
 | Media | VLC, image/PDF viewers, SimpleScreenRecorder and FFmpeg in package lists. Other creative apps are selectable downloads. |
-| Family | Optional Islamic content, prayer/Qibla tools, Family Safety and a local browser body-region filter. Kids Mode is an escapable full-screen playground, not an account lock. |
+| Family | Optional Islamic content, prayer/Qibla tools, Family Safety and a local browser body-region filter. Kids Mode (**Win+K**) is an escapable full-screen playground, not an account lock. |
 
 ## AI, development and connectivity
 
 - Local assistant with conversation history, streaming, system-information answers,
-  multi-step app/settings actions (YouTube play, stop media, type into focused chat),
-  notes, reminders, document reading, OCR and English/Bangla voice interaction.
+  multi-step app/settings actions (YouTube play, stop/next media, type into focused chat),
+  notes, one-shot reminders, **recurring schedules** (daily/weekday/weekly; notify or safe
+  action), **durable memory** (remember / list / forget), **read/summarize/speak URLs**,
+  install/uninstall (with confirm), social draft posts, Modesty enable/status from chat,
+  OS self-heal (network, audio, display, Bluetooth, printer, updates, slow PC, missing
+  binaries → install offer), document reading, OCR, and English/Bangla/Romanized Bangla
+  voice. Dual-pass STT; neural TTS (Bangla Nabanita) with Auto/EN/BN reply language.
   Web search and navigation open network services. Long dictation uses Voice Typing.
+- Custom chat **Agents** (instructions, folder, diagnostics, allowed apps; bounded tool
+  steps; approve launches; Save report).
 - Local OpenAI-compatible API at `http://127.0.0.1:11434/v1`, API documentation,
   optional authenticated LAN sharing and model management. Tiny chat model is the
-  build default; larger chat, coding and vision models download separately.
+  build default; larger chat, coding and vision models download separately (Small/Medium
+  recommended for multilingual quality).
 - AI Code Agent with repository context, plans, file diffs, command review, project
   runner/preview, prompt queue, stop, retry and rerun. Local inference is available;
   configured Google Gemini, Groq, DeepSeek and OpenAI-compatible providers send
   prompts and code context to their services. A configured API key can select a
   cloud provider automatically; inspect the active engine before using private code.
+- AI Pipeline (`devos pipeline gui`): multiple open project title+prompt fields, Hold
+  tray, named step groups (up to 20×1–6), Import Specs, Batch 20, blueprints, optional
+  GitHub repo creation, Balanced/Quality/Overnight/Speed modes, parallel Antigravity +
+  Antigravity KDE slots, scorecard. See [`AI_PIPELINE.md`](AI_PIPELINE.md).
 - `devos auto` commit-message, review, explanation and summarization helpers;
   separate browser profiles and resource limits for agent browser sessions.
 - Git/Git LFS/GitHub CLI, Node/npm, Python/pip/venv/pipx, PHP/Composer, MariaDB,
@@ -120,7 +133,7 @@ on the installed system for current availability.
 | `firefox` | Firefox | Download from Flathub |
 | `brave` | Brave | Download from Flathub; catalog recommends 4 GB RAM |
 | `thunderbird` | Thunderbird email | Download from Flathub |
-| `winapp` | Windows App (Microsoft) | Web-app shortcut; internet/vendor account as needed |
+| `winapp` | Windows App (Microsoft) | Offers the unofficial Linux Flatpak on x86-64 Wayland. X11 opens Microsoft's web client in the default browser. Requires internet and a Microsoft work or school account. |
 | `m365web` | Microsoft 365 (Word, Excel, PowerPoint online) | Web-app shortcut; internet/vendor account as needed |
 | `outlookweb` | Outlook (Microsoft) | Web-app shortcut; internet/vendor account as needed |
 | `torrent` | qBittorrent | Download from Ubuntu package repositories |

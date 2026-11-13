@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- AI Pipeline: multiple open project title+prompt fields, Hold tray, Add-all, step groups (up to 20×1–6), Import Specs, Batch 20, blueprints/premium modes documented; README screenshot gallery refreshed with Flagship/installer assets.
+- DevOS AI: `read_url` (summarize/speak pages), recurring schedules (daily/weekday/weekly), durable memory (remember/forget), expanded OS self-heal + missing-app install UX, social drafts, dual-pass STT, Bangla neural TTS, Auto/EN/BN reply language; README + FEATURES inventory updated.
 - New 50-image homepage wallpaper collection, refreshed boot and installer previews, My Profile, About DevOS, Code setup and Agent Endurance.
 - Premium Calamares Summary (motion backdrop) with Restart/Shut down on the installer footer and a restyled Install confirmation dialog.
 - Graphical GRUB theme for the live USB menu and an animated Plymouth splash after boot entry selection.

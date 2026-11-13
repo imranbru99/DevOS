@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DevOS Pipeline — Step groups (test)</title>
+  <style>
+    :root {
+      --bg: #060a17;
+      --panel: #0b1224;
+      --line: #1e293b;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --dim: #64748b;
+      --blue: #38bdf8;
+      --violet: #a5b4fc;
+      --green: #6ee7b7;
+      --green-bg: #064e3b;
+      --green-bd: #047857;
+      --btn: #334155;
+      --primary: #2563eb;
+      --warn-bg: #451a03;
+      --warn: #fcd34d;
+      --ok-bg: #064e3b;
+      --ok: #34d399;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: #030712;
+      color: var(--text);
+      font-family: "Segoe UI", system-ui, sans-serif;
+      font-size: 13px;
+    }
+    .shell {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 20px 16px 40px;
+    }
+    h1 {
+      margin: 0 0 6px;
+      font-size: 18px;
+      color: var(--blue);
+    }
+    .sub {
+      margin: 0 0 16px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    /* Fake pipeline toolbar */
+    .toolbar {
+      background: var(--bg);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px 12px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+    .toolbar .muted {
+      font-size: 10px;
+      color: var(--dim);
+      font-weight: 600;
+      margin-right: auto;
+    }
+    .draft {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 14px;
+    }
+    .draft h2 {
+      margin: 0 0 8px;
+      font-size: 13px;
+      color: var(--blue);
+    }
+    .draft-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+    .draft-list li {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--line);
+      font-size: 12px;
+    }
+    .draft-list li:last-child { border-bottom: 0; }
+    .draft-empty { color: var(--dim); font-size: 12px; }
+
+    button {
+      border: 1px solid var(--line);
+      background: var(--btn);
+      color: var(--text);
+      border-radius: 4px;
+      padding: 6px 12px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    button:hover { filter: brightness(1.08); }
+    button.green {
+      background: var(--green-bg);
+      color: var(--green);
+      border-color: var(--green-bd);
+    }
+    button.primary {
+      background: var(--primary);
+      color: #fff;
+      border-color: transparent;
+      font-weight: 700;
+      padding: 7px 16px;
+    }
+    button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    /* Menu under Auto-add */
+    .menu-wrap { position: relative; display: inline-block; }
+    .menu {
+      display: none;
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0;
+      z-index: 20;
+      min-width: 220px;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      padding: 4px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.45);
+    }
+    .menu.open { display: block; }
+    .menu button {
+      display: block;
+      width: 100%;
+      text-align: left;
+      background: transparent;
+      border: 0;
+      border-radius: 4px;
+      padding: 8px 10px;
+      font-size: 12px;
+    }
+    .menu button:hover { background: #1e3a5f; }
+
+    .toast {
+      display: none;
+      margin-bottom: 12px;
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-weight: 700;
+      font-size: 12px;
+    }
+    .toast.show { display: block; }
+    .toast.ok {
+      background: var(--ok-bg);
+      color: var(--ok);
+      border: 1px solid #059669;
+    }
+    .toast.warn {
+      background: var(--warn-bg);
+      color: var(--warn);
+      border: 1px solid #d97706;
+    }
+
+    /* Dialog overlay */
+    .overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.55);
+      z-index: 50;
+      padding: 16px;
+      overflow: auto;
+    }
+    .overlay.open { display: block; }
+    .dialog {
+      max-width: 920px;
+      margin: 12px auto 40px;
+      background: var(--bg);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 16px 18px;
+    }
+    .dialog-title {
+      margin: 0 0 6px;
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--blue);
+    }
+    .dialog-desc {
+      margin: 0 0 12px;
+      font-size: 11px;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+    .box {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 12px;
+      margin-bottom: 12px;
+    }
+    .box h3 {
+      margin: 0 0 10px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .box.s1 h3 { color: var(--blue); }
+    .box.s2 h3 { color: var(--violet); }
+    .box.s3 h3 { color: var(--green); }
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .row:last-child { margin-bottom: 0; }
+    input[type="text"], select, textarea {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      color: var(--text);
+      padding: 7px 10px;
+      font-size: 12px;
+      font-family: inherit;
+    }
+    input[type="text"], select { flex: 1; min-width: 140px; }
+    textarea {
+      width: 100%;
+      min-height: 140px;
+      font-family: ui-monospace, Consolas, monospace;
+      font-size: 11px;
+      line-height: 1.5;
+      color: var(--violet);
+      resize: vertical;
+      margin-bottom: 8px;
+    }
+    .hint { margin: 0 0 8px; font-size: 11px; color: var(--dim); line-height: 1.4; }
+    .meta { font-size: 11px; color: var(--muted); flex: 1; }
+    .check { font-size: 12px; display: flex; gap: 8px; align-items: center; }
+    .step-list {
+      list-style: none;
+      margin: 0 0 8px;
+      padding: 4px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      max-height: 160px;
+      overflow: auto;
+    }
+    .step-list li {
+      padding: 8px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .step-list li.selected { background: #1e3a5f; }
+    .footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 4px;
+    }
+    .json-out {
+      margin-top: 14px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      font-family: ui-monospace, Consolas, monospace;
+      font-size: 11px;
+      color: #cbd5e1;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <h1>DevOS Pipeline — Step groups (browser test)</h1>
+    <p class="sub">
+      Open this file in a browser. Use <strong>⚙</strong> to create a group and save multi-line prompts one by one.
+      Then click <strong>Auto-add group</strong> to append that group’s prompts into the draft list (after any Step 1 text).
+    </p>
+
+    <div id="toast" class="toast" role="status"></div>
+
+    <div class="toolbar" aria-label="Pipeline toolbar">
+      <span class="muted">Specification / Prompts:</span>
+      <button type="button" id="btnOpenEditor">+ Add group</button>
+      <button type="button" id="btnExpandDummy" disabled>⛶ Expand</button>
+    </div>
+
+    <div class="toolbar" id="chipsBar" aria-label="Saved groups" style="margin-top:-6px">
+      <span class="muted">Groups:</span>
+      <span id="chipsHost"></span>
+    </div>
+
+    <div class="toolbar" aria-label="Add prompt row">
+      <input id="step1" type="text" placeholder="Paste one complete prompt…" style="flex:1;min-width:180px" />
+      <button type="button" class="primary" id="btnAddPrompt">+ Add Prompt</button>
+    </div>
+
+    <div class="draft">
+      <h2>Draft prompts (serial order)</h2>
+      <ul class="draft-list" id="draftList"></ul>
+      <p class="draft-empty" id="draftEmpty">No prompts yet. Use Add Prompt and/or click a saved group chip.</p>
+    </div>
+
+    <div class="json-out" id="storageView" aria-live="polite"></div>
+  </div>
+
+  <!-- Step groups dialog -->
+  <div class="overlay" id="overlay" aria-hidden="true">
+    <div class="dialog" role="dialog" aria-labelledby="dlgTitle">
+      <h2 class="dialog-title" id="dlgTitle">⚙ Step groups</h2>
+      <p class="dialog-desc">
+        1) Create or choose a group name.
+        2) Paste one full prompt (multi-line OK).
+        3) Click Save prompt into group.
+        Repeat for the next prompt.
+      </p>
+
+      <section class="box s1">
+        <h3>1. Group name</h3>
+        <div class="row">
+          <input id="groupName" type="text" placeholder="Engineering follow-ups" />
+          <button type="button" class="green" id="btnCreateGroup">Create group</button>
+        </div>
+        <div class="row">
+          <span>Or choose existing:</span>
+          <select id="groupSelect"></select>
+          <button type="button" id="btnDeleteGroup">Delete group</button>
+        </div>
+        <label class="check"><input type="checkbox" id="defaultCheck" /> Default group for Auto-add</label>
+      </section>
+
+      <section class="box s2">
+        <h3>2. Paste one prompt (multi-line OK)</h3>
+        <p class="hint">
+          Paste the full prompt for the next step only. Newlines stay inside this one step —
+          do not use --- as a splitter here.
+        </p>
+        <textarea id="promptText" placeholder="Paste one complete multi-line prompt here…"></textarea>
+        <div class="row">
+          <span class="meta" id="targetLbl">Create or choose a group first.</span>
+          <button type="button" class="primary" id="btnSavePrompt">💾 Save prompt into group</button>
+        </div>
+      </section>
+
+      <section class="box s3">
+        <h3>3. Prompts already in this group (serial order)</h3>
+        <ul class="step-list" id="stepList"></ul>
+        <div class="row">
+          <span class="meta" id="stepCount">0 prompt(s) in this group (max 6)</span>
+          <button type="button" id="btnUp">▲</button>
+          <button type="button" id="btnDown">▼</button>
+          <button type="button" id="btnRemoveStep">Remove selected</button>
+        </div>
+      </section>
+
+      <div class="footer">
+        <button type="button" id="btnCancel">Cancel</button>
+        <button type="button" class="primary" id="btnDone">✔ Done — keep groups</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const MAX_STEPS = 6;
+    const MAX_GROUPS = 20;
+    const STORE_KEY = "devos_pipeline_step_groups_preview_v1";
+
+    /** @type {{ version: number, default_group_id: string, groups: {id:string,name:string,steps:string[]}[] }} */
+    let store = loadStore();
+    /** @type {string[]} */
+    let draft = [];
+    let selectedStep = -1;
+    let dialogSnapshot = null;
+
+    function uid() {
+      return "g" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    }
+
+    function loadStore() {
+      try {
+        const raw = localStorage.getItem(STORE_KEY);
+        if (raw) {
+          const data = JSON.parse(raw);
+          if (data && Array.isArray(data.groups)) return data;
+        }
+      } catch (_) {}
+      const id = uid();
+      return { version: 2, default_group_id: id, groups: [{ id, name: "Default", steps: [] }] };
+    }
+
+    function persist() {
+      localStorage.setItem(STORE_KEY, JSON.stringify(store));
+      renderStorage();
+      renderChips();
+    }
+
+    function toast(msg, kind) {
+      const el = document.getElementById("toast");
+      el.textContent = msg;
+      el.className = "toast show " + (kind || "ok");
+      clearTimeout(toast._t);
+      toast._t = setTimeout(() => { el.className = "toast"; }, 3200);
+    }
+
+    function currentGroup() {
+      const id = document.getElementById("groupSelect").value;
+      return store.groups.find((g) => g.id === id) || null;
+    }
+
+    function refreshGroupSelect(selectId) {
+      const sel = document.getElementById("groupSelect");
+      const keep = selectId || sel.value || store.default_group_id;
+      sel.innerHTML = "";
+      store.groups.forEach((g) => {
+        const opt = document.createElement("option");
+        opt.value = g.id;
+        const star = g.id === store.default_group_id ? " ★" : "";
+        opt.textContent = `${g.name || "Untitled"} (${g.steps.length})${star}`;
+        sel.appendChild(opt);
+      });
+      if (keep && [...sel.options].some((o) => o.value === keep)) sel.value = keep;
+      else if (sel.options.length) sel.selectedIndex = 0;
+      onGroupChanged();
+    }
+
+    function preview(text) {
+      const words = text.trim().split(/\s+/).filter(Boolean);
+      const head = words.slice(0, 8).join(" ") + (words.length > 8 ? " …" : "");
+      const lines = text.split(/\n/).length;
+      return `${head}  (${words.length} words, ${lines} line${lines === 1 ? "" : "s"})`;
+    }
+
+    function reloadStepList() {
+      const g = currentGroup();
+      const list = document.getElementById("stepList");
+      list.innerHTML = "";
+      selectedStep = -1;
+      const steps = g ? g.steps : [];
+      steps.forEach((p, i) => {
+        const li = document.createElement("li");
+        li.textContent = `${i + 1}. ${preview(p)}`;
+        li.addEventListener("click", () => {
+          selectedStep = i;
+          [...list.children].forEach((c) => c.classList.remove("selected"));
+          li.classList.add("selected");
+        });
+        list.appendChild(li);
+      });
+      document.getElementById("stepCount").textContent =
+        `${steps.length} prompt(s) in this group (max ${MAX_STEPS})`;
+      const target = document.getElementById("targetLbl");
+      if (!g) target.textContent = "Create or choose a group first.";
+      else target.textContent =
+        `Will add as step ${steps.length + 1} in “${g.name}” (max ${MAX_STEPS}).`;
+      document.getElementById("defaultCheck").checked = !!(g && g.id === store.default_group_id);
+      if (g) document.getElementById("groupName").value = g.name || "";
+    }
+
+    function onGroupChanged() {
+      reloadStepList();
+    }
+
+    function createGroup() {
+      const name = document.getElementById("groupName").value.trim();
+      if (!name) {
+        toast("Type a group name first.", "warn");
+        document.getElementById("groupName").focus();
+        return;
+      }
+      if (store.groups.length >= MAX_GROUPS) {
+        toast(`At most ${MAX_GROUPS} groups.`, "warn");
+        return;
+      }
+      const id = uid();
+      store.groups.push({ id, name, steps: [] });
+      if (!store.default_group_id) store.default_group_id = id;
+      refreshGroupSelect(id);
+      document.getElementById("promptText").focus();
+      toast(`Group “${name}” created.`);
+    }
+
+    function savePromptIntoGroup() {
+      const g = currentGroup();
+      if (!g) {
+        toast("Create or choose a group name first.", "warn");
+        return;
+      }
+      const typed = document.getElementById("groupName").value.trim();
+      if (typed) g.name = typed;
+      const prompt = document.getElementById("promptText").value.trim();
+      if (!prompt) {
+        toast("Paste a prompt into the text area first.", "warn");
+        document.getElementById("promptText").focus();
+        return;
+      }
+      if (g.steps.length >= MAX_STEPS) {
+        toast(`This group already has ${MAX_STEPS} prompts.`, "warn");
+        return;
+      }
+      g.steps.push(prompt);
+      if (document.getElementById("defaultCheck").checked) store.default_group_id = g.id;
+      document.getElementById("promptText").value = "";
+      refreshGroupSelect(g.id);
+      document.getElementById("promptText").focus();
+      toast(`Saved prompt as step ${g.steps.length} in “${g.name}”.`);
+    }
+
+    function moveStep(dir) {
+      const g = currentGroup();
+      if (!g || selectedStep < 0) return;
+      const t = selectedStep + dir;
+      if (t < 0 || t >= g.steps.length) return;
+      const tmp = g.steps[selectedStep];
+      g.steps[selectedStep] = g.steps[t];
+      g.steps[t] = tmp;
+      selectedStep = t;
+      reloadStepList();
+      const list = document.getElementById("stepList");
+      if (list.children[selectedStep]) list.children[selectedStep].classList.add("selected");
+    }
+
+    function removeSelectedStep() {
+      const g = currentGroup();
+      if (!g || selectedStep < 0) return;
+      g.steps.splice(selectedStep, 1);
+      refreshGroupSelect(g.id);
+    }
+
+    function deleteGroup() {
+      if (store.groups.length <= 1) {
+        const g = currentGroup();
+        if (g) {
+          g.steps = [];
+          g.name = document.getElementById("groupName").value.trim() || g.name || "Default";
+          reloadStepList();
+          toast("Cleared prompts in the only group.");
+        }
+        return;
+      }
+      const id = document.getElementById("groupSelect").value;
+      const idx = store.groups.findIndex((g) => g.id === id);
+      if (idx < 0) return;
+      const removed = store.groups.splice(idx, 1)[0];
+      if (store.default_group_id === removed.id) store.default_group_id = store.groups[0].id;
+      refreshGroupSelect(store.groups[Math.min(idx, store.groups.length - 1)].id);
+      toast(`Deleted group “${removed.name}”.`);
+    }
+
+    function openDialog() {
+      dialogSnapshot = JSON.parse(JSON.stringify(store));
+      document.getElementById("overlay").classList.add("open");
+      document.getElementById("overlay").setAttribute("aria-hidden", "false");
+      refreshGroupSelect(store.default_group_id || (store.groups[0] && store.groups[0].id));
+    }
+
+    function closeDialog(restore) {
+      if (restore && dialogSnapshot) store = dialogSnapshot;
+      dialogSnapshot = null;
+      document.getElementById("overlay").classList.remove("open");
+      document.getElementById("overlay").setAttribute("aria-hidden", "true");
+      renderStorage();
+      renderChips();
+    }
+
+    function doneKeepGroups() {
+      const g = currentGroup();
+      if (document.getElementById("defaultCheck").checked && g) store.default_group_id = g.id;
+      if (g) {
+        const typed = document.getElementById("groupName").value.trim();
+        if (typed) g.name = typed;
+      }
+      const valid = store.groups.filter((x) => x.steps.length > 0);
+      if (!valid.length) {
+        toast("Create a group, paste a prompt, then Save prompt into group.", "warn");
+        return;
+      }
+      store.groups = valid.map((x) => ({
+        id: x.id,
+        name: (x.name || "Untitled").trim() || "Untitled",
+        steps: x.steps.slice(0, MAX_STEPS),
+      }));
+      if (!store.groups.some((x) => x.id === store.default_group_id)) {
+        store.default_group_id = store.groups[0].id;
+      }
+      persist();
+      closeDialog(false);
+      toast(`Saved ${store.groups.length} group(s). Use Auto-add group next.`);
+    }
+
+    function renderChips() {
+      const host = document.getElementById("chipsHost");
+      host.innerHTML = "";
+      const usable = store.groups.filter((g) => g.steps.length > 0);
+      if (!usable.length) {
+        const hint = document.createElement("span");
+        hint.className = "muted";
+        hint.style.marginLeft = "0";
+        hint.textContent = "No saved groups yet — use + Add group";
+        host.appendChild(hint);
+        return;
+      }
+      usable.forEach((g) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "green";
+        b.style.borderRadius = "12px";
+        b.textContent = `${g.name} (${g.steps.length})`;
+        b.title = `Add all ${g.steps.length} prompt(s) from “${g.name}” in order`;
+        b.addEventListener("click", () => applyGroup(g));
+        host.appendChild(b);
+        host.appendChild(document.createTextNode(" "));
+      });
+    }
+
+    function applyGroup(group) {
+      const step1 = document.getElementById("step1").value.trim();
+      if (step1) {
+        draft.push(step1);
+        document.getElementById("step1").value = "";
+      }
+      draft.push(...group.steps);
+      renderDraft();
+      toast(`Added group “${group.name}”: ${group.steps.length} step(s) in order.`);
+    }
+
+    function addPrompt() {
+      const text = document.getElementById("step1").value.trim();
+      if (!text) {
+        document.getElementById("step1").focus();
+        return;
+      }
+      draft.push(text);
+      document.getElementById("step1").value = "";
+      renderDraft();
+    }
+
+    function renderDraft() {
+      const ul = document.getElementById("draftList");
+      const empty = document.getElementById("draftEmpty");
+      ul.innerHTML = "";
+      if (!draft.length) {
+        empty.style.display = "block";
+        return;
+      }
+      empty.style.display = "none";
+      draft.forEach((p, i) => {
+        const li = document.createElement("li");
+        li.textContent = `${i + 1}. ${preview(p)}`;
+        ul.appendChild(li);
+      });
+    }
+
+    function renderStorage() {
+      document.getElementById("storageView").textContent =
+        "localStorage → " + STORE_KEY + "\n" + JSON.stringify(store, null, 2);
+    }
+
+    // Wire events
+    document.getElementById("btnOpenEditor").addEventListener("click", openDialog);
+    document.getElementById("btnAddPrompt").addEventListener("click", addPrompt);
+    document.getElementById("btnCreateGroup").addEventListener("click", createGroup);
+    document.getElementById("btnSavePrompt").addEventListener("click", savePromptIntoGroup);
+    document.getElementById("btnDeleteGroup").addEventListener("click", deleteGroup);
+    document.getElementById("btnUp").addEventListener("click", () => moveStep(-1));
+    document.getElementById("btnDown").addEventListener("click", () => moveStep(1));
+    document.getElementById("btnRemoveStep").addEventListener("click", removeSelectedStep);
+    document.getElementById("btnCancel").addEventListener("click", () => closeDialog(true));
+    document.getElementById("btnDone").addEventListener("click", doneKeepGroups);
+    document.getElementById("groupSelect").addEventListener("change", onGroupChanged);
+    document.getElementById("overlay").addEventListener("click", (e) => {
+      if (e.target.id === "overlay") closeDialog(true);
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        if (document.getElementById("overlay").classList.contains("open")) closeDialog(true);
+      }
+    });
+
+    renderDraft();
+    renderStorage();
+    renderChips();
+  </script>
+</body>
+</html>

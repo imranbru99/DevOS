@@ -810,23 +810,79 @@ SILENT_ACTIONS = frozenset((
 ))
 
 
+# Common Romanized Bangla (how people type when the keyboard is English).
+_ROMAN_BN = re.compile(
+    r"(?i)(?:^|[^\w])(?:ami|tumi|apni|apnar|kemon|acho|achen|asen|bhalo|valo|thik|accha|acha|"
+    r"dhonnobad|dhonnobaad|shukriya|ki\s+koro|kothay|keno|ekhon|pore|ase|ache|hobe|korbo|"
+    r"bolo|bolen|nah|jee|ji|na\s+ki|onekx|oshadharon|shohoj|dorkar|lagbe|pari|parben|"
+    r"bangla|bangla[yi]|bangladesh|dhaka|bhai|apu)(?:[^\w]|$)"
+)
+
+
+def looks_romanized_bangla(text: str) -> bool:
+    """True when Latin letters look like Bangla typed in English letters."""
+    s = (text or "").strip()
+    if not s or re.search(r"[\u0980-\u09FF]", s):
+        return False
+    latin = sum(1 for ch in s if ch.isalpha() and ch.isascii())
+    if latin < 4:
+        return False
+    hits = len(_ROMAN_BN.findall(s))
+    return hits >= 1 and (hits >= 2 or latin <= 48)
+
+
 def reply_language(text: str) -> str:
-    """bn if the answer is mostly Bangla script, else en."""
+    """bn if Bangla script or clear Romanized Bangla; else en."""
     s = text or ""
     bn = sum(1 for ch in s if "\u0980" <= ch <= "\u09FF")
     latin = sum(1 for ch in s if ("A" <= ch <= "Z") or ("a" <= ch <= "z"))
-    return "bn" if bn >= max(8, latin // 2) else "en"
+    if bn >= max(6, latin // 2):
+        return "bn"
+    if looks_romanized_bangla(s):
+        return "bn"
+    return "en"
 
 
-def plain_for_speech(md: str, limit: int = 480) -> str:
-    """Strip markdown so TTS does not read stars and links aloud."""
+def detect_user_language(text: str) -> str:
+    """Best-effort user language for local-model reply routing.
+
+    Returns ``bn``, ``en``, or ``auto`` (other scripts / mixed — match the user).
+    """
+    s = text or ""
+    if not s.strip():
+        return "en"
+    if reply_language(s) == "bn":
+        return "bn"
+    # Other non-Latin scripts (Arabic, Devanagari, CJK, …) → match user language.
+    if re.search(
+        r"[\u0600-\u06FF\u0750-\u077F\u0900-\u097F\u0A80-\u0AFF"
+        r"\u0B80-\u0BFF\u0C00-\u0C7F\u0C80-\u0CFF\u0D00-\u0D7F"
+        r"\u0E00-\u0E7F\u3040-\u30FF\u3400-\u9FFF\uAC00-\uD7AF]",
+        s,
+    ):
+        return "auto"
+    return "en"
+
+
+def plain_for_speech(md: str, limit: int = 12000) -> str:
+    """Strip markdown so TTS does not read stars and links aloud.
+
+    Default limit is high so long answers are spoken end-to-end (old 480-char
+    cap silently dropped later sentences). limit<=0 means no truncation.
+    """
     text = md or ""
     text = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", text)
     text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)
     text = re.sub(r"[*`#_>~]+", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
-    if len(text) > limit:
-        text = text[:limit].rsplit(" ", 1)[0]
+    if limit > 0 and len(text) > limit:
+        # Break on a sentence end near the limit when possible — never mid-word.
+        cut = text[:limit]
+        for sep in (". ", "! ", "? ", "। ", "\n"):
+            idx = cut.rfind(sep)
+            if idx >= max(200, limit // 2):
+                return cut[: idx + 1].strip()
+        return cut.rsplit(" ", 1)[0]
     return text
 
 
@@ -842,8 +898,6 @@ _PLAY_LOCK = threading.Lock()
 _WARM_STARTED = False
 _FFPLAY_FAST = [
     "ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet",
-    "-fflags", "nobuffer", "-flags", "low_delay",
-    "-probesize", "32", "-analyzeduration", "0",
 ]
 # Short greetings with end punctuation may start immediately ("Hi!", "Sure.").
 _OPENER_RE = re.compile(
@@ -1134,66 +1188,31 @@ def _next_speak_cut(pending: str, force: bool = False, first: bool = False) -> T
         return "", 0
 
     # Sentence / line end — speak a complete sentence as soon as it lands.
-    m = re.search(r"[.!?।؟](?:\s+|$)|[\n]", pending)
+    sentence_end = re.compile(r"[.!?।؟]+(?:\s+|$)|\n")
+    opener = _OPENER_RE.match(pending.lstrip()) if first else None
+    offset = len(pending) - len(pending.lstrip())
+    # Keep a greeting with the next sentence so it does not start a separate player.
+    start = offset + opener.end() if opener else 0
+    m = sentence_end.search(pending, start)
     if m and m.end() >= 3:
         cut = m.end()
         if cut > 220:
-            for sep in (", ", "; ", " — ", " এবং "):
-                idx = pending.find(sep, 80, 200)
-                if idx >= 80:
-                    cut = idx + len(sep)
-                    break
-            else:
-                idx = pending.rfind(" ", 100, 200)
-                if idx >= 100:
-                    cut = idx + 1
+            idx = pending.rfind(" ", 100, 200)
+            if idx >= 100:
+                cut = idx + 1
         chunk = pending[:cut].strip()
         return (chunk, cut) if chunk else ("", 0)
 
-    # First audio: short punctuated greeting only, or a full short clause —
-    # never the first word alone.
-    if first:
-        opener = _OPENER_RE.match(pending)
-        if opener and opener.end() >= 2:
-            cut = opener.end()
-            while cut < len(pending) and pending[cut].isspace():
-                cut += 1
-            chunk = pending[:cut].strip()
-            if chunk:
-                return chunk, cut
-        words = pending.split()
-        if len(words) >= _FIRST_WORDS and len(pending.strip()) >= _FIRST_CHUNK_MIN:
-            take = words[:_FIRST_WORDS]
-            pattern = r"\s+".join(re.escape(w) for w in take)
-            mm = re.search(pattern, pending)
-            if mm:
-                cut = mm.end()
-                if cut < len(pending) and pending[cut:cut + 1] in ",;":
-                    cut += 1
-                while cut < len(pending) and pending[cut].isspace():
-                    cut += 1
-                chunk = pending[:cut].strip()
-                if chunk:
-                    return chunk, cut
-        # Whole short reply already on screen (no more text coming yet / force).
-        stripped = pending.strip()
-        if force and 2 <= len(stripped) <= 80:
-            return stripped, len(pending)
-        if 2 <= len(stripped) <= 40 and re.match(
-            r"^[\w\u0980-\u09FF][\w\u0980-\u09FF'’\- ]*[.!?।؟]$", stripped
-        ):
-            return stripped, len(pending)
-
-    # Mid-sentence comma breaks only for long clauses (fewer cuts ⇒ fewer gaps).
-    if len(pending) >= 140:
-        for sep in (", ", "; ", " — ", " এবং "):
-            idx = pending.find(sep, 80, 180)
-            if idx >= 80:
-                cut = idx + len(sep)
-                chunk = pending[:cut].strip()
-                return (chunk, cut) if chunk else ("", 0)
-
-    if force and len(pending.strip()) >= 4:
+    # A trailing token can still grow. Only use words followed by whitespace.
+    words = list(re.finditer(r"\S+\s+", pending))
+    if first and len(words) >= _FIRST_WORDS and len(pending.strip()) >= _FIRST_CHUNK_MIN:
+        cut = words[_FIRST_WORDS - 1].end()
+        return pending[:cut].strip(), cut
+    if len(pending) > 220:
+        cut = pending.rfind(" ", 100, 200) + 1
+        if cut:
+            return pending[:cut].strip(), cut
+    if force:
         return pending.strip(), len(pending)
     return "", 0
 
@@ -1277,7 +1296,7 @@ def _speak_espeak(text: str, language: str) -> bool:
         ))
         try:
             proc.wait(timeout=120)
-            return True
+            return proc.returncode == 0
         except subprocess.TimeoutExpired:
             proc.kill()
             return False
@@ -1334,10 +1353,12 @@ def _speak_stream_edge(text: str, language: str) -> bool:
         finally:
             _untrack_proc(ff)
         try:
-            edge.wait(timeout=8)
+            edge_rc = edge.wait(timeout=8)
         except subprocess.TimeoutExpired:
             edge.kill()
-        return rc == 0
+            edge.wait()
+            return False
+        return rc == 0 and edge_rc == 0
     except OSError:
         return False
 
@@ -1417,15 +1438,28 @@ class StreamSpeaker:
     def feed_delta_total(self, full_stream_md: str):
         if not self._active or self._q is None:
             return
-        plain = plain_for_speech(full_stream_md, limit=4000)
+        plain = plain_for_speech(full_stream_md, limit=0)
         if not plain:
             return
         with self._lock:
             if self._lang == "en" and reply_language(plain) == "bn":
                 self._lang = "bn"
-            self._plain = plain
+            prev = self._plain
+            if not prev or plain.startswith(prev) or self._cursor == 0:
+                # Normal growth while the model is typing — cursor stays valid.
+                self._plain = plain
+            else:
+                # Markdown cleanup changed earlier text; keep cursor in the shared prefix
+                # so we never skip (or re-speak) words already queued.
+                shared = 0
+                bound = min(len(prev), len(plain), self._cursor)
+                while shared < bound and prev[shared] == plain[shared]:
+                    shared += 1
+                self._plain = plain
+                if self._cursor > shared:
+                    self._cursor = shared
             if self._cursor > len(self._plain):
-                self._cursor = 0
+                self._cursor = len(self._plain)
             while True:
                 pending = self._plain[self._cursor:]
                 chunk, advance = _next_speak_cut(pending, force=False, first=self._first_chunk)
@@ -1439,10 +1473,19 @@ class StreamSpeaker:
         if not self._active or self._q is None:
             return
         with self._lock:
-            leftover = self._plain[self._cursor:].strip()
-            if leftover:
-                self._q.put(leftover)
-                self._cursor = len(self._plain)
+            # Force-flush every remaining word so the last sentence is never lost.
+            while self._cursor < len(self._plain):
+                pending = self._plain[self._cursor:]
+                chunk, advance = _next_speak_cut(pending, force=True, first=self._first_chunk)
+                if not chunk or advance <= 0:
+                    leftover = pending.strip()
+                    if leftover:
+                        self._q.put(leftover)
+                        self._cursor = len(self._plain)
+                    break
+                self._q.put(chunk)
+                self._first_chunk = False
+                self._cursor += advance
         self._q.put(None)
         if self._thread is not None:
             self._thread.join(timeout=240)
@@ -1503,16 +1546,16 @@ class StreamSpeaker:
 
             nxt_box: Dict[str, object] = {}
 
-            def prefetch():
+            def prefetch(box=nxt_box):
                 # Block until the next sentence (or finish sentinel) is queued.
                 try:
                     nxt = q.get(timeout=240)
                 except _queue.Empty:
-                    nxt_box["item"] = "__none__"
+                    box["item"] = "__none__"
                     return
-                nxt_box["item"] = nxt
+                box["item"] = nxt
                 if nxt is not None:
-                    nxt_box["path"] = synth_path(nxt)
+                    box["path"] = synth_path(nxt)
 
             th = threading.Thread(target=prefetch, daemon=True)
             th.start()

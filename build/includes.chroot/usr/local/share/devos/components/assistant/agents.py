@@ -12,7 +12,7 @@ import documents
 import tools
 
 
-MAX_STEPS = 5
+MAX_STEPS = 8
 MAX_FILE_BYTES = 8 * 1024 * 1024
 READABLE_SUFFIXES = {".txt", ".md", ".csv", ".log", ".pdf"}
 

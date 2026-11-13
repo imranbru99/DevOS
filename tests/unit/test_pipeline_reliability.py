@@ -84,16 +84,17 @@ def test_step_groups_serial_auto_add(tmp_path,monkeypatch):
     import pipeline_gui
     monkeypatch.setattr(pipeline_gui,'STEPS_25_TEMPLATE_FILE',tmp_path/'private.md')
     monkeypatch.setattr(pipeline_gui,'STEP_PACK_FILE',tmp_path/'step_pack.json')
-    # One pasted block with --- becomes multiple serial steps in a named group.
+    # Each list entry is one whole prompt (multi-line allowed; not split on ---).
+    multiline='Line one\nLine two\n---\nstill same prompt'
     pipeline_gui.save_step_groups([
-        {'id':'eng','name':'Engineering','steps':['Tests\n---\nDocker\n---\nDocs']},
+        {'id':'eng','name':'Engineering','steps':[multiline,'Docker','Docs']},
         {'id':'seo','name':'SEO','steps':['Meta tags','Sitemap']},
     ], default_group_id='eng')
     groups=pipeline_gui.list_step_groups()
     assert [g['name'] for g in groups]==['Engineering','SEO']
     eng=pipeline_gui.get_step_group('eng')
-    assert eng['steps']==['Tests','Docker','Docs']
-    assert pipeline_gui.get_step_pack()==['Tests','Docker','Docs']
+    assert eng['steps']==[multiline,'Docker','Docs']
+    assert pipeline_gui.get_step_pack()==[multiline,'Docker','Docs']
     assert pipeline_gui.get_step_group('seo')['steps']==['Meta tags','Sitemap']
 
 
