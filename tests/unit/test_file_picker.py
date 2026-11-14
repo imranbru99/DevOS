@@ -9,6 +9,8 @@ ROOT = Path(__file__).resolve().parents[2]
 PORTAL = ROOT / "build/includes.chroot/usr/local/bin/devos-portal-filechooser"
 SERVICE = ROOT / "build/includes.chroot/etc/systemd/user/devos-portal-filechooser.service"
 FILES_BIN = ROOT / "build/includes.chroot/usr/local/bin/devos-files"
+PORTALS_CONF = ROOT / "build/includes.chroot/etc/xdg/xdg-desktop-portal/portals.conf"
+KDE_PORTALS_CONF = ROOT / "build/includes.chroot/etc/xdg/xdg-desktop-portal/kde-portals.conf"
 
 
 class TestFilePicker(unittest.TestCase):
@@ -49,6 +51,12 @@ class TestFilePicker(unittest.TestCase):
         self.assertNotIn("Environment=DISPLAY=:1", text)
         self.assertNotIn("Environment=XDG_RUNTIME_DIR=/run/user/1000", text)
         self.assertIn("PATH=/usr/local/bin", text)
+
+    def test_portals_conf_does_not_force_kwallet_secret(self):
+        for path in (PORTALS_CONF, KDE_PORTALS_CONF):
+            text = path.read_text(encoding="utf-8")
+            self.assertIn("FileChooser=devos;kde;", text)
+            self.assertNotIn("Secret=kwallet", text)
 
     def test_filter_parsing(self):
         def clean_glob_pattern(pat):
