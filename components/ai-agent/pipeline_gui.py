@@ -147,6 +147,44 @@ QFrame#banner_rate_limit {
     border: 1px solid #d97706;
     border-radius: 8px;
 }
+QFrame#banner_running {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #0c1929, stop:0.5 #0f2744, stop:1 #0c1929);
+    border: 2px solid #38bdf8;
+    border-radius: 10px;
+}
+QLabel#running_spinner {
+    color: #38bdf8;
+    font-size: 28px;
+    font-weight: 800;
+    min-width: 42px;
+}
+QLabel#running_title {
+    color: #e0f2fe;
+    font-size: 15px;
+    font-weight: 800;
+    letter-spacing: 0.4px;
+}
+QLabel#running_detail {
+    color: #7dd3fc;
+    font-size: 12px;
+    font-weight: 500;
+}
+QProgressBar#running_bar {
+    background-color: #0b1220;
+    border: 1px solid #1e3a5f;
+    border-radius: 6px;
+    height: 14px;
+    text-align: center;
+    color: #e0f2fe;
+    font-size: 10px;
+    font-weight: 700;
+}
+QProgressBar#running_bar::chunk {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #0284c7, stop:0.5 #38bdf8, stop:1 #10b981);
+    border-radius: 5px;
+}
 QLabel#title {
     font-size: 21px;
     font-weight: 800;
@@ -2827,6 +2865,62 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.banner_frame.hide()
         main_layout.addWidget(self.banner_frame)
 
+        # Animated "pipeline running" banner — shown immediately on Run
+        self.running_banner = QtWidgets.QFrame()
+        self.running_banner.setObjectName("banner_running")
+        self.running_banner.setMinimumHeight(72)
+        run_box = QtWidgets.QVBoxLayout(self.running_banner)
+        run_box.setContentsMargins(16, 10, 16, 10)
+        run_box.setSpacing(8)
+
+        run_top = QtWidgets.QHBoxLayout()
+        run_top.setSpacing(12)
+        self.running_spinner_lbl = QtWidgets.QLabel("◐")
+        self.running_spinner_lbl.setObjectName("running_spinner")
+        self.running_spinner_lbl.setAlignment(Qt.AlignCenter)
+        run_top.addWidget(self.running_spinner_lbl)
+
+        run_text_col = QtWidgets.QVBoxLayout()
+        run_text_col.setSpacing(2)
+        self.running_title_lbl = QtWidgets.QLabel("PIPELINE RUNNING")
+        self.running_title_lbl.setObjectName("running_title")
+        run_text_col.addWidget(self.running_title_lbl)
+        self.running_detail_lbl = QtWidgets.QLabel("Starting agents…")
+        self.running_detail_lbl.setObjectName("running_detail")
+        self.running_detail_lbl.setWordWrap(True)
+        run_text_col.addWidget(self.running_detail_lbl)
+        run_top.addLayout(run_text_col, stretch=1)
+
+        self.btn_running_pause = QtWidgets.QPushButton("Pause")
+        self.btn_running_pause.setObjectName("small_btn")
+        self.btn_running_pause.setStyleSheet(
+            "background-color: #854d0e; color: #fef08a; font-weight: 700; font-size: 12px; "
+            "padding: 8px 14px; border: 1px solid #eab308; border-radius: 6px;"
+        )
+        self.btn_running_pause.clicked.connect(self.toggle_runner)
+        run_top.addWidget(self.btn_running_pause)
+        run_box.addLayout(run_top)
+
+        self.running_bar = QProgressBar()
+        self.running_bar.setObjectName("running_bar")
+        self.running_bar.setRange(0, 100)
+        self.running_bar.setValue(8)
+        self.running_bar.setTextVisible(True)
+        self.running_bar.setFormat("%p% · working…")
+        self.running_bar.setMinimumHeight(14)
+        run_box.addWidget(self.running_bar)
+
+        self.running_banner.hide()
+        main_layout.addWidget(self.running_banner)
+
+        self._run_anim_frames = ["◐", "◓", "◑", "◒"]
+        self._run_anim_i = 0
+        self._run_bar_phase = 0
+        self._run_pulse_on = False
+        self.running_anim_timer = QTimer(self)
+        self.running_anim_timer.setInterval(110)
+        self.running_anim_timer.timeout.connect(self._tick_running_animation)
+
         # Premium control strip — modes, blueprints, scorecard
         premium_bar = QtWidgets.QFrame()
         premium_bar.setObjectName("banner_strip")
@@ -4608,18 +4702,24 @@ class PipelineWindow(QtWidgets.QMainWindow):
             self.queue_badge_lbl.setText(f"{total_projects} Project(s) • {total_tasks} Step(s)")
 
         if self.is_running and running_tasks:
-            curr_task = running_tasks[0]
-            self.kpi_status_val.setText(f"RUNNING: {len(running_tasks)} / 2")
+            self.kpi_status_val.setText(f"▶ RUNNING ({len(running_tasks)})")
             self.kpi_status_val.setStyleSheet("color: #38bdf8; font-size: 14px; font-weight: 800;")
         elif rate_limited_tasks:
             self.kpi_status_val.setText("RATE-LIMITED COOLDOWN")
             self.kpi_status_val.setStyleSheet("color: #fbbf24; font-size: 14px; font-weight: 800;")
         elif self.is_running:
-            self.kpi_status_val.setText("ACTIVE (WAITING)")
+            self.kpi_status_val.setText("▶ ACTIVE")
             self.kpi_status_val.setStyleSheet("color: #34d399; font-size: 14px; font-weight: 800;")
         else:
             self.kpi_status_val.setText("IDLE / PAUSED")
             self.kpi_status_val.setStyleSheet("color: #94a3b8; font-size: 14px; font-weight: 800;")
+
+        # Keep the big animated banner in sync while running
+        if self.is_running:
+            self.set_running_ui(True)
+            self._update_running_banner_detail(tasks)
+        elif hasattr(self, "running_banner") and self.running_banner.isVisible():
+            self.set_running_ui(False)
 
         self.project_page = max(0, min(self.project_page, total_projects - 1))
         self.project_page_label.setText(f"Project {self.project_page + 1 if total_projects else 0} of {total_projects}")
@@ -4732,16 +4832,143 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.log_box.insertPlainText(line + "\n")
         self.log_box.ensureCursorVisible()
 
+    def _tick_running_animation(self):
+        """Animate spinner + progress bar while the pipeline runner is active."""
+        if not getattr(self, "is_running", False):
+            return
+        frames = getattr(self, "_run_anim_frames", None) or ["◐", "◓", "◑", "◒"]
+        self._run_anim_i = (getattr(self, "_run_anim_i", 0) + 1) % len(frames)
+        if hasattr(self, "running_spinner_lbl"):
+            self.running_spinner_lbl.setText(frames[self._run_anim_i])
+
+        # Bounce an indeterminate-looking bar (Qt stylesheets often ignore setRange(0,0))
+        self._run_bar_phase = (getattr(self, "_run_bar_phase", 0) + 3) % 100
+        # Triangle wave 12..92 so the bar always looks "alive"
+        phase = self._run_bar_phase
+        value = 12 + (phase if phase <= 50 else 100 - phase)
+        if hasattr(self, "running_bar"):
+            tasks = self.pipeline.list() if hasattr(self, "pipeline") else []
+            total = len(tasks) or 1
+            done = len([t for t in tasks if t.get("status") in ("COMPLETED", "FAILED")])
+            real_pct = int(done * 100 / total) if tasks else 0
+            # Blend real progress with motion so empty/early run still animates
+            shown = max(value, real_pct) if real_pct < 100 else 100
+            if real_pct == 0:
+                shown = value
+            elif real_pct < 95:
+                shown = min(98, max(real_pct, value // 2 + real_pct // 2))
+            self.running_bar.setValue(int(shown))
+            self.running_bar.setFormat(f"{real_pct}% complete · agents working…")
+
+        # Pulse Run button border while active
+        self._run_pulse_on = not getattr(self, "_run_pulse_on", False)
+        if hasattr(self, "btn_run") and self.is_running:
+            if self._run_pulse_on:
+                self.btn_run.setStyleSheet(
+                    "background-color: #ca8a04; color: #0f172a; font-weight: 800; "
+                    "padding: 8px 16px; border: 2px solid #fde047; border-radius: 8px;"
+                )
+            else:
+                self.btn_run.setStyleSheet(
+                    "background-color: #eab308; color: #0f172a; font-weight: 800; "
+                    "padding: 8px 16px; border: 2px solid #fef08a; border-radius: 8px;"
+                )
+
+    def set_running_ui(self, active: bool, detail: str = ""):
+        """Show/hide the large animated running banner."""
+        if not hasattr(self, "running_banner"):
+            return
+        if active:
+            # Don't clobber a COMPLETE title set by step_finished until pause clears it
+            if self.running_title_lbl.text() != "PIPELINE COMPLETE":
+                self.running_title_lbl.setText("PIPELINE RUNNING")
+            if detail:
+                self.running_detail_lbl.setText(detail)
+            elif not self.running_banner.isVisible():
+                self.running_detail_lbl.setText(
+                    "Dispatching agents — projects run one-by-one per agent…"
+                )
+            self.running_banner.show()
+            if hasattr(self, "running_anim_timer") and not self.running_anim_timer.isActive():
+                self.running_anim_timer.start()
+            self._tick_running_animation()
+        else:
+            if hasattr(self, "running_anim_timer"):
+                self.running_anim_timer.stop()
+            self.running_banner.hide()
+            if hasattr(self, "running_spinner_lbl"):
+                self.running_spinner_lbl.setText("◐")
+            if hasattr(self, "running_title_lbl"):
+                self.running_title_lbl.setText("PIPELINE RUNNING")
+            if hasattr(self, "running_bar"):
+                self.running_bar.setValue(0)
+                self.running_bar.setFormat("%p% · working…")
+
+    def _update_running_banner_detail(self, tasks=None):
+        if not getattr(self, "is_running", False) or not hasattr(self, "running_detail_lbl"):
+            return
+        tasks = tasks if tasks is not None else self.pipeline.list()
+        running = [t for t in tasks if t.get("status") in ("RUNNING", "SUBMITTED")]
+        queued = [t for t in tasks if t.get("status") in ("QUEUED", "PENDING", "WAITING")]
+        done = [t for t in tasks if t.get("status") in ("COMPLETED", "FAILED")]
+        if running:
+            t = running[0]
+            title = t.get("project_title") or t.get("project") or "project"
+            agent = (t.get("agent") or "?").upper()
+            prompt = (t.get("prompt") or "").replace("\n", " ").strip()
+            if len(prompt) > 70:
+                prompt = prompt[:67] + "…"
+            extra = f" · {len(running)} active" if len(running) > 1 else ""
+            self.running_detail_lbl.setText(
+                f"{agent} on “{title}”{extra}  ·  {len(done)}/{len(tasks)} done"
+                + (f"  ·  {prompt}" if prompt else "")
+            )
+        elif queued:
+            self.running_detail_lbl.setText(
+                f"Waiting to dispatch next step…  ·  {len(queued)} queued  ·  {len(done)}/{len(tasks)} done"
+            )
+        elif tasks:
+            self.running_detail_lbl.setText(f"Finishing up…  ·  {len(done)}/{len(tasks)} done")
+        else:
+            self.running_detail_lbl.setText("Queue is empty — add a project, then Run again.")
+
     def toggle_runner(self):
         if not self.is_running:
+            tasks = self.pipeline.list()
+            pending = [t for t in tasks if t.get("status") not in ("COMPLETED", "FAILED")]
+            if not pending:
+                if hasattr(self, "toast_banner"):
+                    self.toast_banner.setText(
+                        "⚠️ Queue is empty — add a project with prompts, then click Run Pipeline."
+                    )
+                    self.toast_banner.setStyleSheet(
+                        "background-color: #451a03; color: #fcd34d; font-weight: 700; font-size: 13px; "
+                        "padding: 10px 16px; border-radius: 8px; border: 1px solid #d97706;"
+                    )
+                    self.toast_banner.show()
+                    QtCore.QTimer.singleShot(4500, self.toast_banner.hide)
+                self.log_box.append(
+                    f"[{datetime.datetime.now().strftime('%H:%M:%S')}] "
+                    "Run ignored — no queued steps. Add a project first."
+                )
+                return
             self.is_running = True
-            self.btn_run.setText("Pause Pipeline")
-            self.btn_run.setStyleSheet("background-color: #eab308; color: black; font-weight: 700;")
+            self.btn_run.setText("⏸ Pause Pipeline")
+            self.btn_run.setStyleSheet(
+                "background-color: #eab308; color: #0f172a; font-weight: 800; "
+                "padding: 8px 16px; border: 2px solid #fef08a; border-radius: 8px;"
+            )
+            self.set_running_ui(
+                True,
+                f"Starting… {len(pending)} step(s) ready · agents run in parallel, one project each",
+            )
             self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Starting pipeline runner...")
             self.runner_timer.start(2500)
             self.run_step()
+            self.refresh_queue()
         else:
             self.is_running = False
+            self.set_running_ui(False)
             self.btn_run.setText("Run Pipeline")
             self.btn_run.setObjectName("primary")
             self.btn_run.setStyleSheet("")
@@ -4800,16 +5027,25 @@ class PipelineWindow(QtWidgets.QMainWindow):
         failed = [t for t in tasks if t["status"] == "FAILED"]
 
         if not pending and self.is_running:
-            self.toggle_runner()
             failed_count = len(failed)
             self.log_box.append(f"Finished with {failed_count} failed tasks." if failed_count else "All pipeline commands completed successfully!")
+            if hasattr(self, "running_title_lbl"):
+                self.running_title_lbl.setText("PIPELINE COMPLETE")
+                self.running_detail_lbl.setText(
+                    f"All steps finished{' with failures' if failed_count else ' successfully'}."
+                )
+                if hasattr(self, "running_bar"):
+                    self.running_bar.setValue(100)
+                    self.running_bar.setFormat("100% · done")
+            # Brief celebration, then tear down running UI via toggle
+            QtCore.QTimer.singleShot(900, self.toggle_runner)
         elif failed and not running and self.is_running and all(t["status"] == "FAILED" or any(f.get("project") == t.get("project") for f in failed) for t in pending):
             self.toggle_runner()
             self.log_box.append("Pipeline paused: a task failed. Resolve or remove it before continuing.")
         elif running and self.is_running:
             # Task is actively executing in background agent (e.g. Antigravity)
             # Keep runner timer alive so it auto-detects completion and triggers the next step!
-            pass
+            self._update_running_banner_detail(tasks)
 
     @queue_error_to_log
     def confirm_completed(self, task_id):
@@ -4876,6 +5112,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
                 return
             self.is_running = False
             self.runner_timer.stop()
+            self.set_running_ui(False)
             self.btn_run.setText("Run Pipeline")
             self.btn_run.setObjectName("primary")
             self.btn_run.setStyleSheet("")
