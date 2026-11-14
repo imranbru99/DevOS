@@ -2508,7 +2508,10 @@ class PipelineWindow(QtWidgets.QMainWindow):
         header_vbox.setSpacing(2)
         title = QtWidgets.QLabel("DevOS AI Command Pipeline")
         title.setObjectName("title")
-        subtitle = QtWidgets.QLabel("Parallel agents · 1-by-1 per agent · Real 429 pauses shared Google quota")
+        subtitle = QtWidgets.QLabel(
+            "All agents run together · each agent does its projects one-by-one "
+            "(Cursor / Antigravity / Antigravity KDE / Local)"
+        )
         subtitle.setObjectName("subtitle")
         header_vbox.addWidget(title)
         header_vbox.addWidget(subtitle)
@@ -2852,208 +2855,196 @@ class PipelineWindow(QtWidgets.QMainWindow):
         form_layout.addWidget(cur_section)
         cur_section.hide()
 
-        # 3. ADD ANOTHER PROJECT / NEXT PROJECT (DYNAMIC PROJECT NUMBERING)
+        # 3. SMART PROJECT FORM — Add Prompt first, serial command list, then queue
         next_section = QtWidgets.QFrame()
         next_section.setObjectName("section_next")
         next_layout = QtWidgets.QVBoxLayout(next_section)
         next_layout.setContentsMargins(12, 10, 12, 10)
-        next_layout.setSpacing(7)
+        next_layout.setSpacing(8)
         next_layout.setAlignment(Qt.AlignTop)
 
         next_header = QtWidgets.QHBoxLayout()
-        self.next_badge_lbl = QtWidgets.QLabel("3. ADD NEXT PROJECT (#2)")
+        self.next_badge_lbl = QtWidgets.QLabel("ADD PROJECT")
         self.next_badge_lbl.setObjectName("badge_indigo")
         self.next_badge_lbl.setFixedHeight(30)
         self.next_badge_lbl.setSizePolicy(QtWidgets.QSizePolicy.Maximum, QtWidgets.QSizePolicy.Fixed)
         next_header.addWidget(self.next_badge_lbl)
-
-        next_header.addStretch()
-        btn_open_field = QtWidgets.QPushButton("+ Open another project field")
-        btn_open_field.setObjectName("small_btn")
-        btn_open_field.setToolTip("Keep multiple project title + command/prompt editors open at once")
-        btn_open_field.setStyleSheet(
-            "background-color: #312e81; color: #e0e7ff; font-size: 11px; font-weight: 700; "
-            "padding: 4px 10px; border: 1px solid #6366f1; border-radius: 5px;"
+        parallel_tip = QtWidgets.QLabel(
+            "Pick an agent per project. All agents run at once; each agent finishes its "
+            "queue one project at a time."
         )
-        btn_open_field.clicked.connect(self.add_open_project_field)
-        next_header.addWidget(btn_open_field)
+        parallel_tip.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        parallel_tip.setWordWrap(True)
+        next_header.addWidget(parallel_tip, stretch=1)
         next_layout.addLayout(next_header)
 
-        open_hint = QtWidgets.QLabel(
-            "Open several project fields below and fill them together — then Add all open fields to Pipeline."
-        )
-        open_hint.setStyleSheet("color: #94a3b8; font-size: 11px;")
-        open_hint.setWordWrap(True)
-        next_layout.addWidget(open_hint)
-
-        self.open_fields_host = QtWidgets.QWidget()
-        self.open_fields_layout = QtWidgets.QVBoxLayout(self.open_fields_host)
-        self.open_fields_layout.setContentsMargins(0, 0, 0, 0)
-        self.open_fields_layout.setSpacing(8)
-        next_layout.addWidget(self.open_fields_host)
-        self.open_project_fields = []
-        # Start with two open fields so multi-project drafting is obvious
-        self.add_open_project_field()
-        self.add_open_project_field()
-
-        open_all_row = QtWidgets.QHBoxLayout()
-        open_all_row.addStretch()
-        self.btn_add_all_open_fields = QtWidgets.QPushButton("+ Add all open fields to Pipeline")
-        self.btn_add_all_open_fields.setObjectName("primary")
-        self.btn_add_all_open_fields.setToolTip("Queue every non-empty open project field")
-        self.btn_add_all_open_fields.clicked.connect(self.add_all_open_project_fields)
-        open_all_row.addWidget(self.btn_add_all_open_fields)
-        next_layout.addLayout(open_all_row)
-
-        single_lbl = QtWidgets.QLabel("Or use the classic single-project form:")
-        single_lbl.setStyleSheet("color: #64748b; font-size: 10px; font-weight: 600; margin-top: 4px;")
-        next_layout.addWidget(single_lbl)
-
-        # Project Title & Slug inputs
+        # Compact project identity
         meta_row = QtWidgets.QHBoxLayout()
         meta_row.setSpacing(8)
-
         self.next_title_input = QLineEdit()
-        self.next_title_input.setPlaceholderText("Next Project Title (e.g. 'Build Laravel Auth API')...")
+        self.next_title_input.setPlaceholderText("Project title (e.g. Build Laravel Auth API)")
         self.next_title_input.textChanged.connect(self.on_next_title_changed)
         self.next_title_input.returnPressed.connect(lambda: self.next_prompt_input.setFocus())
         meta_row.addWidget(self.next_title_input, stretch=2)
-
         self.next_slug_input = QLineEdit()
-        self.next_slug_input.setPlaceholderText("Folder Slug (auto-generated)")
+        self.next_slug_input.setPlaceholderText("folder-slug")
         self.next_slug_input.textChanged.connect(self.update_next_target_preview)
         self.next_slug_input.returnPressed.connect(lambda: self.next_prompt_input.setFocus())
         meta_row.addWidget(self.next_slug_input, stretch=1)
-
         next_layout.addLayout(meta_row)
+
         self.next_location = ProjectLocation(self.pipeline.get_base_dir, self)
         self.next_location.path.textChanged.connect(self.update_next_target_preview)
         next_layout.addWidget(self.next_location)
-
-        # Folder location preview
         self.next_target_preview_lbl = QtWidgets.QLabel("")
         self.next_target_preview_lbl.setStyleSheet("color: #a5b4fc; font-size: 11px; font-family: monospace;")
         self.next_target_preview_lbl.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
         self.next_target_preview_lbl.setWordWrap(True)
         next_layout.addWidget(self.next_target_preview_lbl)
 
-        # Commands toolbar for next project
-        next_tools_row = QtWidgets.QHBoxLayout()
-        next_tools_row.setSpacing(6)
-        next_tools_lbl = QtWidgets.QLabel("Specification / Prompts:")
-        next_tools_lbl.setStyleSheet("color: #64748b; font-size: 10px; font-weight: 600;")
-        next_tools_lbl.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
-        next_tools_row.addWidget(next_tools_lbl)
-        next_tools_row.addStretch()
-
-        btn_next_load = QtWidgets.QPushButton("📄 Load Spec (.md/.txt)")
-        btn_next_load.setObjectName("small_btn")
-        btn_next_load.setToolTip("Load 5,000+ word specification file from disk")
-        btn_next_load.setStyleSheet("background-color: #0f172a; color: #38bdf8; font-size: 10px; padding: 2px 7px; border: 1px solid #1e293b; border-radius: 4px;")
-        btn_next_load.clicked.connect(self.load_next_prompt_file)
-        next_tools_row.addWidget(btn_next_load)
-
-        btn_next_add_group = QtWidgets.QPushButton("+ Add group")
-        btn_next_add_group.setObjectName("small_btn")
-        btn_next_add_group.setToolTip("Open modal to create a group and save multi-line prompts into it")
-        btn_next_add_group.setStyleSheet(
-            "background-color: #1e1b4b; color: #a5b4fc; font-size: 10px; padding: 2px 8px; "
-            "border: 1px solid #312e81; border-radius: 4px;"
+        # Per-project agent (this project only)
+        proj_agent_row = QtWidgets.QHBoxLayout()
+        proj_agent_row.setSpacing(6)
+        proj_agent_lbl = QtWidgets.QLabel("Agent for this project:")
+        proj_agent_lbl.setStyleSheet("color: #94a3b8; font-size: 11px; font-weight: 600;")
+        proj_agent_row.addWidget(proj_agent_lbl)
+        self.next_agent_combo = QtWidgets.QComboBox()
+        self.next_agent_combo.setMinimumWidth(240)
+        self.next_agent_combo.setToolTip(
+            "This project’s agent. Other agents keep working their own projects in parallel."
         )
-        btn_next_add_group.clicked.connect(self.open_steps_25_template_editor)
-        next_tools_row.addWidget(btn_next_add_group)
+        fill_pipeline_agent_combo(
+            self.next_agent_combo,
+            default_key=self.agent_combo.currentData() if hasattr(self, "agent_combo") else None,
+        )
+        proj_agent_row.addWidget(self.next_agent_combo, stretch=1)
+        next_layout.addLayout(proj_agent_row)
 
-        btn_next_expand = QtWidgets.QPushButton("⛶ Expand")
+        # --- 1) ADD PROMPT (shown first) ---
+        add_prompt_box = QtWidgets.QFrame()
+        add_prompt_box.setStyleSheet(
+            "QFrame { background-color: #0b1220; border: 1px solid #1e3a5f; border-radius: 8px; }"
+        )
+        add_prompt_lay = QtWidgets.QVBoxLayout(add_prompt_box)
+        add_prompt_lay.setContentsMargins(10, 8, 10, 8)
+        add_prompt_lay.setSpacing(6)
+
+        add_hdr = QtWidgets.QHBoxLayout()
+        add_hdr_lbl = QtWidgets.QLabel("1. Add prompt / command")
+        add_hdr_lbl.setStyleSheet("color: #38bdf8; font-size: 12px; font-weight: 700; border: none;")
+        add_hdr.addWidget(add_hdr_lbl)
+        add_hdr.addStretch()
+        btn_next_load = QtWidgets.QPushButton("Load file")
+        btn_next_load.setObjectName("small_btn")
+        btn_next_load.setToolTip("Load one prompt from a .md/.txt file into the add box")
+        btn_next_load.clicked.connect(self.load_next_prompt_file)
+        add_hdr.addWidget(btn_next_load)
+        btn_next_add_group = QtWidgets.QPushButton("Choose group…")
+        btn_next_add_group.setObjectName("small_btn")
+        btn_next_add_group.setToolTip("Append a saved command group into the serial list")
+        btn_next_add_group.clicked.connect(self.append_command_group_to_drafts)
+        add_hdr.addWidget(btn_next_add_group)
+        btn_next_expand = QtWidgets.QPushButton("Expand")
         btn_next_expand.setObjectName("small_btn")
-        btn_next_expand.setToolTip("Open full-screen prompt editor modal")
-        btn_next_expand.setStyleSheet("background-color: #1e293b; color: #f1f5f9; font-size: 10px; padding: 2px 7px; border: 1px solid #334155; border-radius: 4px;")
+        btn_next_expand.setToolTip("Larger editor for this one prompt")
         btn_next_expand.clicked.connect(self.open_next_prompt_editor)
-        next_tools_row.addWidget(btn_next_expand)
+        add_hdr.addWidget(btn_next_expand)
+        add_prompt_lay.addLayout(add_hdr)
 
-        next_layout.addLayout(next_tools_row)
-
-        # Saved groups in place — click a chip to add that group after your prompts.
+        # Saved groups chips (optional shortcuts)
         self.next_groups_bar = QtWidgets.QWidget()
+        self.next_groups_bar.setStyleSheet("border: none;")
         self.next_groups_layout = QtWidgets.QHBoxLayout(self.next_groups_bar)
-        self.next_groups_layout.setContentsMargins(0, 2, 0, 2)
+        self.next_groups_layout.setContentsMargins(0, 0, 0, 0)
         self.next_groups_layout.setSpacing(6)
-        next_layout.addWidget(self.next_groups_bar)
+        add_prompt_lay.addWidget(self.next_groups_bar)
 
-        # Commands input for next project (old Add Prompt flow kept as-is)
         next_cmd_row = QtWidgets.QHBoxLayout()
         next_cmd_row.setSpacing(8)
-
         self.next_prompt_input = QTextEdit()
-        self.next_prompt_input.setPlaceholderText("Paste one complete prompt, then click Add Prompt. Add more prompts before submitting the project.")
-        self.next_prompt_input.setMinimumHeight(65)
-        self.next_prompt_input.setMaximumHeight(75)
+        self.next_prompt_input.setPlaceholderText(
+            "Type or paste ONE prompt/command here, then click + Add Prompt.\n"
+            "It appears in the serial list below — not as a giant dump of all commands."
+        )
+        self.next_prompt_input.setMinimumHeight(56)
+        self.next_prompt_input.setMaximumHeight(72)
         self.next_prompt_input.textChanged.connect(self.update_next_prompt_metrics)
         next_cmd_row.addWidget(self.next_prompt_input, stretch=1)
-
-        self.btn_add_next = QtWidgets.QPushButton("+ Add Project #2 to Pipeline")
-        self.btn_add_next.setObjectName("primary")
-        self.btn_add_next.clicked.connect(lambda: self.add_next_project_tasks())
         self.btn_stage_prompt = QtWidgets.QPushButton("+ Add Prompt")
         self.btn_stage_prompt.setObjectName("primary")
+        self.btn_stage_prompt.setMinimumHeight(56)
+        self.btn_stage_prompt.setMinimumWidth(120)
         self.btn_stage_prompt.clicked.connect(self.stage_prompt)
         next_cmd_row.addWidget(self.btn_stage_prompt)
+        add_prompt_lay.addLayout(next_cmd_row)
+        next_layout.addWidget(add_prompt_box)
 
-        next_layout.addLayout(next_cmd_row)
-
-        self.next_prompt_metrics_lbl = QtWidgets.QLabel(
-            "💡 One project form at a time: Add Prompt → (repeat) → Add Project to Pipeline. "
-            "Form clears — fill the next project the same way. Or Hold several, then Add all."
-        )
-        self.next_prompt_metrics_lbl.setStyleSheet("color: #64748b; font-size: 10px;")
-        self.next_prompt_metrics_lbl.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
-        self.next_prompt_metrics_lbl.setWordWrap(True)
-        next_layout.addWidget(self.next_prompt_metrics_lbl)
+        # --- 2) SERIAL COMMAND LIST ---
+        list_hdr = QtWidgets.QHBoxLayout()
+        list_lbl = QtWidgets.QLabel("2. Serial prompts for this project")
+        list_lbl.setStyleSheet("color: #6ee7b7; font-size: 12px; font-weight: 700;")
+        list_hdr.addWidget(list_lbl)
+        self.next_prompt_metrics_lbl = QtWidgets.QLabel("0 prompts staged")
+        self.next_prompt_metrics_lbl.setStyleSheet("color: #64748b; font-size: 11px;")
+        list_hdr.addWidget(self.next_prompt_metrics_lbl, stretch=1)
+        next_layout.addLayout(list_hdr)
 
         self.draft_list = QtWidgets.QListWidget()
-        self.draft_list.setMinimumHeight(85)
-        self.draft_list.setMaximumHeight(85)
+        self.draft_list.setMinimumHeight(120)
+        self.draft_list.setMaximumHeight(180)
+        self.draft_list.setToolTip("Execution order — step 1 runs first, then 2, 3…")
         self.draft_list.itemDoubleClicked.connect(lambda _: self.edit_draft_prompt())
         next_layout.addWidget(self.draft_list)
         self.draft_controls = QtWidgets.QWidget()
         draft_controls = QtWidgets.QHBoxLayout(self.draft_controls)
         draft_controls.setContentsMargins(0, 0, 0, 0)
-        for label, callback in [("↑ Move up", lambda: self.move_draft_prompt(-1)),
-                                ("↓ Move down", lambda: self.move_draft_prompt(1)),
-                                ("Edit", self.edit_draft_prompt), ("Remove", self.remove_draft_prompt)]:
+        for label, callback in [
+            ("↑ Move up", lambda: self.move_draft_prompt(-1)),
+            ("↓ Move down", lambda: self.move_draft_prompt(1)),
+            ("Edit", self.edit_draft_prompt),
+            ("Remove", self.remove_draft_prompt),
+        ]:
             button = QtWidgets.QPushButton(label)
             button.clicked.connect(callback)
             draft_controls.addWidget(button)
+        draft_controls.addStretch()
         next_layout.addWidget(self.draft_controls)
-        self.draft_list.hide()
-        self.draft_controls.hide()
 
-        # Multi-project hold tray — prepare several projects, then queue them together
+        # --- 3) QUEUE ACTIONS ---
+        queue_row = QtWidgets.QHBoxLayout()
+        self.btn_hold_project = QtWidgets.QPushButton("Hold · prepare another project")
+        self.btn_hold_project.setObjectName("small_btn")
+        self.btn_hold_project.setToolTip(
+            "Park this project in the tray, clear the form, fill the next one. "
+            "Then Add all prepared — each can use a different agent."
+        )
+        self.btn_hold_project.setStyleSheet(
+            "background-color: #1e1b4b; color: #c7d2fe; font-size: 11px; padding: 8px 12px; "
+            "border: 1px solid #4338ca; border-radius: 5px; font-weight: 700;"
+        )
+        self.btn_hold_project.clicked.connect(self.hold_current_project_draft)
+        queue_row.addWidget(self.btn_hold_project)
+        queue_row.addStretch()
+        self.btn_add_next = QtWidgets.QPushButton("+ Add Project to Pipeline")
+        self.btn_add_next.setObjectName("primary")
+        self.btn_add_next.setMinimumHeight(36)
+        self.btn_add_next.clicked.connect(lambda: self.add_next_project_tasks())
+        queue_row.addWidget(self.btn_add_next)
+        next_layout.addLayout(queue_row)
+
+        # Held tray (hidden until used)
         held_hdr = QtWidgets.QHBoxLayout()
-        held_lbl = QtWidgets.QLabel("Prepared projects (multi):")
+        held_lbl = QtWidgets.QLabel("Prepared projects (different agents OK):")
         held_lbl.setStyleSheet("color: #a5b4fc; font-size: 11px; font-weight: 700;")
         held_hdr.addWidget(held_lbl)
         held_hdr.addStretch()
-        self.btn_hold_project = QtWidgets.QPushButton("📌 Hold & prepare another")
-        self.btn_hold_project.setObjectName("small_btn")
-        self.btn_hold_project.setToolTip(
-            "Save this project's title + prompts into the tray below, clear the form, "
-            "and fill the next project. Then use Add all prepared."
-        )
-        self.btn_hold_project.setStyleSheet(
-            "background-color: #1e1b4b; color: #c7d2fe; font-size: 10px; padding: 4px 10px; "
-            "border: 1px solid #4338ca; border-radius: 4px; font-weight: 700;"
-        )
-        self.btn_hold_project.clicked.connect(self.hold_current_project_draft)
-        held_hdr.addWidget(self.btn_hold_project)
         next_layout.addLayout(held_hdr)
-
         self.held_list = QtWidgets.QListWidget()
         self.held_list.setMinimumHeight(56)
         self.held_list.setMaximumHeight(72)
-        self.held_list.setToolTip("Projects waiting to be added to the pipeline")
+        self.held_list.setToolTip("Projects waiting to be added — each keeps its own agent")
         next_layout.addWidget(self.held_list)
         self.held_list.hide()
-
         held_btns = QtWidgets.QHBoxLayout()
         self.btn_remove_held = QtWidgets.QPushButton("Remove selected")
         self.btn_remove_held.setObjectName("small_btn")
@@ -3070,24 +3061,63 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.btn_add_all_held.hide()
         self.refresh_held_projects()
 
-        # GitHub Automation Row for next project
+        # Optional GitHub
         gh_row = QtWidgets.QHBoxLayout()
         gh_row.setSpacing(8)
-
-        self.gh_check = QtWidgets.QCheckBox("Auto-Create GitHub Repo (README included)")
+        self.gh_check = QtWidgets.QCheckBox("Auto-Create GitHub Repo")
         gh_row.addWidget(self.gh_check)
-
         self.gh_name_input = QLineEdit()
         self.gh_name_input.setPlaceholderText("Repo Name")
         self.gh_name_input.setMaximumWidth(140)
         gh_row.addWidget(self.gh_name_input)
-
         self.gh_desc_input = QLineEdit()
         self.gh_desc_input.setPlaceholderText("Description")
         gh_row.addWidget(self.gh_desc_input, stretch=1)
-
         next_layout.addLayout(gh_row)
-        next_layout.addWidget(self.btn_add_next)
+
+        # Advanced: multi-field draft (collapsed — not the primary UX)
+        self.open_fields_toggle = QtWidgets.QPushButton("▸ Advanced: multi-field draft (optional)")
+        self.open_fields_toggle.setCheckable(True)
+        self.open_fields_toggle.setChecked(False)
+        self.open_fields_toggle.setStyleSheet(
+            "QPushButton { text-align: left; color: #64748b; font-size: 11px; padding: 4px 2px; "
+            "background: transparent; border: none; }"
+            "QPushButton:checked { color: #a5b4fc; }"
+        )
+        next_layout.addWidget(self.open_fields_toggle)
+
+        self.open_fields_panel = QtWidgets.QWidget()
+        open_panel_lay = QtWidgets.QVBoxLayout(self.open_fields_panel)
+        open_panel_lay.setContentsMargins(0, 4, 0, 0)
+        open_panel_lay.setSpacing(6)
+        open_hint = QtWidgets.QLabel(
+            "Optional: keep several project cards open. Prefer Add Prompt + Hold above for a cleaner flow."
+        )
+        open_hint.setStyleSheet("color: #64748b; font-size: 10px;")
+        open_hint.setWordWrap(True)
+        open_panel_lay.addWidget(open_hint)
+        btn_open_field = QtWidgets.QPushButton("+ Open another project field")
+        btn_open_field.setObjectName("small_btn")
+        btn_open_field.clicked.connect(self.add_open_project_field)
+        open_panel_lay.addWidget(btn_open_field)
+        self.open_fields_host = QtWidgets.QWidget()
+        self.open_fields_layout = QtWidgets.QVBoxLayout(self.open_fields_host)
+        self.open_fields_layout.setContentsMargins(0, 0, 0, 0)
+        self.open_fields_layout.setSpacing(8)
+        open_panel_lay.addWidget(self.open_fields_host)
+        self.open_project_fields = []
+        open_all_row = QtWidgets.QHBoxLayout()
+        open_all_row.addStretch()
+        self.btn_add_all_open_fields = QtWidgets.QPushButton("+ Add all open fields to Pipeline")
+        self.btn_add_all_open_fields.setObjectName("small_btn")
+        self.btn_add_all_open_fields.clicked.connect(self.add_all_open_project_fields)
+        open_all_row.addWidget(self.btn_add_all_open_fields)
+        open_panel_lay.addLayout(open_all_row)
+        self.open_fields_panel.hide()
+        self.open_fields_toggle.toggled.connect(self._toggle_open_fields_panel)
+        next_layout.addWidget(self.open_fields_panel)
+
+        self.refresh_draft_prompts()
         self.update_next_prompt_metrics()
         form_layout.addWidget(next_section)
 
@@ -3436,12 +3466,13 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Loaded SEO Ranking Prompt Preset into input.")
 
     def update_next_prompt_metrics(self):
-        words = len(self.next_prompt_input.toPlainText().split())
+        if not hasattr(self, "next_prompt_metrics_lbl"):
+            return
+        n = len(getattr(self, "draft_prompts", []) or [])
         held_n = len(getattr(self, "held_projects", []) or [])
         held_bit = f" · {held_n} project(s) held" if held_n else ""
         self.next_prompt_metrics_lbl.setText(
-            f"{len(self.draft_prompts)} prompts staged • {words:,} words in editor{held_bit}. "
-            "Add Prompt = one step. Hold = prepare another project. Add Project / Add all = queue."
+            f"{n} prompt(s) in serial order{held_bit} — Add Prompt, then Add Project to Pipeline"
         )
 
     def refresh_held_projects(self):
@@ -3455,8 +3486,10 @@ class PipelineWindow(QtWidgets.QMainWindow):
             self.held_list.clear()
             for i, proj in enumerate(held):
                 n = len(proj.get("prompts") or [])
+                agent = proj.get("agent") or "default"
                 self.held_list.addItem(
-                    f"{i + 1}. {proj.get('title') or proj.get('slug')}  ({n} prompt{'s' if n != 1 else ''})  [{proj.get('slug')}]"
+                    f"{i + 1}. {proj.get('title') or proj.get('slug')}  ·  {agent}  ·  "
+                    f"{n} prompt{'s' if n != 1 else ''}  [{proj.get('slug')}]"
                 )
         if hasattr(self, "btn_remove_held"):
             self.btn_remove_held.setVisible(has)
@@ -3481,6 +3514,11 @@ class PipelineWindow(QtWidgets.QMainWindow):
             slug = to_slug(title or (Path(project).name if project else commands[0][:35]))
         if not title:
             title = slug.replace("-", " ").title()
+        agent = None
+        if hasattr(self, "next_agent_combo"):
+            agent = self.next_agent_combo.currentData()
+        if not agent and hasattr(self, "agent_combo"):
+            agent = self.agent_combo.currentData()
         return {
             "title": title,
             "slug": slug,
@@ -3489,7 +3527,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
             "create_repo": self.gh_check.isChecked(),
             "repo_name": self.gh_name_input.text().strip() or (slug if self.gh_check.isChecked() else ""),
             "repo_desc": self.gh_desc_input.text().strip(),
-            "agent": self.agent_combo.currentData(),
+            "agent": agent,
         }
 
     def _clear_next_project_form(self):
@@ -3704,15 +3742,22 @@ class PipelineWindow(QtWidgets.QMainWindow):
         notify("Projects Added", f"Queued {len(batch)} project(s) ({total_steps} steps)")
 
     def refresh_draft_prompts(self, selected=-1):
-        has_prompts = bool(self.draft_prompts)
-        self.draft_list.setVisible(has_prompts)
-        self.draft_controls.setVisible(has_prompts)
+        # Always show the serial list so Add Prompt → list is the obvious flow
+        self.draft_list.show()
+        self.draft_controls.show()
         self.draft_list.clear()
-        for index, prompt in enumerate(self.draft_prompts):
-            words = prompt.split()
-            preview = " ".join(words[:5]) + (" …" if len(words) > 5 else "")
-            self.draft_list.addItem(f"{index + 1}. {preview}  ({len(words):,} words)")
-        self.draft_list.setCurrentRow(selected)
+        if not self.draft_prompts:
+            empty = QtWidgets.QListWidgetItem("No prompts yet — add one above")
+            empty.setFlags(Qt.NoItemFlags)
+            empty.setForeground(QColor("#64748b"))
+            self.draft_list.addItem(empty)
+        else:
+            for index, prompt in enumerate(self.draft_prompts):
+                words = prompt.split()
+                preview = " ".join(words[:8]) + (" …" if len(words) > 8 else "")
+                self.draft_list.addItem(f"{index + 1}. {preview}  ({len(words):,} words)")
+            if selected >= 0:
+                self.draft_list.setCurrentRow(selected)
         self.update_next_prompt_metrics()
 
     def stage_prompt(self):
@@ -3723,6 +3768,44 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.draft_prompts.append(prompt)
         self.next_prompt_input.clear()
         self.refresh_draft_prompts(len(self.draft_prompts) - 1)
+        self.next_prompt_input.setFocus()
+
+    def _toggle_open_fields_panel(self, checked: bool):
+        self.open_fields_panel.setVisible(checked)
+        self.open_fields_toggle.setText(
+            "▾ Advanced: multi-field draft (optional)" if checked else "▸ Advanced: multi-field draft (optional)"
+        )
+        if checked and not getattr(self, "open_project_fields", None):
+            self.add_open_project_field()
+
+    def append_command_group_to_drafts(self):
+        """Pick a saved command group and append its prompts to the serial list."""
+        group = choose_step_group(parent=self, prefer_modal=True)
+        steps = list((group or {}).get("steps") or [])
+        if not steps:
+            reply = QtWidgets.QMessageBox.question(
+                self,
+                "No command groups",
+                "No groups saved yet. Open Command Group Setting?",
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            )
+            if reply == QtWidgets.QMessageBox.Yes:
+                self.open_steps_25_template_editor()
+            return
+        # Flush any text still in the add box first
+        if self.next_prompt_input.toPlainText().strip():
+            self.stage_prompt()
+        self.draft_prompts.extend(steps)
+        self.refresh_draft_prompts(len(self.draft_prompts) - 1)
+        name = group.get("name") or "group"
+        if hasattr(self, "toast_banner"):
+            self.toast_banner.setText(f"✔ Added {len(steps)} prompt(s) from “{name}” to the serial list.")
+            self.toast_banner.setStyleSheet(
+                "background-color: #064e3b; color: #34d399; font-weight: 700; font-size: 12px; "
+                "padding: 8px 14px; border-radius: 8px; border: 1px solid #059669;"
+            )
+            self.toast_banner.show()
+            QtCore.QTimer.singleShot(3000, self.toast_banner.hide)
 
     def move_draft_prompt(self, direction):
         index = self.draft_list.currentRow()
@@ -4258,7 +4341,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
         next_num = total_projects + 1
         if hasattr(self, "next_badge_lbl"):
-            self.next_badge_lbl.setText(f"3. ADD NEXT PROJECT (#{next_num})")
+            self.next_badge_lbl.setText(f"ADD PROJECT #{next_num}")
         if hasattr(self, "next_title_input") and not self.next_title_input.text():
             self.next_title_input.setPlaceholderText(f"Next Project #{next_num} Title (e.g. 'Build Laravel Auth API')...")
         if hasattr(self, "btn_add_next"):

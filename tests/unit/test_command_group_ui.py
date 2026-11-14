@@ -46,6 +46,17 @@ def test_no_hard_prompt_limit_per_group():
     assert "(max 6)" not in text
 
 
+def test_smart_add_prompt_first_layout():
+    text = SRC.read_text(encoding="utf-8")
+    assert "1. Add prompt / command" in text
+    assert "2. Serial prompts for this project" in text
+    assert "def append_command_group_to_drafts" in text
+    assert "Advanced: multi-field draft (optional)" in text
+    # Primary queue action — open-fields button is no longer the main primary CTA
+    assert "+ Add Project to Pipeline" in text
+    assert "All agents run together" in text
+
+
 def test_chroot_pipeline_gui_synced():
     assert CHROOT.is_file()
     src = SRC.read_text(encoding="utf-8")
