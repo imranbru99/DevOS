@@ -6,18 +6,22 @@ set -euo pipefail
 echo "== Display =="
 echo "DISPLAY=${DISPLAY:-unset}  WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-unset}"
 
-echo "== Write user portal prefs (KDE FileChooser, no KWallet Secret) =="
+echo "== Write user portal prefs (KDE FileChooser; Secret explicitly empty) =="
 mkdir -p "${HOME}/.config/xdg-desktop-portal"
+# Empty Secret= is required: with only default=kde, portal still tries KWallet
+# and that backend exits 255 on DevOS (KWallet disabled).
 cat > "${HOME}/.config/xdg-desktop-portal/portals.conf" <<'EOF'
 [preferred]
 default=kde
-org.freedesktop.impl.portal.FileChooser=kde;devos;
+org.freedesktop.impl.portal.FileChooser=kde;gtk;devos;
 org.freedesktop.impl.portal.Settings=kde;gtk;
+org.freedesktop.impl.portal.Secret=
 EOF
 # Also cover older XDG lookup paths some portal builds still read.
 mkdir -p "${HOME}/.config"
 cp -f "${HOME}/.config/xdg-desktop-portal/portals.conf" \
   "${HOME}/.config/xdg-desktop-portal.conf" 2>/dev/null || true
+
 
 echo "== Stop broken DevOS FileChooser unit (hardcoded DISPLAY was killing pickers) =="
 systemctl --user stop devos-portal-filechooser.service 2>/dev/null || true

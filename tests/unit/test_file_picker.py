@@ -55,10 +55,14 @@ class TestFilePicker(unittest.TestCase):
     def test_portals_conf_does_not_force_kwallet_secret(self):
         for path in (PORTALS_CONF, KDE_PORTALS_CONF):
             text = path.read_text(encoding="utf-8")
-            self.assertIn("FileChooser=kde;devos;", text)
-            # Preference lines only — comments may still mention the backend.
-            prefs = [ln for ln in text.splitlines() if ln.strip() and not ln.strip().startswith("#")]
-            self.assertFalse(any(ln.startswith("org.freedesktop.impl.portal.Secret=") for ln in prefs))
+            self.assertIn("FileChooser=kde;gtk;devos;", text)
+            prefs = [
+                ln.strip()
+                for ln in text.splitlines()
+                if ln.strip() and not ln.strip().startswith("#")
+            ]
+            # Must set Secret= (empty) so default=kde does not pull KWallet.
+            self.assertIn("org.freedesktop.impl.portal.Secret=", prefs)
 
     def test_filter_parsing(self):
         def clean_glob_pattern(pat):
