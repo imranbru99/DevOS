@@ -56,7 +56,9 @@ class TestFilePicker(unittest.TestCase):
         for path in (PORTALS_CONF, KDE_PORTALS_CONF):
             text = path.read_text(encoding="utf-8")
             self.assertIn("FileChooser=devos;kde;", text)
-            self.assertNotIn("Secret=kwallet", text)
+            # Preference lines only — comments may still mention the backend.
+            prefs = [ln for ln in text.splitlines() if ln.strip() and not ln.strip().startswith("#")]
+            self.assertFalse(any(ln.startswith("org.freedesktop.impl.portal.Secret=") for ln in prefs))
 
     def test_filter_parsing(self):
         def clean_glob_pattern(pat):
