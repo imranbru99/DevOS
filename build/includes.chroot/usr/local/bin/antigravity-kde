@@ -1,21 +1,29 @@
 #!/usr/bin/env bash
 # Antigravity IDE — second independent instance (own Google account + projects).
-# Isolated from Google Antigravity (main) via separate data dirs and WM class.
+# Must NOT exec the main /opt/antigravity/antigravity binary when a dedicated
+# IDE tree exists — same binary ⇒ same taskbar group + shared Electron identity.
 set -euo pipefail
 
 IDE_BIN=""
-if [ -x "${HOME}/.local/lib/antigravity-ide/antigravity-ide" ]; then
-    IDE_BIN="${HOME}/.local/lib/antigravity-ide/antigravity-ide"
-elif [ -x "${HOME}/.local/lib/antigravity-ide/bin/antigravity-ide" ]; then
-    IDE_BIN="${HOME}/.local/lib/antigravity-ide/bin/antigravity-ide"
-elif [ -x "/usr/local/share/devos/antigravity-ide/bin/antigravity-ide" ]; then
-    IDE_BIN="/usr/local/share/devos/antigravity-ide/bin/antigravity-ide"
-elif [ -x "/opt/antigravity/antigravity" ]; then
+# Prefer dedicated IDE binary (different argv0 + patched product.json).
+for candidate in \
+    "${HOME}/.local/lib/antigravity-ide/antigravity-ide" \
+    "/usr/local/lib/antigravity-ide/antigravity-ide" \
+    "/usr/local/share/devos/antigravity-ide/antigravity-ide"
+do
+    if [ -x "$candidate" ] && [ "$(stat -c%s "$candidate" 2>/dev/null || echo 0)" -gt 4096 ]; then
+        IDE_BIN="$candidate"
+        break
+    fi
+done
+
+# Last resort: main binary with forced profile flags (weaker taskbar split).
+if [ -z "$IDE_BIN" ] && [ -x "/opt/antigravity/antigravity" ]; then
     IDE_BIN="/opt/antigravity/antigravity"
 fi
 
 if [ -z "$IDE_BIN" ]; then
-    msg='Antigravity IDE is not installed yet. Open DevOS Features, install Google Antigravity (or Antigravity IDE), then try again.'
+    msg='Antigravity IDE is not installed yet. Open DevOS Features → Antigravity IDE (or run: sudo devos-install-antigravity-kde).'
     echo "Error: $msg" >&2
     if command -v kdialog >/dev/null 2>&1; then
         kdialog --title "Antigravity IDE" --error "$msg" >/dev/null 2>&1 || true
@@ -31,21 +39,21 @@ export DONT_PROMPT_WSL_INSTALL=1
 export GEMINI_APP_DATA_DIR="antigravity-kde"
 # Separate keyring / auth from the main Antigravity instance.
 export SSH_CLIENT="127.0.0.1 0 0"
+# Help Chromium/Electron pick the IDE desktop file for taskbar grouping.
+export CHROME_DESKTOP="antigravity-ide.desktop"
 
 DATA_DIR="${HOME}/.config/Antigravity-KDE"
 EXT_DIR="${HOME}/.antigravity-kde/extensions"
 GEMINI_DIR="${HOME}/.gemini/antigravity-kde"
 mkdir -p "$DATA_DIR" "$EXT_DIR" "$GEMINI_DIR"
 
-# Drop stale Electron/Chromium single-instance locks in THIS profile only so a
-# second click cannot attach to a dead process — never touch the main profile.
+# Drop stale Electron/Chromium single-instance locks in THIS profile only.
 for lock in SingletonLock SingletonSocket SingletonCookie; do
     path="${DATA_DIR}/${lock}"
     if [ -L "$path" ] || [ -e "$path" ]; then
         target=$(readlink "$path" 2>/dev/null || true)
         pid="${target##*-}"
         if [ -n "$pid" ] && [ "$pid" -gt 1 ] 2>/dev/null && [ -d "/proc/$pid" ]; then
-            # Live IDE instance: keep the lock (Electron will focus that window).
             :
         else
             rm -f "$path" 2>/dev/null || true
@@ -68,17 +76,14 @@ fi
 
 rm -f "${HOME}/.gemini/cache/antigravity-keyring-unavailable"
 
-# DevOS disables KWallet on purpose. Antigravity still detects KDE and shows
-# "OS keyring is not available" unless password-store=basic is also in argv.json.
 argv_json="${DATA_DIR}/argv.json"
 if [ ! -f "$argv_json" ] || ! grep -q '"password-store"[[:space:]]*:[[:space:]]*"basic"' "$argv_json" 2>/dev/null; then
     printf '%s\n' '{ "password-store": "basic" }' > "$argv_json"
 fi
 export ELECTRON_PASSWORD_STORE=basic
 
-# Always force profile flags last so a vendor wrapper cannot drop isolation.
-# --user-data-dir + GEMINI_APP_DATA_DIR keep this instance off the main account.
-exec "$IDE_BIN" \
+# Force profile + WM class last so vendor defaults cannot drop isolation.
+exec -a antigravity-ide "$IDE_BIN" \
     --ozone-platform=x11 \
     --no-sandbox \
     --password-store=basic \
