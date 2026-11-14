@@ -630,9 +630,11 @@ def set_window_desktop_file(wid, desktop_slug, home_dir=None):
 
 
 def set_window_wm_class(wid, class_name, class_inst=None):
-    """Set a proper two-part WM_CLASS (instance + class) via XSetClassHint / xdotool."""
-    inst = (class_inst or class_name or "chrome").encode("utf-8")
-    cls = (class_name or "chrome").encode("utf-8")
+    """Set a proper two-part WM_CLASS (instance + class) via XSetClassHint / xdotool / xprop."""
+    inst_s = class_inst or class_name or "chrome"
+    cls_s = class_name or "chrome"
+    inst = inst_s.encode("utf-8")
+    cls = cls_s.encode("utf-8")
     try:
         x11 = ctypes.CDLL("libX11.so.6")
         x11.XOpenDisplay.restype = ctypes.c_void_p
@@ -646,7 +648,6 @@ def set_window_wm_class(wid, class_name, class_inst=None):
             x11.XSetClassHint(display, ctypes.c_ulong(wid), ctypes.byref(hint))
             x11.XFlush(display)
             x11.XCloseDisplay(display)
-            return
     except Exception:
         pass
     try:
@@ -656,11 +657,19 @@ def set_window_wm_class(wid, class_name, class_inst=None):
                 "xdotool",
                 "set_window",
                 "--classname",
-                inst.decode(),
+                inst_s,
                 "--class",
-                cls.decode(),
+                cls_s,
                 str(wid),
             ],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        # Plasma often re-reads WM_CLASS from the property; set both ways.
+        prop = "%s\0%s" % (inst_s, cls_s)
+        subprocess.run(
+            ["xprop", "-id", hex(wid), "-f", "WM_CLASS", "8s", "-set", "WM_CLASS", prop],
             check=False,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -686,19 +695,105 @@ def _find_icontasks_general_section(text: str):
 
 
 def _is_chrome_launcher(entry: str) -> bool:
+    """True for idle Chrome/DevOS Browser pins and per-profile chrome-* pins."""
     e = (entry or "").strip().lower()
     return (
         "google-chrome.desktop" in e
         or "com.google.chrome.desktop" in e
+        or "devos-browser.desktop" in e
+        or "devos-web-browser.desktop" in e
         or re.search(r"(^|/)chrome-[a-z0-9-]+\.desktop$", e) is not None
         or "applications:chrome-" in e
     )
 
 
+def _idle_pin_state_path(home_dir=None):
+    home = home_dir or os.path.expanduser("~")
+    return Path(home) / ".config/devos/chrome-taskbar-idle-pin"
+
+
+def _remember_idle_pin(pin: str, home_dir=None) -> None:
+    path = _idle_pin_state_path(home_dir)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text((pin or "").strip() + "\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _idle_chrome_launcher(existing, home_dir=None):
+    """Prefer the pin the user already had (DevOS Browser or Google Chrome)."""
+    home = home_dir or os.path.expanduser("~")
+    for entry in existing or []:
+        el = entry.lower()
+        if "google-chrome.desktop" in el or "devos-browser.desktop" in el:
+            pin = entry if entry.startswith("applications:") else f"applications:{entry}"
+            _remember_idle_pin(pin, home)
+            return pin
+    # Profiles are open → idle browser pin was removed; restore the last one.
+    try:
+        remembered = _idle_pin_state_path(home).read_text(encoding="utf-8").strip()
+        if remembered and (
+            "google-chrome.desktop" in remembered or "devos-browser.desktop" in remembered
+        ):
+            return remembered
+    except OSError:
+        pass
+    # Chrome installed → pin Google Chrome; else keep DevOS Browser tile.
+    if (
+        os.path.isfile("/usr/bin/google-chrome-stable")
+        or os.path.isfile("/usr/bin/google-chrome")
+        or os.path.isfile("/opt/google/chrome/google-chrome")
+        or os.path.isfile(os.path.join(home, ".local/share/applications/google-chrome.desktop"))
+    ):
+        return "applications:google-chrome.desktop"
+    return "applications:devos-browser.desktop"
+
+
+def apply_plasma_launchers_live(launcher_csv: str, grouping: str = "1") -> bool:
+    """Push Icon Tasks launchers through plasmashell without a full restart."""
+    group = "0" if str(grouping).strip() == "0" else "1"
+    script = (
+        "var parts = '%s'.split(',');"
+        "var panels = panels();"
+        "for (var i = 0; i < panels.length; i++) {"
+        "  var widgets = panels[i].widgets();"
+        "  for (var j = 0; j < widgets.length; j++) {"
+        "    if (widgets[j].type !== 'org.kde.plasma.icontasks') continue;"
+        "    widgets[j].currentConfigGroup = ['General'];"
+        "    widgets[j].writeConfig('launchers', parts.join(','));"
+        "    widgets[j].writeConfig('separateLaunchers', 'true');"
+        "    widgets[j].writeConfig('groupingStrategy', '%s');"
+        "    widgets[j].writeConfig('launchInPlace', 'true');"
+        "    widgets[j].writeConfig('hideActivatedLaunchers', 'false');"
+        "    widgets[j].reloadConfig();"
+        "  }"
+        "}"
+    ) % (launcher_csv.replace("'", "\\'"), group)
+    try:
+        import subprocess
+        r = subprocess.run(
+            [
+                "qdbus",
+                "org.kde.plasmashell",
+                "/PlasmaShell",
+                "org.kde.PlasmaShell.evaluateScript",
+                script,
+            ],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=8,
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
 def sync_plasma_profile_launchers(home_dir=None, active_slugs=None):
     """
     Windows-like Chrome pins:
-      - No Chrome windows → show Google Chrome logo pin
+      - No Chrome windows → idle browser pin (DevOS Browser / Google Chrome)
       - Profiles open → hide that pin; show one avatar launcher per open profile
     Other apps stay grouped; Chrome profiles stay ungrouped via distinct WM class.
     """
@@ -731,13 +826,14 @@ def sync_plasma_profile_launchers(home_dir=None, active_slugs=None):
             if line.startswith("launchers="):
                 existing = [x.strip() for x in line.split("=", 1)[1].split(",") if x.strip()]
                 break
+    idle_pin = _idle_chrome_launcher(existing, home)
     preserved = [e for e in existing if not _is_chrome_launcher(e)]
 
     apps_dir = os.path.join(home, ".local/share/applications")
     active = [(s or "").strip().lower() for s in (active_slugs or []) if (s or "").strip()]
     chrome_launchers = []
     if active:
-        # Browser is open → hide idle Chrome pin; show each open profile avatar.
+        # Browser is open → hide idle Chrome/DevOS Browser pin; show each profile.
         seen = set()
         for slug in active:
             # Never skip "default" — that is a real profile slug when the
@@ -752,17 +848,20 @@ def sync_plasma_profile_launchers(home_dir=None, active_slugs=None):
             chrome_launchers.append(f"applications:{desktop}")
             seen.add(slug)
         if not chrome_launchers:
-            chrome_launchers = ["applications:google-chrome.desktop"]
+            chrome_launchers = [idle_pin]
     else:
-        chrome_launchers = ["applications:google-chrome.desktop"]
+        chrome_launchers = [idle_pin]
 
     launchers = preserved + chrome_launchers
+    launcher_csv = ",".join(launchers) if launchers else idle_pin
+    # While multiple Chrome profiles are open, disable Icon Tasks grouping so
+    # Plasma cannot merge chrome-guest + chrome-<profile> into one tile.
+    multi = len(chrome_launchers) >= 2 and all("chrome-" in x for x in chrome_launchers)
     updates = {
-        "launchers": ",".join(launchers) if launchers else "applications:google-chrome.desktop",
+        "launchers": launcher_csv,
         # Keep launchers visible as their own buttons (Windows profile icons).
         "separateLaunchers": "true",
-        # Group other apps; Chrome profiles still split via different WM classes.
-        "groupingStrategy": "1",
+        "groupingStrategy": "0" if multi else "1",
         "launchInPlace": "true",
         # Windows-like: open apps keep the same pin with an indicator under the icon
         # (never hide the pin / spawn a blank second tile for every running app).
@@ -808,6 +907,8 @@ def sync_plasma_profile_launchers(home_dir=None, active_slugs=None):
     if not found:
         out.append(section + "\n" + "\n".join(f"{k}={v}" for k, v in updates.items()) + "\n")
     cfg.write_text("".join(out), encoding="utf-8")
+    # Prefer live qdbus update — full plasmashell restart is slow and rate-limited.
+    apply_plasma_launchers_live(launcher_csv, updates["groupingStrategy"])
     return True
 
 
@@ -818,7 +919,8 @@ def reload_plasmashell():
     """Restart plasmashell so Icon Tasks picks up launcher changes (rate-limited)."""
     global _LAST_PLASMA_RELOAD
     now = time.time()
-    if now - _LAST_PLASMA_RELOAD < 45:
+    force = os.environ.get("DEVOS_FORCE_PLASMA_RELOAD", "").strip() in ("1", "true", "yes")
+    if not force and now - _LAST_PLASMA_RELOAD < 45:
         return False
     _LAST_PLASMA_RELOAD = now
     try:

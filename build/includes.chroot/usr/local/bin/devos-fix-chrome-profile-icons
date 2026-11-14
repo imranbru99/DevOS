@@ -8,13 +8,13 @@ DEST=/usr/local/share/devos/components/browser/chrome_profiles.py
 TMP="$(mktemp)"
 
 echo "== Update Chrome profile taskbar manager (${BRANCH}) =="
-curl -fsSL "${RAW}/build/includes.chroot/usr/local/share/devos/components/browser/chrome_profiles.py" -o "$TMP"
-# If branch file not synced yet, fall back to components path on raw.
-if ! grep -q 'browsing as a Guest' "$TMP" 2>/dev/null; then
-  curl -fsSL "${RAW}/components/browser/chrome_profiles.py" -o "$TMP"
-fi
+curl -fsSL "${RAW}/components/browser/chrome_profiles.py" -o "$TMP" \
+  || curl -fsSL "${RAW}/build/includes.chroot/usr/local/share/devos/components/browser/chrome_profiles.py" -o "$TMP"
 sudo install -m 0644 "$TMP" "$DEST"
 rm -f "$TMP"
+
+export DISPLAY="${DISPLAY:-:0}"
+export DEVOS_FORCE_PLASMA_RELOAD=1
 
 echo "== Sync profile launchers + restart watcher =="
 /usr/bin/python3 "$DEST" sync || true
@@ -26,7 +26,15 @@ sleep 2
 /usr/bin/python3 "$DEST" apply || true
 
 echo
-echo "Done. Close and reopen Chrome windows (Guest + your profile)."
-echo "You should see TWO taskbar icons with profile faces — not one grouped Chrome."
-echo "Check:  systemctl --user status devos-browser-profiles.service --no-pager"
-echo "        wmctrl -lx | grep -i chrome"
+echo "== Current Chrome windows (should show chrome-<profile>, not only google-chrome) =="
+wmctrl -lx 2>/dev/null | grep -iE 'chrome|google-chrome' || true
+echo
+echo "== Taskbar Chrome pins (should list chrome-*.desktop while Chrome is open) =="
+grep -E 'launchers=|groupingStrategy=' \
+  "${XDG_CONFIG_HOME:-$HOME/.config}/plasma-org.kde.plasma.desktop-appletsrc" 2>/dev/null \
+  | head -20 || true
+
+echo
+echo "If still one icon: log out/in once, or run:"
+echo "  DEVOS_FORCE_PLASMA_RELOAD=1 systemctl --user restart plasma-plasmashell.service"
+echo "Then reopen Guest + your profile."

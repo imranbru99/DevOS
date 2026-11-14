@@ -116,11 +116,11 @@ class TestChromeProfiles(unittest.TestCase):
                     "plugin=org.kde.plasma.icontasks\n"
                     "\n"
                     "[Containments][3][Applets][6][Configuration][General]\n"
-                    "launchers=applications:devos-search.desktop,applications:google-chrome.desktop\n"
+                    "launchers=applications:devos-search.desktop,applications:devos-browser.desktop\n"
                     "groupingStrategy=1\n"
                     "separateLaunchers=false\n"
                 )
-            # Open profiles → hide Chrome pin, show avatar pins (Guest included).
+            # Open profiles → hide DevOS Browser pin, show avatar pins (Guest included).
             open(os.path.join(apps, "chrome-guest.desktop"), "w", encoding="utf-8").write(
                 "[Desktop Entry]\n"
             )
@@ -130,8 +130,9 @@ class TestChromeProfiles(unittest.TestCase):
             self.assertIn("applications:chrome-work.desktop", text)
             self.assertIn("applications:chrome-mirza.desktop", text)
             self.assertIn("applications:chrome-guest.desktop", text)
-            self.assertNotIn("applications:google-chrome.desktop", text)
+            self.assertNotIn("applications:devos-browser.desktop", text)
             self.assertIn("separateLaunchers=true", text)
+            self.assertIn("groupingStrategy=0", text)
             self.assertIn("applications:devos-search.desktop", text)
             # Profile literally named "Default" must still get its own pin.
             open(os.path.join(apps, "chrome-default.desktop"), "w", encoding="utf-8").write(
@@ -142,11 +143,11 @@ class TestChromeProfiles(unittest.TestCase):
             text = open(appletsrc, encoding="utf-8").read()
             self.assertIn("applications:chrome-default.desktop", text)
             self.assertIn("applications:chrome-work.desktop", text)
-            # All closed → restore Chrome pin.
+            # All closed → restore the idle browser pin (DevOS Browser on this panel).
             ok = chrome_profiles.sync_plasma_profile_launchers(tmp_home, [])
             self.assertTrue(ok)
             text = open(appletsrc, encoding="utf-8").read()
-            self.assertIn("applications:google-chrome.desktop", text)
+            self.assertIn("applications:devos-browser.desktop", text)
             self.assertNotIn("chrome-work.desktop", text)
 
     def test_class_for_profile_uses_display_name(self):
