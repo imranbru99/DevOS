@@ -13,12 +13,17 @@ def test_voice_module_auto_installs_tts_venv():
     assert "def speak_reply" in text
     assert "StreamSpeaker" in text
     assert "_speak_espeak" in text
+    assert "def _espeak_voice_for" in text
+    assert "en+f3" in text
     # Prefer full sentences — never cut after a single word.
     assert "_FIRST_WORDS = 10" in text
     assert '_TTS_RATE = "+0%"' in text
     assert "_OPENER_RE" in text
     assert "feed_delta_total" in text
     assert "Never abandon an in-flight queue read" in text
+    # Female default must stay locked for a whole streamed reply.
+    assert "self._gender = _tts_gender()" in text
+    assert "self._voice = _edge_voice_for(self._lang, self._gender)" in text
 
 
 def test_first_speak_cut_prefers_sentences_not_one_word():
