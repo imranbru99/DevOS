@@ -46,6 +46,7 @@ try:
         QRectF,
         QSize,
         Qt,
+        QProcess,
         QThread,
         QUrl,
         pyqtSignal,
@@ -2970,12 +2971,9 @@ def remove_privileged(paths, runner=None):
                 errors.append(f"{os.path.basename(path)}: Permission denied")
             return errors
         runner = subprocess.run
-    result = runner(
-        ["pkexec", "rm", "-rf", "--", *safe],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+    # Leave stdout and stderr alone. Piping them makes pkexec skip the
+    # graphical password window and the folder stays on disk.
+    result = runner(["pkexec", "rm", "-rf", "--", *safe])
     if getattr(result, "returncode", 1) in (126, 127):
         return errors + ["Permission request was cancelled."]
     if getattr(result, "returncode", 1) != 0:
@@ -3002,6 +3000,7 @@ class FileOpWorker(QThread):
         self.paths = list(paths or [])
         self._cancel = False
         self.needs_permanent = []
+        self.needs_admin = []
 
     def request_cancel(self):
         self._cancel = True
@@ -3009,6 +3008,7 @@ class FileOpWorker(QThread):
     def run(self):
         errors = []
         self.needs_permanent = []
+        self.needs_admin = []
         try:
             if self.op == "trash":
                 errors = self._trash()
@@ -3110,6 +3110,7 @@ class FileOpWorker(QThread):
     def _delete(self):
         errors = []
         privileged = []
+        self.needs_admin = []
         for p in self.paths:
             if self._cancel:
                 break
@@ -3127,10 +3128,9 @@ class FileOpWorker(QThread):
             else:
                 forget_trashinfo(p)
         if privileged and not self._cancel:
-            errors.extend(remove_privileged(privileged))
-            for p in privileged:
-                if not os.path.lexists(p):
-                    forget_trashinfo(p)
+            # Ask for the password on the window thread. pkexec inside this
+            # worker, under the progress dialog, never shows the prompt.
+            self.needs_admin = list(privileged)
         return errors
 
     def _empty(self):
@@ -7224,11 +7224,12 @@ class WindowsFileExplorer(QMainWindow):
             dlg.reset()
             dlg.hide()
             self.refresh()
-            if not errors and hasattr(self, "status") and done_message:
-                self.status.showMessage(done_message, 4000)
-            elif not errors and hasattr(self, "status_selected_info") and done_message:
-                self.status_selected_info.setText(done_message)
             needs = [p for p in (getattr(worker, "needs_permanent", None) or []) if os.path.lexists(p)]
+            admin = [p for p in (getattr(worker, "needs_admin", None) or []) if os.path.lexists(p)]
+            if not errors and not needs and not admin and hasattr(self, "status") and done_message:
+                self.status.showMessage(done_message, 4000)
+            elif not errors and not needs and not admin and hasattr(self, "status_selected_info") and done_message:
+                self.status_selected_info.setText(done_message)
             perm_names = {os.path.basename(p) for p in needs}
             other = []
             for err in errors or []:
@@ -7242,6 +7243,8 @@ class WindowsFileExplorer(QMainWindow):
                 )
             if needs:
                 self._offer_permanent_delete(needs)
+            if admin:
+                self._start_admin_delete(admin)
             worker.deleteLater()
             if getattr(self, "_file_op_worker", None) is worker:
                 self._file_op_worker = None
@@ -7270,8 +7273,9 @@ class WindowsFileExplorer(QMainWindow):
             "Delete permanently",
             f"{detail} Timeshift snapshots are owned by the system, and the Recycle Bin "
             "on DevOS (C:) is a different disk.\n\n"
-            "Permanently delete them and free the space? This cannot be undone. "
-            "DevOS asks for your password when the system owns the folders.",
+            "Permanently delete them and free the space? This cannot be undone.\n\n"
+            "Click Yes, then enter your password in the next window. "
+            "The timeshift folder is owned by the system, so Delete cannot remove it until then.",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
@@ -7281,6 +7285,66 @@ class WindowsFileExplorer(QMainWindow):
                 "delete",
                 paths,
                 done_message=f"Permanently deleted {count} item(s)",
+            )
+
+    def _start_admin_delete(self, paths):
+        """Remove system-owned folders after the password window is visible."""
+        safe = []
+        refused = []
+        for path in paths:
+            if _safe_delete_target(path):
+                safe.append(path)
+            else:
+                refused.append(os.path.basename(path) or path)
+        if refused:
+            QMessageBox.critical(
+                self,
+                "Delete",
+                "Refusing to delete:\n" + "\n".join(refused),
+            )
+        if not safe:
+            return
+        if os.environ.get("DEVOS_NO_PKEXEC") == "1" or not shutil.which("pkexec"):
+            quoted = " ".join(shlex.quote(path) for path in safe)
+            QMessageBox.critical(
+                self,
+                "Delete",
+                "These folders are owned by the system.\n\n"
+                f"Run this in a terminal:\n\npkexec rm -rf -- {quoted}",
+            )
+            return
+        current = getattr(self, "_admin_proc", None)
+        if current is not None and current.state() != QProcess.NotRunning:
+            QMessageBox.information(self, "Busy", "A delete is already waiting for your password.")
+            return
+        proc = QProcess(self)
+        self._admin_proc = proc
+        self._admin_paths = list(safe)
+        proc.finished.connect(self._admin_delete_finished)
+        if hasattr(self, "status"):
+            self.status.showMessage("Enter your password to delete the timeshift folder. Large folders take a few minutes.")
+        proc.start("pkexec", ["rm", "-rf", "--", *safe])
+
+    def _admin_delete_finished(self, code, _status):
+        paths = list(getattr(self, "_admin_paths", []))
+        self.refresh()
+        left = [path for path in paths if os.path.lexists(path)]
+        if code in (126, 127):
+            if hasattr(self, "status"):
+                self.status.showMessage("Delete cancelled.", 4000)
+            return
+        if left:
+            QMessageBox.critical(
+                self,
+                "Delete",
+                "Could not delete:\n" + "\n".join(os.path.basename(path) for path in left),
+            )
+            return
+        if hasattr(self, "status"):
+            count = len(paths)
+            self.status.showMessage(
+                "Permanently deleted 1 item" if count == 1 else f"Permanently deleted {count} items",
+                4000,
             )
 
     def show_properties(self, target_path=None):

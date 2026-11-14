@@ -231,20 +231,31 @@ class ExplorerStateTests(unittest.TestCase):
     def test_permission_denied_delete_asks_for_one_admin_command(self):
         folder = Path(self.temp.name) / "disk" / "timeshift" / "snapshots" / "2026-11-14_08-03-18"
         folder.mkdir(parents=True)
-        seen = []
 
         def denied(path, allow_privileged=True):
             return "privileged"
 
-        def privileged(paths, runner=None):
-            seen.append(list(paths))
-            return []
-
         worker = MODULE["FileOpWorker"]("delete", [str(folder)])
-        with patch.dict(worker._delete.__globals__, remove_path=denied, remove_privileged=privileged):
+        with patch.dict(worker._delete.__globals__, remove_path=denied):
             errors = worker._delete()
         self.assertEqual(errors, [])
-        self.assertEqual(seen, [[str(folder)]])
+        self.assertEqual(worker.needs_admin, [str(folder)])
+
+    def test_admin_delete_does_not_hide_the_password_window(self):
+        folder = Path(self.temp.name) / "disk" / "timeshift"
+        folder.mkdir(parents=True)
+        seen = {}
+
+        def runner(argv, **kwargs):
+            seen["argv"] = argv
+            seen["kwargs"] = kwargs
+            shutil.rmtree(folder)
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        errors = MODULE["remove_privileged"]([str(folder)], runner=runner)
+        self.assertEqual(errors, [])
+        self.assertNotIn("stdout", seen["kwargs"])
+        self.assertEqual(seen["argv"][:4], ["pkexec", "rm", "-rf", "--"])
 
     def test_new_window_setting_dispatches_real_folder(self):
         from unittest.mock import patch
