@@ -1,0 +1,68 @@
+#!/bin/bash
+# Install Cursor AI Code Editor from the official .deb (not Flatpak).
+# Flathub has no official Cursor package — Features used to fail forever.
+set -euo pipefail
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "Run: sudo devos-install-cursor" >&2
+    exit 1
+fi
+
+if command -v cursor >/dev/null 2>&1 || [ -x /usr/share/cursor/cursor ] || [ -x /usr/bin/cursor ]; then
+    echo "Cursor is already installed."
+    cursor --version 2>/dev/null || true
+    exit 0
+fi
+
+ARCH="$(dpkg --print-architecture 2>/dev/null || echo amd64)"
+case "$ARCH" in
+    amd64|x86_64) PLATFORM="linux-x64-deb" ;;
+    arm64|aarch64) PLATFORM="linux-arm64-deb" ;;
+    *)
+        echo "Unsupported architecture for Cursor: $ARCH" >&2
+        exit 1
+        ;;
+esac
+
+URL="${DEVOS_CURSOR_DEB_URL:-https://api2.cursor.sh/updates/download/golden/${PLATFORM}/cursor/latest}"
+DEB="$(mktemp --suffix=.deb)"
+trap 'rm -f "$DEB"' EXIT
+
+echo "Downloading Cursor ($PLATFORM)…"
+curl -fL --retry 4 --retry-delay 2 --connect-timeout 20 --max-time 900 -o "$DEB" "$URL"
+
+# Sanity: .deb files start with "!<arch>"
+if ! head -c 8 "$DEB" | grep -q '!';arch>'; then
+    echo "Download did not look like a Debian package." >&2
+    exit 1
+fi
+
+echo "Installing Cursor…"
+DEBIAN_FRONTEND=noninteractive apt-get update -y || true
+DEBIAN_FRONTEND=noninteractive apt-get install -y "$DEB" \
+    || DEBIAN_FRONTEND=noninteractive apt-get install -fy
+
+if ! command -v cursor >/dev/null 2>&1 && [ ! -x /usr/bin/cursor ] && [ ! -x /usr/share/cursor/cursor ]; then
+    echo "Cursor package installed but the cursor binary was not found." >&2
+    exit 1
+fi
+
+# Ensure a Start-menu entry exists (vendor .desktop usually ships with the deb).
+if [ ! -f /usr/share/applications/cursor.desktop ] \
+    && [ ! -f /usr/share/applications/cursor-url-handler.desktop ]; then
+    cat > /usr/local/share/applications/cursor.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Cursor
+Comment=AI Code Editor
+Exec=/usr/bin/cursor %F
+Icon=cursor
+Terminal=false
+Categories=Development;IDE;
+StartupWMClass=Cursor
+MimeType=text/plain;inode/directory;
+EOF
+fi
+
+echo "Cursor is installed."
+cursor --version 2>/dev/null || true
