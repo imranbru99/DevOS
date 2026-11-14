@@ -1162,13 +1162,141 @@ def format_step_pack_for_editor(steps) -> str:
     return "\n---\n" + "\n---\n".join(cleaned)
 
 
-def choose_step_group(parent=None):
-    """Pick a saved group. One group → return it; many → menu; none → None."""
-    groups = list_step_groups()
+def format_group_prompts_for_field(group) -> str:
+    """Join a command group's prompts with --- for a project field editor."""
+    steps = _clean_steps(list((group or {}).get("steps") or []))
+    if not steps:
+        return ""
+    return "\n---\n".join(steps)
+
+
+class ChooseCommandGroupDialog(QtWidgets.QDialog):
+    """Modal: pick which saved command group to use on a project field."""
+
+    def __init__(self, parent=None, selected_id=None):
+        super().__init__(parent)
+        self.setWindowTitle("Choose command group")
+        self.setMinimumSize(480, 360)
+        self.setStyleSheet(STYLE)
+        self._selected = None
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(10)
+
+        title = QtWidgets.QLabel("Choose a command group for this project")
+        title.setStyleSheet("font-size: 14px; font-weight: 700; color: #38bdf8;")
+        layout.addWidget(title)
+        hint = QtWidgets.QLabel(
+            "The project field will show this group’s name and load all of its commands/prompts."
+        )
+        hint.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        self.list = QtWidgets.QListWidget()
+        self.list.setStyleSheet(
+            "QListWidget { background: #0b1220; border: 1px solid #1e293b; border-radius: 6px; }"
+            "QListWidget::item { padding: 8px 10px; }"
+            "QListWidget::item:selected { background: #1e3a5f; color: #e2e8f0; }"
+        )
+        groups = [g for g in list_step_groups() if g.get("steps")]
+        select_row = 0
+        for index, group in enumerate(groups):
+            count = len(group.get("steps") or [])
+            item = QtWidgets.QListWidgetItem(
+                f"{group.get('name') or 'Untitled'}  ·  {count} command(s)"
+            )
+            item.setData(Qt.UserRole, group)
+            self.list.addItem(item)
+            if selected_id and group.get("id") == selected_id:
+                select_row = index
+        if groups:
+            self.list.setCurrentRow(select_row)
+        self.list.itemDoubleClicked.connect(self._accept_current)
+        layout.addWidget(self.list, stretch=1)
+
+        if not groups:
+            empty = QtWidgets.QLabel(
+                "No command groups saved yet. Open Command Group Setting to create one "
+                "and add multiple commands/prompts."
+            )
+            empty.setStyleSheet("color: #fbbf24; font-size: 11px;")
+            empty.setWordWrap(True)
+            layout.addWidget(empty)
+
+        buttons = QtWidgets.QHBoxLayout()
+        btn_manage = QtWidgets.QPushButton("⚙ Command Group Setting…")
+        btn_manage.clicked.connect(self._open_settings)
+        buttons.addWidget(btn_manage)
+        buttons.addStretch()
+        btn_cancel = QtWidgets.QPushButton("Cancel")
+        btn_cancel.clicked.connect(self.reject)
+        buttons.addWidget(btn_cancel)
+        btn_ok = QtWidgets.QPushButton("Use this group")
+        btn_ok.setObjectName("primary")
+        btn_ok.setEnabled(bool(groups))
+        btn_ok.clicked.connect(self._accept_current)
+        buttons.addWidget(btn_ok)
+        layout.addLayout(buttons)
+
+    def _open_settings(self):
+        dlg = Steps25TemplateDialog(parent=self)
+        dlg.exec_()
+        # Refresh list after managing groups
+        current_id = None
+        cur = self.list.currentItem()
+        if cur:
+            current_id = (cur.data(Qt.UserRole) or {}).get("id")
+        self.list.clear()
+        groups = [g for g in list_step_groups() if g.get("steps")]
+        select_row = 0
+        for index, group in enumerate(groups):
+            count = len(group.get("steps") or [])
+            item = QtWidgets.QListWidgetItem(
+                f"{group.get('name') or 'Untitled'}  ·  {count} command(s)"
+            )
+            item.setData(Qt.UserRole, group)
+            self.list.addItem(item)
+            if current_id and group.get("id") == current_id:
+                select_row = index
+        if groups:
+            self.list.setCurrentRow(select_row)
+        for child in self.findChildren(QtWidgets.QPushButton):
+            if child.text() == "Use this group":
+                child.setEnabled(bool(groups))
+
+    def _accept_current(self, *_args):
+        item = self.list.currentItem()
+        if not item:
+            return
+        self._selected = item.data(Qt.UserRole)
+        self.accept()
+
+    def selected_group(self):
+        return self._selected
+
+
+def choose_step_group(parent=None, selected_id=None, *, prefer_modal=True):
+    """Pick a saved command group. Returns group dict or None.
+
+    prefer_modal=True opens the Choose command group dialog (project fields).
+    When only one group exists and prefer_modal is False, return it immediately
+    (Auto-add chip fast path).
+    """
+    groups = [g for g in list_step_groups() if g.get("steps")]
     if not groups:
         return None
-    if len(groups) == 1:
+    if len(groups) == 1 and not prefer_modal and not selected_id:
         return groups[0]
+
+    if prefer_modal:
+        try:
+            dlg = ChooseCommandGroupDialog(parent=parent, selected_id=selected_id)
+            if dlg.exec_() == QtWidgets.QDialog.Accepted:
+                return dlg.selected_group()
+            return None
+        except Exception:
+            pass
 
     selected = {"group": None}
     menu = QtWidgets.QMenu(parent)
@@ -1189,7 +1317,6 @@ def choose_step_group(parent=None):
                 break
 
     menu.triggered.connect(_picked)
-    # Prefer button-anchored popup when caller is a widget with a geometry.
     if parent is not None and hasattr(parent, "mapToGlobal") and hasattr(parent, "rect"):
         menu.exec_(parent.mapToGlobal(parent.rect().bottomLeft()))
     else:
@@ -1198,11 +1325,11 @@ def choose_step_group(parent=None):
 
 
 class Steps25TemplateDialog(QtWidgets.QDialog):
-    """Add multi-line prompts one-by-one into named groups; Auto-add runs them serially."""
+    """Command Group Setting — save named groups of multiple commands/prompts."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("⚙ Step groups (Auto-add)")
+        self.setWindowTitle("⚙ Command Group Setting")
         self.resize(920, 680)
         self.setStyleSheet(STYLE)
         self._groups = []
@@ -1212,15 +1339,15 @@ class Steps25TemplateDialog(QtWidgets.QDialog):
         layout.setContentsMargins(18, 16, 18, 16)
         layout.setSpacing(10)
 
-        header = QtWidgets.QLabel("⚙ Step groups")
+        header = QtWidgets.QLabel("⚙ Command Group Setting")
         header.setStyleSheet("font-size: 15px; font-weight: 700; color: #38bdf8;")
         layout.addWidget(header)
 
         desc = QtWidgets.QLabel(
-            "1) Create or choose a group name.  "
-            "2) Paste one full prompt (multi-line OK).  "
-            "3) Click Save prompt into group.  "
-            "Repeat for the next prompt. Auto-add later queues every prompt in that group in order."
+            "1) Create a command group name.  "
+            "2) Paste one command/prompt (multi-line OK).  "
+            "3) Click Save prompt into group — repeat to add multiple commands.  "
+            "Projects can then choose this group by name in the Choose command group modal."
         )
         desc.setStyleSheet("color: #94a3b8; font-size: 11px;")
         desc.setWordWrap(True)
@@ -1938,6 +2065,8 @@ class OpenProjectFieldCard(QtWidgets.QFrame):
             "QFrame#section_next { background-color: #0f172a; border: 1px solid #312e81; "
             "border-radius: 8px; }"
         )
+        self._command_group_id = ""
+        self._command_group_name = ""
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(10, 8, 10, 8)
         lay.setSpacing(6)
@@ -1973,10 +2102,52 @@ class OpenProjectFieldCard(QtWidgets.QFrame):
         self.location = ProjectLocation(base_dir or (lambda: str(Path.home())), self)
         lay.addWidget(self.location)
 
+        # Command group picker — shows chosen group name on this project field
+        group_row = QtWidgets.QHBoxLayout()
+        group_row.setSpacing(6)
+        group_lbl = QtWidgets.QLabel("Command group:")
+        group_lbl.setStyleSheet("color: #94a3b8; font-size: 11px; font-weight: 600;")
+        group_row.addWidget(group_lbl)
+        self.group_name_lbl = QtWidgets.QLabel("None chosen")
+        self.group_name_lbl.setStyleSheet(
+            "background-color: #1e1b4b; color: #c7d2fe; font-size: 11px; font-weight: 700; "
+            "padding: 3px 10px; border-radius: 10px; border: 1px solid #4338ca;"
+        )
+        self.group_name_lbl.setToolTip("Group selected for this project (from Command Group Setting)")
+        group_row.addWidget(self.group_name_lbl)
+        group_row.addStretch()
+        btn_choose = QtWidgets.QPushButton("Choose group…")
+        btn_choose.setObjectName("small_btn")
+        btn_choose.setToolTip("Open modal and pick which command group this project uses")
+        btn_choose.setStyleSheet(
+            "background-color: #064e3b; color: #6ee7b7; font-size: 10px; font-weight: 700; "
+            "padding: 3px 10px; border: 1px solid #047857; border-radius: 4px;"
+        )
+        btn_choose.clicked.connect(self.choose_command_group)
+        group_row.addWidget(btn_choose)
+        btn_clear_g = QtWidgets.QPushButton("Clear")
+        btn_clear_g.setObjectName("small_btn")
+        btn_clear_g.setStyleSheet(
+            "background-color: #334155; color: #f1f5f9; font-size: 10px; padding: 3px 8px; border-radius: 4px;"
+        )
+        btn_clear_g.clicked.connect(self.clear_command_group)
+        group_row.addWidget(btn_clear_g)
+        btn_manage = QtWidgets.QPushButton("⚙ Setting")
+        btn_manage.setObjectName("small_btn")
+        btn_manage.setToolTip("Command Group Setting — create groups and add multiple commands/prompts")
+        btn_manage.setStyleSheet(
+            "background-color: #1e1b4b; color: #a5b4fc; font-size: 10px; padding: 3px 8px; "
+            "border: 1px solid #312e81; border-radius: 4px;"
+        )
+        btn_manage.clicked.connect(self.open_command_group_settings)
+        group_row.addWidget(btn_manage)
+        lay.addLayout(group_row)
+
         self.prompt_input = QTextEdit()
         self.prompt_input.setPlaceholderText(
             "Commands / prompts for this project (multi-line OK).\n"
-            "Separate steps with a line containing only ---"
+            "Separate steps with a line containing only ---\n"
+            "Or click Choose group… to load a saved command group."
         )
         self.prompt_input.setMinimumHeight(72)
         self.prompt_input.setMaximumHeight(110)
@@ -1990,6 +2161,70 @@ class OpenProjectFieldCard(QtWidgets.QFrame):
 
     def set_index(self, index: int):
         self.badge.setText(f"Project field #{index}")
+
+    def _refresh_group_label(self):
+        if self._command_group_name:
+            count = 0
+            group = get_step_group(self._command_group_id) if self._command_group_id else {}
+            count = len((group or {}).get("steps") or [])
+            suffix = f" · {count} cmd" if count else ""
+            self.group_name_lbl.setText(f"✔ {self._command_group_name}{suffix}")
+            self.group_name_lbl.setStyleSheet(
+                "background-color: #064e3b; color: #6ee7b7; font-size: 11px; font-weight: 700; "
+                "padding: 3px 10px; border-radius: 10px; border: 1px solid #047857;"
+            )
+        else:
+            self.group_name_lbl.setText("None chosen")
+            self.group_name_lbl.setStyleSheet(
+                "background-color: #1e1b4b; color: #c7d2fe; font-size: 11px; font-weight: 700; "
+                "padding: 3px 10px; border-radius: 10px; border: 1px solid #4338ca;"
+            )
+
+    def open_command_group_settings(self):
+        dlg = Steps25TemplateDialog(parent=self.window())
+        dlg.exec_()
+        # If this field already has a group, refresh name/count after edits
+        if self._command_group_id:
+            group = get_step_group(self._command_group_id)
+            if group and group.get("steps"):
+                self._command_group_name = group.get("name") or self._command_group_name
+                self._refresh_group_label()
+            else:
+                self.clear_command_group()
+
+    def choose_command_group(self):
+        groups = [g for g in list_step_groups() if g.get("steps")]
+        if not groups:
+            reply = QtWidgets.QMessageBox.question(
+                self,
+                "No command groups",
+                "No command groups saved yet.\n\nOpen Command Group Setting to create a group "
+                "and add multiple commands/prompts?",
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            )
+            if reply == QtWidgets.QMessageBox.Yes:
+                self.open_command_group_settings()
+                groups = [g for g in list_step_groups() if g.get("steps")]
+                if not groups:
+                    return
+            else:
+                return
+        dlg = ChooseCommandGroupDialog(parent=self.window(), selected_id=self._command_group_id or None)
+        if dlg.exec_() != QtWidgets.QDialog.Accepted:
+            return
+        group = dlg.selected_group() or {}
+        steps = list(group.get("steps") or [])
+        if not steps:
+            return
+        self._command_group_id = group.get("id") or ""
+        self._command_group_name = group.get("name") or "Untitled"
+        self.prompt_input.setPlainText(format_group_prompts_for_field(group))
+        self._refresh_group_label()
+
+    def clear_command_group(self):
+        self._command_group_id = ""
+        self._command_group_name = ""
+        self._refresh_group_label()
 
     def to_snapshot(self):
         title = self.title_input.text().strip()
@@ -2023,6 +2258,8 @@ class OpenProjectFieldCard(QtWidgets.QFrame):
             "slug": slug,
             "project": project,
             "prompts": parts,
+            "command_group_id": self._command_group_id,
+            "command_group_name": self._command_group_name,
             "create_repo": False,
             "repo_name": "",
             "repo_desc": "",
@@ -2035,6 +2272,7 @@ class OpenProjectFieldCard(QtWidgets.QFrame):
         self.slug_input.setProperty("auto", True)
         self.prompt_input.clear()
         self.location.path.clear()
+        self.clear_command_group()
 
 
 class PipelineWindow(QtWidgets.QMainWindow):
@@ -2139,6 +2377,19 @@ class PipelineWindow(QtWidgets.QMainWindow):
         btn_import_specs.setToolTip("Batch import all .md project specs from a folder and auto-attach multi-agent steps")
         btn_import_specs.clicked.connect(self.import_specs_folder)
         header_layout.addWidget(btn_import_specs)
+
+        btn_cmd_groups = QtWidgets.QPushButton("⚙ Command Group Setting")
+        btn_cmd_groups.setObjectName("small_btn")
+        btn_cmd_groups.setStyleSheet(
+            "background-color: #1e1b4b; color: #c7d2fe; font-size: 11px; padding: 6px 12px; "
+            "border: 1px solid #4338ca; border-radius: 6px; font-weight: 700;"
+        )
+        btn_cmd_groups.setToolTip(
+            "Create named command groups and add multiple commands/prompts. "
+            "Each project field can choose a group by name."
+        )
+        btn_cmd_groups.clicked.connect(self.open_steps_25_template_editor)
+        header_layout.addWidget(btn_cmd_groups)
 
         self.btn_run = QtWidgets.QPushButton("Run Pipeline")
         self.btn_run.setObjectName("primary")
@@ -3512,7 +3763,10 @@ class PipelineWindow(QtWidgets.QMainWindow):
         if len(groups) == 1:
             self.apply_next_step_group(groups[0]["id"])
             return
-        group = choose_step_group(self.sender() if isinstance(self.sender(), QtWidgets.QWidget) else self)
+        group = choose_step_group(
+            self.sender() if isinstance(self.sender(), QtWidgets.QWidget) else self,
+            prefer_modal=True,
+        )
         if group:
             self.apply_next_step_group(group["id"])
 
@@ -3524,7 +3778,10 @@ class PipelineWindow(QtWidgets.QMainWindow):
         if len(groups) == 1:
             self.apply_cur_step_group(groups[0]["id"])
             return
-        group = choose_step_group(self.sender() if isinstance(self.sender(), QtWidgets.QWidget) else self)
+        group = choose_step_group(
+            self.sender() if isinstance(self.sender(), QtWidgets.QWidget) else self,
+            prefer_modal=True,
+        )
         if group:
             self.apply_cur_step_group(group["id"])
 
