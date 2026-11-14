@@ -790,15 +790,43 @@ _TTS_CACHE = os.path.join(
     "devos", "assistant-tts",
 )
 # Gender-aware voices live in voice_prefs; keep a tiny fallback map here.
-_EDGE_VOICES = {"bn": "bn-BD-NabanitaNeural", "en": "en-US-JennyNeural"}
+_EDGE_VOICES = {
+    ("en", "female"): "en-US-JennyNeural",
+    ("en", "male"): "en-US-GuyNeural",
+    ("bn", "female"): "bn-BD-NabanitaNeural",
+    ("bn", "male"): "bn-BD-PradeepNeural",
+}
 
 
-def _edge_voice_for(language: str) -> str:
+def _tts_gender() -> str:
     try:
         import voice_prefs
-        return voice_prefs.edge_voice_id(language)
+        g = voice_prefs.tts_gender()
+        if g in ("female", "male"):
+            return g
     except Exception:
-        return _EDGE_VOICES.get(language, _EDGE_VOICES["en"])
+        pass
+    return "female"
+
+
+def _edge_voice_for(language: str, gender: Optional[str] = None) -> str:
+    lang = "bn" if language == "bn" else "en"
+    g = (gender or _tts_gender()).lower()
+    if g not in ("female", "male"):
+        g = "female"
+    try:
+        import voice_prefs
+        return voice_prefs.edge_voice_id(lang, gender=g)
+    except Exception:
+        return _EDGE_VOICES.get((lang, g), _EDGE_VOICES[("en", "female")])
+
+
+def _espeak_voice_for(language: str, gender: Optional[str] = None) -> str:
+    """Local fallback must honor female/male — plain ``en``/``bn`` sound male."""
+    g = (gender or _tts_gender()).lower()
+    if language == "bn":
+        return "bn+f2" if g == "female" else "bn"
+    return "en+f3" if g == "female" else "en+m3"
 
 # Tool actions that just do something on screen — no chat bubble when typed,
 # and no spoken reply (the open window / search is the feedback).
@@ -904,7 +932,7 @@ _OPENER_RE = re.compile(
     r"^(Sure|Okay|OK|Yes|Yeah|Yep|Hi|Hello|Hey|Alright|Of course|Absolutely|"
     r"Right|Got it|No problem|Thanks|Thank you|Please|Well|"
     r"হ্যাঁ|জি|আচ্ছা|ঠিক আছে|হ্যালো|নমস্কার|জি\s*আচ্ছা)"
-    r"([.!।؟])(?:\s+|$)",
+    r"([,.!।؟])(?:\s+|$)",
     re.IGNORECASE | re.UNICODE,
 )
 
@@ -1052,12 +1080,12 @@ if __name__ == "__main__":
 
     @classmethod
     def synthesize(cls, text: str, language: str, out: str, rate: str = _TTS_RATE,
-                   timeout: float = 45) -> bool:
+                   timeout: float = 45, voice: Optional[str] = None) -> bool:
         if not text or not text.strip():
             return False
         if not cls.ensure() or cls._proc is None or cls._proc.stdin is None or cls._proc.stdout is None:
             return False
-        voice_name = _edge_voice_for(language)
+        voice_name = voice or _edge_voice_for(language)
         # Tabs separate fields; strip tabs/newlines from spoken text.
         safe = (text or "").replace("\t", " ").replace("\n", " ").strip()
         payload = "%s\t%s\t%s\t%s\n" % (out, voice_name, rate, safe)
@@ -1127,6 +1155,8 @@ def speak_reply(text: str, language: Optional[str] = None, stop_first: bool = Tr
             lang = reply_language(plain)
     if stop_first:
         _stop_speech()
+    gender = _tts_gender()
+    voice_name = _edge_voice_for(lang, gender)
     # Build sentence list, then play with one-ahead synthesis to hide .!? gaps.
     chunks: List[str] = []
     cursor = 0
@@ -1160,7 +1190,7 @@ def speak_reply(text: str, language: Optional[str] = None, stop_first: bool = Tr
 
             def _pre(n=nxt, o=out):
                 box["item"] = n
-                box["ok"] = _synthesize_to_file(n, lang, o)
+                box["ok"] = _synthesize_to_file(n, lang, o, voice=voice_name)
                 if box["ok"]:
                     box["path"] = o
 
@@ -1169,7 +1199,10 @@ def speak_reply(text: str, language: Optional[str] = None, stop_first: bool = Tr
         if path and _play_file(path):
             pass
         else:
-            _speak_chunk(chunk, lang, edge_wait_s=12.0 if i == 0 else 20.0)
+            _speak_chunk(
+                chunk, lang, edge_wait_s=12.0 if i == 0 else 20.0,
+                voice=voice_name, gender=gender,
+            )
         if th is not None:
             _wait_prefetch(box, th, _GAP_BRIDGE_S)
             next_path = box.get("path")  # type: ignore
@@ -1217,10 +1250,11 @@ def _next_speak_cut(pending: str, force: bool = False, first: bool = False) -> T
     return "", 0
 
 
-def _synthesize_to_file(text: str, language: str, out: str, rate: str = _TTS_RATE) -> bool:
+def _synthesize_to_file(text: str, language: str, out: str, rate: str = _TTS_RATE,
+                        voice: Optional[str] = None) -> bool:
     """Write neural TTS audio to out via the warm edge-tts worker."""
     os.makedirs(_TTS_CACHE, exist_ok=True)
-    return _EdgePool.synthesize(text, language, out, rate=rate)
+    return _EdgePool.synthesize(text, language, out, rate=rate, voice=voice)
 
 
 def _track_proc(proc: "subprocess.Popen") -> "subprocess.Popen":
@@ -1282,28 +1316,37 @@ def _wait_prefetch(box: Dict[str, object], thread: threading.Thread,
     thread.join(timeout=0.01)
 
 
-def _speak_espeak(text: str, language: str) -> bool:
+def _speak_espeak(text: str, language: str, gender: Optional[str] = None) -> bool:
     bin_name = "espeak-ng" if shutil.which("espeak-ng") else ("espeak" if shutil.which("espeak") else None)
     if not bin_name:
         return False
-    voice = "bn" if language == "bn" else "en"
+    g = (gender or _tts_gender()).lower()
+    primary = _espeak_voice_for(language, g)
+    # If +f / +m variants are missing on this PC, fall back to base lang (still better than silence).
+    candidates = [primary]
+    base = "bn" if language == "bn" else "en"
+    if primary != base:
+        candidates.append(base)
     # Natural pace a ~10-year-old can follow (not rushed).
     speed = "145" if language == "bn" else "155"
-    try:
-        proc = _track_proc(subprocess.Popen(
-            [bin_name, "-v", voice, "-s", speed, "-g", "4", text],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        ))
+    for voice in candidates:
         try:
-            proc.wait(timeout=120)
-            return proc.returncode == 0
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            return False
-        finally:
-            _untrack_proc(proc)
-    except OSError:
-        return False
+            proc = _track_proc(subprocess.Popen(
+                [bin_name, "-v", voice, "-s", speed, "-g", "4", text],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            ))
+            try:
+                proc.wait(timeout=120)
+                if proc.returncode == 0:
+                    return True
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                return False
+            finally:
+                _untrack_proc(proc)
+        except OSError:
+            continue
+    return False
 
 
 _STREAM_EDGE = r"""
@@ -1319,7 +1362,7 @@ asyncio.run(main())
 """
 
 
-def _speak_stream_edge(text: str, language: str) -> bool:
+def _speak_stream_edge(text: str, language: str, voice: Optional[str] = None) -> bool:
     """Pipe neural audio to ffplay as it arrives — sound starts before the file is finished."""
     plain = (text or "").strip()
     if not plain or not shutil.which("ffplay"):
@@ -1327,7 +1370,7 @@ def _speak_stream_edge(text: str, language: str) -> bool:
     py = _EdgePool._python()
     if not py:
         return False
-    voice_name = _edge_voice_for(language)
+    voice_name = voice or _edge_voice_for(language)
     try:
         edge = subprocess.Popen(
             [py, "-c", _STREAM_EDGE, plain, voice_name, _TTS_RATE],
@@ -1364,20 +1407,22 @@ def _speak_stream_edge(text: str, language: str) -> bool:
 
 
 def _speak_chunk(text: str, language: str, out: Optional[str] = None,
-                 edge_wait_s: float = 45.0) -> bool:
+                 edge_wait_s: float = 45.0, voice: Optional[str] = None,
+                 gender: Optional[str] = None) -> bool:
     """Speak one phrase ASAP so voice tracks live typing — never skip text."""
     plain = (text or "").strip()
     if not plain:
         return True
     os.makedirs(_TTS_CACHE, exist_ok=True)
     path = out or os.path.join(_TTS_CACHE, "devos-assistant-tts-%d.mp3" % (int(time.time() * 1000) % 100000000))
+    voice_name = voice or _edge_voice_for(language, gender)
 
     # Warm edge-tts worker first (already imported + TLS). Spawning a fresh
     # Python for live stream was adding 1–3s — voice then started after typing.
     box: Dict[str, object] = {}
 
     def _edge():
-        box["ok"] = _synthesize_to_file(plain, language, path)
+        box["ok"] = _synthesize_to_file(plain, language, path, voice=voice_name)
 
     th = threading.Thread(target=_edge, daemon=True)
     th.start()
@@ -1392,13 +1437,16 @@ def _speak_chunk(text: str, language: str, out: Optional[str] = None,
     if box.get("ok") and _play_file(path):
         return True
     # Live stream overlaps remaining synth — including short first call chunks.
-    if _speak_stream_edge(plain, language):
+    if _speak_stream_edge(plain, language, voice=voice_name):
         return True
     if not box.get("ok"):
         th.join(timeout=max(1.0, min(edge_wait_s, 6.0)))
     if box.get("ok") and _play_file(path):
         return True
-    return _speak_espeak(plain, language)
+    # One more neural attempt before espeak — avoids random male espeak mid-reply.
+    if _synthesize_to_file(plain, language, path, voice=voice_name) and _play_file(path):
+        return True
+    return _speak_espeak(plain, language, gender=gender or _tts_gender())
 
 
 class StreamSpeaker:
@@ -1412,6 +1460,8 @@ class StreamSpeaker:
         self._plain = ""
         self._cursor = 0
         self._lang = "en"
+        self._gender = "female"
+        self._voice = _EDGE_VOICES[("en", "female")]
         self._q: Optional["queue.Queue[Optional[str]]"] = None
         self._thread: Optional[threading.Thread] = None
         self._seq = 0
@@ -1426,6 +1476,10 @@ class StreamSpeaker:
         self._plain = ""
         self._cursor = 0
         self._lang = language or "en"
+        # Lock gender + Edge voice for the whole reply so one failed chunk cannot
+        # flip to a different neural voice (or male espeak) mid-essay.
+        self._gender = _tts_gender()
+        self._voice = _edge_voice_for(self._lang, self._gender)
         self._q = queue.Queue()
         self._seq = 0
         self._active = True
@@ -1444,6 +1498,8 @@ class StreamSpeaker:
         with self._lock:
             if self._lang == "en" and reply_language(plain) == "bn":
                 self._lang = "bn"
+                # Keep the same gender; only switch language neural voice.
+                self._voice = _edge_voice_for(self._lang, self._gender)
             prev = self._plain
             if not prev or plain.startswith(prev) or self._cursor == 0:
                 # Normal growth while the model is typing — cursor stays valid.
@@ -1529,7 +1585,7 @@ class StreamSpeaker:
         def synth_path(text: str) -> Optional[str]:
             path = os.path.join(_TTS_CACHE, "devos-assistant-tts-%d.mp3" % self._seq)
             self._seq += 1
-            return path if _synthesize_to_file(text, self._lang, path) else None
+            return path if _synthesize_to_file(text, self._lang, path, voice=self._voice) else None
 
         current: Optional[str] = None
         current_path: Optional[str] = None
@@ -1563,7 +1619,13 @@ class StreamSpeaker:
             if current_path and _play_file(current_path):
                 first = False
             else:
-                _speak_chunk(current, self._lang, edge_wait_s=12.0 if first else 20.0)
+                _speak_chunk(
+                    current,
+                    self._lang,
+                    edge_wait_s=12.0 if first else 20.0,
+                    voice=self._voice,
+                    gender=self._gender,
+                )
                 first = False
 
             # Wait until prefetch has taken the next queue item. Abandoning early
