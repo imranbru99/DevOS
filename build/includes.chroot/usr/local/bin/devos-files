@@ -14,6 +14,7 @@ Provides the authentic Windows 10/11 File Explorer experience:
 """
 
 import datetime
+import errno
 import json
 import mimetypes
 import os
@@ -28,7 +29,8 @@ import stat
 import tempfile
 import threading
 from pathlib import Path
-from urllib.parse import unquote
+from typing import Optional
+from urllib.parse import quote, unquote
 
 try:
     from PyQt5.QtCore import (
@@ -989,26 +991,74 @@ def get_icon_for_file(path, is_dir=False, size=48):
 
 
 def is_recycle_bin_path(path: str) -> bool:
-    """Check if given path represents the Recycle Bin or an item within it."""
+    """Check if given path represents the Recycle Bin or an item within it.
+
+    The home bin lives in ~/.local/share/Trash. Each other disk keeps its own
+    bin at .Trash-$UID or .Trash/$UID, per the FreeDesktop trash spec.
+    """
     if not path:
         return False
     if str(path).strip() in ("trash:/", "trash:", "trash", "Recycle Bin"):
         return True
     try:
         norm = os.path.normpath(os.path.abspath(os.path.expanduser(str(path))))
-        trash_files = os.path.normpath(os.path.expanduser("~/.local/share/Trash/files"))
-        trash_root = os.path.normpath(os.path.expanduser("~/.local/share/Trash"))
-        return norm == trash_files or norm == trash_root or norm.startswith(trash_files + os.sep)
     except Exception:
         return False
+    trash_files = os.path.normpath(os.path.expanduser("~/.local/share/Trash/files"))
+    trash_root = os.path.normpath(os.path.expanduser("~/.local/share/Trash"))
+    if norm == trash_files or norm == trash_root or norm.startswith(trash_files + os.sep):
+        return True
+    uid = str(os.getuid())
+    parts = norm.split(os.sep)
+    for index, part in enumerate(parts):
+        if part != "files" or index < 1:
+            continue
+        parent = parts[index - 1]
+        grand = parts[index - 2] if index >= 2 else ""
+        if parent == f".Trash-{uid}" or (parent == uid and grand == ".Trash"):
+            return True
+    return False
+
+
+def is_primary_recycle_bin(path: str) -> bool:
+    """True for the sidebar Recycle Bin, which lists every disk's bin."""
+    if str(path).strip() in ("trash:/", "trash:", "trash", "Recycle Bin"):
+        return True
+    try:
+        norm = os.path.normpath(os.path.abspath(os.path.expanduser(str(path))))
+    except Exception:
+        return False
+    home_files = os.path.normpath(os.path.expanduser("~/.local/share/Trash/files"))
+    return norm == home_files
+
+
+def is_system_snapshot(path: str) -> bool:
+    """Timeshift restore points are root-owned copies, not documents."""
+    parts = [part.lower() for part in os.path.normpath(os.path.abspath(path)).split(os.sep) if part]
+    if "timeshift" not in parts:
+        return False
+    if "snapshots" in parts:
+        return True
+    return parts[-1] == "timeshift"
+
+
+def trashinfo_for(trash_file_path: str, name: str = None) -> str:
+    """Locate the .trashinfo sibling for an item already inside a bin."""
+    base = name or os.path.basename(trash_file_path)
+    files_dir = os.path.dirname(os.path.abspath(trash_file_path))
+    if os.path.basename(files_dir) == "files":
+        info_dir = os.path.join(os.path.dirname(files_dir), "info")
+    else:
+        info_dir = os.path.expanduser("~/.local/share/Trash/info")
+    return os.path.join(info_dir, f"{base}.trashinfo")
 
 
 def get_trash_info(trash_file_path: str):
-    """Parse FreeDesktop trashinfo for a file in ~/.local/share/Trash/files/."""
+    """Parse FreeDesktop trashinfo for a file in a Recycle Bin files directory."""
     try:
         base = os.path.basename(trash_file_path)
-        info_dir = os.path.expanduser("~/.local/share/Trash/info")
-        info_path = os.path.join(info_dir, f"{base}.trashinfo")
+        info_path = trashinfo_for(trash_file_path)
+        info_dir = os.path.dirname(info_path)
         orig_path = None
         del_date = None
         if os.path.exists(info_path):
@@ -2732,6 +2782,214 @@ def is_volume_recovery_folder(path):
     return stat.S_ISDIR(info.st_mode) and info.st_uid == 0 and not info.st_mode & 0o077
 
 
+def home_trash_dirs():
+    files = os.path.expanduser("~/.local/share/Trash/files")
+    info = os.path.expanduser("~/.local/share/Trash/info")
+    return files, info
+
+
+def filesystem_top(path):
+    """Mount point of the filesystem that holds path."""
+    path = os.path.abspath(path)
+    try:
+        device = os.lstat(path).st_dev
+    except OSError:
+        return path
+    current = path
+    while True:
+        parent = os.path.dirname(current)
+        if parent == current:
+            return current
+        try:
+            parent_device = os.lstat(parent).st_dev
+        except OSError:
+            return current
+        if parent_device != device:
+            return current
+        current = parent
+
+
+def trash_directories(path):
+    """Return (files, info) on the same filesystem as path.
+
+    Home's Recycle Bin is on DevOS (C:). A rename onto that bin fails for
+    files on A: or any other disk, so those disks get their own bin.
+    """
+    home_files, home_info = home_trash_dirs()
+    try:
+        os.makedirs(home_files, exist_ok=True)
+        os.makedirs(home_info, exist_ok=True)
+        if os.lstat(path).st_dev == os.stat(home_files).st_dev:
+            return home_files, home_info
+    except OSError:
+        pass
+
+    top = filesystem_top(path)
+    uid = str(os.getuid())
+    candidates = []
+    sticky = os.path.join(top, ".Trash")
+    try:
+        info = os.lstat(sticky)
+        if stat.S_ISDIR(info.st_mode) and not stat.S_ISLNK(info.st_mode) and info.st_mode & stat.S_ISVTX:
+            candidates.append(os.path.join(sticky, uid))
+    except OSError:
+        pass
+    candidates.append(os.path.join(top, f".Trash-{uid}"))
+    source_device = os.lstat(path).st_dev
+    for base in candidates:
+        files = os.path.join(base, "files")
+        info_dir = os.path.join(base, "info")
+        try:
+            os.makedirs(files, exist_ok=True)
+            os.makedirs(info_dir, exist_ok=True)
+            try:
+                os.chmod(base, 0o700)
+            except OSError:
+                pass
+            if os.stat(files).st_dev == source_device:
+                return files, info_dir
+        except OSError:
+            continue
+    return None
+
+
+def iter_trash_file_dirs():
+    """Home bin plus every mounted disk bin this user can see."""
+    home_files, _info = home_trash_dirs()
+    yield home_files
+    uid = str(os.getuid())
+    user = os.path.basename(os.path.expanduser("~")) or uid
+    roots = [
+        os.path.join("/run/media", user),
+        os.path.join("/media", user),
+        "/mnt",
+    ]
+    seen = set()
+    for root in roots:
+        if not os.path.isdir(root):
+            continue
+        try:
+            names = os.listdir(root)
+        except OSError:
+            continue
+        for name in names:
+            top = os.path.join(root, name)
+            for files in (
+                os.path.join(top, ".Trash", uid, "files"),
+                os.path.join(top, f".Trash-{uid}", "files"),
+            ):
+                if files in seen or not os.path.isdir(files):
+                    continue
+                seen.add(files)
+                yield files
+
+
+def recycle_bin_items():
+    items = []
+    for files_dir in iter_trash_file_dirs():
+        try:
+            names = os.listdir(files_dir)
+        except OSError:
+            continue
+        for name in names:
+            if name in (".", ".."):
+                continue
+            items.append(os.path.join(files_dir, name))
+    return items
+
+
+def forget_trashinfo(path):
+    base = os.path.basename(path)
+    clean_base = re.sub(r"\s+\(\d+\)(\.[^.]+)?$", r"\1", base)
+    info_dir = os.path.expanduser("~/.local/share/Trash/info")
+    candidates = [
+        trashinfo_for(path),
+        os.path.join(info_dir, f"{base}.trashinfo"),
+        os.path.join(info_dir, f"{clean_base}.trashinfo"),
+    ]
+    for info_path in candidates:
+        if info_path and os.path.exists(info_path):
+            try:
+                os.remove(info_path)
+            except OSError:
+                pass
+
+
+_PRIVILEGED_EXACT = {
+    "/", "/bin", "/boot", "/dev", "/etc", "/home", "/lib", "/lib64",
+    "/opt", "/proc", "/root", "/run", "/sbin", "/sys", "/tmp", "/usr", "/var",
+    "/media", "/mnt",
+}
+
+
+def _safe_delete_target(path):
+    """Block privileged removal of a filesystem root or a system directory."""
+    if not path or not os.path.isabs(path) or not os.path.lexists(path):
+        return False
+    if os.path.ismount(path):
+        return False
+    real = os.path.realpath(path)
+    home = os.path.realpath(os.path.expanduser("~"))
+    if real in _PRIVILEGED_EXACT or real == home:
+        return False
+    if len([part for part in real.split(os.sep) if part]) < 2:
+        return False
+    return True
+
+
+def remove_path(path, allow_privileged=True):
+    """Delete one item. Return None, 'privileged', or an error string."""
+    base = os.path.basename(path) or path
+    try:
+        if os.path.isdir(path) and not os.path.islink(path):
+            shutil.rmtree(path)
+        else:
+            os.remove(path)
+        return None
+    except OSError as err:
+        denied = isinstance(err, PermissionError) or getattr(err, "errno", None) in (errno.EACCES, errno.EPERM)
+        if denied and allow_privileged:
+            return "privileged"
+        return f"{base}: {err}"
+
+
+def remove_privileged(paths, runner=None):
+    """Remove root-owned items after the user confirms, via one pkexec call."""
+    errors = []
+    safe = []
+    for path in paths:
+        if _safe_delete_target(path):
+            safe.append(path)
+        else:
+            errors.append(f"{os.path.basename(path) or path}: Refusing to delete this location.")
+    if not safe:
+        return errors
+    if runner is None:
+        if os.environ.get("DEVOS_NO_PKEXEC") == "1" or not shutil.which("pkexec"):
+            for path in safe:
+                errors.append(f"{os.path.basename(path)}: Permission denied")
+            return errors
+        runner = subprocess.run
+    result = runner(
+        ["pkexec", "rm", "-rf", "--", *safe],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if getattr(result, "returncode", 1) in (126, 127):
+        return errors + ["Permission request was cancelled."]
+    if getattr(result, "returncode", 1) != 0:
+        detail = (getattr(result, "stderr", "") or getattr(result, "stdout", "") or "could not delete").strip()
+        for path in safe:
+            if os.path.lexists(path):
+                errors.append(f"{os.path.basename(path)}: {detail}")
+        return errors
+    for path in safe:
+        if os.path.lexists(path):
+            errors.append(f"{os.path.basename(path)}: still present")
+    return errors
+
+
 class FileOpWorker(QThread):
     """Trash / delete / empty / restore off the UI thread so large trees do not freeze Explorer."""
 
@@ -2743,12 +3001,14 @@ class FileOpWorker(QThread):
         self.op = op  # trash | delete | empty | restore
         self.paths = list(paths or [])
         self._cancel = False
+        self.needs_permanent = []
 
     def request_cancel(self):
         self._cancel = True
 
     def run(self):
         errors = []
+        self.needs_permanent = []
         try:
             if self.op == "trash":
                 errors = self._trash()
@@ -2763,14 +3023,7 @@ class FileOpWorker(QThread):
         self.finished_ok.emit(errors)
 
     def _trash(self):
-        trash_files = os.path.expanduser("~/.local/share/Trash/files")
-        trash_info = os.path.expanduser("~/.local/share/Trash/info")
-        try:
-            os.makedirs(trash_files, exist_ok=True)
-            os.makedirs(trash_info, exist_ok=True)
-        except OSError:
-            pass
-
+        self.needs_permanent = []
         errors = []
         for p in self.paths:
             if self._cancel:
@@ -2780,9 +3033,16 @@ class FileOpWorker(QThread):
             if is_volume_recovery_folder(p):
                 errors.append("lost+found is a protected filesystem recovery folder.")
                 continue
-            self.progress.emit(os.path.basename(p) or p)
-            deleted = False
+            base = os.path.basename(p) or p
+            self.progress.emit(base)
+            # Restore points are root-owned. Moving them into a bin keeps the
+            # space used, and the rename is refused. Ask to delete them for good.
+            if is_system_snapshot(p):
+                self.needs_permanent.append(p)
+                errors.append(f"{base}: Recycle Bin is unavailable on this volume.")
+                continue
 
+            deleted = False
             for cmd in (["gio", "trash", p], ["kioclient6", "move", p, "trash:/"],
                         ["kioclient5", "move", p, "trash:/"]):
                 if self._cancel:
@@ -2805,11 +3065,15 @@ class FileOpWorker(QThread):
             if deleted or self._cancel or not os.path.exists(p):
                 continue
 
+            dirs = trash_directories(p)
+            if not dirs:
+                self.needs_permanent.append(p)
+                errors.append(f"{base}: Recycle Bin is unavailable on this volume.")
+                continue
+            trash_files, trash_info = dirs
             try:
-                # A fallback rename is atomic only on the same filesystem.
                 if os.lstat(p).st_dev != os.stat(trash_files).st_dev:
                     raise OSError("Recycle Bin is unavailable on this volume.")
-                base = os.path.basename(p)
                 stem, ext = os.path.splitext(base)
                 dst = os.path.join(trash_files, base)
                 counter = 2
@@ -2820,22 +3084,32 @@ class FileOpWorker(QThread):
                     counter += 1
 
                 now_str = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-                info_content = f"[Trash Info]\nPath={os.path.abspath(p)}\nDeletionDate={now_str}\n"
+                info_content = (
+                    "[Trash Info]\n"
+                    f"Path={quote(os.path.abspath(p))}\n"
+                    f"DeletionDate={now_str}\n"
+                )
                 info_path = os.path.join(trash_info, f"{os.path.basename(dst)}.trashinfo")
                 with open(info_path, "x", encoding="utf-8") as handle:
                     handle.write(info_content)
                 try:
                     os.rename(p, dst)
                 except OSError:
-                    os.unlink(info_path)
+                    try:
+                        os.unlink(info_path)
+                    except OSError:
+                        pass
                     raise
             except OSError as err:
-                errors.append(f"{os.path.basename(p)}: {err}")
+                denied = isinstance(err, PermissionError) or getattr(err, "errno", None) in (errno.EACCES, errno.EPERM)
+                if denied or "unavailable" in str(err).lower():
+                    self.needs_permanent.append(p)
+                errors.append(f"{base}: {err}")
         return errors
 
     def _delete(self):
         errors = []
-        info_dir = os.path.expanduser("~/.local/share/Trash/info")
+        privileged = []
         for p in self.paths:
             if self._cancel:
                 break
@@ -2845,51 +3119,37 @@ class FileOpWorker(QThread):
                 errors.append("lost+found is a protected filesystem recovery folder.")
                 continue
             self.progress.emit(os.path.basename(p) or p)
-            base = os.path.basename(p)
-            try:
-                if os.path.isdir(p) and not os.path.islink(p):
-                    shutil.rmtree(p)
-                else:
-                    os.remove(p)
-            except Exception as err:
-                errors.append(f"{base}: {err}")
-            clean_base = re.sub(r"\s+\(\d+\)(\.[^.]+)?$", r"\1", base)
-            for info_path in (
-                os.path.join(info_dir, f"{base}.trashinfo"),
-                os.path.join(info_dir, f"{clean_base}.trashinfo"),
-            ):
-                if os.path.exists(info_path):
-                    try:
-                        os.remove(info_path)
-                    except OSError:
-                        pass
+            result = remove_path(p, allow_privileged=True)
+            if result == "privileged":
+                privileged.append(p)
+            elif result:
+                errors.append(result)
+            else:
+                forget_trashinfo(p)
+        if privileged and not self._cancel:
+            errors.extend(remove_privileged(privileged))
+            for p in privileged:
+                if not os.path.lexists(p):
+                    forget_trashinfo(p)
         return errors
 
     def _empty(self):
-        trash_dir = os.path.expanduser("~/.local/share/Trash/files")
-        trash_info = os.path.expanduser("~/.local/share/Trash/info")
-        if os.path.exists(trash_dir):
-            for item in os.listdir(trash_dir):
-                if self._cancel:
-                    break
-                fp = os.path.join(trash_dir, item)
-                self.progress.emit(item)
-                try:
-                    if os.path.isdir(fp) and not os.path.islink(fp):
-                        shutil.rmtree(fp, ignore_errors=True)
-                    else:
-                        os.remove(fp)
-                except Exception:
-                    pass
-        if os.path.exists(trash_info):
-            for item in os.listdir(trash_info):
-                if self._cancel:
-                    break
-                fp = os.path.join(trash_info, item)
-                try:
-                    os.remove(fp)
-                except Exception:
-                    pass
+        for fp in recycle_bin_items():
+            if self._cancel:
+                break
+            self.progress.emit(os.path.basename(fp) or fp)
+            remove_path(fp, allow_privileged=False)
+            forget_trashinfo(fp)
+        for files_dir in list(iter_trash_file_dirs()):
+            info_dir = os.path.join(os.path.dirname(files_dir), "info")
+            if os.path.isdir(info_dir):
+                for item in os.listdir(info_dir):
+                    if self._cancel:
+                        break
+                    try:
+                        os.remove(os.path.join(info_dir, item))
+                    except OSError:
+                        pass
         sizes_file = os.path.expanduser("~/.local/share/Trash/directorysizes")
         if os.path.exists(sizes_file):
             try:
@@ -5952,8 +6212,7 @@ class WindowsFileExplorer(QMainWindow):
             self.btn_restore_selected.setEnabled(count > 0)
             self.btn_delete_permanently.setEnabled(count > 0)
 
-            trash_files_dir = os.path.expanduser("~/.local/share/Trash/files")
-            has_any = os.path.exists(trash_files_dir) and bool(os.listdir(trash_files_dir))
+            has_any = bool(recycle_bin_items())
             self.btn_empty_trash.setEnabled(has_any)
             self.btn_restore_all.setEnabled(has_any)
         else:
@@ -6134,46 +6393,14 @@ class WindowsFileExplorer(QMainWindow):
         else:
             self.table_view.setHorizontalHeaderLabels(["Name", "Date modified", "Type", "Size"])
 
-        try:
-            entries = os.listdir(path)
-        except OSError as err:
-            self.status_items_count.setText(f"Unable to access: {err.strerror}")
-            self._loading_folder = False
+        rows = self._folder_rows(path, in_trash)
+        if rows is None:
             return
-
-        # Separate folders and files
-        dirs = []
-        files = []
-        for entry in entries:
-            if entry in [".", ".."]:
-                continue
-            full_path = os.path.join(path, entry)
-            if not self._show_hidden and (entry.startswith(".") or is_volume_recovery_folder(full_path)):
-                continue
-            if os.path.isdir(full_path):
-                dirs.append(entry)
-            else:
-                if self._picker_mode:
-                    if self._picker_options.get("directory"):
-                        continue
-                    if self._current_filter_patterns:
-                        matched = False
-                        for pat in self._current_filter_patterns:
-                            if pat in ("*", "*.*", "") or fnmatch.fnmatch(entry.lower(), pat.lower()):
-                                matched = True
-                                break
-                        if not matched:
-                            continue
-                files.append(entry)
-
-        dirs.sort(key=str.lower)
-        files.sort(key=str.lower)
-        all_items = dirs + files
+        all_items = rows
 
         self.table_view.setRowCount(len(all_items))
 
-        for row, entry in enumerate(all_items):
-            full_path = os.path.join(path, entry)
+        for row, (entry, full_path) in enumerate(all_items):
             is_dir = os.path.isdir(full_path)
 
             try:
@@ -6278,6 +6505,46 @@ class WindowsFileExplorer(QMainWindow):
         n = len(all_items)
         self.status_items_count.setText("1 item" if n == 1 else f"{n} items")
         self.status_selected_info.setText("")
+
+    def _folder_rows(self, path, in_trash):
+        """Return [(name, full_path), ...] or None when the folder cannot be read."""
+        if in_trash and is_primary_recycle_bin(path):
+            rows = [(os.path.basename(full), full) for full in recycle_bin_items()]
+            rows.sort(key=lambda item: (not os.path.isdir(item[1]), item[0].lower()))
+            return rows
+        try:
+            entries = os.listdir(path)
+        except OSError as err:
+            self.status_items_count.setText(f"Unable to access: {err.strerror}")
+            self._loading_folder = False
+            return None
+
+        dirs = []
+        files = []
+        for entry in entries:
+            if entry in [".", ".."]:
+                continue
+            full_path = os.path.join(path, entry)
+            if not self._show_hidden and (entry.startswith(".") or is_volume_recovery_folder(full_path)):
+                continue
+            if os.path.isdir(full_path):
+                dirs.append(entry)
+            else:
+                if self._picker_mode:
+                    if self._picker_options.get("directory"):
+                        continue
+                    if self._current_filter_patterns:
+                        matched = False
+                        for pat in self._current_filter_patterns:
+                            if pat in ("*", "*.*", "") or fnmatch.fnmatch(entry.lower(), pat.lower()):
+                                matched = True
+                                break
+                        if not matched:
+                            continue
+                files.append(entry)
+        dirs.sort(key=str.lower)
+        files.sort(key=str.lower)
+        return [(entry, os.path.join(path, entry)) for entry in dirs + files]
 
     def _prompt_trash_item_action(self, target):
         name = os.path.basename(target)
@@ -6953,12 +7220,20 @@ class WindowsFileExplorer(QMainWindow):
                 self.status.showMessage(done_message, 4000)
             elif not errors and hasattr(self, "status_selected_info") and done_message:
                 self.status_selected_info.setText(done_message)
-            if errors:
+            needs = [p for p in (getattr(worker, "needs_permanent", None) or []) if os.path.lexists(p)]
+            perm_names = {os.path.basename(p) for p in needs}
+            other = []
+            for err in errors or []:
+                if err.split(":", 1)[0] not in perm_names:
+                    other.append(err)
+            if other:
                 QMessageBox.critical(
                     self,
                     "File operation",
-                    "Some items could not be processed:\n" + "\n".join(errors[:12]),
+                    "Some items could not be processed:\n" + "\n".join(other[:12]),
                 )
+            if needs:
+                self._offer_permanent_delete(needs)
             worker.deleteLater()
             if getattr(self, "_file_op_worker", None) is worker:
                 self._file_op_worker = None
@@ -6973,6 +7248,32 @@ class WindowsFileExplorer(QMainWindow):
         count = len(paths or [])
         label = "Moving to Recycle Bin…" if count != 1 else f"Moving “{os.path.basename(paths[0])}” to Recycle Bin…"
         self._start_file_op(label, "trash", paths, done_message=f"Moved {count} item(s) to Recycle Bin")
+
+    def _offer_permanent_delete(self, paths):
+        """Ask before removing items the Recycle Bin cannot hold."""
+        count = len(paths)
+        if count == 1:
+            name = os.path.basename(paths[0])
+            detail = f"“{name}” stays on this disk."
+        else:
+            detail = f"{count} items stay on this disk."
+        reply = QMessageBox.warning(
+            self,
+            "Delete permanently",
+            f"{detail} Timeshift snapshots are owned by the system, and the Recycle Bin "
+            "on DevOS (C:) is a different disk.\n\n"
+            "Permanently delete them and free the space? This cannot be undone. "
+            "DevOS asks for your password when the system owns the folders.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply == QMessageBox.Yes:
+            self._start_file_op(
+                "Deleting permanently…",
+                "delete",
+                paths,
+                done_message=f"Permanently deleted {count} item(s)",
+            )
 
     def show_properties(self, target_path=None):
         """Open authentic Windows Properties dialog based on target type."""
@@ -7199,12 +7500,7 @@ class WindowsFileExplorer(QMainWindow):
         self.action_empty_recycle_bin()
 
     def action_empty_recycle_bin(self):
-        trash_dir = os.path.expanduser("~/.local/share/Trash/files")
-        trash_info = os.path.expanduser("~/.local/share/Trash/info")
-
-        has_items = False
-        if os.path.exists(trash_dir) and os.listdir(trash_dir):
-            has_items = True
+        has_items = bool(recycle_bin_items())
 
         if not has_items:
             QMessageBox.information(self, "Recycle Bin", "The Recycle Bin is already empty.")
@@ -7234,13 +7530,7 @@ class WindowsFileExplorer(QMainWindow):
         self._restore_paths(paths)
 
     def action_restore_all(self):
-        trash_dir = os.path.expanduser("~/.local/share/Trash/files")
-        if not os.path.exists(trash_dir):
-            return
-        try:
-            items = [os.path.join(trash_dir, f) for f in os.listdir(trash_dir)]
-        except OSError:
-            items = []
+        items = recycle_bin_items()
         if not items:
             QMessageBox.information(self, "Recycle Bin", "The Recycle Bin is already empty.")
             return

@@ -2,6 +2,7 @@
 import os
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 import runpy
+import shutil
 import stat
 import tempfile
 import unittest
@@ -157,6 +158,93 @@ class ExplorerStateTests(unittest.TestCase):
         w._apply_appearance()
         self.assertEqual(w.table_view.verticalHeader().defaultSectionSize(), 28)
         self.assertTrue(w.status.isHidden())
+
+    def test_timeshift_snapshots_are_offered_for_permanent_delete(self):
+        folder = Path(self.temp.name) / "timeshift" / "snapshots" / "2026-11-14_07-50-33"
+        folder.mkdir(parents=True)
+        (folder / "keep").write_text("snapshot")
+        worker = MODULE["FileOpWorker"]("trash", [str(folder)])
+        with patch("shutil.which", return_value=None):
+            errors = worker._trash()
+        self.assertEqual(worker.needs_permanent, [str(folder)])
+        self.assertTrue(errors)
+        self.assertEqual((folder / "keep").read_text(), "snapshot")
+
+    def test_other_disk_delete_uses_that_disk_recycle_bin(self):
+        disk = Path(self.temp.name) / "disk"
+        disk.mkdir()
+        source = disk / "notes.txt"
+        source.write_text("notes")
+        files = disk / "bin" / "files"
+        info = disk / "bin" / "info"
+
+        def fake_dirs(path):
+            files.mkdir(parents=True, exist_ok=True)
+            info.mkdir(parents=True, exist_ok=True)
+            return str(files), str(info)
+
+        worker = MODULE["FileOpWorker"]("trash", [str(source)])
+        with (
+            patch("shutil.which", return_value=None),
+            patch.dict(worker._trash.__globals__, trash_directories=fake_dirs),
+        ):
+            errors = worker._trash()
+        self.assertEqual(errors, [])
+        self.assertFalse(source.exists())
+        self.assertEqual((files / "notes.txt").read_text(), "notes")
+        info_text = (info / "notes.txt.trashinfo").read_text()
+        self.assertIn(str(source), info_text)
+        self.assertEqual(MODULE["get_trash_info"](str(files / "notes.txt"))[0], str(source))
+
+    def test_volume_trash_is_part_of_the_recycle_bin(self):
+        uid = os.getuid()
+        self.assertTrue(MODULE["is_recycle_bin_path"](f"/run/media/me/A/.Trash-{uid}/files/shot"))
+        self.assertTrue(MODULE["is_system_snapshot"]("/run/media/me/A/timeshift/snapshots/2026-11-14_07-50-33"))
+        self.assertTrue(MODULE["is_system_snapshot"]("/run/media/me/A/timeshift"))
+        self.assertFalse(MODULE["is_system_snapshot"]("/home/me/Projects/app"))
+        self.assertFalse(MODULE["is_recycle_bin_path"]("/run/media/me/A/timeshift/snapshots/shot"))
+
+    def test_admin_delete_refuses_system_roots(self):
+        self.assertFalse(MODULE["_safe_delete_target"]("/"))
+        self.assertFalse(MODULE["_safe_delete_target"](os.path.expanduser("~")))
+        refused = MODULE["remove_privileged"](["/"])
+        self.assertTrue(refused)
+        self.assertIn("Refusing", refused[0])
+
+    def test_admin_delete_removes_a_protected_snapshot_folder(self):
+        folder = Path(self.temp.name) / "disk" / "timeshift" / "snapshots" / "2026-11-14_07-50-33"
+        folder.mkdir(parents=True)
+        (folder / "file").write_text("old")
+        calls = []
+
+        def runner(argv, **kwargs):
+            calls.append(argv)
+            shutil.rmtree(folder)
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        errors = MODULE["remove_privileged"]([str(folder)], runner=runner)
+        self.assertEqual(errors, [])
+        self.assertEqual(calls[0][:4], ["pkexec", "rm", "-rf", "--"])
+        self.assertEqual(calls[0][4], str(folder))
+        self.assertFalse(folder.exists())
+
+    def test_permission_denied_delete_asks_for_one_admin_command(self):
+        folder = Path(self.temp.name) / "disk" / "timeshift" / "snapshots" / "2026-11-14_08-03-18"
+        folder.mkdir(parents=True)
+        seen = []
+
+        def denied(path, allow_privileged=True):
+            return "privileged"
+
+        def privileged(paths, runner=None):
+            seen.append(list(paths))
+            return []
+
+        worker = MODULE["FileOpWorker"]("delete", [str(folder)])
+        with patch.dict(worker._delete.__globals__, remove_path=denied, remove_privileged=privileged):
+            errors = worker._delete()
+        self.assertEqual(errors, [])
+        self.assertEqual(seen, [[str(folder)]])
 
     def test_new_window_setting_dispatches_real_folder(self):
         from unittest.mock import patch
