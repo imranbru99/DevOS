@@ -742,7 +742,9 @@ def sync_plasma_profile_launchers(home_dir=None, active_slugs=None):
         for slug in active:
             # Never skip "default" — that is a real profile slug when the
             # user kept Google's Default profile name (Windows shows it too).
-            if slug in seen or slug == "guest":
+            # Guest must also get its own pin (was skipped → Guest + profile
+            # grouped under one Google Chrome icon).
+            if slug in seen:
                 continue
             desktop = f"chrome-{slug}.desktop"
             if not os.path.isfile(os.path.join(apps_dir, desktop)):
@@ -1088,8 +1090,13 @@ def detect_window_profile(w, profiles, home_dir=None, assigned_profiles=None, pr
         if wid:
             WINDOW_PROFILE_CACHE[wid] = "Guest"
         return "Guest"
-    # Title "(Guest)" / " - Guest" only — bare word "Guest" in page titles is too noisy.
-    if re.search(r"(\(Guest\)| - Guest( - |$))", title or "", re.IGNORECASE):
+    # Title markers: "(Guest)", " - Guest", and Chrome's idle Guest page
+    # "You're browsing as a Guest" (new-tab Guest window).
+    if re.search(
+        r"(\(Guest\)| - Guest( - |$)|browsing as a Guest|You.?re browsing as a Guest)",
+        title or "",
+        re.IGNORECASE,
+    ):
         if wid:
             WINDOW_PROFILE_CACHE[wid] = "Guest"
         return "Guest"
@@ -1318,8 +1325,13 @@ def watch_chrome_windows(home_dir=None, poll_interval=None):
             poll_interval = 5.0
     poll_interval = max(2.0, float(poll_interval))
 
-    # Initial sync
+    # Initial sync + immediate apply so existing windows ungroup without waiting
+    # for the first poll cycle.
     sync_all_profiles(home_dir)
+    try:
+        apply_window_profiles(home_dir)
+    except Exception:
+        pass
 
     last_win_state = None
     while True:

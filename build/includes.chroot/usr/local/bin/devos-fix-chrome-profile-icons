@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Restore Windows-like Chrome taskbar: one avatar icon per open profile (not grouped).
+set -euo pipefail
+
+BRANCH="${1:-cursor/fix-chrome-profile-taskbar-icons-6cbe}"
+RAW="https://raw.githubusercontent.com/imranbru99/DevOS/${BRANCH}"
+DEST=/usr/local/share/devos/components/browser/chrome_profiles.py
+TMP="$(mktemp)"
+
+echo "== Update Chrome profile taskbar manager (${BRANCH}) =="
+curl -fsSL "${RAW}/build/includes.chroot/usr/local/share/devos/components/browser/chrome_profiles.py" -o "$TMP"
+# If branch file not synced yet, fall back to components path on raw.
+if ! grep -q 'browsing as a Guest' "$TMP" 2>/dev/null; then
+  curl -fsSL "${RAW}/components/browser/chrome_profiles.py" -o "$TMP"
+fi
+sudo install -m 0644 "$TMP" "$DEST"
+rm -f "$TMP"
+
+echo "== Sync profile launchers + restart watcher =="
+/usr/bin/python3 "$DEST" sync || true
+systemctl --user enable --now devos-browser-profiles.service 2>/dev/null || true
+systemctl --user restart devos-browser-profiles.service 2>/dev/null \
+  || (pkill -f 'chrome_profiles.py watch' 2>/dev/null || true;
+      nohup /usr/local/bin/devos-browser-profiles-daemon >/dev/null 2>&1 &)
+sleep 2
+/usr/bin/python3 "$DEST" apply || true
+
+echo
+echo "Done. Close and reopen Chrome windows (Guest + your profile)."
+echo "You should see TWO taskbar icons with profile faces — not one grouped Chrome."
+echo "Check:  systemctl --user status devos-browser-profiles.service --no-pager"
+echo "        wmctrl -lx | grep -i chrome"

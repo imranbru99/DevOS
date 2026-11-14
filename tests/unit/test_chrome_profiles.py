@@ -120,12 +120,16 @@ class TestChromeProfiles(unittest.TestCase):
                     "groupingStrategy=1\n"
                     "separateLaunchers=false\n"
                 )
-            # Open profiles → hide Chrome pin, show avatar pins.
-            ok = chrome_profiles.sync_plasma_profile_launchers(tmp_home, ["work", "mirza"])
+            # Open profiles → hide Chrome pin, show avatar pins (Guest included).
+            open(os.path.join(apps, "chrome-guest.desktop"), "w", encoding="utf-8").write(
+                "[Desktop Entry]\n"
+            )
+            ok = chrome_profiles.sync_plasma_profile_launchers(tmp_home, ["work", "mirza", "guest"])
             self.assertTrue(ok)
             text = open(appletsrc, encoding="utf-8").read()
             self.assertIn("applications:chrome-work.desktop", text)
             self.assertIn("applications:chrome-mirza.desktop", text)
+            self.assertIn("applications:chrome-guest.desktop", text)
             self.assertNotIn("applications:google-chrome.desktop", text)
             self.assertIn("separateLaunchers=true", text)
             self.assertIn("applications:devos-search.desktop", text)
@@ -182,6 +186,13 @@ class TestChromeProfiles(unittest.TestCase):
         profiles = {"Default": "Work", "Profile 1": "Mirza", "Profile 4": "Blog"}
         w_guest = {"id": 1, "title": "Welcome - Google Chrome (Guest)", "wm_class": "Google-chrome"}
         self.assertEqual(chrome_profiles.detect_window_profile(w_guest, profiles), "Guest")
+
+        w_new_guest = {
+            "id": 55,
+            "title": "You're browsing as a Guest",
+            "wm_class": "google-chrome.Google-chrome",
+        }
+        self.assertEqual(chrome_profiles.detect_window_profile(w_new_guest, profiles), "Guest")
 
         w_tag = {"id": 2, "title": "[Mirza] Project Dashboard - Google Chrome", "wm_class": "Google-chrome"}
         self.assertEqual(chrome_profiles.detect_window_profile(w_tag, profiles), "Mirza")
