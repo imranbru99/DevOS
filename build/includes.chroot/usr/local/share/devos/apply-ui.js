@@ -60,7 +60,9 @@ function configureTasks(tasks) {
         current = "";
     }
     tasks.writeConfig("launchers", scrubLaunchers(current));
-    tasks.writeConfig("groupingStrategy", 1);
+    tasks.writeConfig("groupingStrategy", 0);
+    tasks.writeConfig("groupPopups", false);
+    tasks.writeConfig("separateLaunchers", true);
     tasks.writeConfig("groupInline", false);
     tasks.writeConfig("iconSpacing", 1);
     tasks.writeConfig("groupPopups", true);

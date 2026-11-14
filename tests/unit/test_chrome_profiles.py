@@ -45,6 +45,13 @@ class TestChromeProfiles(unittest.TestCase):
         self.assertEqual(chrome_profiles.slugify("Profile 1"), "profile-1")
         self.assertEqual(chrome_profiles.slugify("Mirza"), "mirza")
 
+    def test_window_task_class_unique_per_window(self):
+        a = chrome_profiles.window_task_class("work", 0x1A2B)
+        b = chrome_profiles.window_task_class("work", 0x3C4D)
+        self.assertTrue(a.startswith("chrome-work-w"))
+        self.assertTrue(b.startswith("chrome-work-w"))
+        self.assertNotEqual(a, b)
+
     def test_generate_badged_icon(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             icon_48 = os.path.join(tmpdir, "icon48.png")
@@ -133,6 +140,7 @@ class TestChromeProfiles(unittest.TestCase):
             self.assertNotIn("applications:devos-browser.desktop", text)
             self.assertIn("separateLaunchers=true", text)
             self.assertIn("groupingStrategy=0", text)
+            self.assertIn("groupPopups=false", text)
             self.assertIn("applications:devos-search.desktop", text)
             # Profile literally named "Default" must still get its own pin.
             open(os.path.join(apps, "chrome-default.desktop"), "w", encoding="utf-8").write(

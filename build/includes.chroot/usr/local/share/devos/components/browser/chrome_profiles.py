@@ -629,6 +629,61 @@ def set_window_desktop_file(wid, desktop_slug, home_dir=None):
         pass
 
 
+def ensure_window_task_desktop(home_dir, prof_name: str, slug: str, wm_class: str, icon_name: str) -> str:
+    """
+    Create a NoDisplay .desktop whose StartupWMClass matches this ONE window.
+
+    Plasma groups by AppId/WM_CLASS. Two windows that both use chrome-work still
+    stack under one tile even with avatar badges — a unique class + desktop
+    per window is what actually splits the taskbar.
+    """
+    home = home_dir or os.path.expanduser("~")
+    apps = os.path.join(home, ".local/share/applications")
+    os.makedirs(apps, exist_ok=True)
+    desktop = f"{wm_class}.desktop"
+    path = os.path.join(apps, desktop)
+    devos_bin = (
+        os.path.join(home, ".local/bin/devos-browser")
+        if os.path.isfile(os.path.join(home, ".local/bin/devos-browser"))
+        else "/usr/local/bin/devos-browser"
+    )
+    label = prof_name or slug or "Chrome"
+    if slug == "guest" or (prof_name or "").lower() == "guest":
+        exec_line = f"{devos_bin} --guest --class={wm_class}"
+    else:
+        # Best-effort: profile directory may be unknown here; class is what matters for the taskbar.
+        exec_line = f"{devos_bin} --class={wm_class}"
+    content = f"""[Desktop Entry]
+Version=1.0
+Name=Google Chrome ({label})
+GenericName=Web Browser
+Comment=DevOS per-window Chrome task (not shown in Start menu)
+Exec={exec_line} %U
+StartupNotify=true
+StartupWMClass={wm_class}
+Terminal=false
+Icon={icon_name}
+Type=Application
+Categories=Network;WebBrowser;
+NoDisplay=true
+Hidden=false
+X-DevOS-ChromeWindowTask=true
+"""
+    try:
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(content)
+    except OSError:
+        pass
+    return desktop
+
+
+def window_task_class(slug: str, wid: int) -> str:
+    """Unique WM_CLASS so Plasma cannot group two Chrome windows into one tile."""
+    base = slugify(slug) or "chrome"
+    # Keep it short and X11-safe; include window id so each open window is unique.
+    return f"chrome-{base}-w{int(wid) & 0xFFFF:x}"
+
+
 def set_window_wm_class(wid, class_name, class_inst=None):
     """Set a proper two-part WM_CLASS (instance + class) via XSetClassHint / xdotool / xprop."""
     inst_s = class_inst or class_name or "chrome"
@@ -868,18 +923,14 @@ def sync_plasma_profile_launchers(home_dir=None, active_slugs=None):
 
     launchers = preserved + chrome_launchers
     launcher_csv = ",".join(launchers) if launchers else idle_pin
-    # Any open Chrome profile pin → Do Not Group. Plasma's "By program name"
-    # keeps merging windows that still briefly share google-chrome, and live
-    # WM_CLASS edits do not rebuild an already-grouped tile.
-    force_ungroup = bool(active) or (
-        len(chrome_launchers) >= 1 and any("chrome-" in x for x in chrome_launchers)
-    )
+    # Always Do Not Group on DevOS Icon Tasks. Plasma "By program name" merges
+    # Chrome windows that share a binary even after avatar badging.
     updates = {
         "launchers": launcher_csv,
         # Keep launchers visible as their own buttons (Windows profile icons).
         "separateLaunchers": "true",
-        "groupingStrategy": "0" if force_ungroup else "1",
-        "groupPopups": "false" if force_ungroup else "true",
+        "groupingStrategy": "0",
+        "groupPopups": "false",
         "onlyGroupWhenFull": "false",
         "launchInPlace": "true",
         # Windows-like: open apps keep the same pin with an indicator under the icon
@@ -1432,13 +1483,18 @@ def apply_window_profiles(home_dir=None):
     assigned_profiles = set()
     processed = 0
     active_slugs = []
+    window_classes = []
     prof_session_data = get_profile_session_data(chrome_dir)
 
+    # Ensure profile avatar icons + pin desktops exist first.
+    sync_all_profiles(home_dir)
+
     for w in chrome_wins:
+        # Do NOT mark profiles "assigned" across windows — two Work windows are
+        # both Work; forcing the second onto Guest/Mirza made grouping worse.
         prof_name = detect_window_profile(
-            w, profiles, home_dir, assigned_profiles, prof_session_data
+            w, profiles, home_dir, None, prof_session_data
         )
-        assigned_profiles.add(prof_name)
         slug = slugify(prof_name)
         if slug not in active_slugs:
             active_slugs.append(slug)
@@ -1446,26 +1502,33 @@ def apply_window_profiles(home_dir=None):
         prof_key = None if is_guest else name_to_key.get(prof_name)
         avatar = None if is_guest else ((details.get(prof_key) or {}).get("avatar") if prof_key else None)
 
-        prof_icon_48 = os.path.join(icons_dir_48, f"chrome-{slug}.png")
-        prof_icon_128 = os.path.join(icons_dir_128, f"chrome-{slug}.png")
+        icon_name = f"chrome-{slug}"
+        prof_icon_48 = os.path.join(icons_dir_48, f"{icon_name}.png")
+        prof_icon_128 = os.path.join(icons_dir_128, f"{icon_name}.png")
         generate_badged_icon(prof_name, prof_icon_48, prof_icon_128, avatar_path=avatar)
         set_window_icon(w["id"], prof_icon_48, prof_icon_128)
 
-        class_name = f"chrome-{slug}"
+        # Unique class+desktop per WINDOW — same-profile windows no longer share
+        # one Plasma AppId (that was the remaining group-preview bug).
+        class_name = window_task_class(slug, w["id"])
+        desktop_name = ensure_window_task_desktop(
+            home_dir, prof_name, slug, class_name, icon_name
+        )
         set_window_wm_class(w["id"], class_name, class_name)
-        set_window_desktop_file(w["id"], f"chrome-{slug}.desktop", home_dir=home_dir)
+        set_window_desktop_file(w["id"], desktop_name, home_dir=home_dir)
+        window_classes.append(class_name)
         processed += 1
 
-    # Ensure .desktop files exist for every active slug before swapping pins.
-    sync_all_profiles(home_dir)
-    launcher_key = tuple(active_slugs)
-    # Restart plasmashell only when the pin set changes. Live WM_CLASS edits
-    # alone leave Plasma's old group popup; a rebuild picks up Do Not Group.
+    # Pins: one launcher per open profile (avatar). Windows themselves use unique
+    # classes so they never stack under a single group popup.
+    launcher_key = tuple(active_slugs) + tuple(sorted(window_classes))
     if sync_plasma_profile_launchers(home_dir, active_slugs):
-        if launcher_key != _LAST_PLASMA_LAUNCHERS:
-            _LAST_PLASMA_LAUNCHERS = launcher_key
-            if len(active_slugs) >= 2:
-                os.environ["DEVOS_FORCE_PLASMA_RELOAD"] = "1"
+        # Always live-push Do Not Group while any Chrome window is open.
+        pass
+    if launcher_key != _LAST_PLASMA_LAUNCHERS:
+        _LAST_PLASMA_LAUNCHERS = launcher_key
+        if len(chrome_wins) >= 2:
+            os.environ["DEVOS_FORCE_PLASMA_RELOAD"] = "1"
             reload_plasmashell()
 
     return processed
