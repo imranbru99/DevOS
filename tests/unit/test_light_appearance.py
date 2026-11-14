@@ -10,6 +10,19 @@ from devos_appearance import (
 from PyQt5 import QtWidgets
 
 
+def test_selected_icon_name_stays_white_in_light_mode():
+    source = Path(__file__).resolve().parents[2].joinpath(
+        "build/includes.chroot/usr/local/bin/devos-files"
+    ).read_text()
+    start = source.index("QListWidget#fileList { font-size")
+    sheet = source[start:source.index('"""', start)]
+    light = light_stylesheet(sheet)
+    selected = light.split("item:selected:hover")[1].split("}", 1)[0]
+    assert "#0078d4" in selected
+    assert "#ffffff" in selected
+    assert "#0f172a" not in selected
+
+
 def test_light_surfaces_text_and_action_contrast():
     result=light_stylesheet('QWidget {background:#0b1220;color:#f8fafc;border:1px solid #283344;} QPushButton {background:#0078d4;color:#ffffff;}')
     assert 'background: #ffffff' in result

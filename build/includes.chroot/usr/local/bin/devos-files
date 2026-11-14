@@ -4972,14 +4972,15 @@ class WindowsFileExplorer(QMainWindow):
         self.list_view = ExplorerListWidget()
         self.list_view.setObjectName("fileList")
         self.list_view.setStyleSheet("""
-            QListWidget#fileList { font-size: 12px; background: #0e1827; color: #dce7f7; padding: 10px; border: none; }
-            QListWidget#fileList::item { background: #16273c; border: 1px solid #243b56; border-radius: 10px; padding: 8px; margin: 5px; }
-            QListWidget#fileList::item:hover { background: #203951; border-color: #4f8bb5; }
-            QListWidget#fileList::item:selected { background: #235073; border-color: #7dd3fc; }
+            QListWidget#fileList { font-size: 12px; background: transparent; color: #dce7f7; padding: 10px; border: none; }
+            QListWidget#fileList::item { background: transparent; color: #dce7f7; border: 1px solid transparent; border-radius: 10px; padding: 8px; margin: 5px; }
+            QListWidget#fileList::item:hover { background: #203951; color: #f8fafc; border-color: #4f8bb5; }
+            QListWidget#fileList::item:selected,
+            QListWidget#fileList::item:selected:hover { background: #0078d4; color: #ffffff; border: 1px solid #0078d4; }
         """)
         self.list_view.setViewMode(QListWidget.IconMode)
-        self.list_view.setIconSize(QSize(128, 88))
-        self.list_view.setGridSize(QSize(174, 150))
+        self.list_view.setIconSize(QSize(96, 96))
+        self.list_view.setGridSize(QSize(152, 174))
         self.list_view.setResizeMode(QListWidget.Adjust)
         self.list_view.setWordWrap(True)
         self.list_view.itemDoubleClicked.connect(lambda item: self._on_list_item_double_clicked(item) if self._picker_mode or not self._settings.get("single_click", False) else None)
@@ -5346,6 +5347,10 @@ class WindowsFileExplorer(QMainWindow):
                 background: #252b36;
             }
             QTableWidget#fileTable::item:selected, QListWidget#fileList::item:selected {
+                background: #0078d4;
+                color: #ffffff;
+            }
+            QListWidget#fileList::item:selected:hover {
                 background: #0078d4;
                 color: #ffffff;
             }
@@ -5772,7 +5777,8 @@ class WindowsFileExplorer(QMainWindow):
             }
 
             QTableWidget#fileTable, QListWidget#fileList { background: #090f18; alternate-background-color: #0c1421; border: none; color: #dce7f7; }
-            QTableWidget#fileTable::item:selected, QListWidget#fileList::item:selected { background: #17375a; color: white; border: 1px solid #0078d4; border-radius: 4px; }
+            QTableWidget#fileTable::item:selected, QListWidget#fileList::item:selected,
+            QListWidget#fileList::item:selected:hover { background: #0078d4; color: #ffffff; border: 1px solid #0078d4; border-radius: 4px; }
             QHeaderView::section {
                 background: #0e1624;
                 color: #94a3b8;
@@ -6470,6 +6476,7 @@ class WindowsFileExplorer(QMainWindow):
 
             # Also populate Icon list view
             list_item = QListWidgetItem(icon, display_name)
+            list_item.setTextAlignment(Qt.AlignHCenter | Qt.AlignBottom)
             tip_bits = [display_name]
             if entry.lower().endswith(".desktop") and display_name != entry:
                 tip_bits.append(entry)
@@ -6876,7 +6883,8 @@ class WindowsFileExplorer(QMainWindow):
             self.list_view.show()
             size = icon_size or 96
             self.list_view.setIconSize(QSize(size, size))
-            self.list_view.setGridSize(QSize(size + 40, size + 52))
+            # Leave a full line under the icon. A short cell clips the name.
+            self.list_view.setGridSize(QSize(size + 56, size + 78))
             self.btn_view.setText("View: Icons")
             self.details_button.setChecked(False)
             self._thumbnail_timer.start()
