@@ -961,8 +961,9 @@ class TaskCard(QtWidgets.QFrame):
 
 DEFAULT_STEPS_25 = ""  # Personal steps are loaded only from this PC’s config.
 MIN_STEP_PACK = 1
-MAX_STEP_PACK = 6
-MAX_STEP_GROUPS = 20
+# No hard cap on prompts per command group (was 6; users need larger serial packs).
+MAX_STEP_PACK = None
+MAX_STEP_GROUPS = 50
 
 STEPS_25_TEMPLATE_FILE = Path.home() / ".config/devos/pipeline_steps_25.md"
 STEP_PACK_FILE = Path.home() / ".config/devos/pipeline_step_pack.json"
@@ -988,8 +989,10 @@ def _clean_steps(raw_steps) -> list:
         if not text:
             continue
         cleaned.append(text)
-        if len(cleaned) >= MAX_STEP_PACK:
+        if MAX_STEP_PACK is not None and len(cleaned) >= MAX_STEP_PACK:
             break
+    if MAX_STEP_PACK is None:
+        return cleaned
     return cleaned[:MAX_STEP_PACK]
 
 
@@ -1038,7 +1041,9 @@ def _load_step_pack_data() -> dict:
             md = STEPS_25_TEMPLATE_FILE.read_text(encoding="utf-8")
         except Exception:
             md = ""
-    flat = split_prompts(md)[:MAX_STEP_PACK] if md.strip() else []
+    flat = split_prompts(md) if md.strip() else []
+    if MAX_STEP_PACK is not None:
+        flat = flat[:MAX_STEP_PACK]
     if flat:
         gid = _new_group_id()
         return {
@@ -1067,7 +1072,7 @@ def save_step_groups(groups, default_group_id=None) -> dict:
         if len(normalized) >= MAX_STEP_GROUPS:
             break
     if not normalized:
-        raise ValueError("Save at least one group with 1–6 steps.")
+        raise ValueError("Save at least one group with at least 1 prompt.")
     default_id = str(default_group_id or "").strip()
     if not any(g["id"] == default_id for g in normalized):
         default_id = normalized[0]["id"]
@@ -1113,7 +1118,7 @@ def save_step_pack(steps) -> list:
     """Persist steps into the default group (compat helper)."""
     cleaned = _clean_steps(steps)
     if not cleaned:
-        raise ValueError(f"Save at least {MIN_STEP_PACK} step (up to {MAX_STEP_PACK}).")
+        raise ValueError(f"Save at least {MIN_STEP_PACK} prompt.")
     data = _load_step_pack_data()
     groups = list(data.get("groups") or [])
     default_id = data.get("default_group_id") or ""
@@ -1626,8 +1631,7 @@ class Steps25TemplateDialog(QtWidgets.QDialog):
             return
         count = len(group.get("steps") or [])
         self.target_lbl.setText(
-            f"Will add as step {count + 1} in “{group.get('name') or 'Untitled'}” "
-            f"(max {MAX_STEP_PACK})."
+            f"Will add as step {count + 1} in “{group.get('name') or 'Untitled'}”."
         )
 
     def _reload_step_list(self):
@@ -1641,7 +1645,7 @@ class Steps25TemplateDialog(QtWidgets.QDialog):
             self.step_list.addItem(
                 f"{index + 1}. {preview}  ({len(words):,} words, {lines} line{'s' if lines != 1 else ''})"
             )
-        self.step_count_lbl.setText(f"{len(steps)} prompt(s) in this group (max {MAX_STEP_PACK})")
+        self.step_count_lbl.setText(f"{len(steps)} prompt(s) in this group")
         self.default_check.setChecked(bool(group) and group["id"] == self._default_id)
 
     def _create_group(self):
@@ -1692,7 +1696,7 @@ class Steps25TemplateDialog(QtWidgets.QDialog):
             self.step_list.setCurrentRow(edit_index)
             self.prompt_editor.setFocus()
             return
-        if len(steps) >= MAX_STEP_PACK:
+        if MAX_STEP_PACK is not None and len(steps) >= MAX_STEP_PACK:
             QtWidgets.QMessageBox.information(
                 self, "Limit", f"This group already has {MAX_STEP_PACK} prompts."
             )

@@ -38,6 +38,14 @@ def test_command_group_edit_selected_prompt():
     assert "itemDoubleClicked.connect" in text
 
 
+def test_no_hard_prompt_limit_per_group():
+    text = SRC.read_text(encoding="utf-8")
+    assert "MAX_STEP_PACK = None" in text
+    assert "This group already has 6 prompts" not in text
+    # UI must not advertise a max-6 cap
+    assert "(max 6)" not in text
+
+
 def test_chroot_pipeline_gui_synced():
     assert CHROOT.is_file()
     src = SRC.read_text(encoding="utf-8")
