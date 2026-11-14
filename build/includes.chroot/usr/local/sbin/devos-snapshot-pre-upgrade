@@ -6,8 +6,9 @@ case "$FSTYPE" in
   btrfs)
     ;;
   *)
-    # Default installer disk is ext4 — use Timeshift when present.
-    command -v timeshift >/dev/null 2>&1 || exit 0
+    # ext4 Timeshift copies the whole system onto the data disk. A package
+    # install must not create another one.
+    exit 0
     ;;
 esac
 # Bound a slow filesystem or snapshot backend so security updates can continue.

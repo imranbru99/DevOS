@@ -13,6 +13,30 @@ spec.loader.exec_module(updates)
 
 
 class SecurityUpdateTests(unittest.TestCase):
+    def test_package_install_does_not_create_timeshift_copies(self):
+        text = (ROOT / "build/includes.chroot/usr/local/sbin/devos-snapshot-pre-upgrade").read_text()
+        self.assertNotIn("timeshift", text)
+        self.assertIn("must not create another one", text)
+
+    def test_automatic_restore_point_skips_timeshift_on_ext4(self):
+        sys.path.insert(0, str(ROOT / "components" / "settings"))
+        import snapshot_manager
+
+        class Ext4:
+            def filesystem(self):
+                return "ext4"
+
+            def create_restore_point(self, description):
+                raise AssertionError(description)
+
+        original = snapshot_manager.SnapshotManager
+        snapshot_manager.SnapshotManager = lambda *args, **kwargs: Ext4()
+        try:
+            result = updates.snapshot_before_changes()
+        finally:
+            snapshot_manager.SnapshotManager = original
+        self.assertEqual(result["status"], "UNAVAILABLE")
+
     def test_branded_identity_still_matches_ubuntu_security_origins(self):
         text = updates.unattended_conf().replace("${distro_id}", "DevOS").replace("${distro_codename}", "resolute")
         origins = [line.strip().strip('";') for line in text.splitlines()
