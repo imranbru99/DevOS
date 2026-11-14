@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Repair Upload/Download/Open file dialogs on a running DevOS session.
+# Safe to re-run. Does not need a reboot.
+set -euo pipefail
+
+echo "== Display =="
+echo "DISPLAY=${DISPLAY:-unset}  WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-unset}"
+
+echo "== Write user portal prefs (KDE FileChooser; Secret explicitly empty) =="
+mkdir -p "${HOME}/.config/xdg-desktop-portal"
+# Empty Secret= is required: with only default=kde, portal still tries KWallet
+# and that backend exits 255 on DevOS (KWallet disabled).
+cat > "${HOME}/.config/xdg-desktop-portal/portals.conf" <<'EOF'
+[preferred]
+default=kde
+org.freedesktop.impl.portal.FileChooser=kde;gtk;devos;
+org.freedesktop.impl.portal.Settings=kde;gtk;
+org.freedesktop.impl.portal.Secret=
+EOF
+# Also cover older XDG lookup paths some portal builds still read.
+mkdir -p "${HOME}/.config"
+cp -f "${HOME}/.config/xdg-desktop-portal/portals.conf" \
+  "${HOME}/.config/xdg-desktop-portal.conf" 2>/dev/null || true
+
+
+echo "== Stop broken DevOS FileChooser unit (hardcoded DISPLAY was killing pickers) =="
+systemctl --user stop devos-portal-filechooser.service 2>/dev/null || true
+systemctl --user disable devos-portal-filechooser.service 2>/dev/null || true
+systemctl --user mask devos-portal-filechooser.service 2>/dev/null || true
+pkill -f '/usr/local/bin/devos-portal-filechooser' 2>/dev/null || true
+pkill -f 'org.freedesktop.impl.portal.desktop.devos' 2>/dev/null || true
+
+echo "== Disable broken KWallet Secret portal activation if present =="
+for f in \
+  /usr/share/dbus-1/services/org.freedesktop.impl.portal.desktop.kwallet.service \
+  /usr/share/xdg-desktop-portal/portals/kwallet.portal
+do
+  if [ -f "$f" ]; then
+    echo "  found $f (system file — not removed; preference override avoids it)"
+  fi
+done
+
+echo "== Restart portals =="
+systemctl --user restart xdg-desktop-portal.service || true
+systemctl --user restart xdg-desktop-portal-kde.service 2>/dev/null || true
+sleep 1
+
+echo "== Portal status =="
+systemctl --user is-active xdg-desktop-portal.service || true
+systemctl --user is-active xdg-desktop-portal-kde.service 2>/dev/null || true
+busctl --user status org.freedesktop.portal.Desktop 2>/dev/null | head -5 || true
+
+echo "== Recent portal errors =="
+journalctl --user -u xdg-desktop-portal -n 15 --no-pager 2>/dev/null | tail -15 || true
+
+echo "== Direct picker test (should open a window; close Cancel) =="
+if [ -x /usr/local/bin/devos-files ]; then
+  /usr/local/bin/devos-files --picker --output /tmp/devos-picker-test.json --title "DevOS portal test" \
+    && echo "devos-files picker exit: $?" \
+    || echo "devos-files picker exit: $?"
+else
+  echo "devos-files missing"
+fi
+
+echo
+echo "Done. Now try Upload/Download in Chrome or Antigravity."
+echo "If still broken, paste: journalctl --user -u xdg-desktop-portal -n 40 --no-pager"

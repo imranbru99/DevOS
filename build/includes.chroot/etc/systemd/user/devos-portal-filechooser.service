@@ -8,9 +8,11 @@ Type=simple
 ExecStart=/usr/bin/python3 /usr/local/bin/devos-portal-filechooser
 Restart=on-failure
 RestartSec=2
-Environment=DISPLAY=:1
-Environment=WAYLAND_DISPLAY=wayland-0
-Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+# Inherit display from the graphical session — hardcoding DISPLAY=:1 /
+# XDG_RUNTIME_DIR=/run/user/1000 broke upload/download pickers when the
+# session was on :0 or a different UID (same class of bug as browser-profiles).
+PassEnvironment=DISPLAY WAYLAND_DISPLAY XAUTHORITY XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS
 
 [Install]
 WantedBy=graphical-session.target

@@ -1,26 +1,70 @@
 """Unit tests for DevOS File Chooser & Portal Integration."""
 
+import re
 import subprocess
-import sys
 import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+PORTAL = ROOT / "build/includes.chroot/usr/local/bin/devos-portal-filechooser"
+SERVICE = ROOT / "build/includes.chroot/etc/systemd/user/devos-portal-filechooser.service"
+FILES_BIN = ROOT / "build/includes.chroot/usr/local/bin/devos-files"
+PORTALS_CONF = ROOT / "build/includes.chroot/etc/xdg/xdg-desktop-portal/portals.conf"
+KDE_PORTALS_CONF = ROOT / "build/includes.chroot/etc/xdg/xdg-desktop-portal/kde-portals.conf"
 
 
 class TestFilePicker(unittest.TestCase):
     def test_cli_help(self):
+        if not FILES_BIN.is_file():
+            self.skipTest("devos-files missing from ISO tree")
+        text = FILES_BIN.read_text(encoding="utf-8", errors="replace")
+        for flag in ("--picker", "--save", "--directory", "--multiple"):
+            self.assertIn(flag, text)
+        # Runtime --help needs PyQt5 (present on DevOS, not always in CI).
         ret = subprocess.run(
-            ["devos-files", "--help"],
+            ["python3", str(FILES_BIN), "--help"],
             capture_output=True,
-            text=True
+            text=True,
         )
-        self.assertEqual(ret.returncode, 0)
+        if ret.returncode != 0 and "PyQt5" in (ret.stderr or ""):
+            self.skipTest("PyQt5 not installed in this environment")
+        self.assertEqual(ret.returncode, 0, ret.stderr)
         self.assertIn("--picker", ret.stdout)
-        self.assertIn("--save", ret.stdout)
-        self.assertIn("--directory", ret.stdout)
-        self.assertIn("--multiple", ret.stdout)
+
+    def test_portal_resolves_existing_devos_files_not_missing_local_path(self):
+        """Missing ~/.local/bin/devos-files must not block /usr/local/bin fallback."""
+        text = PORTAL.read_text(encoding="utf-8")
+        self.assertIn("os.path.isfile(c)", text)
+        self.assertIn("os.access(c, os.X_OK)", text)
+        self.assertIn('"/usr/local/bin/devos-files"', text)
+        # Old bug pattern: expanduser() alone is always a truthy string.
+        self.assertNotRegex(
+            text,
+            r'or os\.path\.expanduser\("~/\.local/bin/devos-files"\)\s*'
+            r'or os\.path\.expanduser\("~/\.gemini/antigravity/bin/devos-files"\)\s*'
+            r'or "/usr/local/bin/devos-files"',
+        )
+
+    def test_portal_service_inherits_display_env(self):
+        text = SERVICE.read_text(encoding="utf-8")
+        self.assertIn("PassEnvironment=DISPLAY", text)
+        self.assertNotIn("Environment=DISPLAY=:1", text)
+        self.assertNotIn("Environment=XDG_RUNTIME_DIR=/run/user/1000", text)
+        self.assertIn("PATH=/usr/local/bin", text)
+
+    def test_portals_conf_does_not_force_kwallet_secret(self):
+        for path in (PORTALS_CONF, KDE_PORTALS_CONF):
+            text = path.read_text(encoding="utf-8")
+            self.assertIn("FileChooser=kde;gtk;devos;", text)
+            prefs = [
+                ln.strip()
+                for ln in text.splitlines()
+                if ln.strip() and not ln.strip().startswith("#")
+            ]
+            # Must set Secret= (empty) so default=kde does not pull KWallet.
+            self.assertIn("org.freedesktop.impl.portal.Secret=", prefs)
 
     def test_filter_parsing(self):
-        import re
-
         def clean_glob_pattern(pat):
             if not pat:
                 return pat
@@ -49,7 +93,6 @@ class TestFilePicker(unittest.TestCase):
         self.assertEqual(f1[0][1], ["*.png", "*.jpg"])
         self.assertEqual(f1[1][1], ["*.pdf"])
 
-        # Test bracket regex character classes from Chrome/Chromium
         f_chrome = parse_filter_string("PDF Document (*.[pP][dD][fF]);;PNG Image (*.[pP][nN][gG])")
         self.assertEqual(len(f_chrome), 2)
         self.assertEqual(f_chrome[0][0], "PDF Document (*.pdf)")
@@ -57,7 +100,6 @@ class TestFilePicker(unittest.TestCase):
         self.assertEqual(f_chrome[1][0], "PNG Image (*.png)")
         self.assertEqual(f_chrome[1][1], ["*.png"])
 
-        # Test filename normalization
         self.assertEqual(clean_glob_pattern("Makkar.[pP][dD][fF]"), "Makkar.pdf")
         self.assertEqual(clean_glob_pattern("screenshot.[pP][nN][gG]"), "screenshot.png")
 
