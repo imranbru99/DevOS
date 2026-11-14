@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Make Google Antigravity (main) and Antigravity IDE (second) open as two apps.
+# Safe to re-run. Needs network once to pull launchers from GitHub.
+set -euo pipefail
+
+BRANCH="${1:-cursor/fix-antigravity-ide-chrome-default-6cbe}"
+RAW="https://raw.githubusercontent.com/imranbru99/DevOS/${BRANCH}"
+
+echo "== Install isolated launchers (branch: ${BRANCH}) =="
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+curl -fsSL "${RAW}/build/includes.chroot/usr/local/bin/devos-antigravity" -o "${TMP}/devos-antigravity"
+curl -fsSL "${RAW}/build/includes.chroot/usr/local/bin/antigravity-kde" -o "${TMP}/antigravity-kde"
+
+sudo install -m 0755 "${TMP}/devos-antigravity" /usr/local/bin/devos-antigravity
+sudo install -m 0755 "${TMP}/antigravity-kde" /usr/local/bin/antigravity-kde
+# PATH often has /usr/bin before /usr/local/bin — keep both names working.
+sudo ln -sfn /usr/local/bin/antigravity-kde /usr/bin/antigravity-kde
+sudo ln -sfn /usr/local/bin/devos-antigravity /usr/bin/devos-antigravity 2>/dev/null || true
+
+# Desktop entries (menu)
+for f in antigravity.desktop antigravity-kde.desktop antigravity-ide.desktop devos-antigravity-studio.desktop; do
+  url="${RAW}/build/includes.chroot/usr/share/applications/${f}"
+  if curl -fsSL "$url" -o "${TMP}/${f}"; then
+    sudo install -m 0644 "${TMP}/${f}" "/usr/share/applications/${f}"
+    echo "  ✔ /usr/share/applications/${f}"
+  fi
+done
+
+# Fresh isolated profile dirs
+mkdir -p "${HOME}/.config/Antigravity" "${HOME}/.config/Antigravity-KDE"
+mkdir -p "${HOME}/.gemini/antigravity" "${HOME}/.gemini/antigravity-kde"
+printf '%s\n' '{ "password-store": "basic" }' > "${HOME}/.config/Antigravity/argv.json"
+printf '%s\n' '{ "password-store": "basic" }' > "${HOME}/.config/Antigravity-KDE/argv.json"
+
+echo "== Close any running Antigravity windows =="
+pkill -f '/opt/antigravity/antigravity' 2>/dev/null || true
+pkill -f 'antigravity-ide' 2>/dev/null || true
+pkill -f 'Antigravity-KDE' 2>/dev/null || true
+sleep 1
+# Clear stale singleton locks (both profiles)
+for d in "${HOME}/.config/Antigravity" "${HOME}/.config/Antigravity-KDE"; do
+  rm -f "${d}/SingletonLock" "${d}/SingletonSocket" "${d}/SingletonCookie" 2>/dev/null || true
+done
+
+echo "== Verify isolation flags =="
+grep -n 'user-data-dir\|GEMINI_APP_DATA_DIR\|Antigravity-KDE' /usr/local/bin/antigravity-kde | head -10
+grep -n 'user-data-dir\|GEMINI_APP_DATA_DIR' /usr/local/bin/devos-antigravity | head -10
+
+echo
+echo "Done. Open them separately:"
+echo "  1) Google Antigravity  →  /usr/local/bin/devos-antigravity"
+echo "  2) Antigravity IDE    →  /usr/local/bin/antigravity-kde"
+echo "They must show different Google accounts / windows."
+echo "Check processes:  ps -ef | grep -E 'user-data-dir=.*Antigravity' | grep -v grep"
