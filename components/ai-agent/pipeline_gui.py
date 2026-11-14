@@ -20,6 +20,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtCore import Qt, QTimer, QCoreApplication
@@ -960,8 +961,9 @@ class TaskCard(QtWidgets.QFrame):
 
 DEFAULT_STEPS_25 = ""  # Personal steps are loaded only from this PC’s config.
 MIN_STEP_PACK = 1
-MAX_STEP_PACK = 6
-MAX_STEP_GROUPS = 20
+# No hard cap on prompts per command group (was 6; users need larger serial packs).
+MAX_STEP_PACK = None
+MAX_STEP_GROUPS = 50
 
 STEPS_25_TEMPLATE_FILE = Path.home() / ".config/devos/pipeline_steps_25.md"
 STEP_PACK_FILE = Path.home() / ".config/devos/pipeline_step_pack.json"
@@ -987,8 +989,10 @@ def _clean_steps(raw_steps) -> list:
         if not text:
             continue
         cleaned.append(text)
-        if len(cleaned) >= MAX_STEP_PACK:
+        if MAX_STEP_PACK is not None and len(cleaned) >= MAX_STEP_PACK:
             break
+    if MAX_STEP_PACK is None:
+        return cleaned
     return cleaned[:MAX_STEP_PACK]
 
 
@@ -1037,7 +1041,9 @@ def _load_step_pack_data() -> dict:
             md = STEPS_25_TEMPLATE_FILE.read_text(encoding="utf-8")
         except Exception:
             md = ""
-    flat = split_prompts(md)[:MAX_STEP_PACK] if md.strip() else []
+    flat = split_prompts(md) if md.strip() else []
+    if MAX_STEP_PACK is not None:
+        flat = flat[:MAX_STEP_PACK]
     if flat:
         gid = _new_group_id()
         return {
@@ -1066,7 +1072,7 @@ def save_step_groups(groups, default_group_id=None) -> dict:
         if len(normalized) >= MAX_STEP_GROUPS:
             break
     if not normalized:
-        raise ValueError("Save at least one group with 1–6 steps.")
+        raise ValueError("Save at least one group with at least 1 prompt.")
     default_id = str(default_group_id or "").strip()
     if not any(g["id"] == default_id for g in normalized):
         default_id = normalized[0]["id"]
@@ -1112,7 +1118,7 @@ def save_step_pack(steps) -> list:
     """Persist steps into the default group (compat helper)."""
     cleaned = _clean_steps(steps)
     if not cleaned:
-        raise ValueError(f"Save at least {MIN_STEP_PACK} step (up to {MAX_STEP_PACK}).")
+        raise ValueError(f"Save at least {MIN_STEP_PACK} prompt.")
     data = _load_step_pack_data()
     groups = list(data.get("groups") or [])
     default_id = data.get("default_group_id") or ""
@@ -1162,13 +1168,174 @@ def format_step_pack_for_editor(steps) -> str:
     return "\n---\n" + "\n---\n".join(cleaned)
 
 
-def choose_step_group(parent=None):
-    """Pick a saved group. One group → return it; many → menu; none → None."""
-    groups = list_step_groups()
+def format_group_prompts_for_field(group) -> str:
+    """Join a command group's prompts with --- for a project field editor."""
+    steps = _clean_steps(list((group or {}).get("steps") or []))
+    if not steps:
+        return ""
+    return "\n---\n".join(steps)
+
+
+def fill_pipeline_agent_combo(combo: QtWidgets.QComboBox, default_key: Optional[str] = None) -> None:
+    """Populate an agent chooser (multi + discovered agents). Used per project field."""
+    combo.clear()
+    combo.addItem("✨ Multi-Agent Hybrid (Antigravity + DevOS Code)", "multi")
+    known = discover_agents()
+    is_kde_session = ("KDE" in os.environ.get("XDG_CURRENT_DESKTOP", "")) or (
+        os.environ.get("DESKTOP_SESSION") == "plasma"
+    )
+    default_index = 0
+    idx = 1
+    for k, v in known.items():
+        if v.get("running"):
+            label = f"● {v['name']} [Running]"
+        elif v.get("available"):
+            label = f"○ {v['name']} [Ready]" if k == "local" else f"○ {v['name']} [Installed]"
+        else:
+            label = f"○ {v['name']} [Not Installed]"
+        combo.addItem(label, k)
+        if default_key and k == default_key:
+            default_index = idx
+        elif not default_key:
+            if is_kde_session and k == "antigravity-kde" and v.get("running"):
+                default_index = idx
+            elif not is_kde_session and k == "antigravity" and v.get("running") and default_index == 0:
+                default_index = idx
+            elif v.get("running") and default_index == 0:
+                default_index = idx
+        idx += 1
+    if default_key == "multi":
+        default_index = 0
+    combo.setCurrentIndex(default_index)
+
+
+class ChooseCommandGroupDialog(QtWidgets.QDialog):
+    """Modal: pick which saved command group to use on a project field."""
+
+    def __init__(self, parent=None, selected_id=None):
+        super().__init__(parent)
+        self.setWindowTitle("Choose command group")
+        self.setMinimumSize(480, 360)
+        self.setStyleSheet(STYLE)
+        self._selected = None
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(10)
+
+        title = QtWidgets.QLabel("Choose a command group for this project")
+        title.setStyleSheet("font-size: 14px; font-weight: 700; color: #38bdf8;")
+        layout.addWidget(title)
+        hint = QtWidgets.QLabel(
+            "The project field will show this group’s name and load all of its commands/prompts."
+        )
+        hint.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        self.list = QtWidgets.QListWidget()
+        self.list.setStyleSheet(
+            "QListWidget { background: #0b1220; border: 1px solid #1e293b; border-radius: 6px; }"
+            "QListWidget::item { padding: 8px 10px; }"
+            "QListWidget::item:selected { background: #1e3a5f; color: #e2e8f0; }"
+        )
+        groups = [g for g in list_step_groups() if g.get("steps")]
+        select_row = 0
+        for index, group in enumerate(groups):
+            count = len(group.get("steps") or [])
+            item = QtWidgets.QListWidgetItem(
+                f"{group.get('name') or 'Untitled'}  ·  {count} command(s)"
+            )
+            item.setData(Qt.UserRole, group)
+            self.list.addItem(item)
+            if selected_id and group.get("id") == selected_id:
+                select_row = index
+        if groups:
+            self.list.setCurrentRow(select_row)
+        self.list.itemDoubleClicked.connect(self._accept_current)
+        layout.addWidget(self.list, stretch=1)
+
+        if not groups:
+            empty = QtWidgets.QLabel(
+                "No command groups saved yet. Open Command Group Setting to create one "
+                "and add multiple commands/prompts."
+            )
+            empty.setStyleSheet("color: #fbbf24; font-size: 11px;")
+            empty.setWordWrap(True)
+            layout.addWidget(empty)
+
+        buttons = QtWidgets.QHBoxLayout()
+        btn_manage = QtWidgets.QPushButton("⚙ Command Group Setting…")
+        btn_manage.clicked.connect(self._open_settings)
+        buttons.addWidget(btn_manage)
+        buttons.addStretch()
+        btn_cancel = QtWidgets.QPushButton("Cancel")
+        btn_cancel.clicked.connect(self.reject)
+        buttons.addWidget(btn_cancel)
+        btn_ok = QtWidgets.QPushButton("Use this group")
+        btn_ok.setObjectName("primary")
+        btn_ok.setEnabled(bool(groups))
+        btn_ok.clicked.connect(self._accept_current)
+        buttons.addWidget(btn_ok)
+        layout.addLayout(buttons)
+
+    def _open_settings(self):
+        dlg = Steps25TemplateDialog(parent=self)
+        dlg.exec_()
+        # Refresh list after managing groups
+        current_id = None
+        cur = self.list.currentItem()
+        if cur:
+            current_id = (cur.data(Qt.UserRole) or {}).get("id")
+        self.list.clear()
+        groups = [g for g in list_step_groups() if g.get("steps")]
+        select_row = 0
+        for index, group in enumerate(groups):
+            count = len(group.get("steps") or [])
+            item = QtWidgets.QListWidgetItem(
+                f"{group.get('name') or 'Untitled'}  ·  {count} command(s)"
+            )
+            item.setData(Qt.UserRole, group)
+            self.list.addItem(item)
+            if current_id and group.get("id") == current_id:
+                select_row = index
+        if groups:
+            self.list.setCurrentRow(select_row)
+        for child in self.findChildren(QtWidgets.QPushButton):
+            if child.text() == "Use this group":
+                child.setEnabled(bool(groups))
+
+    def _accept_current(self, *_args):
+        item = self.list.currentItem()
+        if not item:
+            return
+        self._selected = item.data(Qt.UserRole)
+        self.accept()
+
+    def selected_group(self):
+        return self._selected
+
+
+def choose_step_group(parent=None, selected_id=None, *, prefer_modal=True):
+    """Pick a saved command group. Returns group dict or None.
+
+    prefer_modal=True opens the Choose command group dialog (project fields).
+    When only one group exists and prefer_modal is False, return it immediately
+    (Auto-add chip fast path).
+    """
+    groups = [g for g in list_step_groups() if g.get("steps")]
     if not groups:
         return None
-    if len(groups) == 1:
+    if len(groups) == 1 and not prefer_modal and not selected_id:
         return groups[0]
+
+    if prefer_modal:
+        try:
+            dlg = ChooseCommandGroupDialog(parent=parent, selected_id=selected_id)
+            if dlg.exec_() == QtWidgets.QDialog.Accepted:
+                return dlg.selected_group()
+            return None
+        except Exception:
+            pass
 
     selected = {"group": None}
     menu = QtWidgets.QMenu(parent)
@@ -1189,7 +1356,6 @@ def choose_step_group(parent=None):
                 break
 
     menu.triggered.connect(_picked)
-    # Prefer button-anchored popup when caller is a widget with a geometry.
     if parent is not None and hasattr(parent, "mapToGlobal") and hasattr(parent, "rect"):
         menu.exec_(parent.mapToGlobal(parent.rect().bottomLeft()))
     else:
@@ -1198,29 +1364,31 @@ def choose_step_group(parent=None):
 
 
 class Steps25TemplateDialog(QtWidgets.QDialog):
-    """Add multi-line prompts one-by-one into named groups; Auto-add runs them serially."""
+    """Command Group Setting — save named groups of multiple commands/prompts."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("⚙ Step groups (Auto-add)")
+        self.setWindowTitle("⚙ Command Group Setting")
         self.resize(920, 680)
         self.setStyleSheet(STYLE)
         self._groups = []
         self._loading = False
+        self._edit_index = None  # when set, Save/Update replaces that step instead of appending
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(18, 16, 18, 16)
         layout.setSpacing(10)
 
-        header = QtWidgets.QLabel("⚙ Step groups")
+        header = QtWidgets.QLabel("⚙ Command Group Setting")
         header.setStyleSheet("font-size: 15px; font-weight: 700; color: #38bdf8;")
         layout.addWidget(header)
 
         desc = QtWidgets.QLabel(
-            "1) Create or choose a group name.  "
-            "2) Paste one full prompt (multi-line OK).  "
-            "3) Click Save prompt into group.  "
-            "Repeat for the next prompt. Auto-add later queues every prompt in that group in order."
+            "1) Create a command group name.  "
+            "2) Paste one command/prompt (multi-line OK).  "
+            "3) Click Save prompt into group — repeat to add multiple commands.  "
+            "To edit: select a prompt in section 3 → Edit selected (or double-click) → change text → Update prompt.  "
+            "Projects can then choose this group by name in the Choose command group modal."
         )
         desc.setStyleSheet("color: #94a3b8; font-size: 11px;")
         desc.setWordWrap(True)
@@ -1291,13 +1459,21 @@ class Steps25TemplateDialog(QtWidgets.QDialog):
         self.target_lbl = QtWidgets.QLabel("")
         self.target_lbl.setStyleSheet("color: #94a3b8; font-size: 11px;")
         save_row.addWidget(self.target_lbl, stretch=1)
-        btn_add = QtWidgets.QPushButton("💾 Save prompt into group")
-        btn_add.setObjectName("primary")
-        btn_add.setStyleSheet(
+        btn_cancel_edit = QtWidgets.QPushButton("Cancel edit")
+        btn_cancel_edit.setStyleSheet(
+            "background-color: #334155; color: #f1f5f9; font-size: 11px; padding: 6px 12px; border-radius: 4px;"
+        )
+        btn_cancel_edit.clicked.connect(self._cancel_edit_prompt)
+        btn_cancel_edit.hide()
+        self.btn_cancel_edit = btn_cancel_edit
+        save_row.addWidget(btn_cancel_edit)
+        self.btn_save_prompt = QtWidgets.QPushButton("💾 Save prompt into group")
+        self.btn_save_prompt.setObjectName("primary")
+        self.btn_save_prompt.setStyleSheet(
             "background-color: #2563eb; color: white; font-weight: 700; padding: 7px 16px; border-radius: 5px;"
         )
-        btn_add.clicked.connect(self._add_prompt_to_group)
-        save_row.addWidget(btn_add)
+        self.btn_save_prompt.clicked.connect(self._add_prompt_to_group)
+        save_row.addWidget(self.btn_save_prompt)
         s2.addLayout(save_row)
         layout.addWidget(step2, stretch=1)
 
@@ -1310,6 +1486,7 @@ class Steps25TemplateDialog(QtWidgets.QDialog):
         s3 = QtWidgets.QVBoxLayout(step3)
         self.step_list = QtWidgets.QListWidget()
         self.step_list.setMinimumHeight(110)
+        self.step_list.itemDoubleClicked.connect(lambda *_: self._edit_selected_step())
         s3.addWidget(self.step_list)
         step_btns = QtWidgets.QHBoxLayout()
         self.step_count_lbl = QtWidgets.QLabel("")
@@ -1317,12 +1494,22 @@ class Steps25TemplateDialog(QtWidgets.QDialog):
         step_btns.addWidget(self.step_count_lbl, stretch=1)
         btn_up = QtWidgets.QPushButton("▲")
         btn_up.setFixedWidth(36)
+        btn_up.setToolTip("Move selected prompt up")
         btn_up.clicked.connect(lambda: self._move_step(-1))
         step_btns.addWidget(btn_up)
         btn_down = QtWidgets.QPushButton("▼")
         btn_down.setFixedWidth(36)
+        btn_down.setToolTip("Move selected prompt down")
         btn_down.clicked.connect(lambda: self._move_step(1))
         step_btns.addWidget(btn_down)
+        btn_edit_step = QtWidgets.QPushButton("✎ Edit selected")
+        btn_edit_step.setToolTip("Load selected prompt into the editor above to change it")
+        btn_edit_step.setStyleSheet(
+            "background-color: #1e1b4b; color: #c7d2fe; font-size: 11px; font-weight: 700; "
+            "padding: 5px 12px; border: 1px solid #4338ca; border-radius: 4px;"
+        )
+        btn_edit_step.clicked.connect(self._edit_selected_step)
+        step_btns.addWidget(btn_edit_step)
         btn_remove_step = QtWidgets.QPushButton("Remove selected")
         btn_remove_step.clicked.connect(self._remove_selected_step)
         step_btns.addWidget(btn_remove_step)
@@ -1384,6 +1571,10 @@ class Steps25TemplateDialog(QtWidgets.QDialog):
     def _on_combo_changed(self, _index=-1):
         if self._loading:
             return
+        # Switching groups cancels an in-progress edit
+        if self._edit_index is not None:
+            self.prompt_editor.clear()
+            self._set_edit_mode(None)
         group = self._current_group()
         if group:
             self.default_check.setChecked(group["id"] == self._default_id)
@@ -1391,15 +1582,56 @@ class Steps25TemplateDialog(QtWidgets.QDialog):
         self._reload_step_list()
         self._update_target_label()
 
+    def _set_edit_mode(self, index=None):
+        self._edit_index = index
+        if index is None:
+            self.btn_save_prompt.setText("💾 Save prompt into group")
+            self.btn_cancel_edit.hide()
+            self._update_target_label()
+            return
+        self.btn_save_prompt.setText(f"💾 Update prompt #{index + 1}")
+        self.btn_cancel_edit.show()
+        group = self._current_group()
+        name = (group or {}).get("name") or "Untitled"
+        self.target_lbl.setText(
+            f"Editing step {index + 1} in “{name}” — change the text above, then Update prompt."
+        )
+
+    def _cancel_edit_prompt(self):
+        self.prompt_editor.clear()
+        self._set_edit_mode(None)
+        self.prompt_editor.setFocus()
+
+    def _edit_selected_step(self):
+        group = self._current_group()
+        if not group:
+            return
+        index = self.step_list.currentRow()
+        steps = list(group.get("steps") or [])
+        if not (0 <= index < len(steps)):
+            QtWidgets.QMessageBox.information(
+                self, "Select a prompt", "Click a prompt in the list first, then Edit selected."
+            )
+            return
+        self.prompt_editor.setPlainText(steps[index])
+        self._set_edit_mode(index)
+        self.prompt_editor.setFocus()
+        # Put cursor at end so user can start typing immediately
+        cursor = self.prompt_editor.textCursor()
+        cursor.movePosition(cursor.End)
+        self.prompt_editor.setTextCursor(cursor)
+
     def _update_target_label(self):
+        if self._edit_index is not None:
+            self._set_edit_mode(self._edit_index)
+            return
         group = self._current_group()
         if not group:
             self.target_lbl.setText("Create or choose a group first.")
             return
         count = len(group.get("steps") or [])
         self.target_lbl.setText(
-            f"Will add as step {count + 1} in “{group.get('name') or 'Untitled'}” "
-            f"(max {MAX_STEP_PACK})."
+            f"Will add as step {count + 1} in “{group.get('name') or 'Untitled'}”."
         )
 
     def _reload_step_list(self):
@@ -1413,7 +1645,7 @@ class Steps25TemplateDialog(QtWidgets.QDialog):
             self.step_list.addItem(
                 f"{index + 1}. {preview}  ({len(words):,} words, {lines} line{'s' if lines != 1 else ''})"
             )
-        self.step_count_lbl.setText(f"{len(steps)} prompt(s) in this group (max {MAX_STEP_PACK})")
+        self.step_count_lbl.setText(f"{len(steps)} prompt(s) in this group")
         self.default_check.setChecked(bool(group) and group["id"] == self._default_id)
 
     def _create_group(self):
@@ -1429,6 +1661,7 @@ class Steps25TemplateDialog(QtWidgets.QDialog):
         self._groups.append({"id": gid, "name": name, "steps": []})
         if not self._default_id:
             self._default_id = gid
+        self._set_edit_mode(None)
         self._refresh_combo(select_id=gid)
         self.prompt_editor.setFocus()
 
@@ -1447,7 +1680,23 @@ class Steps25TemplateDialog(QtWidgets.QDialog):
             self.prompt_editor.setFocus()
             return
         steps = list(group.get("steps") or [])
-        if len(steps) >= MAX_STEP_PACK:
+        edit_index = self._edit_index
+        if edit_index is not None:
+            if not (0 <= edit_index < len(steps)):
+                self._set_edit_mode(None)
+                QtWidgets.QMessageBox.warning(self, "Edit failed", "That prompt is no longer in the list.")
+                return
+            steps[edit_index] = prompt
+            group["steps"] = steps
+            if self.default_check.isChecked():
+                self._default_id = group["id"]
+            self.prompt_editor.clear()
+            self._set_edit_mode(None)
+            self._refresh_combo(select_id=group["id"])
+            self.step_list.setCurrentRow(edit_index)
+            self.prompt_editor.setFocus()
+            return
+        if MAX_STEP_PACK is not None and len(steps) >= MAX_STEP_PACK:
             QtWidgets.QMessageBox.information(
                 self, "Limit", f"This group already has {MAX_STEP_PACK} prompts."
             )
@@ -1471,8 +1720,15 @@ class Steps25TemplateDialog(QtWidgets.QDialog):
             return
         steps[index], steps[target] = steps[target], steps[index]
         group["steps"] = steps
+        # Keep edit mode pointing at the same prompt after reorder
+        if self._edit_index == index:
+            self._edit_index = target
+        elif self._edit_index == target:
+            self._edit_index = index
         self._reload_step_list()
         self.step_list.setCurrentRow(target)
+        if self._edit_index is not None:
+            self._set_edit_mode(self._edit_index)
 
     def _remove_selected_step(self):
         group = self._current_group()
@@ -1484,6 +1740,13 @@ class Steps25TemplateDialog(QtWidgets.QDialog):
             return
         steps.pop(index)
         group["steps"] = steps
+        if self._edit_index is not None:
+            if self._edit_index == index:
+                self.prompt_editor.clear()
+                self._set_edit_mode(None)
+            elif self._edit_index > index:
+                self._edit_index -= 1
+                self._set_edit_mode(self._edit_index)
         self._refresh_combo(select_id=group["id"])
 
     def _delete_group(self):
@@ -1931,13 +2194,15 @@ class OpenProjectFieldCard(QtWidgets.QFrame):
 
     removed = QtCore.pyqtSignal(object)
 
-    def __init__(self, index: int = 1, parent=None, base_dir=None):
+    def __init__(self, index: int = 1, parent=None, base_dir=None, default_agent=None):
         super().__init__(parent)
         self.setObjectName("section_next")
         self.setStyleSheet(
             "QFrame#section_next { background-color: #0f172a; border: 1px solid #312e81; "
             "border-radius: 8px; }"
         )
+        self._command_group_id = ""
+        self._command_group_name = ""
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(10, 8, 10, 8)
         lay.setSpacing(6)
@@ -1973,10 +2238,65 @@ class OpenProjectFieldCard(QtWidgets.QFrame):
         self.location = ProjectLocation(base_dir or (lambda: str(Path.home())), self)
         lay.addWidget(self.location)
 
+        # Per-project agent chooser (each project can pick its own agent)
+        agent_row = QtWidgets.QHBoxLayout()
+        agent_row.setSpacing(6)
+        agent_lbl = QtWidgets.QLabel("Agent:")
+        agent_lbl.setStyleSheet("color: #94a3b8; font-size: 11px; font-weight: 600;")
+        agent_row.addWidget(agent_lbl)
+        self.agent_combo = QtWidgets.QComboBox()
+        self.agent_combo.setMinimumWidth(220)
+        self.agent_combo.setToolTip("Which AI agent runs the steps for this project")
+        fill_pipeline_agent_combo(self.agent_combo, default_key=default_agent)
+        agent_row.addWidget(self.agent_combo, stretch=1)
+        lay.addLayout(agent_row)
+
+        # Command group picker — shows chosen group name on this project field
+        group_row = QtWidgets.QHBoxLayout()
+        group_row.setSpacing(6)
+        group_lbl = QtWidgets.QLabel("Command group:")
+        group_lbl.setStyleSheet("color: #94a3b8; font-size: 11px; font-weight: 600;")
+        group_row.addWidget(group_lbl)
+        self.group_name_lbl = QtWidgets.QLabel("None chosen")
+        self.group_name_lbl.setStyleSheet(
+            "background-color: #1e1b4b; color: #c7d2fe; font-size: 11px; font-weight: 700; "
+            "padding: 3px 10px; border-radius: 10px; border: 1px solid #4338ca;"
+        )
+        self.group_name_lbl.setToolTip("Group selected for this project (from Command Group Setting)")
+        group_row.addWidget(self.group_name_lbl)
+        group_row.addStretch()
+        btn_choose = QtWidgets.QPushButton("Choose group…")
+        btn_choose.setObjectName("small_btn")
+        btn_choose.setToolTip("Open modal and pick which command group this project uses")
+        btn_choose.setStyleSheet(
+            "background-color: #064e3b; color: #6ee7b7; font-size: 10px; font-weight: 700; "
+            "padding: 3px 10px; border: 1px solid #047857; border-radius: 4px;"
+        )
+        btn_choose.clicked.connect(self.choose_command_group)
+        group_row.addWidget(btn_choose)
+        btn_clear_g = QtWidgets.QPushButton("Clear")
+        btn_clear_g.setObjectName("small_btn")
+        btn_clear_g.setStyleSheet(
+            "background-color: #334155; color: #f1f5f9; font-size: 10px; padding: 3px 8px; border-radius: 4px;"
+        )
+        btn_clear_g.clicked.connect(self.clear_command_group)
+        group_row.addWidget(btn_clear_g)
+        btn_manage = QtWidgets.QPushButton("⚙ Setting")
+        btn_manage.setObjectName("small_btn")
+        btn_manage.setToolTip("Command Group Setting — create groups and add multiple commands/prompts")
+        btn_manage.setStyleSheet(
+            "background-color: #1e1b4b; color: #a5b4fc; font-size: 10px; padding: 3px 8px; "
+            "border: 1px solid #312e81; border-radius: 4px;"
+        )
+        btn_manage.clicked.connect(self.open_command_group_settings)
+        group_row.addWidget(btn_manage)
+        lay.addLayout(group_row)
+
         self.prompt_input = QTextEdit()
         self.prompt_input.setPlaceholderText(
             "Commands / prompts for this project (multi-line OK).\n"
-            "Separate steps with a line containing only ---"
+            "Separate steps with a line containing only ---\n"
+            "Or click Choose group… to load a saved command group."
         )
         self.prompt_input.setMinimumHeight(72)
         self.prompt_input.setMaximumHeight(110)
@@ -1990,6 +2310,70 @@ class OpenProjectFieldCard(QtWidgets.QFrame):
 
     def set_index(self, index: int):
         self.badge.setText(f"Project field #{index}")
+
+    def _refresh_group_label(self):
+        if self._command_group_name:
+            count = 0
+            group = get_step_group(self._command_group_id) if self._command_group_id else {}
+            count = len((group or {}).get("steps") or [])
+            suffix = f" · {count} cmd" if count else ""
+            self.group_name_lbl.setText(f"✔ {self._command_group_name}{suffix}")
+            self.group_name_lbl.setStyleSheet(
+                "background-color: #064e3b; color: #6ee7b7; font-size: 11px; font-weight: 700; "
+                "padding: 3px 10px; border-radius: 10px; border: 1px solid #047857;"
+            )
+        else:
+            self.group_name_lbl.setText("None chosen")
+            self.group_name_lbl.setStyleSheet(
+                "background-color: #1e1b4b; color: #c7d2fe; font-size: 11px; font-weight: 700; "
+                "padding: 3px 10px; border-radius: 10px; border: 1px solid #4338ca;"
+            )
+
+    def open_command_group_settings(self):
+        dlg = Steps25TemplateDialog(parent=self.window())
+        dlg.exec_()
+        # If this field already has a group, refresh name/count after edits
+        if self._command_group_id:
+            group = get_step_group(self._command_group_id)
+            if group and group.get("steps"):
+                self._command_group_name = group.get("name") or self._command_group_name
+                self._refresh_group_label()
+            else:
+                self.clear_command_group()
+
+    def choose_command_group(self):
+        groups = [g for g in list_step_groups() if g.get("steps")]
+        if not groups:
+            reply = QtWidgets.QMessageBox.question(
+                self,
+                "No command groups",
+                "No command groups saved yet.\n\nOpen Command Group Setting to create a group "
+                "and add multiple commands/prompts?",
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            )
+            if reply == QtWidgets.QMessageBox.Yes:
+                self.open_command_group_settings()
+                groups = [g for g in list_step_groups() if g.get("steps")]
+                if not groups:
+                    return
+            else:
+                return
+        dlg = ChooseCommandGroupDialog(parent=self.window(), selected_id=self._command_group_id or None)
+        if dlg.exec_() != QtWidgets.QDialog.Accepted:
+            return
+        group = dlg.selected_group() or {}
+        steps = list(group.get("steps") or [])
+        if not steps:
+            return
+        self._command_group_id = group.get("id") or ""
+        self._command_group_name = group.get("name") or "Untitled"
+        self.prompt_input.setPlainText(format_group_prompts_for_field(group))
+        self._refresh_group_label()
+
+    def clear_command_group(self):
+        self._command_group_id = ""
+        self._command_group_name = ""
+        self._refresh_group_label()
 
     def to_snapshot(self):
         title = self.title_input.text().strip()
@@ -2023,10 +2407,12 @@ class OpenProjectFieldCard(QtWidgets.QFrame):
             "slug": slug,
             "project": project,
             "prompts": parts,
+            "command_group_id": self._command_group_id,
+            "command_group_name": self._command_group_name,
             "create_repo": False,
             "repo_name": "",
             "repo_desc": "",
-            "agent": None,
+            "agent": self.agent_combo.currentData() if hasattr(self, "agent_combo") else None,
         }
 
     def clear(self):
@@ -2035,6 +2421,8 @@ class OpenProjectFieldCard(QtWidgets.QFrame):
         self.slug_input.setProperty("auto", True)
         self.prompt_input.clear()
         self.location.path.clear()
+        self.clear_command_group()
+        # Keep the per-project agent selection after clear so the next draft reuses it.
 
 
 class PipelineWindow(QtWidgets.QMainWindow):
@@ -2120,7 +2508,10 @@ class PipelineWindow(QtWidgets.QMainWindow):
         header_vbox.setSpacing(2)
         title = QtWidgets.QLabel("DevOS AI Command Pipeline")
         title.setObjectName("title")
-        subtitle = QtWidgets.QLabel("Parallel agents · 1-by-1 per agent · Real 429 pauses shared Google quota")
+        subtitle = QtWidgets.QLabel(
+            "All agents run together · each agent does its projects one-by-one "
+            "(Cursor / Antigravity / Antigravity KDE / Local)"
+        )
         subtitle.setObjectName("subtitle")
         header_vbox.addWidget(title)
         header_vbox.addWidget(subtitle)
@@ -2139,6 +2530,19 @@ class PipelineWindow(QtWidgets.QMainWindow):
         btn_import_specs.setToolTip("Batch import all .md project specs from a folder and auto-attach multi-agent steps")
         btn_import_specs.clicked.connect(self.import_specs_folder)
         header_layout.addWidget(btn_import_specs)
+
+        btn_cmd_groups = QtWidgets.QPushButton("⚙ Command Group Setting")
+        btn_cmd_groups.setObjectName("small_btn")
+        btn_cmd_groups.setStyleSheet(
+            "background-color: #1e1b4b; color: #c7d2fe; font-size: 11px; padding: 6px 12px; "
+            "border: 1px solid #4338ca; border-radius: 6px; font-weight: 700;"
+        )
+        btn_cmd_groups.setToolTip(
+            "Create named command groups and add multiple commands/prompts. "
+            "Each project field can choose a group by name."
+        )
+        btn_cmd_groups.clicked.connect(self.open_steps_25_template_editor)
+        header_layout.addWidget(btn_cmd_groups)
 
         self.btn_run = QtWidgets.QPushButton("Run Pipeline")
         self.btn_run.setObjectName("primary")
@@ -2277,60 +2681,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
         form_layout.setContentsMargins(14, 12, 14, 12)
         form_layout.setSpacing(10)
 
-        # 1. Target Agent Selection
-        agent_row = QtWidgets.QHBoxLayout()
-        agent_row.setSpacing(8)
-
-        lbl_step1 = QtWidgets.QLabel("1. Agent:")
-        lbl_step1.setObjectName("field_label")
-        agent_row.addWidget(lbl_step1)
-
-        self.agent_combo = QtWidgets.QComboBox()
-        self.agent_combo.setMinimumWidth(240)
-        self.agent_combo.addItem("✨ Multi-Agent Hybrid (Antigravity + DevOS Code)", "multi")
-        known = discover_agents()
-        is_kde_session = ("KDE" in os.environ.get("XDG_CURRENT_DESKTOP", "")) or (
-            os.environ.get("DESKTOP_SESSION") == "plasma"
-        )
-        default_index = 0
-
-        idx = 1
-        for k, v in known.items():
-            if v.get("running"):
-                label = f"● {v['name']} [Running]"
-            elif v.get("available"):
-                label = f"○ {v['name']} [Ready]" if k == "local" else f"○ {v['name']} [Installed]"
-            else:
-                label = f"○ {v['name']} [Not Installed]"
-            self.agent_combo.addItem(label, k)
-
-            if is_kde_session and k == "antigravity-kde" and v.get("running"):
-                default_index = idx
-            elif not is_kde_session and k == "antigravity" and v.get("running") and default_index == 0:
-                default_index = idx
-            elif v.get("running") and default_index == 0:
-                default_index = idx
-            idx += 1
-
-        self.agent_combo.setCurrentIndex(default_index)
-        agent_row.addWidget(self.agent_combo)
-
-        # Live status badge next to dropdown
-        self.agent_status_lbl = QtWidgets.QLabel()
-        self.agent_status_lbl.setObjectName("badge_cyan")
-        agent_row.addWidget(self.agent_status_lbl)
-
-        agent_row.addStretch()
-
-        btn_seo = QtWidgets.QPushButton("SEO Preset")
-        btn_seo.setToolTip("Auto-fill prompt for best ranking repo name & 400-char SEO description")
-        btn_seo.setStyleSheet("background-color: #1e293b; color: #38bdf8; font-size: 11px; padding: 4px 8px; border: 1px solid #334155; border-radius: 5px;")
-        btn_seo.clicked.connect(self.fill_seo_prompt)
-        agent_row.addWidget(btn_seo)
-
-        form_layout.addLayout(agent_row)
-
-        # 2. CURRENT WORKING PROJECT SECTION
+        # Optional: detected current project (collapsed by default)
         cur_section = QtWidgets.QFrame()
         cur_section.setObjectName("section_current")
         cur_layout = QtWidgets.QVBoxLayout(cur_section)
@@ -2338,7 +2689,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
         cur_layout.setSpacing(5)
 
         cur_header = QtWidgets.QHBoxLayout()
-        cur_badge = QtWidgets.QLabel("2. CURRENT ACTIVE PROJECT")
+        cur_badge = QtWidgets.QLabel("CURRENT ACTIVE PROJECT")
         cur_badge.setObjectName("badge_cyan")
         cur_header.addWidget(cur_badge)
 
@@ -2476,208 +2827,195 @@ class PipelineWindow(QtWidgets.QMainWindow):
         form_layout.addWidget(cur_section)
         cur_section.hide()
 
-        # 3. ADD ANOTHER PROJECT / NEXT PROJECT (DYNAMIC PROJECT NUMBERING)
+        # 3. SMART PROJECT FORM — Add Prompt first, serial command list, then queue
         next_section = QtWidgets.QFrame()
         next_section.setObjectName("section_next")
         next_layout = QtWidgets.QVBoxLayout(next_section)
         next_layout.setContentsMargins(12, 10, 12, 10)
-        next_layout.setSpacing(7)
+        next_layout.setSpacing(8)
         next_layout.setAlignment(Qt.AlignTop)
 
         next_header = QtWidgets.QHBoxLayout()
-        self.next_badge_lbl = QtWidgets.QLabel("3. ADD NEXT PROJECT (#2)")
+        self.next_badge_lbl = QtWidgets.QLabel("ADD PROJECT")
         self.next_badge_lbl.setObjectName("badge_indigo")
         self.next_badge_lbl.setFixedHeight(30)
         self.next_badge_lbl.setSizePolicy(QtWidgets.QSizePolicy.Maximum, QtWidgets.QSizePolicy.Fixed)
         next_header.addWidget(self.next_badge_lbl)
-
-        next_header.addStretch()
-        btn_open_field = QtWidgets.QPushButton("+ Open another project field")
-        btn_open_field.setObjectName("small_btn")
-        btn_open_field.setToolTip("Keep multiple project title + command/prompt editors open at once")
-        btn_open_field.setStyleSheet(
-            "background-color: #312e81; color: #e0e7ff; font-size: 11px; font-weight: 700; "
-            "padding: 4px 10px; border: 1px solid #6366f1; border-radius: 5px;"
+        parallel_tip = QtWidgets.QLabel(
+            "Pick an agent per project. All agents run at once; each agent finishes its "
+            "queue one project at a time."
         )
-        btn_open_field.clicked.connect(self.add_open_project_field)
-        next_header.addWidget(btn_open_field)
+        parallel_tip.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        parallel_tip.setWordWrap(True)
+        next_header.addWidget(parallel_tip, stretch=1)
         next_layout.addLayout(next_header)
 
-        open_hint = QtWidgets.QLabel(
-            "Open several project fields below and fill them together — then Add all open fields to Pipeline."
-        )
-        open_hint.setStyleSheet("color: #94a3b8; font-size: 11px;")
-        open_hint.setWordWrap(True)
-        next_layout.addWidget(open_hint)
-
-        self.open_fields_host = QtWidgets.QWidget()
-        self.open_fields_layout = QtWidgets.QVBoxLayout(self.open_fields_host)
-        self.open_fields_layout.setContentsMargins(0, 0, 0, 0)
-        self.open_fields_layout.setSpacing(8)
-        next_layout.addWidget(self.open_fields_host)
-        self.open_project_fields = []
-        # Start with two open fields so multi-project drafting is obvious
-        self.add_open_project_field()
-        self.add_open_project_field()
-
-        open_all_row = QtWidgets.QHBoxLayout()
-        open_all_row.addStretch()
-        self.btn_add_all_open_fields = QtWidgets.QPushButton("+ Add all open fields to Pipeline")
-        self.btn_add_all_open_fields.setObjectName("primary")
-        self.btn_add_all_open_fields.setToolTip("Queue every non-empty open project field")
-        self.btn_add_all_open_fields.clicked.connect(self.add_all_open_project_fields)
-        open_all_row.addWidget(self.btn_add_all_open_fields)
-        next_layout.addLayout(open_all_row)
-
-        single_lbl = QtWidgets.QLabel("Or use the classic single-project form:")
-        single_lbl.setStyleSheet("color: #64748b; font-size: 10px; font-weight: 600; margin-top: 4px;")
-        next_layout.addWidget(single_lbl)
-
-        # Project Title & Slug inputs
+        # Compact project identity
         meta_row = QtWidgets.QHBoxLayout()
         meta_row.setSpacing(8)
-
         self.next_title_input = QLineEdit()
-        self.next_title_input.setPlaceholderText("Next Project Title (e.g. 'Build Laravel Auth API')...")
+        self.next_title_input.setPlaceholderText("Project title (e.g. Build Laravel Auth API)")
         self.next_title_input.textChanged.connect(self.on_next_title_changed)
         self.next_title_input.returnPressed.connect(lambda: self.next_prompt_input.setFocus())
         meta_row.addWidget(self.next_title_input, stretch=2)
-
         self.next_slug_input = QLineEdit()
-        self.next_slug_input.setPlaceholderText("Folder Slug (auto-generated)")
+        self.next_slug_input.setPlaceholderText("folder-slug")
         self.next_slug_input.textChanged.connect(self.update_next_target_preview)
         self.next_slug_input.returnPressed.connect(lambda: self.next_prompt_input.setFocus())
         meta_row.addWidget(self.next_slug_input, stretch=1)
-
         next_layout.addLayout(meta_row)
+
         self.next_location = ProjectLocation(self.pipeline.get_base_dir, self)
         self.next_location.path.textChanged.connect(self.update_next_target_preview)
         next_layout.addWidget(self.next_location)
-
-        # Folder location preview
         self.next_target_preview_lbl = QtWidgets.QLabel("")
         self.next_target_preview_lbl.setStyleSheet("color: #a5b4fc; font-size: 11px; font-family: monospace;")
         self.next_target_preview_lbl.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
         self.next_target_preview_lbl.setWordWrap(True)
         next_layout.addWidget(self.next_target_preview_lbl)
 
-        # Commands toolbar for next project
-        next_tools_row = QtWidgets.QHBoxLayout()
-        next_tools_row.setSpacing(6)
-        next_tools_lbl = QtWidgets.QLabel("Specification / Prompts:")
-        next_tools_lbl.setStyleSheet("color: #64748b; font-size: 10px; font-weight: 600;")
-        next_tools_lbl.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
-        next_tools_row.addWidget(next_tools_lbl)
-        next_tools_row.addStretch()
-
-        btn_next_load = QtWidgets.QPushButton("📄 Load Spec (.md/.txt)")
-        btn_next_load.setObjectName("small_btn")
-        btn_next_load.setToolTip("Load 5,000+ word specification file from disk")
-        btn_next_load.setStyleSheet("background-color: #0f172a; color: #38bdf8; font-size: 10px; padding: 2px 7px; border: 1px solid #1e293b; border-radius: 4px;")
-        btn_next_load.clicked.connect(self.load_next_prompt_file)
-        next_tools_row.addWidget(btn_next_load)
-
-        btn_next_add_group = QtWidgets.QPushButton("+ Add group")
-        btn_next_add_group.setObjectName("small_btn")
-        btn_next_add_group.setToolTip("Open modal to create a group and save multi-line prompts into it")
-        btn_next_add_group.setStyleSheet(
-            "background-color: #1e1b4b; color: #a5b4fc; font-size: 10px; padding: 2px 8px; "
-            "border: 1px solid #312e81; border-radius: 4px;"
+        # One agent chooser for this project (no duplicate global Agent row)
+        proj_agent_row = QtWidgets.QHBoxLayout()
+        proj_agent_row.setSpacing(6)
+        proj_agent_lbl = QtWidgets.QLabel("Agent:")
+        proj_agent_lbl.setStyleSheet("color: #94a3b8; font-size: 11px; font-weight: 600;")
+        proj_agent_row.addWidget(proj_agent_lbl)
+        self.agent_combo = QtWidgets.QComboBox()
+        self.agent_combo.setMinimumWidth(240)
+        self.agent_combo.setToolTip(
+            "Agent for this project. Other agents keep working their own queues in parallel."
         )
-        btn_next_add_group.clicked.connect(self.open_steps_25_template_editor)
-        next_tools_row.addWidget(btn_next_add_group)
+        fill_pipeline_agent_combo(self.agent_combo)
+        # Alias kept for older helpers that still mention next_agent_combo
+        self.next_agent_combo = self.agent_combo
+        proj_agent_row.addWidget(self.agent_combo, stretch=1)
+        next_layout.addLayout(proj_agent_row)
 
-        btn_next_expand = QtWidgets.QPushButton("⛶ Expand")
+        # --- 1) ADD PROMPT (shown first) ---
+        add_prompt_box = QtWidgets.QFrame()
+        add_prompt_box.setStyleSheet(
+            "QFrame { background-color: #0b1220; border: 1px solid #1e3a5f; border-radius: 8px; }"
+        )
+        add_prompt_lay = QtWidgets.QVBoxLayout(add_prompt_box)
+        add_prompt_lay.setContentsMargins(10, 8, 10, 8)
+        add_prompt_lay.setSpacing(6)
+
+        add_hdr = QtWidgets.QHBoxLayout()
+        add_hdr_lbl = QtWidgets.QLabel("1. Add prompt / command")
+        add_hdr_lbl.setStyleSheet("color: #38bdf8; font-size: 12px; font-weight: 700; border: none;")
+        add_hdr.addWidget(add_hdr_lbl)
+        add_hdr.addStretch()
+        btn_next_load = QtWidgets.QPushButton("Load file")
+        btn_next_load.setObjectName("small_btn")
+        btn_next_load.setToolTip("Load one prompt from a .md/.txt file into the add box")
+        btn_next_load.clicked.connect(self.load_next_prompt_file)
+        add_hdr.addWidget(btn_next_load)
+        btn_next_add_group = QtWidgets.QPushButton("Choose group…")
+        btn_next_add_group.setObjectName("small_btn")
+        btn_next_add_group.setToolTip("Append a saved command group into the serial list")
+        btn_next_add_group.clicked.connect(self.append_command_group_to_drafts)
+        add_hdr.addWidget(btn_next_add_group)
+        btn_next_expand = QtWidgets.QPushButton("Expand")
         btn_next_expand.setObjectName("small_btn")
-        btn_next_expand.setToolTip("Open full-screen prompt editor modal")
-        btn_next_expand.setStyleSheet("background-color: #1e293b; color: #f1f5f9; font-size: 10px; padding: 2px 7px; border: 1px solid #334155; border-radius: 4px;")
+        btn_next_expand.setToolTip("Larger editor for this one prompt")
         btn_next_expand.clicked.connect(self.open_next_prompt_editor)
-        next_tools_row.addWidget(btn_next_expand)
+        add_hdr.addWidget(btn_next_expand)
+        add_prompt_lay.addLayout(add_hdr)
 
-        next_layout.addLayout(next_tools_row)
-
-        # Saved groups in place — click a chip to add that group after your prompts.
+        # Saved groups chips (optional shortcuts)
         self.next_groups_bar = QtWidgets.QWidget()
+        self.next_groups_bar.setStyleSheet("border: none;")
         self.next_groups_layout = QtWidgets.QHBoxLayout(self.next_groups_bar)
-        self.next_groups_layout.setContentsMargins(0, 2, 0, 2)
+        self.next_groups_layout.setContentsMargins(0, 0, 0, 0)
         self.next_groups_layout.setSpacing(6)
-        next_layout.addWidget(self.next_groups_bar)
+        add_prompt_lay.addWidget(self.next_groups_bar)
 
-        # Commands input for next project (old Add Prompt flow kept as-is)
         next_cmd_row = QtWidgets.QHBoxLayout()
         next_cmd_row.setSpacing(8)
-
         self.next_prompt_input = QTextEdit()
-        self.next_prompt_input.setPlaceholderText("Paste one complete prompt, then click Add Prompt. Add more prompts before submitting the project.")
-        self.next_prompt_input.setMinimumHeight(65)
-        self.next_prompt_input.setMaximumHeight(75)
+        self.next_prompt_input.setPlaceholderText(
+            "Type or paste ONE prompt/command here, then click + Add Prompt.\n"
+            "It appears in the serial list below — not as a giant dump of all commands."
+        )
+        self.next_prompt_input.setMinimumHeight(56)
+        self.next_prompt_input.setMaximumHeight(72)
         self.next_prompt_input.textChanged.connect(self.update_next_prompt_metrics)
         next_cmd_row.addWidget(self.next_prompt_input, stretch=1)
-
-        self.btn_add_next = QtWidgets.QPushButton("+ Add Project #2 to Pipeline")
-        self.btn_add_next.setObjectName("primary")
-        self.btn_add_next.clicked.connect(lambda: self.add_next_project_tasks())
         self.btn_stage_prompt = QtWidgets.QPushButton("+ Add Prompt")
         self.btn_stage_prompt.setObjectName("primary")
+        self.btn_stage_prompt.setMinimumHeight(56)
+        self.btn_stage_prompt.setMinimumWidth(120)
         self.btn_stage_prompt.clicked.connect(self.stage_prompt)
         next_cmd_row.addWidget(self.btn_stage_prompt)
+        add_prompt_lay.addLayout(next_cmd_row)
+        next_layout.addWidget(add_prompt_box)
 
-        next_layout.addLayout(next_cmd_row)
-
-        self.next_prompt_metrics_lbl = QtWidgets.QLabel(
-            "💡 One project form at a time: Add Prompt → (repeat) → Add Project to Pipeline. "
-            "Form clears — fill the next project the same way. Or Hold several, then Add all."
-        )
-        self.next_prompt_metrics_lbl.setStyleSheet("color: #64748b; font-size: 10px;")
-        self.next_prompt_metrics_lbl.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
-        self.next_prompt_metrics_lbl.setWordWrap(True)
-        next_layout.addWidget(self.next_prompt_metrics_lbl)
+        # --- 2) SERIAL COMMAND LIST ---
+        list_hdr = QtWidgets.QHBoxLayout()
+        list_lbl = QtWidgets.QLabel("2. Serial prompts for this project")
+        list_lbl.setStyleSheet("color: #6ee7b7; font-size: 12px; font-weight: 700;")
+        list_hdr.addWidget(list_lbl)
+        self.next_prompt_metrics_lbl = QtWidgets.QLabel("0 prompts staged")
+        self.next_prompt_metrics_lbl.setStyleSheet("color: #64748b; font-size: 11px;")
+        list_hdr.addWidget(self.next_prompt_metrics_lbl, stretch=1)
+        next_layout.addLayout(list_hdr)
 
         self.draft_list = QtWidgets.QListWidget()
-        self.draft_list.setMinimumHeight(85)
-        self.draft_list.setMaximumHeight(85)
+        self.draft_list.setMinimumHeight(120)
+        self.draft_list.setMaximumHeight(180)
+        self.draft_list.setToolTip("Execution order — step 1 runs first, then 2, 3…")
         self.draft_list.itemDoubleClicked.connect(lambda _: self.edit_draft_prompt())
         next_layout.addWidget(self.draft_list)
         self.draft_controls = QtWidgets.QWidget()
         draft_controls = QtWidgets.QHBoxLayout(self.draft_controls)
         draft_controls.setContentsMargins(0, 0, 0, 0)
-        for label, callback in [("↑ Move up", lambda: self.move_draft_prompt(-1)),
-                                ("↓ Move down", lambda: self.move_draft_prompt(1)),
-                                ("Edit", self.edit_draft_prompt), ("Remove", self.remove_draft_prompt)]:
+        for label, callback in [
+            ("↑ Move up", lambda: self.move_draft_prompt(-1)),
+            ("↓ Move down", lambda: self.move_draft_prompt(1)),
+            ("Edit", self.edit_draft_prompt),
+            ("Remove", self.remove_draft_prompt),
+        ]:
             button = QtWidgets.QPushButton(label)
             button.clicked.connect(callback)
             draft_controls.addWidget(button)
+        draft_controls.addStretch()
         next_layout.addWidget(self.draft_controls)
-        self.draft_list.hide()
-        self.draft_controls.hide()
 
-        # Multi-project hold tray — prepare several projects, then queue them together
+        # --- 3) QUEUE ACTIONS ---
+        queue_row = QtWidgets.QHBoxLayout()
+        self.btn_hold_project = QtWidgets.QPushButton("Hold · prepare another project")
+        self.btn_hold_project.setObjectName("small_btn")
+        self.btn_hold_project.setToolTip(
+            "Park this project in the tray, clear the form, fill the next one. "
+            "Then Add all prepared — each can use a different agent."
+        )
+        self.btn_hold_project.setStyleSheet(
+            "background-color: #1e1b4b; color: #c7d2fe; font-size: 11px; padding: 8px 12px; "
+            "border: 1px solid #4338ca; border-radius: 5px; font-weight: 700;"
+        )
+        self.btn_hold_project.clicked.connect(self.hold_current_project_draft)
+        queue_row.addWidget(self.btn_hold_project)
+        queue_row.addStretch()
+        self.btn_add_next = QtWidgets.QPushButton("+ Add Project to Pipeline")
+        self.btn_add_next.setObjectName("primary")
+        self.btn_add_next.setMinimumHeight(36)
+        self.btn_add_next.clicked.connect(lambda: self.add_next_project_tasks())
+        queue_row.addWidget(self.btn_add_next)
+        next_layout.addLayout(queue_row)
+
+        # Held tray (hidden until used)
         held_hdr = QtWidgets.QHBoxLayout()
-        held_lbl = QtWidgets.QLabel("Prepared projects (multi):")
+        held_lbl = QtWidgets.QLabel("Prepared projects (different agents OK):")
         held_lbl.setStyleSheet("color: #a5b4fc; font-size: 11px; font-weight: 700;")
         held_hdr.addWidget(held_lbl)
         held_hdr.addStretch()
-        self.btn_hold_project = QtWidgets.QPushButton("📌 Hold & prepare another")
-        self.btn_hold_project.setObjectName("small_btn")
-        self.btn_hold_project.setToolTip(
-            "Save this project's title + prompts into the tray below, clear the form, "
-            "and fill the next project. Then use Add all prepared."
-        )
-        self.btn_hold_project.setStyleSheet(
-            "background-color: #1e1b4b; color: #c7d2fe; font-size: 10px; padding: 4px 10px; "
-            "border: 1px solid #4338ca; border-radius: 4px; font-weight: 700;"
-        )
-        self.btn_hold_project.clicked.connect(self.hold_current_project_draft)
-        held_hdr.addWidget(self.btn_hold_project)
         next_layout.addLayout(held_hdr)
-
         self.held_list = QtWidgets.QListWidget()
         self.held_list.setMinimumHeight(56)
         self.held_list.setMaximumHeight(72)
-        self.held_list.setToolTip("Projects waiting to be added to the pipeline")
+        self.held_list.setToolTip("Projects waiting to be added — each keeps its own agent")
         next_layout.addWidget(self.held_list)
         self.held_list.hide()
-
         held_btns = QtWidgets.QHBoxLayout()
         self.btn_remove_held = QtWidgets.QPushButton("Remove selected")
         self.btn_remove_held.setObjectName("small_btn")
@@ -2694,24 +3032,63 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.btn_add_all_held.hide()
         self.refresh_held_projects()
 
-        # GitHub Automation Row for next project
+        # Optional GitHub
         gh_row = QtWidgets.QHBoxLayout()
         gh_row.setSpacing(8)
-
-        self.gh_check = QtWidgets.QCheckBox("Auto-Create GitHub Repo (README included)")
+        self.gh_check = QtWidgets.QCheckBox("Auto-Create GitHub Repo")
         gh_row.addWidget(self.gh_check)
-
         self.gh_name_input = QLineEdit()
         self.gh_name_input.setPlaceholderText("Repo Name")
         self.gh_name_input.setMaximumWidth(140)
         gh_row.addWidget(self.gh_name_input)
-
         self.gh_desc_input = QLineEdit()
         self.gh_desc_input.setPlaceholderText("Description")
         gh_row.addWidget(self.gh_desc_input, stretch=1)
-
         next_layout.addLayout(gh_row)
-        next_layout.addWidget(self.btn_add_next)
+
+        # Advanced: multi-field draft (collapsed — not the primary UX)
+        self.open_fields_toggle = QtWidgets.QPushButton("▸ Advanced: multi-field draft (optional)")
+        self.open_fields_toggle.setCheckable(True)
+        self.open_fields_toggle.setChecked(False)
+        self.open_fields_toggle.setStyleSheet(
+            "QPushButton { text-align: left; color: #64748b; font-size: 11px; padding: 4px 2px; "
+            "background: transparent; border: none; }"
+            "QPushButton:checked { color: #a5b4fc; }"
+        )
+        next_layout.addWidget(self.open_fields_toggle)
+
+        self.open_fields_panel = QtWidgets.QWidget()
+        open_panel_lay = QtWidgets.QVBoxLayout(self.open_fields_panel)
+        open_panel_lay.setContentsMargins(0, 4, 0, 0)
+        open_panel_lay.setSpacing(6)
+        open_hint = QtWidgets.QLabel(
+            "Optional: keep several project cards open. Prefer Add Prompt + Hold above for a cleaner flow."
+        )
+        open_hint.setStyleSheet("color: #64748b; font-size: 10px;")
+        open_hint.setWordWrap(True)
+        open_panel_lay.addWidget(open_hint)
+        btn_open_field = QtWidgets.QPushButton("+ Open another project field")
+        btn_open_field.setObjectName("small_btn")
+        btn_open_field.clicked.connect(self.add_open_project_field)
+        open_panel_lay.addWidget(btn_open_field)
+        self.open_fields_host = QtWidgets.QWidget()
+        self.open_fields_layout = QtWidgets.QVBoxLayout(self.open_fields_host)
+        self.open_fields_layout.setContentsMargins(0, 0, 0, 0)
+        self.open_fields_layout.setSpacing(8)
+        open_panel_lay.addWidget(self.open_fields_host)
+        self.open_project_fields = []
+        open_all_row = QtWidgets.QHBoxLayout()
+        open_all_row.addStretch()
+        self.btn_add_all_open_fields = QtWidgets.QPushButton("+ Add all open fields to Pipeline")
+        self.btn_add_all_open_fields.setObjectName("small_btn")
+        self.btn_add_all_open_fields.clicked.connect(self.add_all_open_project_fields)
+        open_all_row.addWidget(self.btn_add_all_open_fields)
+        open_panel_lay.addLayout(open_all_row)
+        self.open_fields_panel.hide()
+        self.open_fields_toggle.toggled.connect(self._toggle_open_fields_panel)
+        next_layout.addWidget(self.open_fields_panel)
+
+        self.refresh_draft_prompts()
         self.update_next_prompt_metrics()
         form_layout.addWidget(next_section)
 
@@ -2885,39 +3262,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
             index = self.agent_combo.currentIndex()
         if not hasattr(self, "agent_combo") or index < 0:
             return
-
         agent_key = self.agent_combo.itemData(index)
-        if agent_key == "multi":
-            if hasattr(self, "agent_status_lbl"):
-                self.agent_status_lbl.setText("Multi-Agent: Collaborative Routing")
-                self.agent_status_lbl.setStyleSheet(
-                    "background-color: #3b0764; color: #d8b4fe; border: 1px solid #9333ea; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 700;"
-                )
-            return
-
-        known = discover_agents()
-        agent_info = known.get(agent_key, {})
-        is_running = agent_info.get("running", False)
-        pid = agent_info.get("pid")
-
-        if hasattr(self, "agent_status_lbl"):
-            if is_running:
-                self.agent_status_lbl.setText(f"Live: Running (PID {pid})")
-                self.agent_status_lbl.setStyleSheet(
-                    "background-color: #022c22; color: #34d399; border: 1px solid #059669; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 700;"
-                )
-            elif agent_info.get("available"):
-                ready_txt = "Ready" if agent_key == "local" else "Installed"
-                self.agent_status_lbl.setText(f"Status: {ready_txt}")
-                self.agent_status_lbl.setStyleSheet(
-                    "background-color: #1e293b; color: #94a3b8; border: 1px solid #334155; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 600;"
-                )
-            else:
-                self.agent_status_lbl.setText("Status: Not Installed")
-                self.agent_status_lbl.setStyleSheet(
-                    "background-color: #2a1215; color: #f87171; border: 1px solid #7f1d1d; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 600;"
-                )
-
         self.refresh_current_project(agent=agent_key)
 
     def refresh_current_project(self, agent: Optional[str] = None, manual: bool = False):
@@ -3049,23 +3394,14 @@ class PipelineWindow(QtWidgets.QMainWindow):
             self.update_next_target_preview()
             self.refresh_queue()
 
-    def fill_seo_prompt(self):
-        title = self.next_title_input.text().strip() or self.current_title or "this project"
-        prompt = (
-            f"Based on {title}, give me the best github repo name with 400 character description "
-            "for reaching organically to rank or any related search our repo will be searchable rank in google or github"
-        )
-        self.next_prompt_input.setText(prompt)
-        self.gh_check.setChecked(True)
-        self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Loaded SEO Ranking Prompt Preset into input.")
-
     def update_next_prompt_metrics(self):
-        words = len(self.next_prompt_input.toPlainText().split())
+        if not hasattr(self, "next_prompt_metrics_lbl"):
+            return
+        n = len(getattr(self, "draft_prompts", []) or [])
         held_n = len(getattr(self, "held_projects", []) or [])
         held_bit = f" · {held_n} project(s) held" if held_n else ""
         self.next_prompt_metrics_lbl.setText(
-            f"{len(self.draft_prompts)} prompts staged • {words:,} words in editor{held_bit}. "
-            "Add Prompt = one step. Hold = prepare another project. Add Project / Add all = queue."
+            f"{n} prompt(s) in serial order{held_bit} — Add Prompt, then Add Project to Pipeline"
         )
 
     def refresh_held_projects(self):
@@ -3079,8 +3415,10 @@ class PipelineWindow(QtWidgets.QMainWindow):
             self.held_list.clear()
             for i, proj in enumerate(held):
                 n = len(proj.get("prompts") or [])
+                agent = proj.get("agent") or "default"
                 self.held_list.addItem(
-                    f"{i + 1}. {proj.get('title') or proj.get('slug')}  ({n} prompt{'s' if n != 1 else ''})  [{proj.get('slug')}]"
+                    f"{i + 1}. {proj.get('title') or proj.get('slug')}  ·  {agent}  ·  "
+                    f"{n} prompt{'s' if n != 1 else ''}  [{proj.get('slug')}]"
                 )
         if hasattr(self, "btn_remove_held"):
             self.btn_remove_held.setVisible(has)
@@ -3105,6 +3443,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
             slug = to_slug(title or (Path(project).name if project else commands[0][:35]))
         if not title:
             title = slug.replace("-", " ").title()
+        agent = self.agent_combo.currentData() if hasattr(self, "agent_combo") else None
         return {
             "title": title,
             "slug": slug,
@@ -3113,7 +3452,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
             "create_repo": self.gh_check.isChecked(),
             "repo_name": self.gh_name_input.text().strip() or (slug if self.gh_check.isChecked() else ""),
             "repo_desc": self.gh_desc_input.text().strip(),
-            "agent": self.agent_combo.currentData(),
+            "agent": agent,
         }
 
     def _clear_next_project_form(self):
@@ -3132,8 +3471,13 @@ class PipelineWindow(QtWidgets.QMainWindow):
         """Keep another project title + command/prompt editor open on screen."""
         if not hasattr(self, "open_project_fields"):
             self.open_project_fields = []
-        card = OpenProjectFieldCard(index=len(self.open_project_fields) + 1, parent=self.open_fields_host,
-                                    base_dir=self.pipeline.get_base_dir)
+        default_agent = self.agent_combo.currentData() if hasattr(self, "agent_combo") else None
+        card = OpenProjectFieldCard(
+            index=len(self.open_project_fields) + 1,
+            parent=self.open_fields_host,
+            base_dir=self.pipeline.get_base_dir,
+            default_agent=default_agent,
+        )
         card.removed.connect(self.remove_open_project_field)
         self.open_fields_layout.addWidget(card)
         self.open_project_fields.append(card)
@@ -3163,13 +3507,14 @@ class PipelineWindow(QtWidgets.QMainWindow):
         if self.busy():
             self.log_box.append("Wait for the current task to finish before changing the queue.")
             return
-        agent = self.agent_combo.currentData()
         snaps = []
         submitted = []
         for card in getattr(self, "open_project_fields", []) or []:
             snap = card.to_snapshot()
             if snap:
-                snap["agent"] = agent
+                # Prefer this project's own agent chooser; fall back to global Agent combo
+                if not snap.get("agent"):
+                    snap["agent"] = self.agent_combo.currentData()
                 snaps.append(snap)
                 submitted.append(card)
         if not snaps:
@@ -3322,15 +3667,22 @@ class PipelineWindow(QtWidgets.QMainWindow):
         notify("Projects Added", f"Queued {len(batch)} project(s) ({total_steps} steps)")
 
     def refresh_draft_prompts(self, selected=-1):
-        has_prompts = bool(self.draft_prompts)
-        self.draft_list.setVisible(has_prompts)
-        self.draft_controls.setVisible(has_prompts)
+        # Always show the serial list so Add Prompt → list is the obvious flow
+        self.draft_list.show()
+        self.draft_controls.show()
         self.draft_list.clear()
-        for index, prompt in enumerate(self.draft_prompts):
-            words = prompt.split()
-            preview = " ".join(words[:5]) + (" …" if len(words) > 5 else "")
-            self.draft_list.addItem(f"{index + 1}. {preview}  ({len(words):,} words)")
-        self.draft_list.setCurrentRow(selected)
+        if not self.draft_prompts:
+            empty = QtWidgets.QListWidgetItem("No prompts yet — add one above")
+            empty.setFlags(Qt.NoItemFlags)
+            empty.setForeground(QColor("#64748b"))
+            self.draft_list.addItem(empty)
+        else:
+            for index, prompt in enumerate(self.draft_prompts):
+                words = prompt.split()
+                preview = " ".join(words[:8]) + (" …" if len(words) > 8 else "")
+                self.draft_list.addItem(f"{index + 1}. {preview}  ({len(words):,} words)")
+            if selected >= 0:
+                self.draft_list.setCurrentRow(selected)
         self.update_next_prompt_metrics()
 
     def stage_prompt(self):
@@ -3341,6 +3693,44 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.draft_prompts.append(prompt)
         self.next_prompt_input.clear()
         self.refresh_draft_prompts(len(self.draft_prompts) - 1)
+        self.next_prompt_input.setFocus()
+
+    def _toggle_open_fields_panel(self, checked: bool):
+        self.open_fields_panel.setVisible(checked)
+        self.open_fields_toggle.setText(
+            "▾ Advanced: multi-field draft (optional)" if checked else "▸ Advanced: multi-field draft (optional)"
+        )
+        if checked and not getattr(self, "open_project_fields", None):
+            self.add_open_project_field()
+
+    def append_command_group_to_drafts(self):
+        """Pick a saved command group and append its prompts to the serial list."""
+        group = choose_step_group(parent=self, prefer_modal=True)
+        steps = list((group or {}).get("steps") or [])
+        if not steps:
+            reply = QtWidgets.QMessageBox.question(
+                self,
+                "No command groups",
+                "No groups saved yet. Open Command Group Setting?",
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            )
+            if reply == QtWidgets.QMessageBox.Yes:
+                self.open_steps_25_template_editor()
+            return
+        # Flush any text still in the add box first
+        if self.next_prompt_input.toPlainText().strip():
+            self.stage_prompt()
+        self.draft_prompts.extend(steps)
+        self.refresh_draft_prompts(len(self.draft_prompts) - 1)
+        name = group.get("name") or "group"
+        if hasattr(self, "toast_banner"):
+            self.toast_banner.setText(f"✔ Added {len(steps)} prompt(s) from “{name}” to the serial list.")
+            self.toast_banner.setStyleSheet(
+                "background-color: #064e3b; color: #34d399; font-weight: 700; font-size: 12px; "
+                "padding: 8px 14px; border-radius: 8px; border: 1px solid #059669;"
+            )
+            self.toast_banner.show()
+            QtCore.QTimer.singleShot(3000, self.toast_banner.hide)
 
     def move_draft_prompt(self, direction):
         index = self.draft_list.currentRow()
@@ -3512,7 +3902,10 @@ class PipelineWindow(QtWidgets.QMainWindow):
         if len(groups) == 1:
             self.apply_next_step_group(groups[0]["id"])
             return
-        group = choose_step_group(self.sender() if isinstance(self.sender(), QtWidgets.QWidget) else self)
+        group = choose_step_group(
+            self.sender() if isinstance(self.sender(), QtWidgets.QWidget) else self,
+            prefer_modal=True,
+        )
         if group:
             self.apply_next_step_group(group["id"])
 
@@ -3524,7 +3917,10 @@ class PipelineWindow(QtWidgets.QMainWindow):
         if len(groups) == 1:
             self.apply_cur_step_group(groups[0]["id"])
             return
-        group = choose_step_group(self.sender() if isinstance(self.sender(), QtWidgets.QWidget) else self)
+        group = choose_step_group(
+            self.sender() if isinstance(self.sender(), QtWidgets.QWidget) else self,
+            prefer_modal=True,
+        )
         if group:
             self.apply_cur_step_group(group["id"])
 
@@ -3870,7 +4266,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
         next_num = total_projects + 1
         if hasattr(self, "next_badge_lbl"):
-            self.next_badge_lbl.setText(f"3. ADD NEXT PROJECT (#{next_num})")
+            self.next_badge_lbl.setText(f"ADD PROJECT #{next_num}")
         if hasattr(self, "next_title_input") and not self.next_title_input.text():
             self.next_title_input.setPlaceholderText(f"Next Project #{next_num} Title (e.g. 'Build Laravel Auth API')...")
         if hasattr(self, "btn_add_next"):
