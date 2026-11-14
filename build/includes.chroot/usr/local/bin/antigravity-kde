@@ -68,6 +68,14 @@ fi
 
 rm -f "${HOME}/.gemini/cache/antigravity-keyring-unavailable"
 
+# DevOS disables KWallet on purpose. Antigravity still detects KDE and shows
+# "OS keyring is not available" unless password-store=basic is also in argv.json.
+argv_json="${DATA_DIR}/argv.json"
+if [ ! -f "$argv_json" ] || ! grep -q '"password-store"[[:space:]]*:[[:space:]]*"basic"' "$argv_json" 2>/dev/null; then
+    printf '%s\n' '{ "password-store": "basic" }' > "$argv_json"
+fi
+export ELECTRON_PASSWORD_STORE=basic
+
 # Always force profile flags last so a vendor wrapper cannot drop isolation.
 # --user-data-dir + GEMINI_APP_DATA_DIR keep this instance off the main account.
 exec "$IDE_BIN" \

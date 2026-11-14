@@ -63,6 +63,13 @@ if [ -x "$BIN" ] || [ -x "$IDE_LOCAL" ]; then
     done
 fi
 
+# Ensure the command is findable even when /usr/local/bin is missing from PATH.
+if [ -x "$WRAPPER" ]; then
+    mkdir -p /usr/bin
+    ln -sfn "$WRAPPER" /usr/bin/antigravity-kde
+fi
+
 echo "Antigravity KDE (Studio) is ready."
-echo "Launch with: antigravity-kde   (separate account from Google Antigravity)"
+echo "Launch with: antigravity-kde   (or /usr/local/bin/antigravity-kde)"
+echo "Separate account from Google Antigravity — quit the main app first if both share a window."
 exit 0

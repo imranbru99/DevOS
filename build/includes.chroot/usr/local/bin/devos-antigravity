@@ -25,6 +25,14 @@ DATA_DIR="${HOME}/.config/Antigravity"
 EXT_DIR="${HOME}/.antigravity/extensions"
 mkdir -p "$DATA_DIR" "$EXT_DIR"
 
+# DevOS disables KWallet; force basic store so the KDE keyring toast stays off.
+argv_json="${DATA_DIR}/argv.json"
+if [ ! -f "$argv_json" ] || ! grep -q '"password-store"[[:space:]]*:[[:space:]]*"basic"' "$argv_json" 2>/dev/null; then
+    printf '%s\n' '{ "password-store": "basic" }' > "$argv_json"
+fi
+export ELECTRON_PASSWORD_STORE=basic
+rm -f "${HOME}/.gemini/cache/antigravity-keyring-unavailable"
+
 flags=(
     --ozone-platform=x11
     --enable-gpu-rasterization
