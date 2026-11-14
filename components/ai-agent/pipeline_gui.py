@@ -1368,6 +1368,7 @@ class Steps25TemplateDialog(QtWidgets.QDialog):
         self.setStyleSheet(STYLE)
         self._groups = []
         self._loading = False
+        self._edit_index = None  # when set, Save/Update replaces that step instead of appending
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(18, 16, 18, 16)
@@ -1381,6 +1382,7 @@ class Steps25TemplateDialog(QtWidgets.QDialog):
             "1) Create a command group name.  "
             "2) Paste one command/prompt (multi-line OK).  "
             "3) Click Save prompt into group — repeat to add multiple commands.  "
+            "To edit: select a prompt in section 3 → Edit selected (or double-click) → change text → Update prompt.  "
             "Projects can then choose this group by name in the Choose command group modal."
         )
         desc.setStyleSheet("color: #94a3b8; font-size: 11px;")
@@ -1452,13 +1454,21 @@ class Steps25TemplateDialog(QtWidgets.QDialog):
         self.target_lbl = QtWidgets.QLabel("")
         self.target_lbl.setStyleSheet("color: #94a3b8; font-size: 11px;")
         save_row.addWidget(self.target_lbl, stretch=1)
-        btn_add = QtWidgets.QPushButton("💾 Save prompt into group")
-        btn_add.setObjectName("primary")
-        btn_add.setStyleSheet(
+        btn_cancel_edit = QtWidgets.QPushButton("Cancel edit")
+        btn_cancel_edit.setStyleSheet(
+            "background-color: #334155; color: #f1f5f9; font-size: 11px; padding: 6px 12px; border-radius: 4px;"
+        )
+        btn_cancel_edit.clicked.connect(self._cancel_edit_prompt)
+        btn_cancel_edit.hide()
+        self.btn_cancel_edit = btn_cancel_edit
+        save_row.addWidget(btn_cancel_edit)
+        self.btn_save_prompt = QtWidgets.QPushButton("💾 Save prompt into group")
+        self.btn_save_prompt.setObjectName("primary")
+        self.btn_save_prompt.setStyleSheet(
             "background-color: #2563eb; color: white; font-weight: 700; padding: 7px 16px; border-radius: 5px;"
         )
-        btn_add.clicked.connect(self._add_prompt_to_group)
-        save_row.addWidget(btn_add)
+        self.btn_save_prompt.clicked.connect(self._add_prompt_to_group)
+        save_row.addWidget(self.btn_save_prompt)
         s2.addLayout(save_row)
         layout.addWidget(step2, stretch=1)
 
@@ -1471,6 +1481,7 @@ class Steps25TemplateDialog(QtWidgets.QDialog):
         s3 = QtWidgets.QVBoxLayout(step3)
         self.step_list = QtWidgets.QListWidget()
         self.step_list.setMinimumHeight(110)
+        self.step_list.itemDoubleClicked.connect(lambda *_: self._edit_selected_step())
         s3.addWidget(self.step_list)
         step_btns = QtWidgets.QHBoxLayout()
         self.step_count_lbl = QtWidgets.QLabel("")
@@ -1478,12 +1489,22 @@ class Steps25TemplateDialog(QtWidgets.QDialog):
         step_btns.addWidget(self.step_count_lbl, stretch=1)
         btn_up = QtWidgets.QPushButton("▲")
         btn_up.setFixedWidth(36)
+        btn_up.setToolTip("Move selected prompt up")
         btn_up.clicked.connect(lambda: self._move_step(-1))
         step_btns.addWidget(btn_up)
         btn_down = QtWidgets.QPushButton("▼")
         btn_down.setFixedWidth(36)
+        btn_down.setToolTip("Move selected prompt down")
         btn_down.clicked.connect(lambda: self._move_step(1))
         step_btns.addWidget(btn_down)
+        btn_edit_step = QtWidgets.QPushButton("✎ Edit selected")
+        btn_edit_step.setToolTip("Load selected prompt into the editor above to change it")
+        btn_edit_step.setStyleSheet(
+            "background-color: #1e1b4b; color: #c7d2fe; font-size: 11px; font-weight: 700; "
+            "padding: 5px 12px; border: 1px solid #4338ca; border-radius: 4px;"
+        )
+        btn_edit_step.clicked.connect(self._edit_selected_step)
+        step_btns.addWidget(btn_edit_step)
         btn_remove_step = QtWidgets.QPushButton("Remove selected")
         btn_remove_step.clicked.connect(self._remove_selected_step)
         step_btns.addWidget(btn_remove_step)
@@ -1545,6 +1566,10 @@ class Steps25TemplateDialog(QtWidgets.QDialog):
     def _on_combo_changed(self, _index=-1):
         if self._loading:
             return
+        # Switching groups cancels an in-progress edit
+        if self._edit_index is not None:
+            self.prompt_editor.clear()
+            self._set_edit_mode(None)
         group = self._current_group()
         if group:
             self.default_check.setChecked(group["id"] == self._default_id)
@@ -1552,7 +1577,49 @@ class Steps25TemplateDialog(QtWidgets.QDialog):
         self._reload_step_list()
         self._update_target_label()
 
+    def _set_edit_mode(self, index=None):
+        self._edit_index = index
+        if index is None:
+            self.btn_save_prompt.setText("💾 Save prompt into group")
+            self.btn_cancel_edit.hide()
+            self._update_target_label()
+            return
+        self.btn_save_prompt.setText(f"💾 Update prompt #{index + 1}")
+        self.btn_cancel_edit.show()
+        group = self._current_group()
+        name = (group or {}).get("name") or "Untitled"
+        self.target_lbl.setText(
+            f"Editing step {index + 1} in “{name}” — change the text above, then Update prompt."
+        )
+
+    def _cancel_edit_prompt(self):
+        self.prompt_editor.clear()
+        self._set_edit_mode(None)
+        self.prompt_editor.setFocus()
+
+    def _edit_selected_step(self):
+        group = self._current_group()
+        if not group:
+            return
+        index = self.step_list.currentRow()
+        steps = list(group.get("steps") or [])
+        if not (0 <= index < len(steps)):
+            QtWidgets.QMessageBox.information(
+                self, "Select a prompt", "Click a prompt in the list first, then Edit selected."
+            )
+            return
+        self.prompt_editor.setPlainText(steps[index])
+        self._set_edit_mode(index)
+        self.prompt_editor.setFocus()
+        # Put cursor at end so user can start typing immediately
+        cursor = self.prompt_editor.textCursor()
+        cursor.movePosition(cursor.End)
+        self.prompt_editor.setTextCursor(cursor)
+
     def _update_target_label(self):
+        if self._edit_index is not None:
+            self._set_edit_mode(self._edit_index)
+            return
         group = self._current_group()
         if not group:
             self.target_lbl.setText("Create or choose a group first.")
@@ -1590,6 +1657,7 @@ class Steps25TemplateDialog(QtWidgets.QDialog):
         self._groups.append({"id": gid, "name": name, "steps": []})
         if not self._default_id:
             self._default_id = gid
+        self._set_edit_mode(None)
         self._refresh_combo(select_id=gid)
         self.prompt_editor.setFocus()
 
@@ -1608,6 +1676,22 @@ class Steps25TemplateDialog(QtWidgets.QDialog):
             self.prompt_editor.setFocus()
             return
         steps = list(group.get("steps") or [])
+        edit_index = self._edit_index
+        if edit_index is not None:
+            if not (0 <= edit_index < len(steps)):
+                self._set_edit_mode(None)
+                QtWidgets.QMessageBox.warning(self, "Edit failed", "That prompt is no longer in the list.")
+                return
+            steps[edit_index] = prompt
+            group["steps"] = steps
+            if self.default_check.isChecked():
+                self._default_id = group["id"]
+            self.prompt_editor.clear()
+            self._set_edit_mode(None)
+            self._refresh_combo(select_id=group["id"])
+            self.step_list.setCurrentRow(edit_index)
+            self.prompt_editor.setFocus()
+            return
         if len(steps) >= MAX_STEP_PACK:
             QtWidgets.QMessageBox.information(
                 self, "Limit", f"This group already has {MAX_STEP_PACK} prompts."
@@ -1632,8 +1716,15 @@ class Steps25TemplateDialog(QtWidgets.QDialog):
             return
         steps[index], steps[target] = steps[target], steps[index]
         group["steps"] = steps
+        # Keep edit mode pointing at the same prompt after reorder
+        if self._edit_index == index:
+            self._edit_index = target
+        elif self._edit_index == target:
+            self._edit_index = index
         self._reload_step_list()
         self.step_list.setCurrentRow(target)
+        if self._edit_index is not None:
+            self._set_edit_mode(self._edit_index)
 
     def _remove_selected_step(self):
         group = self._current_group()
@@ -1645,6 +1736,13 @@ class Steps25TemplateDialog(QtWidgets.QDialog):
             return
         steps.pop(index)
         group["steps"] = steps
+        if self._edit_index is not None:
+            if self._edit_index == index:
+                self.prompt_editor.clear()
+                self._set_edit_mode(None)
+            elif self._edit_index > index:
+                self._edit_index -= 1
+                self._set_edit_mode(self._edit_index)
         self._refresh_combo(select_id=group["id"])
 
     def _delete_group(self):

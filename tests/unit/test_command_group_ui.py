@@ -30,6 +30,14 @@ def test_per_project_agent_chooser():
     assert "self.agent_combo.currentData()" in text
 
 
+def test_command_group_edit_selected_prompt():
+    text = SRC.read_text(encoding="utf-8")
+    assert "def _edit_selected_step" in text
+    assert "✎ Edit selected" in text
+    assert "Update prompt #" in text
+    assert "itemDoubleClicked.connect" in text
+
+
 def test_chroot_pipeline_gui_synced():
     assert CHROOT.is_file()
     src = SRC.read_text(encoding="utf-8")
