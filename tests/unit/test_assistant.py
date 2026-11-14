@@ -2219,10 +2219,16 @@ class TestMultiStepChaining(unittest.TestCase):
         r_ok = a.chat("ok")
         self.assertTrue(r_ok.ok)
         self.assertIn("Got it", r_ok.text)
-        # Status
+        # Status (common spellings + typos like "kemon aco")
         r_status = a.chat("kemon acho")
         self.assertTrue(r_status.ok)
         self.assertIn("ভালো আছি", r_status.text)
+        r_typo = a.chat("kemon aco")
+        self.assertTrue(r_typo.ok)
+        self.assertIn("ভালো আছি", r_typo.text)
+        r_how = engine.fast_chat_reply("how are you")
+        self.assertIsNotNone(r_how)
+        self.assertIn("ready", r_how.text.lower())
         # Non-fast path goes to normal model
         self.assertIsNone(engine.fast_chat_reply("what is docker"))
 
