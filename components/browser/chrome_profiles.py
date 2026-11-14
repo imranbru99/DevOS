@@ -50,19 +50,40 @@ def get_profile_avatar_path(config_dir, profile_key, info=None):
         return None
     folder = os.path.join(config_dir, profile_key)
     candidates = []
-    picture_name = None
     if isinstance(info, dict):
-        picture_name = info.get("gaia_picture_file_name") or info.get("last_downloaded_gaia_picture_url_with_size")
-        if isinstance(picture_name, str) and "/" not in picture_name and picture_name.endswith((".png", ".jpg", ".jpeg", ".webp")):
-            candidates.append(os.path.join(folder, picture_name))
+        for key in (
+            "gaia_picture_file_name",
+            "last_downloaded_gaia_picture_url_with_size",
+            "gaia_picture_url",
+        ):
+            picture_name = info.get(key)
+            if isinstance(picture_name, str) and picture_name and "/" not in picture_name:
+                if picture_name.endswith((".png", ".jpg", ".jpeg", ".webp")):
+                    candidates.append(os.path.join(folder, picture_name))
     for name in (
         "Google Profile Picture.png",
         "Google Profile Picture.jpg",
+        "Google Profile Picture.jpeg",
         "profile_picture.png",
+        "Profile Picture.png",
     ):
         candidates.append(os.path.join(folder, name))
+    # Chrome sometimes drops the Gaia image under these folders.
+    for sub in ("", "Google Profile Picture", "Avatars"):
+        base = os.path.join(folder, sub) if sub else folder
+        if not os.path.isdir(base):
+            continue
+        try:
+            for entry in sorted(os.listdir(base)):
+                low = entry.lower()
+                if low.endswith((".png", ".jpg", ".jpeg", ".webp")) and (
+                    "profile" in low or "gaia" in low or "avatar" in low or "picture" in low
+                ):
+                    candidates.append(os.path.join(base, entry))
+        except OSError:
+            pass
     for path in candidates:
-        if path and os.path.isfile(path):
+        if path and os.path.isfile(path) and os.path.getsize(path) > 64:
             return path
     return None
 
@@ -189,9 +210,12 @@ def generate_badged_icon(name, output_48, output_128=None, base_icon=None, avata
             used_avatar = False
 
     if not used_avatar:
-        label = (name or "Chrome").strip().split()[0][:7].upper() or "CHROME"
+        # Large corner monogram (not Chrome's gray person silhouette).
+        initial = (name or "C").strip()[:1].upper() or "C"
+        short = (name or "Chrome").strip().split()[0][:6]
         bg_color = get_profile_color(name or "Chrome")
         font = None
+        font_sm = None
         for font_path in [
             "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
             "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
@@ -199,30 +223,63 @@ def generate_badged_icon(name, output_48, output_128=None, base_icon=None, avata
         ]:
             if os.path.isfile(font_path):
                 try:
-                    font_size = 22 if len(label) <= 4 else (19 if len(label) <= 6 else 16)
-                    font = ImageFont.truetype(font_path, font_size)
+                    font = ImageFont.truetype(font_path, 36)
+                    font_sm = ImageFont.truetype(font_path, 14)
                     break
                 except Exception:
                     pass
-        draw.rounded_rectangle(
-            [4, 76, 124, 124],
-            radius=12,
-            fill=bg_color,
-            outline=(255, 255, 255, 230),
-            width=3,
+        badge_size = 64
+        ring = 4
+        outer = badge_size + ring * 2
+        badge = Image.new("RGBA", (outer, outer), (0, 0, 0, 0))
+        bdraw = ImageDraw.Draw(badge)
+        bdraw.ellipse((0, 0, outer - 1, outer - 1), fill=(255, 255, 255, 245))
+        bdraw.ellipse(
+            (ring, ring, ring + badge_size - 1, ring + badge_size - 1),
+            fill=bg_color + (255,),
         )
         if font:
-            draw.text((64, 100), label, fill=(255, 255, 255), font=font, anchor="mm")
+            bdraw.text(
+                (outer // 2, outer // 2 - 2),
+                initial,
+                fill=(255, 255, 255, 255),
+                font=font,
+                anchor="mm",
+            )
         else:
-            draw.text((64, 100), label, fill=(255, 255, 255), anchor="mm")
+            bdraw.text(
+                (outer // 2, outer // 2),
+                initial,
+                fill=(255, 255, 255, 255),
+                anchor="mm",
+            )
+        img.alpha_composite(badge, (128 - outer - 2, 128 - outer - 2))
+        # Tiny name strip so Work / Guest / Mirza are obvious at a glance.
+        if font_sm and short:
+            strip_h = 22
+            strip = Image.new("RGBA", (128, strip_h), (0, 0, 0, 0))
+            sdraw = ImageDraw.Draw(strip)
+            sdraw.rounded_rectangle(
+                [2, 0, 126, strip_h - 1],
+                radius=6,
+                fill=bg_color + (230,),
+            )
+            sdraw.text(
+                (64, strip_h // 2),
+                short.upper(),
+                fill=(255, 255, 255, 255),
+                font=font_sm,
+                anchor="mm",
+            )
+            img.alpha_composite(strip, (0, 2))
 
     os.makedirs(os.path.dirname(os.path.abspath(output_48)), exist_ok=True)
     img_48 = img.resize((48, 48), Image.Resampling.LANCZOS)
-    img_48.save(output_48)
+    img_48.save(output_48, format="PNG")
 
     if output_128:
         os.makedirs(os.path.dirname(os.path.abspath(output_128)), exist_ok=True)
-        img.save(output_128)
+        img.save(output_128, format="PNG")
 
 
 def update_google_chrome_desktop(home_dir, all_profiles):
@@ -629,6 +686,42 @@ def set_window_desktop_file(wid, desktop_slug, home_dir=None):
         pass
 
 
+def _install_icon_name(home_dir, icon_name: str, src_48: str, src_128: str = None) -> None:
+    """Copy badged PNGs into hicolor under icon_name and refresh the icon cache lightly."""
+    home = home_dir or os.path.expanduser("~")
+    for size, src in ((48, src_48), (128, src_128 or src_48)):
+        if not src or not os.path.isfile(src):
+            continue
+        dest_dir = os.path.join(home, f".local/share/icons/hicolor/{size}x{size}/apps")
+        os.makedirs(dest_dir, exist_ok=True)
+        dest = os.path.join(dest_dir, f"{icon_name}.png")
+        try:
+            if os.path.abspath(src) != os.path.abspath(dest):
+                shutil.copyfile(src, dest)
+        except OSError:
+            pass
+    # Nudge Plasma/icon theme to notice new files without a full desktop restart.
+    try:
+        cache = os.path.join(home, ".local/share/icons/hicolor/icon-theme.cache")
+        if os.path.isfile(cache):
+            os.utime(cache, None)
+        else:
+            open(cache, "a", encoding="utf-8").close()
+    except OSError:
+        pass
+    try:
+        import subprocess
+        subprocess.run(
+            ["gtk-update-icon-cache", "-f", os.path.join(home, ".local/share/icons/hicolor")],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )
+    except Exception:
+        pass
+
+
 def ensure_window_task_desktop(home_dir, prof_name: str, slug: str, wm_class: str, icon_name: str) -> str:
     """
     Create a NoDisplay .desktop whose StartupWMClass matches this ONE window.
@@ -653,6 +746,7 @@ def ensure_window_task_desktop(home_dir, prof_name: str, slug: str, wm_class: st
     else:
         # Best-effort: profile directory may be unknown here; class is what matters for the taskbar.
         exec_line = f"{devos_bin} --class={wm_class}"
+    # Icon name MUST match wm_class so each task tile can show its own badge file.
     content = f"""[Desktop Entry]
 Version=1.0
 Name=Google Chrome ({label})
@@ -662,12 +756,13 @@ Exec={exec_line} %U
 StartupNotify=true
 StartupWMClass={wm_class}
 Terminal=false
-Icon={icon_name}
+Icon={wm_class}
 Type=Application
 Categories=Network;WebBrowser;
 NoDisplay=true
 Hidden=false
 X-DevOS-ChromeWindowTask=true
+X-DevOS-ChromeProfileSlug={slug}
 """
     try:
         with open(path, "w", encoding="utf-8") as fh:
@@ -1506,13 +1601,22 @@ def apply_window_profiles(home_dir=None):
         prof_icon_48 = os.path.join(icons_dir_48, f"{icon_name}.png")
         prof_icon_128 = os.path.join(icons_dir_128, f"{icon_name}.png")
         generate_badged_icon(prof_name, prof_icon_48, prof_icon_128, avatar_path=avatar)
-        set_window_icon(w["id"], prof_icon_48, prof_icon_128)
 
-        # Unique class+desktop per WINDOW — same-profile windows no longer share
-        # one Plasma AppId (that was the remaining group-preview bug).
+        # Unique class+desktop+icon per WINDOW so tiles never share one graphic.
         class_name = window_task_class(slug, w["id"])
+        win_icon_48 = os.path.join(icons_dir_48, f"{class_name}.png")
+        win_icon_128 = os.path.join(icons_dir_128, f"{class_name}.png")
+        try:
+            shutil.copyfile(prof_icon_48, win_icon_48)
+            shutil.copyfile(prof_icon_128, win_icon_128)
+        except OSError:
+            win_icon_48, win_icon_128 = prof_icon_48, prof_icon_128
+        _install_icon_name(home_dir, class_name, win_icon_48, win_icon_128)
+        _install_icon_name(home_dir, icon_name, prof_icon_48, prof_icon_128)
+        set_window_icon(w["id"], win_icon_48, win_icon_128)
+
         desktop_name = ensure_window_task_desktop(
-            home_dir, prof_name, slug, class_name, icon_name
+            home_dir, prof_name, slug, class_name, class_name
         )
         set_window_wm_class(w["id"], class_name, class_name)
         set_window_desktop_file(w["id"], desktop_name, home_dir=home_dir)
@@ -1571,17 +1675,14 @@ def watch_chrome_windows(home_dir=None, poll_interval=None):
             # Include WM class so we keep retagging until every window leaves
             # google-chrome and gets chrome-<profile> (separate footer icons).
             cur_state = [(w["id"], w["title"], w["wm_class"].lower()) for w in chrome_wins]
-            still_grouped = any(
-                "google-chrome" in (w["wm_class"] or "").lower()
-                and not (w["wm_class"] or "").lower().startswith("chrome-")
-                for w in chrome_wins
-            )
 
-            if cur_state != last_win_state or still_grouped:
+            # Always re-apply while Chrome is open: Chrome resets _NET_WM_ICON
+            # back to the gray person badge a few seconds after we badge it.
+            if chrome_wins:
                 apply_window_profiles(home_dir)
                 last_win_state = cur_state
             # Idle longer when Chrome is not open.
-            sleep_for = poll_interval if chrome_wins else max(poll_interval, 15.0)
+            sleep_for = min(poll_interval, 3.0) if chrome_wins else max(poll_interval, 15.0)
 
         except Exception:
             sleep_for = poll_interval

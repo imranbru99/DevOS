@@ -115,5 +115,6 @@ echo
 echo "== Taskbar grouping (must be groupingStrategy=0) =="
 grep -E 'launchers=|groupingStrategy=|groupPopups=' "$CFG" 2>/dev/null | head -30 || true
 echo
-echo "Close ALL Chrome windows, reopen them, then you should see ONE taskbar icon PER window"
-echo "(no group preview with 2 thumbnails)."
+echo "Close ALL Chrome windows, reopen them."
+echo "You should see ONE taskbar icon PER window, each with a colored letter/face badge"
+echo "(not three identical gray person badges)."
