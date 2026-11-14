@@ -27,13 +27,31 @@ fi
 
 unset ELECTRON_RUN_AS_NODE
 export DONT_PROMPT_WSL_INSTALL=1
+# Must differ from Google Antigravity (main uses "antigravity").
 export GEMINI_APP_DATA_DIR="antigravity-kde"
 # Separate keyring / auth from the main Antigravity instance.
 export SSH_CLIENT="127.0.0.1 0 0"
 
 DATA_DIR="${HOME}/.config/Antigravity-KDE"
 EXT_DIR="${HOME}/.antigravity-kde/extensions"
-mkdir -p "$DATA_DIR" "$EXT_DIR"
+GEMINI_DIR="${HOME}/.gemini/antigravity-kde"
+mkdir -p "$DATA_DIR" "$EXT_DIR" "$GEMINI_DIR"
+
+# Drop stale Electron/Chromium single-instance locks in THIS profile only so a
+# second click cannot attach to a dead process — never touch the main profile.
+for lock in SingletonLock SingletonSocket SingletonCookie; do
+    path="${DATA_DIR}/${lock}"
+    if [ -L "$path" ] || [ -e "$path" ]; then
+        target=$(readlink "$path" 2>/dev/null || true)
+        pid="${target##*-}"
+        if [ -n "$pid" ] && [ "$pid" -gt 1 ] 2>/dev/null && [ -d "/proc/$pid" ]; then
+            # Live IDE instance: keep the lock (Electron will focus that window).
+            :
+        else
+            rm -f "$path" 2>/dev/null || true
+        fi
+    fi
+done
 
 # Prefer this IDE's own extensions; fall back to shared only if empty.
 if [ -z "$(ls -A "$EXT_DIR" 2>/dev/null || true)" ]; then
@@ -50,6 +68,8 @@ fi
 
 rm -f "${HOME}/.gemini/cache/antigravity-keyring-unavailable"
 
+# Always force profile flags last so a vendor wrapper cannot drop isolation.
+# --user-data-dir + GEMINI_APP_DATA_DIR keep this instance off the main account.
 exec "$IDE_BIN" \
     --ozone-platform=x11 \
     --no-sandbox \

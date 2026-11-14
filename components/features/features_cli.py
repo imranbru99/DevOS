@@ -579,15 +579,17 @@ def after_remove(feature: dict) -> None:
 
 def system_defaults(installed):
     """role -> desktop file: the first installed feature in catalog order wins
-    (ONLYOFFICE before LibreOffice). The browser stays DevOS Browser, which
-    opens the user's pick; people change it in DevOS Features -> Default apps."""
+    (ONLYOFFICE before LibreOffice; Google Chrome before Edge/Firefox).
+
+    When Chrome (or another browser feature) is installed, it becomes the
+    system default so app logins/OAuth open there instead of DevOS Browser.
+    Users can still override in DevOS Features -> Default apps."""
     chosen = {}
     for feature in catalog.FEATURES:
         if feature["id"] not in installed:
             continue
         for role, desktop in feature["roles"].items():
-            if role != "browser":
-                chosen.setdefault(role, desktop)
+            chosen.setdefault(role, desktop)
     return chosen
 
 
