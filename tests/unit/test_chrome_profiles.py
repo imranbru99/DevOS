@@ -142,21 +142,29 @@ class TestChromeProfiles(unittest.TestCase):
             self.assertIn("groupingStrategy=0", text)
             self.assertIn("groupPopups=false", text)
             self.assertIn("applications:devos-search.desktop", text)
-            # Profile literally named "Default" must still get its own pin.
-            open(os.path.join(apps, "chrome-default.desktop"), "w", encoding="utf-8").write(
+            # Per-window desktops take priority (Plasma paints these icons, not gray person).
+            open(os.path.join(apps, "chrome-work-w1a2.desktop"), "w", encoding="utf-8").write(
                 "[Desktop Entry]\n"
             )
-            ok = chrome_profiles.sync_plasma_profile_launchers(tmp_home, ["default", "work"])
+            open(os.path.join(apps, "chrome-work-w3b4.desktop"), "w", encoding="utf-8").write(
+                "[Desktop Entry]\n"
+            )
+            ok = chrome_profiles.sync_plasma_profile_launchers(
+                tmp_home,
+                ["work"],
+                window_desktops=["chrome-work-w1a2.desktop", "chrome-work-w3b4.desktop"],
+            )
             self.assertTrue(ok)
             text = open(appletsrc, encoding="utf-8").read()
-            self.assertIn("applications:chrome-default.desktop", text)
-            self.assertIn("applications:chrome-work.desktop", text)
+            self.assertIn("applications:chrome-work-w1a2.desktop", text)
+            self.assertIn("applications:chrome-work-w3b4.desktop", text)
+            self.assertNotIn("applications:chrome-work.desktop,", text + ",")
             # All closed → restore the idle browser pin (DevOS Browser on this panel).
             ok = chrome_profiles.sync_plasma_profile_launchers(tmp_home, [])
             self.assertTrue(ok)
             text = open(appletsrc, encoding="utf-8").read()
             self.assertIn("applications:devos-browser.desktop", text)
-            self.assertNotIn("chrome-work.desktop", text)
+            self.assertNotIn("chrome-work-w1a2.desktop", text)
 
     def test_class_for_profile_uses_display_name(self):
         with tempfile.TemporaryDirectory() as tmp_home:

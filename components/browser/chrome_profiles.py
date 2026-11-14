@@ -746,7 +746,13 @@ def ensure_window_task_desktop(home_dir, prof_name: str, slug: str, wm_class: st
     else:
         # Best-effort: profile directory may be unknown here; class is what matters for the taskbar.
         exec_line = f"{devos_bin} --class={wm_class}"
-    # Icon name MUST match wm_class so each task tile can show its own badge file.
+    # Absolute Icon= path — Plasma theme lookup often misses new hicolor files
+    # and falls back to Chrome's gray person badge.
+    icon_abs = os.path.join(home, ".local/share/icons/hicolor/48x48/apps", f"{wm_class}.png")
+    if not os.path.isfile(icon_abs):
+        icon_abs = os.path.join(home, ".local/share/icons/hicolor/128x128/apps", f"{wm_class}.png")
+    if not os.path.isfile(icon_abs):
+        icon_abs = wm_class
     content = f"""[Desktop Entry]
 Version=1.0
 Name=Google Chrome ({label})
@@ -756,7 +762,7 @@ Exec={exec_line} %U
 StartupNotify=true
 StartupWMClass={wm_class}
 Terminal=false
-Icon={wm_class}
+Icon={icon_abs}
 Type=Application
 Categories=Network;WebBrowser;
 NoDisplay=true
@@ -848,7 +854,7 @@ def _find_icontasks_general_section(text: str):
 
 
 def _is_chrome_launcher(entry: str) -> bool:
-    """True for idle Chrome/DevOS Browser pins and per-profile chrome-* pins."""
+    """True for idle Chrome/DevOS Browser pins and per-profile/per-window chrome-* pins."""
     e = (entry or "").strip().lower()
     return (
         "google-chrome.desktop" in e
@@ -954,12 +960,12 @@ def apply_plasma_launchers_live(launcher_csv: str, grouping: str = "1") -> bool:
         return False
 
 
-def sync_plasma_profile_launchers(home_dir=None, active_slugs=None):
+def sync_plasma_profile_launchers(home_dir=None, active_slugs=None, window_desktops=None):
     """
     Windows-like Chrome pins:
       - No Chrome windows → idle browser pin (DevOS Browser / Google Chrome)
-      - Profiles open → hide that pin; show one avatar launcher per open profile
-    Other apps stay grouped; Chrome profiles stay ungrouped via distinct WM class.
+      - Windows open → pin each window's unique .desktop (badged Icon= path)
+        so Plasma shows OUR icon, not Chrome's gray person badge
     """
     home = home_dir or os.path.expanduser("~")
     cfg = Path(home) / ".config/plasma-org.kde.plasma.desktop-appletsrc"
@@ -977,6 +983,7 @@ def sync_plasma_profile_launchers(home_dir=None, active_slugs=None):
         "groupingStrategy",
         "launchInPlace",
         "hideActivatedLaunchers",
+        "groupPopups",
     )
 
     # Keep every non-Chrome pin the user already had.
@@ -995,15 +1002,24 @@ def sync_plasma_profile_launchers(home_dir=None, active_slugs=None):
 
     apps_dir = os.path.join(home, ".local/share/applications")
     active = [(s or "").strip().lower() for s in (active_slugs or []) if (s or "").strip()]
+    win_desks = []
+    for d in window_desktops or []:
+        name = (d or "").strip()
+        if not name:
+            continue
+        if not name.endswith(".desktop"):
+            name = f"{name}.desktop"
+        if os.path.isfile(os.path.join(apps_dir, name)):
+            win_desks.append(f"applications:{name}")
+
     chrome_launchers = []
-    if active:
-        # Browser is open → hide idle Chrome/DevOS Browser pin; show each profile.
+    if win_desks:
+        # Prefer per-window launchers — Icon Tasks then paints our badged PNG.
+        chrome_launchers = win_desks
+    elif active:
+        # Fallback: one pin per open profile (avatar).
         seen = set()
         for slug in active:
-            # Never skip "default" — that is a real profile slug when the
-            # user kept Google's Default profile name (Windows shows it too).
-            # Guest must also get its own pin (was skipped → Guest + profile
-            # grouped under one Google Chrome icon).
             if slug in seen:
                 continue
             desktop = f"chrome-{slug}.desktop"
@@ -1615,6 +1631,7 @@ def apply_window_profiles(home_dir=None):
         _install_icon_name(home_dir, icon_name, prof_icon_48, prof_icon_128)
         set_window_icon(w["id"], win_icon_48, win_icon_128)
 
+        # .desktop Icon= uses absolute path to the badge file installed above.
         desktop_name = ensure_window_task_desktop(
             home_dir, prof_name, slug, class_name, class_name
         )
@@ -1623,17 +1640,18 @@ def apply_window_profiles(home_dir=None):
         window_classes.append(class_name)
         processed += 1
 
-    # Pins: one launcher per open profile (avatar). Windows themselves use unique
-    # classes so they never stack under a single group popup.
-    launcher_key = tuple(active_slugs) + tuple(sorted(window_classes))
-    if sync_plasma_profile_launchers(home_dir, active_slugs):
-        # Always live-push Do Not Group while any Chrome window is open.
-        pass
+    # Pin each open window's .desktop on Icon Tasks so Plasma shows OUR badge
+    # (matching StartupWMClass), not Chrome's gray person window icon.
+    launcher_key = tuple(sorted(window_classes))
+    sync_plasma_profile_launchers(
+        home_dir,
+        active_slugs,
+        window_desktops=[f"{c}.desktop" for c in window_classes],
+    )
     if launcher_key != _LAST_PLASMA_LAUNCHERS:
         _LAST_PLASMA_LAUNCHERS = launcher_key
-        if len(chrome_wins) >= 2:
-            os.environ["DEVOS_FORCE_PLASMA_RELOAD"] = "1"
-            reload_plasmashell()
+        os.environ["DEVOS_FORCE_PLASMA_RELOAD"] = "1"
+        reload_plasmashell()
 
     return processed
 

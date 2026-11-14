@@ -112,9 +112,12 @@ echo
 echo "== Chrome windows (each should have chrome-<profile>-wXXXX class) =="
 wmctrl -lx 2>/dev/null | grep -iE 'chrome|google-chrome' || echo "(open Chrome windows, then: python3 $DEST apply)"
 echo
-echo "== Taskbar grouping (must be groupingStrategy=0) =="
+echo "== Taskbar pins (should list chrome-*-w*.desktop, not only google-chrome) =="
 grep -E 'launchers=|groupingStrategy=|groupPopups=' "$CFG" 2>/dev/null | head -30 || true
 echo
-echo "Close ALL Chrome windows, reopen them."
-echo "You should see ONE taskbar icon PER window, each with a colored letter/face badge"
-echo "(not three identical gray person badges)."
+echo "== Badged icon files =="
+ls -1 "$HOME/.local/share/icons/hicolor/48x48/apps"/chrome-*-w*.png 2>/dev/null | head -10 \
+  || echo "(none yet — reopen Chrome after this script)"
+echo
+echo "IMPORTANT: fully quit Chrome (all windows), run this script again if needed,"
+echo "then reopen Chrome. Tiles should show colored letter badges — not gray person."
