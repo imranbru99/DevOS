@@ -45,7 +45,13 @@ def get_chrome_profiles(config_dir=None):
 
 
 def _is_usable_profile_photo(path: str) -> bool:
-    """True for real Gaia photos — reject Chrome's default gray person silhouettes."""
+    """True for real Gaia photos — reject Chrome default circle+person silhouettes.
+
+    Chrome's unsigned-in / default avatars are flat colored circles with a white
+    or gray person shape. Those look "colorful" (green/blue/orange bg) so a
+    naive saturation check wrongly treats them as photos — then the taskbar
+    badge becomes the same gray person the user sees in Chrome's profile chip.
+    """
     if not path or not os.path.isfile(path):
         return False
     try:
@@ -60,20 +66,49 @@ def _is_usable_profile_photo(path: str) -> bool:
     if "idr_profile_avatar" in low or "default_avatar" in low:
         return False
     try:
-        img = Image.open(path).convert("RGBA").resize((32, 32), Image.Resampling.NEAREST)
+        raw = Image.open(path).convert("RGBA")
+        # Built-in / theme avatars are small simple PNGs; real Gaia photos are larger.
+        if max(raw.size) < 48:
+            return False
+        img = raw.resize((32, 32), Image.Resampling.NEAREST)
         pixels = list(img.getdata())
         if not pixels:
             return False
-        # Default silhouette is nearly gray with low color saturation.
+
+        opaque = [(r, g, b, a) for r, g, b, a in pixels if a >= 40]
+        if len(opaque) < 40:
+            return False
+
+        # Quantize: Chrome default avatars use a handful of flat colors.
+        buckets = {}
+        grayish = 0
         colorful = 0
-        for r, g, b, a in pixels:
-            if a < 40:
-                continue
+        for r, g, b, a in opaque:
+            key = (r // 24, g // 24, b // 24)
+            buckets[key] = buckets.get(key, 0) + 1
             mx, mn = max(r, g, b), min(r, g, b)
+            if mx - mn <= 28 and mx >= 160:
+                grayish += 1  # white/gray person shape
             if mx - mn > 28:
                 colorful += 1
-        # Real photos have many colorful pixels; gray person badges do not.
-        return colorful >= max(8, len(pixels) // 10)
+
+        unique = len(buckets)
+        top = max(buckets.values()) if buckets else 0
+        dominant_share = top / float(len(opaque))
+        gray_share = grayish / float(len(opaque))
+
+        # Flat badge: few unique colors + one dominant fill (the colored circle).
+        if unique <= 14 and dominant_share >= 0.35:
+            return False
+        # Colored circle + light person silhouette (green/blue bg + white body).
+        if gray_share >= 0.12 and unique <= 20 and dominant_share >= 0.28:
+            return False
+        # Real photos need many distinct colors — not a cartoon badge.
+        if unique < 18:
+            return False
+        if colorful < max(12, len(opaque) // 8):
+            return False
+        return True
     except Exception:
         return False
 
@@ -84,23 +119,30 @@ def get_profile_avatar_path(config_dir, profile_key, info=None):
         return None
     folder = os.path.join(config_dir, profile_key)
     candidates = []
-    if isinstance(info, dict):
-        # Only trust explicit Gaia picture fields — not chrome://theme avatars.
-        for key in ("gaia_picture_file_name",):
-            picture_name = info.get(key)
-            if isinstance(picture_name, str) and picture_name and "/" not in picture_name:
-                if picture_name.endswith((".png", ".jpg", ".jpeg", ".webp")):
-                    candidates.append(os.path.join(folder, picture_name))
-        # No signed-in Gaia image → letter badge (do not use avatar_icon theme ids).
-        if not info.get("gaia_picture_file_name") and not info.get("use_gaia_picture"):
-            # Still allow the well-known filename below if present on disk.
-            pass
-    for name in (
-        "Google Profile Picture.png",
-        "Google Profile Picture.jpg",
-        "Google Profile Picture.jpeg",
-    ):
-        candidates.append(os.path.join(folder, name))
+    info = info if isinstance(info, dict) else {}
+
+    # Theme ids like chrome://theme/IDR_PROFILE_AVATAR_* are never files — letter badge.
+    avatar_icon = str(info.get("avatar_icon") or "")
+    if "IDR_PROFILE_AVATAR" in avatar_icon.upper() or avatar_icon.startswith("chrome://theme/"):
+        # Only override when Gaia is actually in use.
+        if not info.get("use_gaia_picture"):
+            return None
+
+    # Require an explicit Gaia picture — unsigned-in defaults must not badge as photos.
+    using_gaia = bool(info.get("use_gaia_picture"))
+    picture_name = info.get("gaia_picture_file_name")
+    if using_gaia and isinstance(picture_name, str) and picture_name and "/" not in picture_name:
+        if picture_name.endswith((".png", ".jpg", ".jpeg", ".webp")):
+            candidates.append(os.path.join(folder, picture_name))
+
+    if using_gaia:
+        for name in (
+            "Google Profile Picture.png",
+            "Google Profile Picture.jpg",
+            "Google Profile Picture.jpeg",
+        ):
+            candidates.append(os.path.join(folder, name))
+
     for path in candidates:
         if _is_usable_profile_photo(path):
             return path
@@ -217,12 +259,13 @@ def _draw_letter_badge(img, name: str) -> None:
     ]:
         if os.path.isfile(font_path):
             try:
-                font = ImageFont.truetype(font_path, 40)
+                font = ImageFont.truetype(font_path, 48)
                 font_sm = ImageFont.truetype(font_path, 13)
                 break
             except Exception:
                 pass
-    badge_size = 68
+    # Large corner badge so the letter stays readable at 48px taskbar size.
+    badge_size = 76
     ring = 5
     outer = badge_size + ring * 2
     badge = Image.new("RGBA", (outer, outer), (0, 0, 0, 0))

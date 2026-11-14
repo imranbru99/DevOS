@@ -11,10 +11,16 @@ CFG="${XDG_CONFIG_HOME:-$HOME/.config}/plasma-org.kde.plasma.desktop-appletsrc"
 echo "== Update Chrome profile taskbar manager (${BRANCH}) =="
 curl -fsSL "${RAW}/components/browser/chrome_profiles.py" -o "$TMP" \
   || curl -fsSL "${RAW}/build/includes.chroot/usr/local/share/devos/components/browser/chrome_profiles.py" -o "$TMP"
-# Must contain per-window class helper
+# Must contain per-window class helper + silhouette rejection (letter badge)
 grep -q 'window_task_class' "$TMP"
+grep -q 'reject Chrome default circle+person silhouettes' "$TMP" \
+  || grep -q 'colored circle + light person silhouette' "$TMP"
 sudo install -m 0644 "$TMP" "$DEST"
 rm -f "$TMP"
+
+# Drop stale badged icons so letter badges regenerate for no-photo profiles
+rm -f "$HOME/.local/share/icons/hicolor/48x48/apps"/chrome-*.png \
+      "$HOME/.local/share/icons/hicolor/128x128/apps"/chrome-*.png 2>/dev/null || true
 
 export DISPLAY="${DISPLAY:-:0}"
 export DEVOS_FORCE_PLASMA_RELOAD=1
