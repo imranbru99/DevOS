@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Update AI Pipeline on a running DevOS PC from the DevOS GitHub repo.
+# Pulls pipeline_gui.py (and task_pipeline.py) so you see new UI without rebuilding the ISO.
+#
+# Usage:
+#   sudo devos-update-ai-pipeline              # latest main
+#   sudo devos-update-ai-pipeline <branch>    # e.g. cursor/pipeline-command-groups-ui-6cbe
+set -euo pipefail
+
+BRANCH="${1:-main}"
+REPO_RAW="https://raw.githubusercontent.com/imranbru99/DevOS/${BRANCH}"
+DEST_DIR="/usr/local/share/devos/components/ai-agent"
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo "Run with sudo: sudo devos-update-ai-pipeline ${BRANCH}"
+  exit 1
+fi
+
+mkdir -p "$DEST_DIR"
+
+echo "== Fetching AI Pipeline from branch: ${BRANCH} =="
+for f in pipeline_gui.py task_pipeline.py pipeline_premium.py; do
+  url="${REPO_RAW}/components/ai-agent/${f}"
+  echo "  GET $url"
+  if curl -fsSL "$url" -o "${TMP}/${f}"; then
+    install -m 0644 "${TMP}/${f}" "${DEST_DIR}/${f}"
+    echo "  ✔ installed ${DEST_DIR}/${f}"
+  else
+    echo "  (skip ${f} — not on this branch or download failed)"
+  fi
+done
+
+# Also keep components/ tree copy if present (dev checkout on this machine)
+if [ -d /usr/local/share/devos/components/ai-agent ]; then
+  :
+fi
+COMPONENTS_SRC="/workspace/components/ai-agent"
+if [ -d "$COMPONENTS_SRC" ] && [ -f "${DEST_DIR}/pipeline_gui.py" ]; then
+  # no-op on end-user machines; DEST_DIR is the runtime path
+  true
+fi
+
+echo "== Restart AI Pipeline =="
+# Close any running GUI (user can reopen from menu)
+pkill -f '/usr/local/share/devos/components/ai-agent/pipeline_gui.py' 2>/dev/null || true
+pkill -f 'pipeline_gui.py' 2>/dev/null || true
+sleep 0.5
+
+echo
+echo "Done. Open AI Pipeline again from the menu (or run: devos-ai-pipeline)."
+echo "If UI is still old, confirm branch has the file:"
+echo "  curl -fsSL ${REPO_RAW}/components/ai-agent/pipeline_gui.py | grep -c 'fill_pipeline_agent_combo'"

@@ -20,6 +20,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtCore import Qt, QTimer, QCoreApplication
@@ -1170,6 +1171,39 @@ def format_group_prompts_for_field(group) -> str:
     return "\n---\n".join(steps)
 
 
+def fill_pipeline_agent_combo(combo: QtWidgets.QComboBox, default_key: Optional[str] = None) -> None:
+    """Populate an agent chooser (multi + discovered agents). Used per project field."""
+    combo.clear()
+    combo.addItem("✨ Multi-Agent Hybrid (Antigravity + DevOS Code)", "multi")
+    known = discover_agents()
+    is_kde_session = ("KDE" in os.environ.get("XDG_CURRENT_DESKTOP", "")) or (
+        os.environ.get("DESKTOP_SESSION") == "plasma"
+    )
+    default_index = 0
+    idx = 1
+    for k, v in known.items():
+        if v.get("running"):
+            label = f"● {v['name']} [Running]"
+        elif v.get("available"):
+            label = f"○ {v['name']} [Ready]" if k == "local" else f"○ {v['name']} [Installed]"
+        else:
+            label = f"○ {v['name']} [Not Installed]"
+        combo.addItem(label, k)
+        if default_key and k == default_key:
+            default_index = idx
+        elif not default_key:
+            if is_kde_session and k == "antigravity-kde" and v.get("running"):
+                default_index = idx
+            elif not is_kde_session and k == "antigravity" and v.get("running") and default_index == 0:
+                default_index = idx
+            elif v.get("running") and default_index == 0:
+                default_index = idx
+        idx += 1
+    if default_key == "multi":
+        default_index = 0
+    combo.setCurrentIndex(default_index)
+
+
 class ChooseCommandGroupDialog(QtWidgets.QDialog):
     """Modal: pick which saved command group to use on a project field."""
 
@@ -2058,7 +2092,7 @@ class OpenProjectFieldCard(QtWidgets.QFrame):
 
     removed = QtCore.pyqtSignal(object)
 
-    def __init__(self, index: int = 1, parent=None, base_dir=None):
+    def __init__(self, index: int = 1, parent=None, base_dir=None, default_agent=None):
         super().__init__(parent)
         self.setObjectName("section_next")
         self.setStyleSheet(
@@ -2101,6 +2135,19 @@ class OpenProjectFieldCard(QtWidgets.QFrame):
         lay.addLayout(meta)
         self.location = ProjectLocation(base_dir or (lambda: str(Path.home())), self)
         lay.addWidget(self.location)
+
+        # Per-project agent chooser (each project can pick its own agent)
+        agent_row = QtWidgets.QHBoxLayout()
+        agent_row.setSpacing(6)
+        agent_lbl = QtWidgets.QLabel("Agent:")
+        agent_lbl.setStyleSheet("color: #94a3b8; font-size: 11px; font-weight: 600;")
+        agent_row.addWidget(agent_lbl)
+        self.agent_combo = QtWidgets.QComboBox()
+        self.agent_combo.setMinimumWidth(220)
+        self.agent_combo.setToolTip("Which AI agent runs the steps for this project")
+        fill_pipeline_agent_combo(self.agent_combo, default_key=default_agent)
+        agent_row.addWidget(self.agent_combo, stretch=1)
+        lay.addLayout(agent_row)
 
         # Command group picker — shows chosen group name on this project field
         group_row = QtWidgets.QHBoxLayout()
@@ -2263,7 +2310,7 @@ class OpenProjectFieldCard(QtWidgets.QFrame):
             "create_repo": False,
             "repo_name": "",
             "repo_desc": "",
-            "agent": None,
+            "agent": self.agent_combo.currentData() if hasattr(self, "agent_combo") else None,
         }
 
     def clear(self):
@@ -2273,6 +2320,7 @@ class OpenProjectFieldCard(QtWidgets.QFrame):
         self.prompt_input.clear()
         self.location.path.clear()
         self.clear_command_group()
+        # Keep the per-project agent selection after clear so the next draft reuses it.
 
 
 class PipelineWindow(QtWidgets.QMainWindow):
@@ -2538,32 +2586,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
         self.agent_combo = QtWidgets.QComboBox()
         self.agent_combo.setMinimumWidth(240)
-        self.agent_combo.addItem("✨ Multi-Agent Hybrid (Antigravity + DevOS Code)", "multi")
-        known = discover_agents()
-        is_kde_session = ("KDE" in os.environ.get("XDG_CURRENT_DESKTOP", "")) or (
-            os.environ.get("DESKTOP_SESSION") == "plasma"
-        )
-        default_index = 0
-
-        idx = 1
-        for k, v in known.items():
-            if v.get("running"):
-                label = f"● {v['name']} [Running]"
-            elif v.get("available"):
-                label = f"○ {v['name']} [Ready]" if k == "local" else f"○ {v['name']} [Installed]"
-            else:
-                label = f"○ {v['name']} [Not Installed]"
-            self.agent_combo.addItem(label, k)
-
-            if is_kde_session and k == "antigravity-kde" and v.get("running"):
-                default_index = idx
-            elif not is_kde_session and k == "antigravity" and v.get("running") and default_index == 0:
-                default_index = idx
-            elif v.get("running") and default_index == 0:
-                default_index = idx
-            idx += 1
-
-        self.agent_combo.setCurrentIndex(default_index)
+        fill_pipeline_agent_combo(self.agent_combo)
         agent_row.addWidget(self.agent_combo)
 
         # Live status badge next to dropdown
@@ -3383,8 +3406,13 @@ class PipelineWindow(QtWidgets.QMainWindow):
         """Keep another project title + command/prompt editor open on screen."""
         if not hasattr(self, "open_project_fields"):
             self.open_project_fields = []
-        card = OpenProjectFieldCard(index=len(self.open_project_fields) + 1, parent=self.open_fields_host,
-                                    base_dir=self.pipeline.get_base_dir)
+        default_agent = self.agent_combo.currentData() if hasattr(self, "agent_combo") else None
+        card = OpenProjectFieldCard(
+            index=len(self.open_project_fields) + 1,
+            parent=self.open_fields_host,
+            base_dir=self.pipeline.get_base_dir,
+            default_agent=default_agent,
+        )
         card.removed.connect(self.remove_open_project_field)
         self.open_fields_layout.addWidget(card)
         self.open_project_fields.append(card)
@@ -3414,13 +3442,14 @@ class PipelineWindow(QtWidgets.QMainWindow):
         if self.busy():
             self.log_box.append("Wait for the current task to finish before changing the queue.")
             return
-        agent = self.agent_combo.currentData()
         snaps = []
         submitted = []
         for card in getattr(self, "open_project_fields", []) or []:
             snap = card.to_snapshot()
             if snap:
-                snap["agent"] = agent
+                # Prefer this project's own agent chooser; fall back to global Agent combo
+                if not snap.get("agent"):
+                    snap["agent"] = self.agent_combo.currentData()
                 snaps.append(snap)
                 submitted.append(card)
         if not snaps:
