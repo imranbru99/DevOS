@@ -171,17 +171,17 @@ class TestOptimizerProcesses(unittest.TestCase):
 
 class TestIdleDecisions(unittest.TestCase):
 
-    def test_10_idle_threshold_default_is_30_minutes(self):
-        self.assertEqual(optimizer.DEFAULT_IDLE_MINUTES, 30)
-        t = IdleTracker(idle_minutes=30)
+    def test_10_idle_threshold_default_is_10_minutes(self):
+        self.assertEqual(optimizer.DEFAULT_IDLE_MINUTES, 10)
+        t = IdleTracker(idle_minutes=10)
         chrome = app("chrome", 100, 1200, cpu=10.0)
         t.update(0, {chrome["key"]: chrome})
-        t.update(29 * 60, {chrome["key"]: chrome})
-        self.assertEqual(t.candidates(29 * 60), [])
-        t.update(30 * 60, {chrome["key"]: chrome})
-        self.assertEqual([a["key"] for a in t.candidates(30 * 60)], ["chrome:100"])
-        self.assertIn("Chrome has been open and unused for 30 min and is using 1.2 GB",
-                      optimizer.suggestion_text(chrome, t.idle_minutes_of("chrome:100", 30 * 60)))
+        t.update(9 * 60, {chrome["key"]: chrome})
+        self.assertEqual(t.candidates(9 * 60), [])
+        t.update(10 * 60, {chrome["key"]: chrome})
+        self.assertEqual([a["key"] for a in t.candidates(10 * 60)], ["chrome:100"])
+        self.assertIn("unused for 10 min",
+                      optimizer.suggestion_text(chrome, t.idle_minutes_of("chrome:100", 10 * 60)))
 
     def test_11_cpu_activity_resets_idle(self):
         t = IdleTracker(idle_minutes=15)
@@ -197,16 +197,47 @@ class TestIdleDecisions(unittest.TestCase):
         self.assertEqual(len(t.candidates(25 * 60)), 1)
 
     def test_11b_low_background_cpu_does_not_reset_idle(self):
-        """Chrome/Electron often sits at ~3–6% while unused — still notify."""
-        t = IdleTracker(idle_minutes=30)
+        """Windows App / Chrome humming at ~5% still counts as unused."""
+        t = IdleTracker(idle_minutes=10)
         chrome = app("chrome", 100, 800, cpu=0.0)
         t.update(0, {chrome["key"]: chrome})
-        # 30 CPU-seconds over 600 s = 5% → below 12% → still unused
-        humming = dict(chrome, cpu=30.0)
+        humming = dict(chrome, cpu=30.0)  # 5% over 600s
         t.update(10 * 60, {humming["key"]: humming})
-        t.update(30 * 60, {humming["key"]: humming})
-        self.assertEqual([a["key"] for a in t.candidates(30 * 60)], ["chrome:100"])
-        self.assertAlmostEqual(t.idle_minutes_of("chrome:100", 30 * 60), 30.0)
+        self.assertEqual([a["key"] for a in t.candidates(10 * 60)], ["chrome:100"])
+        self.assertAlmostEqual(t.idle_minutes_of("chrome:100", 10 * 60), 10.0)
+
+    def test_11c_escalating_tiers_10_then_20(self):
+        t = IdleTracker(idle_minutes=10)
+        win = app("chrome", 100, 900, cpu=0.0)
+        win["name"] = "Windows App"
+        t.update(0, {win["key"]: win})
+        t.update(10 * 60, {win["key"]: win})
+        cands = t.candidates(10 * 60)
+        self.assertEqual(cands[0]["_idle_tier"], 10)
+        t.mark_notified(win["key"], 10)
+        self.assertEqual(t.candidates(10 * 60), [])
+        t.update(20 * 60, {win["key"]: win})
+        cands = t.candidates(20 * 60)
+        self.assertEqual(cands[0]["_idle_tier"], 20)
+        text = optimizer.suggestion_text(win, 20)
+        self.assertIn("20 minutes have passed", text)
+        self.assertIn("Please stop", text)
+
+    def test_11d_agent_not_notified_while_ai_worker_busy(self):
+        t = IdleTracker(idle_minutes=10)
+        agent = app("python3", 50, 400, cpu=0.0)
+        agent["name"] = "DevOS AI Code Agent"
+        # First sample seeds AI CPU; second shows llama climbing → busy.
+        table1 = {9: {"comm": "llama-server", "ppid": 1, "uid": 1000, "rss": 10 * MB, "cpu": 10.0}}
+        table2 = {9: {"comm": "llama-server", "ppid": 1, "uid": 1000, "rss": 10 * MB, "cpu": 90.0}}
+        t.update(0, {agent["key"]: agent}, table=table1)
+        t.update(10 * 60, {agent["key"]: agent}, table=table2)  # AI busy → agent still "working"
+        self.assertEqual(t.candidates(10 * 60), [])
+        # AI stops; count starts; after another 10 min → notify
+        table3 = {9: {"comm": "llama-server", "ppid": 1, "uid": 1000, "rss": 10 * MB, "cpu": 90.0}}
+        t.update(11 * 60, {agent["key"]: agent}, table=table3)
+        t.update(21 * 60, {agent["key"]: agent}, table=table3)
+        self.assertEqual([a["key"] for a in t.candidates(21 * 60)], [agent["key"]])
     def test_12_focus_resets_idle(self):
         t = IdleTracker(idle_minutes=15)
         code = app("codium", 400, 800)
@@ -274,13 +305,12 @@ class TestIdleDecisions(unittest.TestCase):
 
 
     def test_20_devos_ai_identity_and_protection(self):
-        # DevOS AI Core names in PROTECTED_NAMES
+        # Engines stay protected; Code Agent GUI is suggestible when idle.
         self.assertTrue(optimizer.is_protected("devos-ai"))
         self.assertTrue(optimizer.is_protected("devos-ai-core"))
-        self.assertTrue(optimizer.is_protected("devos-ai-code-agent"))
+        self.assertFalse(optimizer.is_protected("devos-ai-code-agent"))
         self.assertTrue(optimizer.is_protected("devos-chat"))
-        
-        # Test simulated /proc cmdline resolution
+
         fake_proc = tempfile.mkdtemp(prefix="fake-proc-")
         try:
             pid_dir = os.path.join(fake_proc, "9999")
@@ -289,17 +319,15 @@ class TestIdleDecisions(unittest.TestCase):
                 f.write(b"python3\x00/usr/local/share/devos/components/code-agent/agent_gui.py\x00")
             name, prot = optimizer.resolve_app_identity("python3", pid=9999, proc_root=fake_proc)
             self.assertEqual(name, "DevOS AI Code Agent")
-            self.assertTrue(prot)
-            self.assertTrue(optimizer.is_protected("python3", pid=9999, proc_root=fake_proc))
-            
-            # Simulated DevOS AI Core server.py
+            self.assertFalse(prot)
+            self.assertFalse(optimizer.is_protected("python3", pid=9999, proc_root=fake_proc))
+
             with open(os.path.join(pid_dir, "cmdline"), "wb") as f:
                 f.write(b"python3\x00/usr/local/share/devos/components/ai-core/server.py\x00")
             name, prot = optimizer.resolve_app_identity("python3", pid=9999, proc_root=fake_proc)
             self.assertEqual(name, "DevOS AI Core (Local Neural Engine & API)")
             self.assertTrue(prot)
 
-            # Simulated DevOS AI Chat assistant.py
             with open(os.path.join(pid_dir, "cmdline"), "wb") as f:
                 f.write(b"python3\x00/usr/local/share/devos/components/assistant/assistant.py\x00")
             name, prot = optimizer.resolve_app_identity("python3", pid=9999, proc_root=fake_proc)

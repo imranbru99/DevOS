@@ -3,8 +3,10 @@
 DevOS Optimizer - keeps the desktop fast with friendly, low-noise suggestions.
 
 Runs per user session as a KDE system-tray app:
-  * Idle app suggestions: GUI apps unused (unfocused) for ~30 minutes that hold
-    meaningful memory get one polite "close it?" notification.
+  * Idle app suggestions: GUI apps unused (unfocused) for ~10 minutes that hold
+    meaningful memory get a close reminder; reminders escalate at 20, 30, …
+    Apps that are actively working (high CPU, or Code Agent while AI is busy)
+    are skipped until work finishes — then the 10-minute count starts.
   * Clean up: a dialog that sizes and removes user-owned temp files, caches,
     the recycle bin, Windows-app temp folders, old downloads and old logs.
   * Low-disk warnings and an optional tip from the local DevOS AI.
@@ -42,17 +44,25 @@ MB = 1024 * 1024
 GB = 1024 * MB
 DAY = 86400
 
-# Rule: any normal GUI app unused (unfocused) for this long → suggest closing.
-DEFAULT_IDLE_MINUTES = 30
+# Rule: unused (unfocused / not working) this long → first "please stop" notify.
+DEFAULT_IDLE_MINUTES = 10
 MIN_IDLE_MINUTES = 10
 IDLE_CHOICES = (10, 15, 20, 30)
 # Memory floor for a close suggestion (was 150 MB — light apps never notified).
 MIN_RSS_BYTES = 64 * MB
 # Background Chrome/Electron often sits at 2–6% CPU while the user is away.
-# Only treat sustained/meaningful CPU as "using" the app (video, builds, games).
+# Only treat sustained/meaningful CPU as "working" (video, builds, agent jobs).
 CPU_ACTIVE_PCT = 12.0
-SUGGESTION_INTERVAL_S = 10 * 60
+SUGGESTION_INTERVAL_S = 60  # allow next app / next 10-min tier promptly
 SAMPLE_INTERVAL_S = 60
+# Process names that mean local AI / agent backend is doing real work.
+AI_WORKER_COMMS = {
+    "llama-server", "llama", "ollama", "ollama_llama_server",
+}
+# GUI apps that should stay quiet while AI_WORKER_COMMS are busy.
+AGENT_APP_NAME_HINTS = (
+    "code agent", "antigravity", "cursor", "codex", "claude", "chatgpt",
+)
 LOW_DISK_FRACTION = 0.10
 LOW_DISK_BYTES = 5 * GB
 
@@ -73,11 +83,13 @@ PROTECTED_NAMES = {
     "xdg-desktop-portal", "xdg-desktop-portal-kde", "kwalletd5", "kwalletd6",
     "ibus-daemon", "fcitx5", "at-spi-bus-launcher", "at-spi2-registryd",
     "gpg-agent", "ssh-agent", "calamares", "devos-optimizer",
-    # DevOS AI & Core Services (never suggest closing or kill)
-    "devos-ai", "devos-ai-core", "devos-ai-code-agent", "devos-code-agent",
+    # DevOS AI & Core Services (never suggest closing the engines themselves)
+    "devos-ai", "devos-ai-core",
     "devos-chat", "devos-ai-models", "devos-ai-api", "devos-dashboard",
     "devos-security", "devos-vault", "devos-session", "devos-taskman",
     "llama-server", "ollama",
+    # Note: DevOS AI Code Agent GUI is NOT listed — after its work finishes and
+    # it sits unused for idle_minutes, Optimizer may ask to close it.
 }
 
 # Parents under which a DISPLAY-bearing process counts as a separate app
@@ -933,9 +945,10 @@ def app_root(pid, table):
 
 
 DEVOS_CMD_IDENTITIES = (
-    ("agent_gui.py", "DevOS AI Code Agent", True),
-    ("code_agent.py", "DevOS AI Code Agent", True),
-    ("devos-ai-code-agent", "DevOS AI Code Agent", True),
+    # Code Agent GUI: suggestible when idle; skipped while AI workers are busy.
+    ("agent_gui.py", "DevOS AI Code Agent", False),
+    ("code_agent.py", "DevOS AI Code Agent", False),
+    ("devos-ai-code-agent", "DevOS AI Code Agent", False),
     ("assistant.py", "DevOS AI Chat", True),
     ("devos-chat", "DevOS AI Chat", True),
     ("chat_gui.py", "DevOS AI Chat", True),
@@ -964,6 +977,9 @@ DEVOS_CMD_IDENTITIES = (
     ("explorer.py", "Files", False),
     ("clipboard.py", "Clipboard", True),
     ("first_boot.py", "DevOS Setup", True),
+    ("pipeline_gui.py", "DevOS AI Pipeline", False),
+    ("devos-windows-app", "Windows App", False),
+    ("browser_launch.py", "Windows App", False),
 )
 
 
@@ -1188,8 +1204,29 @@ def collect_apps(table=None, windows=None, my_uid=None, my_pid=None):
 # Idle decision logic (pure)
 # ---------------------------------------------------------------------------
 
+def looks_like_agent_app(app):
+    name = (app.get("name") or "").lower()
+    comm = (app.get("comm") or "").lower()
+    if any(h in name for h in AGENT_APP_NAME_HINTS):
+        return True
+    if "agent" in name or "agent" in comm:
+        return True
+    return False
+
+
+def ai_worker_cpu_total(table):
+    """Sum CPU-seconds for local AI worker processes (llama/ollama/…)."""
+    total = 0.0
+    for info in table.values():
+        if info["comm"].lower() in AI_WORKER_COMMS:
+            total += info["cpu"]
+        elif "llama" in info["comm"].lower() or "ollama" in info["comm"].lower():
+            total += info["cpu"]
+    return total
+
+
 class IdleTracker(object):
-    """Tracks when each app was last active (focused or using CPU)."""
+    """Tracks when each app was last truly used (focus or real work)."""
 
     def __init__(self, idle_minutes=DEFAULT_IDLE_MINUTES, min_rss=MIN_RSS_BYTES,
                  cpu_active_pct=CPU_ACTIVE_PCT, never_ask=()):
@@ -1197,34 +1234,75 @@ class IdleTracker(object):
         self.min_rss = min_rss
         self.cpu_active_pct = cpu_active_pct
         self.never_ask = {n.lower() for n in never_ask}
-        self.state = {}  # key -> {last_active, last_cpu, last_time, app}
+        # key -> {last_active, last_cpu, last_time, cpu_pct, notified_tier, app}
+        self.state = {}
+        self._ai_last_cpu = None
+        self._ai_last_time = None
 
-    def update(self, now, apps, focused_key=None):
+    def _ai_busy(self, now, table):
+        """True when llama/ollama CPU is climbing — Code Agent / pipeline is working."""
+        if table is None:
+            return False
+        total = ai_worker_cpu_total(table)
+        prev, prev_t = self._ai_last_cpu, self._ai_last_time
+        self._ai_last_cpu, self._ai_last_time = total, now
+        if prev is None or prev_t is None:
+            return False
+        dt = now - prev_t
+        if dt <= 0:
+            return False
+        pct = (total - prev) / dt * 100.0
+        return pct > self.cpu_active_pct
+
+    def update(self, now, apps, focused_key=None, table=None):
+        ai_busy = self._ai_busy(now, table)
         for key in list(self.state):
             if key not in apps:
                 del self.state[key]
         for key, app in apps.items():
             st = self.state.get(key)
             if st is None:
-                self.state[key] = {"last_active": now, "last_cpu": app["cpu"],
-                                   "last_time": now, "cpu_pct": 0.0, "app": app}
+                self.state[key] = {
+                    "last_active": now, "last_cpu": app["cpu"],
+                    "last_time": now, "cpu_pct": 0.0, "notified_tier": 0, "app": app,
+                }
                 continue
             dt = now - st["last_time"]
             pct = (app["cpu"] - st["last_cpu"]) / dt * 100.0 if dt > 0 else 0.0
             st["cpu_pct"] = max(0.0, pct)
-            if pct > self.cpu_active_pct:
+            working = pct > self.cpu_active_pct
+            # Agent GUIs stay "working" while the local AI backend is busy,
+            # even if the GUI itself is mostly waiting on the model.
+            if ai_busy and looks_like_agent_app(app):
+                working = True
+            if working:
                 st["last_active"] = now
+                st["notified_tier"] = 0
             st.update(last_cpu=app["cpu"], last_time=now, app=app)
         if focused_key and focused_key in self.state:
             self.state[focused_key]["last_active"] = now
+            self.state[focused_key]["notified_tier"] = 0
 
     def mark_active(self, key, now):
         if key in self.state:
             self.state[key]["last_active"] = now
+            self.state[key]["notified_tier"] = 0
+
+    def mark_notified(self, key, tier):
+        if key in self.state:
+            self.state[key]["notified_tier"] = max(
+                int(self.state[key].get("notified_tier") or 0), int(tier))
 
     def idle_minutes_of(self, key, now):
         st = self.state.get(key)
         return (now - st["last_active"]) / 60.0 if st else 0.0
+
+    def idle_tier(self, idle_min):
+        """10, 20, 30… based on configured step (default 10)."""
+        step = max(MIN_IDLE_MINUTES, int(self.idle_minutes))
+        if idle_min < step:
+            return 0
+        return int(idle_min // step) * step
 
     def candidates(self, now):
         out = []
@@ -1237,10 +1315,17 @@ class IdleTracker(object):
                 continue
             if app["rss"] < self.min_rss:
                 continue
-            if self.idle_minutes_of(key, now) < self.idle_minutes:
+            idle = self.idle_minutes_of(key, now)
+            tier = self.idle_tier(idle)
+            if tier == 0:
                 continue
-            out.append(app)
-        out.sort(key=lambda a: -a["rss"])
+            if tier <= int(st.get("notified_tier") or 0):
+                continue
+            item = dict(app)
+            item["_idle_min"] = idle
+            item["_idle_tier"] = tier
+            out.append(item)
+        out.sort(key=lambda a: (-a.get("_idle_tier", 0), -a["rss"]))
         return out
 
 
@@ -1265,10 +1350,18 @@ class SuggestionLimiter(object):
 
 
 def suggestion_text(app, idle_min):
+    mins = max(1, int(idle_min))
+    mem = human_size(app["rss"])
+    name = app["name"]
+    if mins >= 20:
+        return (
+            "%d minutes have passed and you still have not used %s (%s memory). "
+            "Please stop this application if you will not use it."
+        ) % (mins, name, mem)
     return (
-        "%s has been open and unused for %d min and is using %s of memory. "
-        "Finished with it? You can close it or keep it running."
-    ) % (app["name"], int(idle_min), human_size(app["rss"]))
+        "%s has been open and unused for %d min (%s memory). "
+        "Please stop the application if you will not use it."
+    ) % (name, mins, mem)
 
 
 def focused_app_key(apps, focused_pid, table):
@@ -2042,18 +2135,21 @@ def run_gui(open_cleanup=False):
                 return
             now = time.time()
             self.last_apps = apps
-            self.tracker.update(now, apps, focused)
+            self.tracker.update(now, apps, focused, table=table)
             if not self.limiter.can_suggest(now):
                 return
             cands = self.tracker.candidates(now)
             if not cands:
                 return
             app = cands[0]
+            idle_min = app.get("_idle_min") or self.tracker.idle_minutes_of(app["key"], now)
+            tier = app.get("_idle_tier") or self.tracker.idle_tier(idle_min)
             self.limiter.record(now)
-            text = suggestion_text(app, self.tracker.idle_minutes_of(app["key"], now))
+            self.tracker.mark_notified(app["key"], tier)
+            text = suggestion_text(app, idle_min)
             # Tray balloon + action toast — users often miss a frameless toast alone.
             self.notify_plain(text)
-            self.show_toast("Free up memory", text, [
+            self.show_toast("Please stop unused app", text, [
                 ("Close", lambda a=app: self.do_close(a)),
                 ("Keep", lambda a=app: self.tracker.mark_active(a["key"], time.time())),
                 ("Don't ask for this app", lambda a=app: self.never_ask(a)),
