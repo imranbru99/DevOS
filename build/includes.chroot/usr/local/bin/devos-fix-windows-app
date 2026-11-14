@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Fix Start-menu Windows App so it opens Microsoft Cloud PC (app window), not a Chrome tab.
+set -euo pipefail
+
+BRANCH="${1:-cursor/fix-windows-app-cloud-pc-launch-6cbe}"
+RAW="https://raw.githubusercontent.com/imranbru99/DevOS/${BRANCH}"
+BASE=/usr/local/share/devos/components/cloudpc
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+echo "== Update Windows App launcher (${BRANCH}) =="
+curl -fsSL "${RAW}/build/includes.chroot/usr/local/bin/devos-windows-app" -o "${TMP}/devos-windows-app"
+curl -fsSL "${RAW}/build/includes.chroot/usr/local/share/devos/components/cloudpc/linux_client.py" -o "${TMP}/linux_client.py"
+curl -fsSL "${RAW}/build/includes.chroot/usr/local/share/devos/components/cloudpc/browser_launch.py" -o "${TMP}/browser_launch.py"
+
+sudo install -m 0755 "${TMP}/devos-windows-app" /usr/local/bin/devos-windows-app
+sudo mkdir -p "$BASE"
+sudo install -m 0644 "${TMP}/linux_client.py" "${BASE}/linux_client.py"
+sudo install -m 0644 "${TMP}/browser_launch.py" "${BASE}/browser_launch.py"
+
+# Ensure a visible menu entry points at the fixed launcher.
+mkdir -p "${HOME}/.local/share/applications"
+cat > "${HOME}/.local/share/applications/devos-web-winapp.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Windows App
+GenericName=Microsoft Cloud PC
+Comment=Windows 365, Azure Virtual Desktop and remote apps
+Exec=/usr/local/bin/devos-windows-app
+Icon=devos-web-winapp
+StartupWMClass=chrome-windows.cloud.microsoft__-Default
+Terminal=false
+Categories=Network;Office;
+Keywords=windows;cloud;pc;rdp;azure;virtual desktop;365;
+X-DevOS-WebApp=true
+EOF
+update-desktop-database "${HOME}/.local/share/applications" 2>/dev/null || true
+
+echo
+echo "Done. Click Windows App again (Microsoft Cloud PC)."
+echo "First open may install the PWA — keep Chrome online ~30s, then reopen if asked."
+echo "Verify:  ps -ef | grep -E 'app-id=|windows.cloud.microsoft' | grep -v grep"

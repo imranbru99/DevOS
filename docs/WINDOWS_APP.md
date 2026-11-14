@@ -32,8 +32,13 @@ Microsoft reference: https://learn.microsoft.com/en-us/windows-app/display-setti
 Remmina is an alternative for an administrator-provided compatible RDP connection;
 it is not assumed to be a drop-in replacement for a Windows 365 web sign-in.
 
-The normal shortcut opens only the Microsoft web app. Run
-`devos-windows-app --reminder` for the optional reminder companion. Opening a
+The normal Start-menu **Windows App** shortcut opens Microsoft's web Windows App
+as a real app window (Chrome/Edge `--app-id` PWA). That keeps Cloud PC login and
+remote apps inside Windows App. It does **not** use `xdg-open` (plain Chrome tab)
+and does **not** prompt for the unofficial Flatpak client. Use
+`devos-windows-app --install-client` only if you explicitly want that Flatpak.
+
+Run `devos-windows-app --reminder` for the optional reminder companion. Opening a
 login page does not start its countdown; start reminders after connecting.
 
 Taskbar identity: Chromium URL app windows on Wayland use

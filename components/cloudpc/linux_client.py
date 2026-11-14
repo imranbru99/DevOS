@@ -44,55 +44,38 @@ def install(flatpak):
                         "--bundle", str(download)], check=True)
 
 
-def open_browser():
-    return subprocess.run(["xdg-open", browser_launch.URL]).returncode
+def open_microsoft_windows_app():
+    """Open Microsoft's Windows App (Cloud PC) as an app window, not a Chrome tab."""
+    try:
+        browser_launch.open_isolated()
+        return 0
+    except OSError as exc:
+        print(f"Windows App could not start: {exc}", file=sys.stderr)
+        browser_launch._notify(str(exc))
+        # Last resort only — Cloud PC may open in a normal tab.
+        return subprocess.run(["xdg-open", browser_launch.URL]).returncode
 
 
 def main():
-    explicit = sys.argv[1:] == ["--install-client"]
+    explicit = sys.argv[1:] in (["--install-client"], ["--native-client"])
     flatpak = shutil.which("flatpak")
+    # Official path for the Start-menu "Windows App" entry is always the
+    # Microsoft web client (PWA). Flatpak is opt-in via --install-client.
+    if not explicit:
+        return open_microsoft_windows_app()
     if platform.machine() != "x86_64" or not os.environ.get("WAYLAND_DISPLAY") or not flatpak:
-        if explicit:
-            print("This Windows App package requires x86-64, Flatpak, and a Wayland session.", file=sys.stderr)
-            return 1
-        return open_browser()
+        print("This Windows App package requires x86-64, Flatpak, and a Wayland session.", file=sys.stderr)
+        return 1
     installed = subprocess.run([flatpak, "info", "--user", APP_ID],
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if installed.returncode != 0:
-        if not explicit:
-            dialog = shutil.which("kdialog")
-            if not dialog or not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
-                return open_browser()
-            result = subprocess.run([
-                dialog, "--title", "Windows App", "--yesno",
-                "Install the unofficial Windows App for Linux client from GitHub? "
-                "The app and its Flatpak runtime will be installed for your account. "
-                "This release uses a runtime that no longer receives security updates. "
-                "Choose Open browser to use Microsoft's web client.",
-                "--yes-label", "Install client", "--no-label", "Open browser",
-            ])
-            if result.returncode != 0:
-                return open_browser()
         try:
             install(flatpak)
         except (OSError, ValueError, subprocess.CalledProcessError) as exc:
             print(f"Windows App client installation failed: {exc}", file=sys.stderr)
-            if not explicit:
-                browser_launch._notify(
-                    "The Linux client could not be installed. Opening the browser instead.")
-                return open_browser()
             return 1
-    if explicit:
         return 0
-    try:
-        status = subprocess.run([flatpak, "run", "--user", APP_ID]).returncode
-        if status == 0:
-            return 0
-        print(f"Windows App client exited with status {status}.", file=sys.stderr)
-    except OSError as exc:
-        print(f"Windows App client could not start: {exc}", file=sys.stderr)
-    browser_launch._notify("The Linux client could not run. Opening the browser instead.")
-    return open_browser()
+    return 0
 
 
 if __name__ == "__main__":

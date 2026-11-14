@@ -7,13 +7,14 @@ elif [ -f "$HOME/project/dev-os/components/cloudpc/cloudpc.py" ]; then
 else
     component=/usr/local/share/devos/components/cloudpc/cloudpc.py
 fi
-# The normal shortcut opens only the actual Windows App browser window.
-# The local reminder is optional and never claims to track the remote session.
+# Normal menu click → Microsoft Windows App (Cloud PC web PWA / app window).
+# Never default to xdg-open or the unofficial Flatpak — that opens a plain
+# Chrome tab and Cloud PC login / remote apps fail to stay in Windows App.
 if [ "${1:-}" = "--reminder" ]; then
     shift
     exec -a "$(basename "$0")" /usr/bin/python3 "$component" "$@"
 fi
-if [ "$#" -eq 0 ] || [ "${1:-}" = "--install-client" ]; then
+if [ "${1:-}" = "--install-client" ] || [ "${1:-}" = "--native-client" ]; then
     client="$(dirname "$component")/linux_client.py"
     if [ -f "$client" ]; then
         exec -a "$(basename "$0")" /usr/bin/python3 "$client" "$@"
