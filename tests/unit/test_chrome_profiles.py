@@ -45,6 +45,13 @@ class TestChromeProfiles(unittest.TestCase):
         self.assertEqual(chrome_profiles.slugify("Profile 1"), "profile-1")
         self.assertEqual(chrome_profiles.slugify("Mirza"), "mirza")
 
+    def test_window_task_class_unique_per_window(self):
+        a = chrome_profiles.window_task_class("work", 0x1A2B)
+        b = chrome_profiles.window_task_class("work", 0x3C4D)
+        self.assertTrue(a.startswith("chrome-work-w"))
+        self.assertTrue(b.startswith("chrome-work-w"))
+        self.assertNotEqual(a, b)
+
     def test_generate_badged_icon(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             icon_48 = os.path.join(tmpdir, "icon48.png")
@@ -54,6 +61,26 @@ class TestChromeProfiles(unittest.TestCase):
             self.assertTrue(os.path.isfile(icon_128))
             self.assertGreater(os.path.getsize(icon_48), 500)
             self.assertGreater(os.path.getsize(icon_128), 1000)
+
+    def test_letter_badge_when_no_photo(self):
+        self.assertEqual(chrome_profiles._profile_initial("Work"), "W")
+        self.assertEqual(chrome_profiles._profile_initial("guest"), "G")
+        self.assertEqual(chrome_profiles._profile_initial(""), "C")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # No avatar_path → must still write a real PNG (letter badge, not blank).
+            out = os.path.join(tmpdir, "work48.png")
+            chrome_profiles.generate_badged_icon("Work", out, avatar_path=None)
+            self.assertTrue(os.path.isfile(out))
+            self.assertGreater(os.path.getsize(out), 400)
+            # Fake gray silhouette must be rejected → letter badge instead.
+            from PIL import Image as PILImage
+
+            fake = os.path.join(tmpdir, "avatar_default.png")
+            PILImage.new("RGB", (64, 64), (120, 120, 120)).save(fake)
+            out2 = os.path.join(tmpdir, "guest48.png")
+            chrome_profiles.generate_badged_icon("Guest", out2, avatar_path=fake)
+            self.assertTrue(os.path.isfile(out2))
+            self.assertGreater(os.path.getsize(out2), 400)
 
     def test_sync_all_profiles(self):
         with tempfile.TemporaryDirectory() as tmp_home:
@@ -116,34 +143,48 @@ class TestChromeProfiles(unittest.TestCase):
                     "plugin=org.kde.plasma.icontasks\n"
                     "\n"
                     "[Containments][3][Applets][6][Configuration][General]\n"
-                    "launchers=applications:devos-search.desktop,applications:google-chrome.desktop\n"
+                    "launchers=applications:devos-search.desktop,applications:devos-browser.desktop\n"
                     "groupingStrategy=1\n"
                     "separateLaunchers=false\n"
                 )
-            # Open profiles → hide Chrome pin, show avatar pins.
-            ok = chrome_profiles.sync_plasma_profile_launchers(tmp_home, ["work", "mirza"])
+            # Open profiles → hide DevOS Browser pin, show avatar pins (Guest included).
+            open(os.path.join(apps, "chrome-guest.desktop"), "w", encoding="utf-8").write(
+                "[Desktop Entry]\n"
+            )
+            ok = chrome_profiles.sync_plasma_profile_launchers(tmp_home, ["work", "mirza", "guest"])
             self.assertTrue(ok)
             text = open(appletsrc, encoding="utf-8").read()
             self.assertIn("applications:chrome-work.desktop", text)
             self.assertIn("applications:chrome-mirza.desktop", text)
-            self.assertNotIn("applications:google-chrome.desktop", text)
+            self.assertIn("applications:chrome-guest.desktop", text)
+            self.assertNotIn("applications:devos-browser.desktop", text)
             self.assertIn("separateLaunchers=true", text)
+            self.assertIn("groupingStrategy=0", text)
+            self.assertIn("groupPopups=false", text)
             self.assertIn("applications:devos-search.desktop", text)
-            # Profile literally named "Default" must still get its own pin.
-            open(os.path.join(apps, "chrome-default.desktop"), "w", encoding="utf-8").write(
+            # Per-window desktops take priority (Plasma paints these icons, not gray person).
+            open(os.path.join(apps, "chrome-work-w1a2.desktop"), "w", encoding="utf-8").write(
                 "[Desktop Entry]\n"
             )
-            ok = chrome_profiles.sync_plasma_profile_launchers(tmp_home, ["default", "work"])
+            open(os.path.join(apps, "chrome-work-w3b4.desktop"), "w", encoding="utf-8").write(
+                "[Desktop Entry]\n"
+            )
+            ok = chrome_profiles.sync_plasma_profile_launchers(
+                tmp_home,
+                ["work"],
+                window_desktops=["chrome-work-w1a2.desktop", "chrome-work-w3b4.desktop"],
+            )
             self.assertTrue(ok)
             text = open(appletsrc, encoding="utf-8").read()
-            self.assertIn("applications:chrome-default.desktop", text)
-            self.assertIn("applications:chrome-work.desktop", text)
-            # All closed → restore Chrome pin.
+            self.assertIn("applications:chrome-work-w1a2.desktop", text)
+            self.assertIn("applications:chrome-work-w3b4.desktop", text)
+            self.assertNotIn("applications:chrome-work.desktop,", text + ",")
+            # All closed → restore the idle browser pin (DevOS Browser on this panel).
             ok = chrome_profiles.sync_plasma_profile_launchers(tmp_home, [])
             self.assertTrue(ok)
             text = open(appletsrc, encoding="utf-8").read()
-            self.assertIn("applications:google-chrome.desktop", text)
-            self.assertNotIn("chrome-work.desktop", text)
+            self.assertIn("applications:devos-browser.desktop", text)
+            self.assertNotIn("chrome-work-w1a2.desktop", text)
 
     def test_class_for_profile_uses_display_name(self):
         with tempfile.TemporaryDirectory() as tmp_home:
@@ -182,6 +223,13 @@ class TestChromeProfiles(unittest.TestCase):
         profiles = {"Default": "Work", "Profile 1": "Mirza", "Profile 4": "Blog"}
         w_guest = {"id": 1, "title": "Welcome - Google Chrome (Guest)", "wm_class": "Google-chrome"}
         self.assertEqual(chrome_profiles.detect_window_profile(w_guest, profiles), "Guest")
+
+        w_new_guest = {
+            "id": 55,
+            "title": "You're browsing as a Guest",
+            "wm_class": "google-chrome.Google-chrome",
+        }
+        self.assertEqual(chrome_profiles.detect_window_profile(w_new_guest, profiles), "Guest")
 
         w_tag = {"id": 2, "title": "[Mirza] Project Dashboard - Google Chrome", "wm_class": "Google-chrome"}
         self.assertEqual(chrome_profiles.detect_window_profile(w_tag, profiles), "Mirza")

@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+# Force Windows-like Chrome taskbar: each open window gets its own icon (never grouped).
+set -euo pipefail
+
+BRANCH="${1:-cursor/fix-chrome-profile-taskbar-icons-6cbe}"
+RAW="https://raw.githubusercontent.com/imranbru99/DevOS/${BRANCH}"
+DEST=/usr/local/share/devos/components/browser/chrome_profiles.py
+TMP="$(mktemp)"
+CFG="${XDG_CONFIG_HOME:-$HOME/.config}/plasma-org.kde.plasma.desktop-appletsrc"
+
+echo "== Update Chrome profile taskbar manager (${BRANCH}) =="
+curl -fsSL "${RAW}/components/browser/chrome_profiles.py" -o "$TMP" \
+  || curl -fsSL "${RAW}/build/includes.chroot/usr/local/share/devos/components/browser/chrome_profiles.py" -o "$TMP"
+# Must contain per-window class helper + silhouette rejection (letter badge)
+grep -q 'window_task_class' "$TMP"
+grep -q 'reject Chrome default circle+person silhouettes' "$TMP" \
+  || grep -q 'colored circle + light person silhouette' "$TMP"
+sudo install -m 0644 "$TMP" "$DEST"
+rm -f "$TMP"
+
+# Drop stale badged icons so letter badges regenerate for no-photo profiles
+rm -f "$HOME/.local/share/icons/hicolor/48x48/apps"/chrome-*.png \
+      "$HOME/.local/share/icons/hicolor/128x128/apps"/chrome-*.png 2>/dev/null || true
+
+export DISPLAY="${DISPLAY:-:0}"
+export DEVOS_FORCE_PLASMA_RELOAD=1
+
+echo "== Sync + force Do Not Group (groupingStrategy=0) =="
+/usr/bin/python3 "$DEST" sync || true
+
+/usr/bin/python3 - <<'PY'
+import re, os
+from pathlib import Path
+cfg = Path(os.path.expanduser("~/.config/plasma-org.kde.plasma.desktop-appletsrc"))
+if not cfg.is_file():
+    raise SystemExit(0)
+text = cfg.read_text(encoding="utf-8", errors="replace")
+parts = re.split(r"(?m)(?=^\[)", text)
+out = []
+changed = False
+tasks_keys = set()
+for part in parts:
+    header = part.split("\n", 1)[0].strip()
+    m = re.match(r"^\[Containments\]\[(\d+)\]\[Applets\]\[(\d+)\]$", header)
+    if m:
+        body = part.split("\n", 1)[1] if "\n" in part else ""
+        if re.search(r"(?m)^plugin=org\.kde\.plasma\.(icontasks|taskmanager)\s*$", body):
+            tasks_keys.add(f"{m.group(1)}:{m.group(2)}")
+    out.append(part)
+out2 = []
+for part in out:
+    header = part.split("\n", 1)[0].strip()
+    gen = re.match(
+        r"^\[Containments\]\[(\d+)\]\[Applets\]\[(\d+)\]\[Configuration\]\[General\]$",
+        header,
+    )
+    if gen and f"{gen.group(1)}:{gen.group(2)}" in tasks_keys:
+        keys = {
+            "groupingStrategy": "0",
+            "groupPopups": "false",
+            "onlyGroupWhenFull": "false",
+            "separateLaunchers": "true",
+            "hideActivatedLaunchers": "false",
+            "launchInPlace": "true",
+        }
+        seen = set()
+        rest = part.split("\n", 1)[1] if "\n" in part else ""
+        lines = []
+        for line in rest.splitlines(keepends=True):
+            k = line.split("=", 1)[0].strip() if "=" in line and not line.startswith("[") else None
+            if k in keys:
+                lines.append(f"{k}={keys[k]}\n")
+                seen.add(k)
+                changed = True
+            else:
+                lines.append(line)
+        for k, v in keys.items():
+            if k not in seen:
+                lines.append(f"{k}={v}\n")
+                changed = True
+        part = header + "\n" + "".join(lines)
+        if not part.endswith("\n"):
+            part += "\n"
+    out2.append(part)
+cfg.write_text("".join(out2), encoding="utf-8")
+print("Wrote groupingStrategy=0 groupPopups=false separateLaunchers=true")
+PY
+
+# Live qdbus push (if plasmashell is up)
+qdbus org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript "
+var panels = panels();
+for (var i = 0; i < panels.length; i++) {
+  var widgets = panels[i].widgets();
+  for (var j = 0; j < widgets.length; j++) {
+    if (widgets[j].type !== 'org.kde.plasma.icontasks' && widgets[j].type !== 'org.kde.plasma.taskmanager') continue;
+    widgets[j].currentConfigGroup = ['General'];
+    widgets[j].writeConfig('groupingStrategy', '0');
+    widgets[j].writeConfig('groupPopups', 'false');
+    widgets[j].writeConfig('separateLaunchers', 'true');
+    widgets[j].reloadConfig();
+  }
+}
+" >/dev/null 2>&1 || true
+
+systemctl --user enable --now devos-browser-profiles.service 2>/dev/null || true
+systemctl --user restart devos-browser-profiles.service 2>/dev/null \
+  || (pkill -f 'chrome_profiles.py watch' 2>/dev/null || true;
+      nohup /usr/local/bin/devos-browser-profiles-daemon >/dev/null 2>&1 &)
+
+echo "== Restart plasmashell (required to clear old grouped tiles) =="
+systemctl --user reset-failed plasma-plasmashell.service 2>/dev/null || true
+systemctl --user restart plasma-plasmashell.service 2>/dev/null \
+  || (kquitapp6 plasmashell 2>/dev/null || kquitapp5 plasmashell 2>/dev/null || true; sleep 2; plasmashell --replace >/dev/null 2>&1 &)
+sleep 4
+/usr/bin/python3 "$DEST" apply || true
+
+echo
+echo "== Chrome windows (each should have chrome-<profile>-wXXXX class) =="
+wmctrl -lx 2>/dev/null | grep -iE 'chrome|google-chrome' || echo "(open Chrome windows, then: python3 $DEST apply)"
+echo
+echo "== Taskbar pins (should list chrome-*-w*.desktop, not only google-chrome) =="
+grep -E 'launchers=|groupingStrategy=|groupPopups=' "$CFG" 2>/dev/null | head -30 || true
+echo
+echo "== Badged icon files =="
+ls -1 "$HOME/.local/share/icons/hicolor/48x48/apps"/chrome-*-w*.png 2>/dev/null | head -10 \
+  || echo "(none yet — reopen Chrome after this script)"
+echo
+echo "IMPORTANT: fully quit Chrome (all windows), run this script again if needed,"
+echo "then reopen Chrome. Tiles should show colored letter badges — not gray person."
