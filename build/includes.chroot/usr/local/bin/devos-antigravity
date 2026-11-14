@@ -8,6 +8,9 @@ export DONT_PROMPT_WSL_INSTALL=1
 export GEMINI_APP_DATA_DIR="antigravity"
 # Bypass host GNOME Keyring so logins stay in this profile only.
 export SSH_CLIENT="127.0.0.1 0 0"
+# Keep the OS keyring. Forcing the basic password store makes Antigravity
+# show the KDE keyring warning. devos-kwallet-compat is that keyring, and
+# this profile stays separate via its user-data dir and GEMINI_APP_DATA_DIR.
 
 binary=/opt/antigravity/antigravity
 if [[ ! -x "$binary" ]]; then
@@ -29,7 +32,6 @@ flags=(
     --ozone-platform=x11
     --enable-gpu-rasterization
     --enable-zero-copy
-    --password-store=basic
     --user-data-dir="${DATA_DIR}"
     --extensions-dir="${EXT_DIR}"
     --class=antigravity
