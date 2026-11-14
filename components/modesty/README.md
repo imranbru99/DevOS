@@ -23,8 +23,9 @@ behind its HTML content, preserving text and controls. No ancestor receives
 ## Limits
 
 Age, gender, body boundaries, and face-to-body matching are **estimates**, not
-verified identity or age. They can be wrong or miss a person. A person without
-a visible, confidently matched adult face remains clear in women mode.
+verified identity or age. They can be wrong or miss a person. From 1.2.1, women
+mode also blurs **high-skin body crops with no face** (midriff / torso image
+search). Medical diagrams, icons, and drawings without a person mask stay clear.
 
 Media remains visible while being checked or when detection fails. This is
 intentional: there is no whole-image or whole-container fallback. Cross-origin
@@ -42,8 +43,8 @@ sudo devos-modesty status
 sudo devos-modesty disable
 ```
 
-Re-enabling repacks version 1.2.0 and refreshes browser policy. Restart or refresh
-browser policy to load the new extension. A signing key is created per device in
+Re-enabling repacks version 1.2.1 and refreshes browser policy. Fully quit and
+reopen Chrome so the new extension loads. A signing key is created per device in
 `/var/lib/devos-modesty/key.pem`, preserved across disable/re-enable. An existing
 local legacy key is reused so its extension ID does not change.
 

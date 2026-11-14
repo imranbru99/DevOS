@@ -25,6 +25,9 @@
     // Body skin share that, with an adult woman face in-frame, selects the mask
     // even when nose/eye anchors failed to match (common on real photo crops).
     bodySkinRatio: 0.12,
+    // High visible-skin share on a body mask with NO usable face — midriff,
+    // lingerie, and torso crops in image search. Lean to blur for modesty.
+    bodySkinOnlyRatio: 0.20,
   });
 
   function clamp01(x, fallback) {
@@ -99,19 +102,28 @@
       if (s.mode === 'people') return true;
       // Preferred path: body matched to an adult woman face.
       if (isAdultWomanFace(faces[person.faceIndex], s)) return true;
+      const skin = Number(person.skinRatio) || 0;
       // Real photo crops often lose nose/eye anchors. If this body shows
       // substantial skin and an adult woman face is in the same image above
       // the torso, still blur that body (not the whole image).
-      const skin = Number(person.skinRatio) || 0;
-      if (skin < s.bodySkinRatio || adultWomen.length === 0) return false;
-      return adultWomen.some((row) => {
-        const f = row.face;
-        const faceMidY = f.y + f.h * 0.5;
-        // Face should sit in the upper portion of a standing/sitting figure.
-        return faceMidY <= (Number(person.torsoY) || Infinity) || faceMidY < (result.height || 1) * 0.55;
-      });
+      if (skin >= s.bodySkinRatio && adultWomen.length > 0) {
+        const matched = adultWomen.some((row) => {
+          const f = row.face;
+          const faceMidY = f.y + f.h * 0.5;
+          // Face should sit in the upper portion of a standing/sitting figure.
+          return faceMidY <= (Number(person.torsoY) || Infinity) || faceMidY < (result.height || 1) * 0.55;
+        });
+        if (matched) return true;
+      }
+      // Image-search midriff / torso / lingerie crops often have no face at
+      // all. High visible-skin body masks still get blurred in women mode.
+      if (skin >= s.bodySkinOnlyRatio) return true;
+      return false;
     });
-    return { blur: regions.length > 0, reason: regions.length ? (s.mode === 'people' ? 'person' : 'adult-woman') : 'no-target-body', regions };
+    const reason = regions.length
+      ? (s.mode === 'people' ? 'person' : 'adult-woman')
+      : 'no-target-body';
+    return { blur: regions.length > 0, reason, regions };
   }
 
   function matchFace(pose, faces, used) {

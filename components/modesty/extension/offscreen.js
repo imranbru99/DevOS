@@ -232,7 +232,15 @@ function detect(dataUrl) {
       segmentationThreshold: 0.60, maxDetections: 8, scoreThreshold: 0.40, minKeypointScore: 0.28 });
     const used = new Set();
     const people = segments
-      .filter((segment) => hasAnatomicalBody(segment.pose) && segmentHasSkin(img, segment))
+      .filter((segment) => {
+        const skin = segmentSkinRatio(img, segment);
+        if (skin < 0.04) return false;
+        // Full / partial anatomical pose, or a skin-heavy torso crop (midriff).
+        if (hasAnatomicalBody(segment.pose)) return true;
+        if (skin < 0.18) return false;
+        const kps = (segment.pose.keypoints || []).filter((k) => k.score >= 0.22);
+        return kps.length >= 2;
+      })
       .map((segment) => {
         let faceIndex = ModestyRules.matchFace(segment.pose, faces, used);
         // Geometric fallback when nose/eyes are weak but a face sits above the torso.

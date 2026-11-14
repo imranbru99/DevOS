@@ -25,14 +25,16 @@ class ModestyPackageTests(unittest.TestCase):
             first = modesty.enable(temp, mode="women")
             key = root / modesty.DEVICE_KEY
             self.assertEqual(key.stat().st_mode & 0o777, 0o600)
-            self.assertEqual(first["version"], "1.2.0")
+            self.assertEqual(first["version"], "1.2.1")
             parsed = crx3.parse_crx3((root / modesty.INSTALL_DIR / modesty.CRX_NAME).read_bytes())
             with zipfile.ZipFile(io.BytesIO(parsed["zip"])) as archive:
                 names = archive.namelist()
                 self.assertIn("models/body-pix/model.json", names)
                 self.assertIn("models/body-pix/group1-shard1of1.bin", names)
                 self.assertIn("vendor/body-pix/body-pix.js", names)
-                self.assertEqual(json.loads(archive.read("manifest.json"))["version"], "1.2.0")
+                self.assertEqual(json.loads(archive.read("manifest.json"))["version"], "1.2.1")
+                rules = archive.read("rules.js").decode("utf-8")
+                self.assertIn("bodySkinOnlyRatio", rules)
             modesty.disable(temp)
             self.assertTrue(key.exists())
             second = modesty.enable(temp, mode="women")
@@ -40,7 +42,8 @@ class ModestyPackageTests(unittest.TestCase):
 
     def test_rules_face_score_threshold_rejects_inanimate_objects(self):
         rules_js = (ROOT / "components/modesty/extension/rules.js").read_text(encoding="utf-8")
-        self.assertIn("faceScore: 0.55", rules_js)
+        self.assertIn("faceScore: 0.50", rules_js)
+        self.assertIn("bodySkinOnlyRatio: 0.20", rules_js)
 
     def test_svg_filter_uses_object_bounding_box_and_xlink_for_regional_blur(self):
         content_js = (ROOT / "components/modesty/extension/content.js").read_text(encoding="utf-8")

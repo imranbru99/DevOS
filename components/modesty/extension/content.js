@@ -512,6 +512,24 @@
     }
   });
 
+  // Google Images / lazy grids often swap src after first paint — rescan on
+  // scroll so newly revealed thumbnails are checked without a full reload.
+  let scrollScanTimer = null;
+  function scheduleScrollScan() {
+    if (!settings.enabled || scrollScanTimer) return;
+    scrollScanTimer = setTimeout(() => {
+      scrollScanTimer = null;
+      if (!settings.enabled) return;
+      document.querySelectorAll('img').forEach((img) => {
+        if (!img.complete || !img.naturalWidth) return;
+        const st = info.get(img);
+        const key = img.currentSrc || img.src || '';
+        if (!st || st.key !== key || (!st.result && !st.pending)) processImg(img);
+      });
+    }, 400);
+  }
+  window.addEventListener('scroll', scheduleScrollScan, { passive: true, capture: true });
+
   // ------------------------------------------------------------ start
   observer.observe(document.documentElement || document, OBSERVE_OPTS);
   loadSettings().then(() => {
@@ -520,5 +538,8 @@
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', () => scanTree(document.documentElement), { once: true });
     }
+    // Second pass after Google Images finishes hydrating thumbnails.
+    setTimeout(() => { if (settings.enabled) scanTree(document.documentElement); }, 1500);
+    setTimeout(() => { if (settings.enabled) scanTree(document.documentElement); }, 4000);
   });
 })();
