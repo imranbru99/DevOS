@@ -9,7 +9,8 @@ captureMode=0
 captureOnClick=false
 includePointer=false
 includeDecorations=true
-quitAfterSaveCopyExport=false
+# After Copy or Save, close Spectacle instead of opening/keeping the editor window.
+quitAfterSaveCopyExport=true
 
 [Save]
 saveFilenameFormat=Screenshot_%Y%M%D_%H%m%S
