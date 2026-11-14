@@ -1,0 +1,414 @@
+#!/usr/bin/env python3
+"""Silent KWallet for DevOS.
+
+The real KWallet stays disabled. Its unlock window blocks the whole screen,
+which is why kwalletrc sets Enabled=false and kded does not autoload it.
+
+Electron 42 (Antigravity, Cursor, VS Code, Chrome) still calls
+org.kde.KWallet.isEnabled on the KWallet 4 path /modules/kwalletd. kwalletd6
+does not export that path, and with the wallet disabled nothing answers at
+all. safeStorage then reports encryption unavailable and the app shows:
+
+    You're running in a KDE environment but the OS keyring is not available
+    for encryption. Ensure you have kwallet running.
+
+This process owns org.kde.kwalletd, org.kde.kwalletd5 and org.kde.kwalletd6
+and exports the interface on /modules/kwalletd, /modules/kwalletd5 and
+/modules/kwalletd6. It stores the OSCrypt key in a mode 0600 file. It never
+opens a window and never asks for a password.
+"""
+
+import json
+import os
+import signal
+import sys
+import time
+from pathlib import Path
+
+PASSWORD = 1  # KWallet::Password, Chromium Type::kPassword
+HANDLE = 1
+WALLET_NAME = "kdewallet"
+NAMES = (
+    "org.kde.kwalletd",
+    "org.kde.kwalletd5",
+    "org.kde.kwalletd6",
+)
+PATHS = (
+    "/modules/kwalletd",
+    "/modules/kwalletd5",
+    "/modules/kwalletd6",
+)
+PRIMARY = NAMES[0]
+MAX_VALUE_BYTES = 64 * 1024
+
+INTERFACE_XML = """
+<node>
+  <interface name="org.kde.KWallet">
+    <method name="isEnabled">
+      <arg type="b" direction="out"/>
+    </method>
+    <method name="networkWallet">
+      <arg type="s" direction="out"/>
+    </method>
+    <method name="open">
+      <arg type="s" name="wallet" direction="in"/>
+      <arg type="x" name="wId" direction="in"/>
+      <arg type="s" name="appid" direction="in"/>
+      <arg type="i" direction="out"/>
+    </method>
+    <method name="hasEntry">
+      <arg type="i" name="handle" direction="in"/>
+      <arg type="s" name="folder" direction="in"/>
+      <arg type="s" name="key" direction="in"/>
+      <arg type="s" name="appid" direction="in"/>
+      <arg type="b" direction="out"/>
+    </method>
+    <method name="entryType">
+      <arg type="i" name="handle" direction="in"/>
+      <arg type="s" name="folder" direction="in"/>
+      <arg type="s" name="key" direction="in"/>
+      <arg type="s" name="appid" direction="in"/>
+      <arg type="i" direction="out"/>
+    </method>
+    <method name="removeEntry">
+      <arg type="i" name="handle" direction="in"/>
+      <arg type="s" name="folder" direction="in"/>
+      <arg type="s" name="key" direction="in"/>
+      <arg type="s" name="appid" direction="in"/>
+      <arg type="i" direction="out"/>
+    </method>
+    <method name="hasFolder">
+      <arg type="i" name="handle" direction="in"/>
+      <arg type="s" name="folder" direction="in"/>
+      <arg type="s" name="appid" direction="in"/>
+      <arg type="b" direction="out"/>
+    </method>
+    <method name="createFolder">
+      <arg type="i" name="handle" direction="in"/>
+      <arg type="s" name="folder" direction="in"/>
+      <arg type="s" name="appid" direction="in"/>
+      <arg type="b" direction="out"/>
+    </method>
+    <method name="writePassword">
+      <arg type="i" name="handle" direction="in"/>
+      <arg type="s" name="folder" direction="in"/>
+      <arg type="s" name="key" direction="in"/>
+      <arg type="s" name="password" direction="in"/>
+      <arg type="s" name="appid" direction="in"/>
+      <arg type="i" direction="out"/>
+    </method>
+    <method name="readPassword">
+      <arg type="i" name="handle" direction="in"/>
+      <arg type="s" name="folder" direction="in"/>
+      <arg type="s" name="key" direction="in"/>
+      <arg type="s" name="appid" direction="in"/>
+      <arg type="s" direction="out"/>
+    </method>
+    <method name="close">
+      <arg type="i" name="handle" direction="in"/>
+      <arg type="b" name="force" direction="in"/>
+      <arg type="s" name="appid" direction="in"/>
+      <arg type="i" direction="out"/>
+    </method>
+  </interface>
+</node>
+"""
+
+
+def store_path():
+    override = os.environ.get("DEVOS_KWALLET_STORE")
+    if override:
+        return Path(override)
+    data_home = os.environ.get("XDG_DATA_HOME")
+    if not data_home:
+        data_home = str(Path.home() / ".local" / "share")
+    return Path(data_home) / "devos" / "kwallet-compat.json"
+
+
+def lock_path():
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if runtime:
+        return Path(runtime) / "devos-kwallet-compat.lock"
+    return Path.home() / ".cache" / "devos" / "kwallet-compat.lock"
+
+
+class WalletStore:
+    """Tiny password map with the KWallet calls Chromium OSCrypt makes."""
+
+    def __init__(self, path):
+        self.path = Path(path)
+        self.data = {"wallets": {}}
+        self._load()
+
+    def _load(self):
+        try:
+            raw = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        if isinstance(raw, dict) and isinstance(raw.get("wallets"), dict):
+            self.data = raw
+
+    def _save(self):
+        self.path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+        os.chmod(self.path.parent, 0o700)
+        payload = (json.dumps(self.data, indent=2, sort_keys=True) + "\n").encode("utf-8")
+        tmp = self.path.with_name(self.path.name + ".tmp")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            os.write(fd, payload)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, self.path)
+        os.chmod(self.path, 0o600)
+
+    def _wallet(self, name):
+        wallets = self.data.setdefault("wallets", {})
+        wallet = wallets.get(name)
+        if not isinstance(wallet, dict):
+            wallet = {"folders": {}}
+            wallets[name] = wallet
+        wallet.setdefault("folders", {})
+        return wallet
+
+    def _folder(self, wallet_name, folder, create):
+        wallet = self._wallet(wallet_name)
+        folders = wallet["folders"]
+        found = folders.get(folder)
+        if isinstance(found, dict):
+            return found
+        if not create:
+            return None
+        folders[folder] = {}
+        return folders[folder]
+
+    def is_enabled(self):
+        return True
+
+    def network_wallet(self):
+        return WALLET_NAME
+
+    def open_wallet(self, _wallet_name, _appid):
+        # One shared handle. Closing it is a no-op, matching Chromium's note
+        # that the handle is shared and close rarely does anything.
+        self._wallet(WALLET_NAME)
+        self._save()
+        return HANDLE
+
+    def _check(self, handle):
+        return handle == HANDLE
+
+    def has_folder(self, handle, folder, _appid):
+        if not self._check(handle):
+            return False
+        return self._folder(WALLET_NAME, folder, create=False) is not None
+
+    def create_folder(self, handle, folder, _appid):
+        if not self._check(handle) or not folder:
+            return False
+        self._folder(WALLET_NAME, folder, create=True)
+        self._save()
+        return True
+
+    def has_entry(self, handle, folder, key, _appid):
+        if not self._check(handle):
+            return False
+        found = self._folder(WALLET_NAME, folder, create=False)
+        return bool(found) and key in found and isinstance(found[key], dict)
+
+    def entry_type(self, handle, folder, key, _appid):
+        if not self.has_entry(handle, folder, key, _appid):
+            return 0
+        kind = self._folder(WALLET_NAME, folder, create=False)[key].get("type")
+        return PASSWORD if kind == "password" else 0
+
+    def read_password(self, handle, folder, key, _appid):
+        if not self.has_entry(handle, folder, key, _appid):
+            return ""
+        value = self._folder(WALLET_NAME, folder, create=False)[key].get("value")
+        return value if isinstance(value, str) else ""
+
+    def write_password(self, handle, folder, key, password, _appid):
+        if not self._check(handle) or not folder or not key:
+            return 1
+        if not isinstance(password, str) or len(password.encode("utf-8")) > MAX_VALUE_BYTES:
+            return 1
+        found = self._folder(WALLET_NAME, folder, create=True)
+        found[key] = {"type": "password", "value": password}
+        self._save()
+        return 0
+
+    def remove_entry(self, handle, folder, key, _appid):
+        if not self._check(handle):
+            return 1
+        found = self._folder(WALLET_NAME, folder, create=False)
+        if not found or key not in found:
+            return 0
+        del found[key]
+        self._save()
+        return 0
+
+    def close_wallet(self, _handle, _force, _appid):
+        return 0
+
+
+def _variant(signature, value):
+    from gi.repository import GLib
+
+    return GLib.Variant(signature, value)
+
+
+def dispatch(store, method, parameters):
+    """Return (signature, value) for one KWallet method. Raise KeyError if unknown."""
+    args = () if parameters is None else parameters.unpack()
+    if method == "isEnabled":
+        return "(b)", (store.is_enabled(),)
+    if method == "networkWallet":
+        return "(s)", (store.network_wallet(),)
+    if method == "open":
+        wallet, _wid, appid = args
+        return "(i)", (store.open_wallet(wallet, appid),)
+    if method == "hasEntry":
+        handle, folder, key, appid = args
+        return "(b)", (store.has_entry(handle, folder, key, appid),)
+    if method == "entryType":
+        handle, folder, key, appid = args
+        return "(i)", (store.entry_type(handle, folder, key, appid),)
+    if method == "removeEntry":
+        handle, folder, key, appid = args
+        return "(i)", (store.remove_entry(handle, folder, key, appid),)
+    if method == "hasFolder":
+        handle, folder, appid = args
+        return "(b)", (store.has_folder(handle, folder, appid),)
+    if method == "createFolder":
+        handle, folder, appid = args
+        return "(b)", (store.create_folder(handle, folder, appid),)
+    if method == "writePassword":
+        handle, folder, key, password, appid = args
+        return "(i)", (store.write_password(handle, folder, key, password, appid),)
+    if method == "readPassword":
+        handle, folder, key, appid = args
+        return "(s)", (store.read_password(handle, folder, key, appid),)
+    if method == "close":
+        handle, force, appid = args
+        return "(i)", (store.close_wallet(handle, force, appid),)
+    raise KeyError(method)
+
+
+def name_is_owned(name):
+    from gi.repository import Gio, GLib
+
+    bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+    reply = bus.call_sync(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "NameHasOwner",
+        GLib.Variant("(s)", (name,)),
+        GLib.VariantType("(b)"),
+        Gio.DBusCallFlags.NONE,
+        2000,
+        None,
+    )
+    return bool(reply.unpack()[0])
+
+
+def acquire_singleton():
+    """Hold the session lock, or wait until the running instance owns the bus name."""
+    import fcntl
+
+    path = lock_path()
+    path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        os.close(fd)
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            try:
+                if name_is_owned(PRIMARY):
+                    return None
+            except Exception:
+                pass
+            time.sleep(0.05)
+        print("devos-kwallet-compat: another copy holds the lock but the bus name is not up", file=sys.stderr)
+        return None
+    os.ftruncate(fd, 0)
+    os.write(fd, str(os.getpid()).encode("ascii"))
+    return fd
+
+
+def serve(store):
+    from gi.repository import Gio, GLib
+
+    signal.signal(signal.SIGHUP, signal.SIG_IGN)
+    loop = GLib.MainLoop()
+    node = Gio.DBusNodeInfo.new_for_xml(INTERFACE_XML)
+    interface = node.interfaces[0]
+    registered = {"done": False}
+    owned = {"primary": False}
+
+    def on_method(_connection, _sender, _path, _iface, method, parameters, invocation):
+        try:
+            signature, value = dispatch(store, method, parameters)
+        except KeyError:
+            invocation.return_error_literal(
+                "org.freedesktop.DBus.Error.UnknownMethod",
+                method,
+            )
+            return
+        except Exception as exc:
+            invocation.return_error_literal(
+                "org.kde.KWallet.Error",
+                exc.__class__.__name__,
+            )
+            return
+        invocation.return_value(_variant(signature, value))
+
+    def on_bus_acquired(connection, _name):
+        if registered["done"]:
+            return
+        for path in PATHS:
+            connection.register_object(path, interface, on_method, None, None)
+        registered["done"] = True
+
+    def on_name_acquired(_connection, name):
+        if name == PRIMARY:
+            owned["primary"] = True
+
+    def on_name_lost(_connection, name):
+        if name == PRIMARY and not owned["primary"]:
+            print(
+                "devos-kwallet-compat: org.kde.kwalletd is already taken; not replacing it",
+                file=sys.stderr,
+            )
+            loop.quit()
+
+    flags = Gio.BusNameOwnerFlags.DO_NOT_QUEUE
+    for name in NAMES:
+        Gio.bus_own_name(
+            Gio.BusType.SESSION,
+            name,
+            flags,
+            on_bus_acquired,
+            on_name_acquired,
+            on_name_lost if name == PRIMARY else None,
+        )
+    loop.run()
+
+
+def main():
+    lock = acquire_singleton()
+    if lock is None:
+        return 0
+    try:
+        serve(WalletStore(store_path()))
+    finally:
+        os.close(lock)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

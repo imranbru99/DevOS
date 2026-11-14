@@ -30,6 +30,10 @@ export DONT_PROMPT_WSL_INSTALL=1
 export GEMINI_APP_DATA_DIR="antigravity-kde"
 # Separate keyring / auth from the main Antigravity instance.
 export SSH_CLIENT="127.0.0.1 0 0"
+# Keep the OS keyring. Forcing the basic password store makes Antigravity
+# report that the KDE keyring is missing. devos-kwallet-compat answers the
+# probe with no wallet window. Accounts stay split by the user-data dir
+# and GEMINI_APP_DATA_DIR.
 
 DATA_DIR="${HOME}/.config/Antigravity-KDE"
 EXT_DIR="${HOME}/.antigravity-kde/extensions"
@@ -53,7 +57,6 @@ rm -f "${HOME}/.gemini/cache/antigravity-keyring-unavailable"
 exec "$IDE_BIN" \
     --ozone-platform=x11 \
     --no-sandbox \
-    --password-store=basic \
     --user-data-dir="${DATA_DIR}" \
     --extensions-dir="${EXT_DIR}" \
     --class=antigravity-ide \

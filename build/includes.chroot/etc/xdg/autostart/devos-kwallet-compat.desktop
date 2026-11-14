@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=DevOS Keyring
+Comment=Answer the KDE keyring probe without opening a KWallet window
+Exec=/usr/local/bin/devos-kwallet-compat
+Icon=dialog-password
+Terminal=false
+X-KDE-autostart-phase=0
+X-GNOME-Autostart-enabled=true
+OnlyShowIn=KDE;
+NoDisplay=true
+X-KDE-StartupNotify=false
+StartupNotify=false
