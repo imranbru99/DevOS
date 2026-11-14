@@ -57,6 +57,16 @@ def test_smart_add_prompt_first_layout():
     assert "All agents run together" in text
 
 
+def test_single_agent_chooser_no_seo_or_collab_badge():
+    text = SRC.read_text(encoding="utf-8")
+    # Top duplicate Agent row / SEO / collab badge removed from main form
+    assert 'QLabel("1. Agent:")' not in text
+    assert "SEO Preset" not in text
+    assert "Multi-Agent: Collaborative Routing" not in text
+    assert "def fill_seo_prompt" not in text
+    assert "One agent chooser for this project" in text
+
+
 def test_chroot_pipeline_gui_synced():
     assert CHROOT.is_file()
     src = SRC.read_text(encoding="utf-8")

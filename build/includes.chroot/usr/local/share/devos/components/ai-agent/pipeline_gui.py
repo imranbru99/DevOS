@@ -2681,35 +2681,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
         form_layout.setContentsMargins(14, 12, 14, 12)
         form_layout.setSpacing(10)
 
-        # 1. Target Agent Selection
-        agent_row = QtWidgets.QHBoxLayout()
-        agent_row.setSpacing(8)
-
-        lbl_step1 = QtWidgets.QLabel("1. Agent:")
-        lbl_step1.setObjectName("field_label")
-        agent_row.addWidget(lbl_step1)
-
-        self.agent_combo = QtWidgets.QComboBox()
-        self.agent_combo.setMinimumWidth(240)
-        fill_pipeline_agent_combo(self.agent_combo)
-        agent_row.addWidget(self.agent_combo)
-
-        # Live status badge next to dropdown
-        self.agent_status_lbl = QtWidgets.QLabel()
-        self.agent_status_lbl.setObjectName("badge_cyan")
-        agent_row.addWidget(self.agent_status_lbl)
-
-        agent_row.addStretch()
-
-        btn_seo = QtWidgets.QPushButton("SEO Preset")
-        btn_seo.setToolTip("Auto-fill prompt for best ranking repo name & 400-char SEO description")
-        btn_seo.setStyleSheet("background-color: #1e293b; color: #38bdf8; font-size: 11px; padding: 4px 8px; border: 1px solid #334155; border-radius: 5px;")
-        btn_seo.clicked.connect(self.fill_seo_prompt)
-        agent_row.addWidget(btn_seo)
-
-        form_layout.addLayout(agent_row)
-
-        # 2. CURRENT WORKING PROJECT SECTION
+        # Optional: detected current project (collapsed by default)
         cur_section = QtWidgets.QFrame()
         cur_section.setObjectName("section_current")
         cur_layout = QtWidgets.QVBoxLayout(cur_section)
@@ -2717,7 +2689,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
         cur_layout.setSpacing(5)
 
         cur_header = QtWidgets.QHBoxLayout()
-        cur_badge = QtWidgets.QLabel("2. CURRENT ACTIVE PROJECT")
+        cur_badge = QtWidgets.QLabel("CURRENT ACTIVE PROJECT")
         cur_badge.setObjectName("badge_cyan")
         cur_header.addWidget(cur_badge)
 
@@ -2902,22 +2874,21 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.next_target_preview_lbl.setWordWrap(True)
         next_layout.addWidget(self.next_target_preview_lbl)
 
-        # Per-project agent (this project only)
+        # One agent chooser for this project (no duplicate global Agent row)
         proj_agent_row = QtWidgets.QHBoxLayout()
         proj_agent_row.setSpacing(6)
-        proj_agent_lbl = QtWidgets.QLabel("Agent for this project:")
+        proj_agent_lbl = QtWidgets.QLabel("Agent:")
         proj_agent_lbl.setStyleSheet("color: #94a3b8; font-size: 11px; font-weight: 600;")
         proj_agent_row.addWidget(proj_agent_lbl)
-        self.next_agent_combo = QtWidgets.QComboBox()
-        self.next_agent_combo.setMinimumWidth(240)
-        self.next_agent_combo.setToolTip(
-            "This project’s agent. Other agents keep working their own projects in parallel."
+        self.agent_combo = QtWidgets.QComboBox()
+        self.agent_combo.setMinimumWidth(240)
+        self.agent_combo.setToolTip(
+            "Agent for this project. Other agents keep working their own queues in parallel."
         )
-        fill_pipeline_agent_combo(
-            self.next_agent_combo,
-            default_key=self.agent_combo.currentData() if hasattr(self, "agent_combo") else None,
-        )
-        proj_agent_row.addWidget(self.next_agent_combo, stretch=1)
+        fill_pipeline_agent_combo(self.agent_combo)
+        # Alias kept for older helpers that still mention next_agent_combo
+        self.next_agent_combo = self.agent_combo
+        proj_agent_row.addWidget(self.agent_combo, stretch=1)
         next_layout.addLayout(proj_agent_row)
 
         # --- 1) ADD PROMPT (shown first) ---
@@ -3291,39 +3262,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
             index = self.agent_combo.currentIndex()
         if not hasattr(self, "agent_combo") or index < 0:
             return
-
         agent_key = self.agent_combo.itemData(index)
-        if agent_key == "multi":
-            if hasattr(self, "agent_status_lbl"):
-                self.agent_status_lbl.setText("Multi-Agent: Collaborative Routing")
-                self.agent_status_lbl.setStyleSheet(
-                    "background-color: #3b0764; color: #d8b4fe; border: 1px solid #9333ea; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 700;"
-                )
-            return
-
-        known = discover_agents()
-        agent_info = known.get(agent_key, {})
-        is_running = agent_info.get("running", False)
-        pid = agent_info.get("pid")
-
-        if hasattr(self, "agent_status_lbl"):
-            if is_running:
-                self.agent_status_lbl.setText(f"Live: Running (PID {pid})")
-                self.agent_status_lbl.setStyleSheet(
-                    "background-color: #022c22; color: #34d399; border: 1px solid #059669; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 700;"
-                )
-            elif agent_info.get("available"):
-                ready_txt = "Ready" if agent_key == "local" else "Installed"
-                self.agent_status_lbl.setText(f"Status: {ready_txt}")
-                self.agent_status_lbl.setStyleSheet(
-                    "background-color: #1e293b; color: #94a3b8; border: 1px solid #334155; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 600;"
-                )
-            else:
-                self.agent_status_lbl.setText("Status: Not Installed")
-                self.agent_status_lbl.setStyleSheet(
-                    "background-color: #2a1215; color: #f87171; border: 1px solid #7f1d1d; padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 600;"
-                )
-
         self.refresh_current_project(agent=agent_key)
 
     def refresh_current_project(self, agent: Optional[str] = None, manual: bool = False):
@@ -3455,16 +3394,6 @@ class PipelineWindow(QtWidgets.QMainWindow):
             self.update_next_target_preview()
             self.refresh_queue()
 
-    def fill_seo_prompt(self):
-        title = self.next_title_input.text().strip() or self.current_title or "this project"
-        prompt = (
-            f"Based on {title}, give me the best github repo name with 400 character description "
-            "for reaching organically to rank or any related search our repo will be searchable rank in google or github"
-        )
-        self.next_prompt_input.setText(prompt)
-        self.gh_check.setChecked(True)
-        self.log_box.append(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Loaded SEO Ranking Prompt Preset into input.")
-
     def update_next_prompt_metrics(self):
         if not hasattr(self, "next_prompt_metrics_lbl"):
             return
@@ -3514,11 +3443,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
             slug = to_slug(title or (Path(project).name if project else commands[0][:35]))
         if not title:
             title = slug.replace("-", " ").title()
-        agent = None
-        if hasattr(self, "next_agent_combo"):
-            agent = self.next_agent_combo.currentData()
-        if not agent and hasattr(self, "agent_combo"):
-            agent = self.agent_combo.currentData()
+        agent = self.agent_combo.currentData() if hasattr(self, "agent_combo") else None
         return {
             "title": title,
             "slug": slug,
