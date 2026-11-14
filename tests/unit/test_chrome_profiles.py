@@ -62,6 +62,26 @@ class TestChromeProfiles(unittest.TestCase):
             self.assertGreater(os.path.getsize(icon_48), 500)
             self.assertGreater(os.path.getsize(icon_128), 1000)
 
+    def test_letter_badge_when_no_photo(self):
+        self.assertEqual(chrome_profiles._profile_initial("Work"), "W")
+        self.assertEqual(chrome_profiles._profile_initial("guest"), "G")
+        self.assertEqual(chrome_profiles._profile_initial(""), "C")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # No avatar_path → must still write a real PNG (letter badge, not blank).
+            out = os.path.join(tmpdir, "work48.png")
+            chrome_profiles.generate_badged_icon("Work", out, avatar_path=None)
+            self.assertTrue(os.path.isfile(out))
+            self.assertGreater(os.path.getsize(out), 400)
+            # Fake gray silhouette must be rejected → letter badge instead.
+            from PIL import Image as PILImage
+
+            fake = os.path.join(tmpdir, "avatar_default.png")
+            PILImage.new("RGB", (64, 64), (120, 120, 120)).save(fake)
+            out2 = os.path.join(tmpdir, "guest48.png")
+            chrome_profiles.generate_badged_icon("Guest", out2, avatar_path=fake)
+            self.assertTrue(os.path.isfile(out2))
+            self.assertGreater(os.path.getsize(out2), 400)
+
     def test_sync_all_profiles(self):
         with tempfile.TemporaryDirectory() as tmp_home:
             # Create simulated ~/.config/google-chrome/Local State

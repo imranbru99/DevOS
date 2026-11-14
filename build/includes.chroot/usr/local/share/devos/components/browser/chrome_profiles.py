@@ -44,46 +44,65 @@ def get_chrome_profiles(config_dir=None):
     return profiles
 
 
+def _is_usable_profile_photo(path: str) -> bool:
+    """True for real Gaia photos — reject Chrome's default gray person silhouettes."""
+    if not path or not os.path.isfile(path):
+        return False
+    try:
+        if os.path.getsize(path) < 400:
+            return False
+    except OSError:
+        return False
+    low = os.path.basename(path).lower()
+    # Chrome ships generic avatar_* placeholders that look like the gray person.
+    if low.startswith("avatar") or "placeholder" in low or "silhouette" in low:
+        return False
+    if "idr_profile_avatar" in low or "default_avatar" in low:
+        return False
+    try:
+        img = Image.open(path).convert("RGBA").resize((32, 32), Image.Resampling.NEAREST)
+        pixels = list(img.getdata())
+        if not pixels:
+            return False
+        # Default silhouette is nearly gray with low color saturation.
+        colorful = 0
+        for r, g, b, a in pixels:
+            if a < 40:
+                continue
+            mx, mn = max(r, g, b), min(r, g, b)
+            if mx - mn > 28:
+                colorful += 1
+        # Real photos have many colorful pixels; gray person badges do not.
+        return colorful >= max(8, len(pixels) // 10)
+    except Exception:
+        return False
+
+
 def get_profile_avatar_path(config_dir, profile_key, info=None):
-    """Return the on-disk Google account / profile picture for a Chrome profile."""
+    """Return a real Google account photo, or None → letter-badge fallback."""
     if not config_dir or not profile_key or profile_key == "guest":
         return None
     folder = os.path.join(config_dir, profile_key)
     candidates = []
     if isinstance(info, dict):
-        for key in (
-            "gaia_picture_file_name",
-            "last_downloaded_gaia_picture_url_with_size",
-            "gaia_picture_url",
-        ):
+        # Only trust explicit Gaia picture fields — not chrome://theme avatars.
+        for key in ("gaia_picture_file_name",):
             picture_name = info.get(key)
             if isinstance(picture_name, str) and picture_name and "/" not in picture_name:
                 if picture_name.endswith((".png", ".jpg", ".jpeg", ".webp")):
                     candidates.append(os.path.join(folder, picture_name))
+        # No signed-in Gaia image → letter badge (do not use avatar_icon theme ids).
+        if not info.get("gaia_picture_file_name") and not info.get("use_gaia_picture"):
+            # Still allow the well-known filename below if present on disk.
+            pass
     for name in (
         "Google Profile Picture.png",
         "Google Profile Picture.jpg",
         "Google Profile Picture.jpeg",
-        "profile_picture.png",
-        "Profile Picture.png",
     ):
         candidates.append(os.path.join(folder, name))
-    # Chrome sometimes drops the Gaia image under these folders.
-    for sub in ("", "Google Profile Picture", "Avatars"):
-        base = os.path.join(folder, sub) if sub else folder
-        if not os.path.isdir(base):
-            continue
-        try:
-            for entry in sorted(os.listdir(base)):
-                low = entry.lower()
-                if low.endswith((".png", ".jpg", ".jpeg", ".webp")) and (
-                    "profile" in low or "gaia" in low or "avatar" in low or "picture" in low
-                ):
-                    candidates.append(os.path.join(base, entry))
-        except OSError:
-            pass
     for path in candidates:
-        if path and os.path.isfile(path) and os.path.getsize(path) > 64:
+        if _is_usable_profile_photo(path):
             return path
     return None
 
@@ -171,11 +190,91 @@ def _circle_crop(avatar, size):
     return out
 
 
+def _profile_initial(name: str) -> str:
+    """First letter of the profile name for badge fallback (Guest → G)."""
+    text = (name or "").strip()
+    if not text:
+        return "C"
+    for ch in text:
+        if ch.isalnum():
+            return ch.upper()
+    return text[0].upper()
+
+
+def _draw_letter_badge(img, name: str) -> None:
+    """Paint a large colored first-letter badge (never the gray person silhouette)."""
+    initial = _profile_initial(name)
+    short = (name or "Chrome").strip().split()[0][:8] if (name or "").strip() else "Chrome"
+    bg_color = get_profile_color(name or "Chrome")
+    font = None
+    font_sm = None
+    for font_path in [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSans-Bold.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
+    ]:
+        if os.path.isfile(font_path):
+            try:
+                font = ImageFont.truetype(font_path, 40)
+                font_sm = ImageFont.truetype(font_path, 13)
+                break
+            except Exception:
+                pass
+    badge_size = 68
+    ring = 5
+    outer = badge_size + ring * 2
+    badge = Image.new("RGBA", (outer, outer), (0, 0, 0, 0))
+    bdraw = ImageDraw.Draw(badge)
+    bdraw.ellipse((0, 0, outer - 1, outer - 1), fill=(255, 255, 255, 250))
+    bdraw.ellipse(
+        (ring, ring, ring + badge_size - 1, ring + badge_size - 1),
+        fill=bg_color + (255,),
+    )
+    if font:
+        bdraw.text(
+            (outer // 2, outer // 2 - 1),
+            initial,
+            fill=(255, 255, 255, 255),
+            font=font,
+            anchor="mm",
+        )
+    else:
+        bdraw.text(
+            (outer // 2, outer // 2),
+            initial,
+            fill=(255, 255, 255, 255),
+            anchor="mm",
+        )
+    img.alpha_composite(badge, (128 - outer - 1, 128 - outer - 1))
+    if font_sm and short:
+        strip_h = 20
+        strip = Image.new("RGBA", (128, strip_h), (0, 0, 0, 0))
+        sdraw = ImageDraw.Draw(strip)
+        sdraw.rounded_rectangle(
+            [2, 0, 126, strip_h - 1],
+            radius=6,
+            fill=bg_color + (235,),
+        )
+        sdraw.text(
+            (64, strip_h // 2),
+            short.upper(),
+            fill=(255, 255, 255, 255),
+            font=font_sm,
+            anchor="mm",
+        )
+        img.alpha_composite(strip, (0, 2))
+
+
 def generate_badged_icon(name, output_48, output_128=None, base_icon=None, avatar_path=None):
     """
-    Windows-style Chrome profile icon: stock Chrome logo with the profile's
-    Google account photo as a circular badge in the lower-right corner.
-    Falls back to a short name pill when no avatar image is available.
+    Windows-style Chrome profile icon: stock Chrome logo + badge.
+
+    Badge priority:
+      1) Real Google account photo (Gaia)
+      2) Colored circle with the profile name's FIRST CHARACTER
+         (profiles with no photo — never leave blank / gray person)
     """
     if not base_icon or not os.path.isfile(base_icon):
         base_icon = get_stock_chrome_icon()
@@ -187,14 +286,12 @@ def generate_badged_icon(name, output_48, output_128=None, base_icon=None, avata
         draw = ImageDraw.Draw(img)
         draw.ellipse([8, 8, 120, 120], fill=(66, 133, 244, 255))
 
-    draw = ImageDraw.Draw(img)
     used_avatar = False
-    if avatar_path and os.path.isfile(avatar_path):
+    if avatar_path and _is_usable_profile_photo(avatar_path):
         try:
             badge_size = 56
             ring = 4
             badge = _circle_crop(Image.open(avatar_path), badge_size)
-            # White ring behind the photo (Windows taskbar style).
             cx = 128 - badge_size // 2 - 4
             cy = 128 - badge_size // 2 - 4
             outer = badge_size + ring * 2
@@ -210,68 +307,7 @@ def generate_badged_icon(name, output_48, output_128=None, base_icon=None, avata
             used_avatar = False
 
     if not used_avatar:
-        # Large corner monogram (not Chrome's gray person silhouette).
-        initial = (name or "C").strip()[:1].upper() or "C"
-        short = (name or "Chrome").strip().split()[0][:6]
-        bg_color = get_profile_color(name or "Chrome")
-        font = None
-        font_sm = None
-        for font_path in [
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-            "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
-        ]:
-            if os.path.isfile(font_path):
-                try:
-                    font = ImageFont.truetype(font_path, 36)
-                    font_sm = ImageFont.truetype(font_path, 14)
-                    break
-                except Exception:
-                    pass
-        badge_size = 64
-        ring = 4
-        outer = badge_size + ring * 2
-        badge = Image.new("RGBA", (outer, outer), (0, 0, 0, 0))
-        bdraw = ImageDraw.Draw(badge)
-        bdraw.ellipse((0, 0, outer - 1, outer - 1), fill=(255, 255, 255, 245))
-        bdraw.ellipse(
-            (ring, ring, ring + badge_size - 1, ring + badge_size - 1),
-            fill=bg_color + (255,),
-        )
-        if font:
-            bdraw.text(
-                (outer // 2, outer // 2 - 2),
-                initial,
-                fill=(255, 255, 255, 255),
-                font=font,
-                anchor="mm",
-            )
-        else:
-            bdraw.text(
-                (outer // 2, outer // 2),
-                initial,
-                fill=(255, 255, 255, 255),
-                anchor="mm",
-            )
-        img.alpha_composite(badge, (128 - outer - 2, 128 - outer - 2))
-        # Tiny name strip so Work / Guest / Mirza are obvious at a glance.
-        if font_sm and short:
-            strip_h = 22
-            strip = Image.new("RGBA", (128, strip_h), (0, 0, 0, 0))
-            sdraw = ImageDraw.Draw(strip)
-            sdraw.rounded_rectangle(
-                [2, 0, 126, strip_h - 1],
-                radius=6,
-                fill=bg_color + (230,),
-            )
-            sdraw.text(
-                (64, strip_h // 2),
-                short.upper(),
-                fill=(255, 255, 255, 255),
-                font=font_sm,
-                anchor="mm",
-            )
-            img.alpha_composite(strip, (0, 2))
+        _draw_letter_badge(img, name or "Chrome")
 
     os.makedirs(os.path.dirname(os.path.abspath(output_48)), exist_ok=True)
     img_48 = img.resize((48, 48), Image.Resampling.LANCZOS)
