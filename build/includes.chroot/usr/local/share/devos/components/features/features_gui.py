@@ -200,9 +200,19 @@ def failure_text(info: dict) -> str:
     if info["running"]:
         return ""
     lines = []
-    for _fid, name, why in info["failed"]:
+    for fid, name, why in info["failed"]:
         if "removed" in why:
             lines.append(f"• {name} was kept, because removing it would also remove part of DevOS.")
+        elif fid == "cursor":
+            lines.append(
+                f"• {name} could not be installed. DevOS now downloads Cursor’s official .deb "
+                "(Flatpak is not available on Flathub). Press Try again after updating Features."
+            )
+        elif fid in ("passwords", "keepassxc"):
+            lines.append(
+                f"• {name} could not be installed from apt. Check internet, then Try again "
+                "(DevOS will enable the Ubuntu universe repo if needed)."
+            )
         else:
             lines.append(f"• {name} could not be downloaded or installed.")
     failed_ids = {fid for fid, _n, _w in info["failed"]}
@@ -213,7 +223,8 @@ def failure_text(info: dict) -> str:
         return ""
     return ("Some changes didn't finish:\n" + "\n".join(lines) +
             "\nCheck that you are connected to the internet, then press Try again. "
-            "DevOS also retries downloads by itself the next time the PC starts.")
+            "DevOS also retries downloads by itself the next time the PC starts. "
+            "Details: open Terminal and run  cat /var/log/devos-features.log")
 
 
 def finished_text(code: int, info: dict) -> str:

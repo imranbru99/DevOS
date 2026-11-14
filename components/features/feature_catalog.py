@@ -282,7 +282,11 @@ FEATURES: List[Dict] = [
       builtin={"optin": True, "desktop": ["devos-antigravity-studio.desktop"]}),
     F("cursor", "developer", "Cursor AI Code Editor",
       "AI-first code editor with deep codebase reasoning and interactive autocomplete.", 450,
-      win="Cursor", flatpak=["com.cursor.Cursor"], presets=("developer",), min_ram_gb=4),
+      win="Cursor", presets=("developer",), min_ram_gb=4,
+      # Official .deb — Flathub has no official Cursor Flatpak (com.cursor.Cursor 404).
+      script="/usr/local/sbin/devos-install-cursor",
+      detect=["/usr/bin/cursor", "/usr/share/cursor/cursor"],
+      remove=["cursor"]),
     F("cursor-agent", "developer", "Cursor Agent",
       "Cursor's autonomous coding agent CLI (agent / cursor-agent). Runs in the terminal or "
       "from the DevOS AI Pipeline alongside Antigravity and the local DevOS agent.", 80,

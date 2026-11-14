@@ -395,16 +395,69 @@ def installed_ids():
     return [f["id"] for f in catalog.FEATURES if is_installed(f)]
 
 
+_universe_enabled = False
+
+
+def ensure_universe_repo() -> None:
+    """KeePassXC and other apps live in Ubuntu universe — enable it once if missing."""
+    global _universe_enabled, _apt_updated
+    if _universe_enabled:
+        return
+    _universe_enabled = True
+    # Already present in sources?
+    try:
+        listing = subprocess.run(
+            ["bash", "-lc", "grep -RhsE '^[[:space:]]*deb.*universe' /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null | head -1"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if (listing.stdout or "").strip():
+            return
+    except (OSError, subprocess.SubprocessError):
+        pass
+    log("Enabling Ubuntu universe (needed for KeePassXC and similar apps)…")
+    if shutil.which("add-apt-repository"):
+        run(["add-apt-repository", "-y", "universe"])
+    else:
+        # Fallback: append universe to the first deb line that lacks it.
+        try:
+            src = Path("/etc/apt/sources.list")
+            text = src.read_text(encoding="utf-8") if src.is_file() else ""
+            if "universe" not in text and "ubuntu.com" in text:
+                lines = []
+                for line in text.splitlines():
+                    if line.startswith("deb ") and "universe" not in line:
+                        line = line.rstrip() + " universe"
+                    lines.append(line)
+                src.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        except OSError as exc:
+            log(f"  could not enable universe: {exc}")
+    _apt_updated = False  # force a fresh apt-get update
+
+
 def apt_candidates(pkgs):
     """Only names apt can install here (a missing one would fail the whole batch)."""
     good = []
+    missing = []
     for pkg in pkgs:
         out = subprocess.run(["apt-cache", "policy", pkg], capture_output=True, text=True).stdout
         match = re.search(r"Candidate:\s*(\S+)", out)
         if match and match.group(1) != "(none)":
             good.append(pkg)
         else:
-            log(f"  {pkg} is not available, skipped")
+            missing.append(pkg)
+    if missing:
+        ensure_universe_repo()
+        if not apt_update():
+            for pkg in missing:
+                log(f"  {pkg} is not available (apt update failed), skipped")
+            return good
+        for pkg in missing:
+            out = subprocess.run(["apt-cache", "policy", pkg], capture_output=True, text=True).stdout
+            match = re.search(r"Candidate:\s*(\S+)", out)
+            if match and match.group(1) != "(none)":
+                good.append(pkg)
+            else:
+                log(f"  {pkg} is not available, skipped")
     return good
 
 
@@ -471,12 +524,27 @@ def add_feature(feature: dict) -> bool:
     if feature["eula"]:
         subprocess.run(["debconf-set-selections"], input=feature["eula"] + "\n", text=True)
     if feature["apt"] and not install_from_media(feature["apt"]):
+        ensure_universe_repo()
         if not apt_update():
+            log(f"  {feature['name']}: apt update failed (check internet / mirrors)")
             return False
         pkgs = apt_candidates(feature["apt"])
-        ok = bool(pkgs) and run(["apt-get", "install", "-y", "--no-install-recommends"] + pkgs) == 0
+        if not pkgs:
+            log(f"  {feature['name']}: package not in apt ({', '.join(feature['apt'])})")
+            ok = False
+        else:
+            ok = run(["apt-get", "install", "-y", "--no-install-recommends"] + pkgs) == 0
+            if not ok:
+                log(f"  {feature['name']}: apt-get install failed for {', '.join(pkgs)}")
     if ok and feature["flatpak"]:
-        ok = run(["flatpak", "install", "--system", "-y", "--noninteractive", "flathub"] + feature["flatpak"]) == 0
+        # Ensure Flathub exists before install (Cursor no longer uses Flatpak).
+        if shutil.which("flatpak"):
+            run(["flatpak", "remote-add", "--if-not-exists", "flathub",
+                 "https://dl.flathub.org/repo/flathub.flatpakrepo"])
+        code = run(["flatpak", "install", "--system", "-y", "--noninteractive", "flathub"] + feature["flatpak"])
+        if code != 0:
+            log(f"  {feature['name']}: flatpak install failed for {', '.join(feature['flatpak'])}")
+            ok = False
     if ok and feature["script"]:
         vendor = OFFLINE_VENDOR.get(feature["id"])
         if vendor and not deb_installed(vendor):
@@ -486,7 +554,13 @@ def add_feature(feature: dict) -> bool:
                 log(f"  {feature['name']}: offline media unavailable; using install script")
         # Script still runs when the vendor package is present — it applies
         # DevOS policies / menu cleanup and is a no-op install when already there.
-        ok = run(["/bin/bash", feature["script"]]) == 0
+        if not Path(feature["script"]).is_file():
+            log(f"  {feature['name']}: install script missing: {feature['script']}")
+            ok = False
+        else:
+            ok = run(["/bin/bash", feature["script"]]) == 0
+            if not ok:
+                log(f"  {feature['name']}: install script failed: {feature['script']}")
     if ok and feature.get("builtin"):
         ok = set_builtin(feature, True)
     elif ok and catalog.feature_desktops(feature):
