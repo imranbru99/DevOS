@@ -3,8 +3,8 @@
 DevOS Optimizer - keeps the desktop fast with friendly, low-noise suggestions.
 
 Runs per user session as a KDE system-tray app:
-  * Idle app suggestions: GUI apps that have been unfocused and idle for a
-    while and hold a lot of memory get one polite "close it?" suggestion.
+  * Idle app suggestions: GUI apps unused (unfocused) for ~30 minutes that hold
+    meaningful memory get one polite "close it?" notification.
   * Clean up: a dialog that sizes and removes user-owned temp files, caches,
     the recycle bin, Windows-app temp folders, old downloads and old logs.
   * Low-disk warnings and an optional tip from the local DevOS AI.
@@ -42,11 +42,15 @@ MB = 1024 * 1024
 GB = 1024 * MB
 DAY = 86400
 
-DEFAULT_IDLE_MINUTES = 15
+# Rule: any normal GUI app unused (unfocused) for this long → suggest closing.
+DEFAULT_IDLE_MINUTES = 30
 MIN_IDLE_MINUTES = 10
 IDLE_CHOICES = (10, 15, 20, 30)
-MIN_RSS_BYTES = 150 * MB
-CPU_ACTIVE_PCT = 2.0
+# Memory floor for a close suggestion (was 150 MB — light apps never notified).
+MIN_RSS_BYTES = 64 * MB
+# Background Chrome/Electron often sits at 2–6% CPU while the user is away.
+# Only treat sustained/meaningful CPU as "using" the app (video, builds, games).
+CPU_ACTIVE_PCT = 12.0
 SUGGESTION_INTERVAL_S = 10 * 60
 SAMPLE_INTERVAL_S = 60
 LOW_DISK_FRACTION = 0.10
@@ -1228,7 +1232,8 @@ class IdleTracker(object):
             app = st["app"]
             if app.get("protected") or app["comm"] in PROTECTED_NAMES:
                 continue
-            if app["comm"] in self.never_ask:
+            name_l = (app.get("name") or "").lower()
+            if app["comm"] in self.never_ask or name_l in self.never_ask:
                 continue
             if app["rss"] < self.min_rss:
                 continue
@@ -1260,8 +1265,10 @@ class SuggestionLimiter(object):
 
 
 def suggestion_text(app, idle_min):
-    return "%s has been quiet in the background for %d min and is using %s of memory. Finished with it? You can close it or keep it running." % (
-        app["name"], int(idle_min), human_size(app["rss"]))
+    return (
+        "%s has been open and unused for %d min and is using %s of memory. "
+        "Finished with it? You can close it or keep it running."
+    ) % (app["name"], int(idle_min), human_size(app["rss"]))
 
 
 def focused_app_key(apps, focused_pid, table):
@@ -2044,6 +2051,8 @@ def run_gui(open_cleanup=False):
             app = cands[0]
             self.limiter.record(now)
             text = suggestion_text(app, self.tracker.idle_minutes_of(app["key"], now))
+            # Tray balloon + action toast — users often miss a frameless toast alone.
+            self.notify_plain(text)
             self.show_toast("Free up memory", text, [
                 ("Close", lambda a=app: self.do_close(a)),
                 ("Keep", lambda a=app: self.tracker.mark_active(a["key"], time.time())),

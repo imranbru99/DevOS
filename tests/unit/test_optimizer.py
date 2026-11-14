@@ -171,22 +171,24 @@ class TestOptimizerProcesses(unittest.TestCase):
 
 class TestIdleDecisions(unittest.TestCase):
 
-    def test_10_idle_threshold_15_minutes(self):
-        t = IdleTracker(idle_minutes=15)
+    def test_10_idle_threshold_default_is_30_minutes(self):
+        self.assertEqual(optimizer.DEFAULT_IDLE_MINUTES, 30)
+        t = IdleTracker(idle_minutes=30)
         chrome = app("chrome", 100, 1200, cpu=10.0)
         t.update(0, {chrome["key"]: chrome})
-        t.update(14 * 60, {chrome["key"]: chrome})
-        self.assertEqual(t.candidates(14 * 60), [])
-        t.update(15 * 60, {chrome["key"]: chrome})
-        self.assertEqual([a["key"] for a in t.candidates(15 * 60)], ["chrome:100"])
-        self.assertIn("Chrome has been quiet in the background for 15 min and is using 1.2 GB",
-                      optimizer.suggestion_text(chrome, t.idle_minutes_of("chrome:100", 15 * 60)))
+        t.update(29 * 60, {chrome["key"]: chrome})
+        self.assertEqual(t.candidates(29 * 60), [])
+        t.update(30 * 60, {chrome["key"]: chrome})
+        self.assertEqual([a["key"] for a in t.candidates(30 * 60)], ["chrome:100"])
+        self.assertIn("Chrome has been open and unused for 30 min and is using 1.2 GB",
+                      optimizer.suggestion_text(chrome, t.idle_minutes_of("chrome:100", 30 * 60)))
 
     def test_11_cpu_activity_resets_idle(self):
         t = IdleTracker(idle_minutes=15)
         vlc = app("vlc", 300, 400, cpu=0.0)
         t.update(0, {vlc["key"]: vlc})
-        busy = dict(vlc, cpu=30.0)  # 30 CPU-seconds over 600 s = 5% -> active
+        # 90 CPU-seconds over 600 s = 15% → above CPU_ACTIVE_PCT (12%) → active
+        busy = dict(vlc, cpu=90.0)
         t.update(10 * 60, {busy["key"]: busy})
         t.update(20 * 60, {busy["key"]: busy})  # now idle (0% since last sample)
         self.assertEqual(t.candidates(20 * 60), [])
@@ -194,6 +196,17 @@ class TestIdleDecisions(unittest.TestCase):
         t.update(25 * 60, {busy["key"]: busy})
         self.assertEqual(len(t.candidates(25 * 60)), 1)
 
+    def test_11b_low_background_cpu_does_not_reset_idle(self):
+        """Chrome/Electron often sits at ~3–6% while unused — still notify."""
+        t = IdleTracker(idle_minutes=30)
+        chrome = app("chrome", 100, 800, cpu=0.0)
+        t.update(0, {chrome["key"]: chrome})
+        # 30 CPU-seconds over 600 s = 5% → below 12% → still unused
+        humming = dict(chrome, cpu=30.0)
+        t.update(10 * 60, {humming["key"]: humming})
+        t.update(30 * 60, {humming["key"]: humming})
+        self.assertEqual([a["key"] for a in t.candidates(30 * 60)], ["chrome:100"])
+        self.assertAlmostEqual(t.idle_minutes_of("chrome:100", 30 * 60), 30.0)
     def test_12_focus_resets_idle(self):
         t = IdleTracker(idle_minutes=15)
         code = app("codium", 400, 800)
