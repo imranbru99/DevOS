@@ -2425,6 +2425,245 @@ class OpenProjectFieldCard(QtWidgets.QFrame):
         # Keep the per-project agent selection after clear so the next draft reuses it.
 
 
+class SmartProjectFormCard(QtWidgets.QFrame):
+    """Full ADD PROJECT #N card — stacked under the first project form."""
+
+    removed = QtCore.pyqtSignal(object)
+    queue_requested = QtCore.pyqtSignal(object)
+
+    def __init__(self, index: int = 2, parent=None, base_dir=None):
+        super().__init__(parent)
+        self.setObjectName("section_next")
+        self._drafts = []
+        self.setStyleSheet(
+            "QFrame#section_next { background-color: #0f172a; border: 1px solid #312e81; "
+            "border-radius: 8px; }"
+        )
+        lay = QtWidgets.QVBoxLayout(self)
+        lay.setContentsMargins(12, 10, 12, 10)
+        lay.setSpacing(8)
+
+        head = QtWidgets.QHBoxLayout()
+        self.badge = QtWidgets.QLabel(f"ADD PROJECT #{index}")
+        self.badge.setObjectName("badge_indigo")
+        self.badge.setFixedHeight(30)
+        self.badge.setSizePolicy(QtWidgets.QSizePolicy.Maximum, QtWidgets.QSizePolicy.Fixed)
+        head.addWidget(self.badge)
+        tip = QtWidgets.QLabel("Fill this project independently — pick its own agent and prompts.")
+        tip.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        tip.setWordWrap(True)
+        head.addWidget(tip, stretch=1)
+        btn_x = QtWidgets.QPushButton("Remove")
+        btn_x.setObjectName("small_btn")
+        btn_x.setToolTip("Remove this project form")
+        btn_x.clicked.connect(lambda: self.removed.emit(self))
+        head.addWidget(btn_x)
+        lay.addLayout(head)
+
+        meta = QtWidgets.QHBoxLayout()
+        meta.setSpacing(8)
+        self.title_input = QLineEdit()
+        self.title_input.setPlaceholderText(f"Project #{index} title (e.g. Build Laravel Auth API)")
+        self.title_input.textChanged.connect(self._sync_slug)
+        meta.addWidget(self.title_input, stretch=2)
+        self.slug_input = QLineEdit()
+        self.slug_input.setPlaceholderText("folder-slug")
+        self.slug_input.setProperty("auto", True)
+        self.slug_input.textEdited.connect(lambda _: self.slug_input.setProperty("auto", False))
+        meta.addWidget(self.slug_input, stretch=1)
+        lay.addLayout(meta)
+
+        self.location = ProjectLocation(base_dir or (lambda: str(Path.home())), self)
+        lay.addWidget(self.location)
+
+        agent_row = QtWidgets.QHBoxLayout()
+        agent_lbl = QtWidgets.QLabel("Agent:")
+        agent_lbl.setStyleSheet("color: #94a3b8; font-size: 11px; font-weight: 600;")
+        agent_row.addWidget(agent_lbl)
+        self.agent_combo = QtWidgets.QComboBox()
+        self.agent_combo.setMinimumWidth(240)
+        fill_pipeline_agent_combo(self.agent_combo)
+        agent_row.addWidget(self.agent_combo, stretch=1)
+        lay.addLayout(agent_row)
+
+        add_box = QtWidgets.QFrame()
+        add_box.setStyleSheet(
+            "QFrame { background-color: #0b1220; border: 1px solid #1e3a5f; border-radius: 8px; }"
+        )
+        add_lay = QtWidgets.QVBoxLayout(add_box)
+        add_lay.setContentsMargins(10, 8, 10, 8)
+        add_lay.setSpacing(6)
+        add_hdr = QtWidgets.QLabel("1. Add prompt / command")
+        add_hdr.setStyleSheet("color: #38bdf8; font-size: 12px; font-weight: 700; border: none;")
+        add_lay.addWidget(add_hdr)
+        cmd_row = QtWidgets.QHBoxLayout()
+        self.prompt_input = QTextEdit()
+        self.prompt_input.setPlaceholderText(
+            "Type ONE prompt/command, then + Add Prompt.\nIt joins the serial list below."
+        )
+        self.prompt_input.setMinimumHeight(56)
+        self.prompt_input.setMaximumHeight(72)
+        cmd_row.addWidget(self.prompt_input, stretch=1)
+        btn_stage = QtWidgets.QPushButton("+ Add Prompt")
+        btn_stage.setObjectName("primary")
+        btn_stage.setMinimumHeight(56)
+        btn_stage.setMinimumWidth(120)
+        btn_stage.clicked.connect(self._stage_prompt)
+        cmd_row.addWidget(btn_stage)
+        add_lay.addLayout(cmd_row)
+        lay.addWidget(add_box)
+
+        list_hdr = QtWidgets.QHBoxLayout()
+        list_lbl = QtWidgets.QLabel("2. Serial prompts for this project")
+        list_lbl.setStyleSheet("color: #6ee7b7; font-size: 12px; font-weight: 700;")
+        list_hdr.addWidget(list_lbl)
+        self.metrics_lbl = QtWidgets.QLabel("0 prompts staged")
+        self.metrics_lbl.setStyleSheet("color: #64748b; font-size: 11px;")
+        list_hdr.addWidget(self.metrics_lbl, stretch=1)
+        lay.addLayout(list_hdr)
+
+        self.draft_list = QtWidgets.QListWidget()
+        self.draft_list.setMinimumHeight(100)
+        self.draft_list.setMaximumHeight(160)
+        self.draft_list.itemDoubleClicked.connect(lambda _: self._edit_draft())
+        lay.addWidget(self.draft_list)
+        draft_btns = QtWidgets.QHBoxLayout()
+        for label, cb in (
+            ("↑", lambda: self._move_draft(-1)),
+            ("↓", lambda: self._move_draft(1)),
+            ("Edit", self._edit_draft),
+            ("Remove", self._remove_draft),
+        ):
+            b = QtWidgets.QPushButton(label)
+            b.clicked.connect(cb)
+            draft_btns.addWidget(b)
+        draft_btns.addStretch()
+        lay.addLayout(draft_btns)
+
+        actions = QtWidgets.QHBoxLayout()
+        actions.addStretch()
+        self.btn_queue = QtWidgets.QPushButton(f"+ Add Project #{index} to Pipeline")
+        self.btn_queue.setObjectName("primary")
+        self.btn_queue.setMinimumHeight(36)
+        self.btn_queue.clicked.connect(self._emit_queue)
+        actions.addWidget(self.btn_queue)
+        lay.addLayout(actions)
+        self._refresh_drafts()
+
+    def _sync_slug(self, _text=""):
+        if not self.slug_input.text().strip() or self.slug_input.property("auto"):
+            self.slug_input.setProperty("auto", True)
+            t = self.title_input.text().strip()
+            self.slug_input.setText(to_slug(t) if t else "")
+
+    def set_index(self, index: int):
+        self.badge.setText(f"ADD PROJECT #{index}")
+        self.title_input.setPlaceholderText(f"Project #{index} title (e.g. Build Laravel Auth API)")
+        self.btn_queue.setText(f"+ Add Project #{index} to Pipeline")
+
+    def _stage_prompt(self):
+        text = self.prompt_input.toPlainText().strip()
+        if not text:
+            return
+        self._drafts.append(text)
+        self.prompt_input.clear()
+        self._refresh_drafts()
+
+    def _refresh_drafts(self):
+        self.draft_list.clear()
+        if not self._drafts:
+            empty = QtWidgets.QListWidgetItem("No prompts yet — add one above.")
+            empty.setFlags(Qt.NoItemFlags)
+            empty.setForeground(QtGui.QColor("#64748b"))
+            self.draft_list.addItem(empty)
+            self.metrics_lbl.setText("0 prompts staged")
+            return
+        for i, prompt in enumerate(self._drafts):
+            preview = prompt.replace("\n", " ").strip()
+            if len(preview) > 90:
+                preview = preview[:87] + "…"
+            self.draft_list.addItem(f"{i + 1}. {preview}")
+        n = len(self._drafts)
+        self.metrics_lbl.setText(f"{n} prompt{'s' if n != 1 else ''} staged")
+
+    def _move_draft(self, delta: int):
+        row = self.draft_list.currentRow()
+        if row < 0 or row >= len(self._drafts):
+            return
+        target = row + delta
+        if not 0 <= target < len(self._drafts):
+            return
+        self._drafts[row], self._drafts[target] = self._drafts[target], self._drafts[row]
+        self._refresh_drafts()
+        self.draft_list.setCurrentRow(target)
+
+    def _remove_draft(self):
+        row = self.draft_list.currentRow()
+        if 0 <= row < len(self._drafts):
+            self._drafts.pop(row)
+            self._refresh_drafts()
+
+    def _edit_draft(self):
+        row = self.draft_list.currentRow()
+        if not 0 <= row < len(self._drafts):
+            return
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(f"Edit prompt #{row + 1}")
+        dlg.resize(560, 360)
+        v = QtWidgets.QVBoxLayout(dlg)
+        editor = QtWidgets.QPlainTextEdit(self._drafts[row])
+        v.addWidget(editor)
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Save | QtWidgets.QDialogButtonBox.Cancel
+        )
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        v.addWidget(buttons)
+        if dlg.exec_() == QtWidgets.QDialog.Accepted:
+            text = editor.toPlainText().strip()
+            if text:
+                self._drafts[row] = text
+                self._refresh_drafts()
+                self.draft_list.setCurrentRow(row)
+
+    def to_snapshot(self):
+        raw = self.prompt_input.toPlainText().strip()
+        prompts = list(self._drafts) + ([raw] if raw else [])
+        if not prompts:
+            return None
+        title = self.title_input.text().strip()
+        project = self.location.path.text().strip()
+        slug = self.slug_input.text().strip() or to_slug(
+            title or (Path(project).name if project else prompts[0][:35])
+        )
+        if not title:
+            title = slug.replace("-", " ").title()
+        return {
+            "title": title,
+            "slug": slug,
+            "project": project,
+            "prompts": prompts,
+            "create_repo": False,
+            "repo_name": "",
+            "repo_desc": "",
+            "agent": self.agent_combo.currentData(),
+        }
+
+    def _emit_queue(self):
+        snap = self.to_snapshot()
+        if snap:
+            self.queue_requested.emit(snap)
+
+    def clear(self):
+        self._drafts.clear()
+        self.title_input.clear()
+        self.slug_input.clear()
+        self.slug_input.setProperty("auto", True)
+        self.prompt_input.clear()
+        self.location.path.clear()
+        self._refresh_drafts()
+
+
 class PipelineWindow(QtWidgets.QMainWindow):
     pipeline_activity = QtCore.pyqtSignal(str)
     def __init__(self):
@@ -2518,12 +2757,6 @@ class PipelineWindow(QtWidgets.QMainWindow):
         header_layout.addLayout(header_vbox, stretch=1)
 
         # Top Control Buttons
-        btn_batch_top = QtWidgets.QPushButton("⚡ Batch 20 Projects...")
-        btn_batch_top.setObjectName("accent_action")
-        btn_batch_top.setToolTip("Auto-generate 20 separate project folders with 1st spec prompt + shared 2-5 prompts")
-        btn_batch_top.clicked.connect(self.open_batch_dialog)
-        header_layout.addWidget(btn_batch_top)
-
         btn_import_specs = QtWidgets.QPushButton("📁 Import Specs...")
         btn_import_specs.setObjectName("small_btn")
         btn_import_specs.setStyleSheet("background-color: #1e293b; color: #38bdf8; font-size: 11px; padding: 6px 12px; border: 1px solid #334155; border-radius: 6px;")
@@ -2836,7 +3069,7 @@ class PipelineWindow(QtWidgets.QMainWindow):
         next_layout.setAlignment(Qt.AlignTop)
 
         next_header = QtWidgets.QHBoxLayout()
-        self.next_badge_lbl = QtWidgets.QLabel("ADD PROJECT")
+        self.next_badge_lbl = QtWidgets.QLabel("ADD PROJECT #1")
         self.next_badge_lbl.setObjectName("badge_indigo")
         self.next_badge_lbl.setFixedHeight(30)
         self.next_badge_lbl.setSizePolicy(QtWidgets.QSizePolicy.Maximum, QtWidgets.QSizePolicy.Fixed)
@@ -3092,15 +3325,26 @@ class PipelineWindow(QtWidgets.QMainWindow):
         self.update_next_prompt_metrics()
         form_layout.addWidget(next_section)
 
-        # Quick Batch 20-Projects Bar
-        btn_batch_inline = QtWidgets.QPushButton("⚡ Batch 20-Projects Generator (1st Prompt + Steps 2-5 Shared)")
-        btn_batch_inline.setStyleSheet(
-            "background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #1e1b4b, stop:1 #312e81); "
-            "color: #c7d2fe; font-weight: 700; padding: 7px 12px; border: 1px solid #4338ca; border-radius: 7px;"
+        # Extra project forms stacked under #1 (Add another project)
+        self.extra_project_host = QtWidgets.QWidget()
+        self.extra_project_layout = QtWidgets.QVBoxLayout(self.extra_project_host)
+        self.extra_project_layout.setContentsMargins(0, 8, 0, 0)
+        self.extra_project_layout.setSpacing(10)
+        self.extra_project_forms = []
+        form_layout.addWidget(self.extra_project_host)
+
+        btn_add_another = QtWidgets.QPushButton("+ Add another project")
+        btn_add_another.setObjectName("accent_action")
+        btn_add_another.setMinimumHeight(40)
+        btn_add_another.setStyleSheet(
+            "background-color: #1e1b4b; color: #e0e7ff; font-weight: 700; font-size: 13px; "
+            "padding: 10px 14px; border: 1px solid #6366f1; border-radius: 8px;"
         )
-        btn_batch_inline.setToolTip("Open generator to create 20 projects with 5 prompts each in 1 click")
-        btn_batch_inline.clicked.connect(self.open_batch_dialog)
-        form_layout.addWidget(btn_batch_inline)
+        btn_add_another.setToolTip(
+            "Open ADD PROJECT #2 (then #3…) under the first project form"
+        )
+        btn_add_another.clicked.connect(self.add_another_project_form)
+        form_layout.addWidget(btn_add_another)
 
         left_layout.addWidget(form_card)
         left_layout.addStretch()
@@ -3256,6 +3500,93 @@ class PipelineWindow(QtWidgets.QMainWindow):
 
     def add_task(self):
         self.add_next_project_tasks()
+
+    def add_another_project_form(self):
+        """Stack a new ADD PROJECT #N form under project #1."""
+        if not hasattr(self, "extra_project_forms"):
+            self.extra_project_forms = []
+        if not hasattr(self, "extra_project_layout"):
+            return
+        index = 2 + len(self.extra_project_forms)
+        card = SmartProjectFormCard(
+            index=index,
+            parent=self.extra_project_host,
+            base_dir=self.pipeline.get_base_dir,
+        )
+        card.removed.connect(self.remove_extra_project_form)
+        card.queue_requested.connect(self.queue_extra_project_form)
+        self.extra_project_layout.addWidget(card)
+        self.extra_project_forms.append(card)
+        self._renumber_extra_project_forms()
+        if hasattr(self, "toast_banner"):
+            self.toast_banner.setText(f"✔ ADD PROJECT #{index} opened under project #1.")
+            self.toast_banner.setStyleSheet(
+                "background-color: #1e1b4b; color: #c7d2fe; font-weight: 700; font-size: 13px; "
+                "padding: 8px 16px; border-radius: 8px; border: 1px solid #4338ca;"
+            )
+            self.toast_banner.show()
+            QtCore.QTimer.singleShot(2500, self.toast_banner.hide)
+        try:
+            card.title_input.setFocus()
+        except Exception:
+            pass
+
+    def remove_extra_project_form(self, card):
+        forms = getattr(self, "extra_project_forms", [])
+        if card not in forms:
+            return
+        forms.remove(card)
+        self.extra_project_layout.removeWidget(card)
+        card.setParent(None)
+        card.deleteLater()
+        self._renumber_extra_project_forms()
+
+    def _renumber_extra_project_forms(self):
+        for i, card in enumerate(getattr(self, "extra_project_forms", []) or []):
+            card.set_index(i + 2)
+
+    @queue_error_to_log
+    def queue_extra_project_form(self, snap: dict):
+        """Queue one stacked project form into the pipeline."""
+        if self.busy():
+            self.log_box.append("Wait for the current task to finish before changing the queue.")
+            return
+        if not snap or not snap.get("prompts"):
+            if hasattr(self, "toast_banner"):
+                self.toast_banner.setText("⚠️ Add a title and at least one prompt first.")
+                self.toast_banner.setStyleSheet(
+                    "background-color: #451a03; color: #fcd34d; font-weight: 700; font-size: 12px; "
+                    "padding: 8px 14px; border-radius: 8px; border: 1px solid #d97706;"
+                )
+                self.toast_banner.show()
+                QtCore.QTimer.singleShot(3500, self.toast_banner.hide)
+            return
+        total_steps = self._queue_project_snapshots([snap])
+        self.log_box.append(
+            f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Queued stacked project "
+            f"'{snap.get('title')}' ({len(snap.get('prompts') or [])} step(s))"
+        )
+        sender = self.sender()
+        if isinstance(sender, SmartProjectFormCard):
+            sender.clear()
+        groups = get_grouped_projects(self.pipeline.list())
+        last_slug = snap.get("slug")
+        if last_slug:
+            for i, group in enumerate(groups):
+                if group["slug"] == last_slug:
+                    self.project_page = i
+                    break
+        self.refresh_queue()
+        if hasattr(self, "toast_banner"):
+            self.toast_banner.setText(
+                f"✔ Added '{snap.get('title')}' ({total_steps} step(s))."
+            )
+            self.toast_banner.setStyleSheet(
+                "background-color: #064e3b; color: #34d399; font-weight: 700; font-size: 13px; "
+                "padding: 10px 16px; border-radius: 8px; border: 1px solid #059669;"
+            )
+            self.toast_banner.show()
+            QtCore.QTimer.singleShot(3500, self.toast_banner.hide)
 
     def on_agent_changed(self, index: int = -1):
         if index < 0 and hasattr(self, "agent_combo"):
@@ -4264,13 +4595,15 @@ class PipelineWindow(QtWidgets.QMainWindow):
         pct = int((completed_tasks / total_tasks * 100)) if total_tasks > 0 else 0
         self.kpi_completed_val.setText(f"{completed_tasks}/{total_tasks} ({pct}%)")
 
-        next_num = total_projects + 1
+        # Primary form stays ADD PROJECT #1; stacked forms are #2, #3… via renumber.
         if hasattr(self, "next_badge_lbl"):
-            self.next_badge_lbl.setText(f"ADD PROJECT #{next_num}")
+            self.next_badge_lbl.setText("ADD PROJECT #1")
         if hasattr(self, "next_title_input") and not self.next_title_input.text():
-            self.next_title_input.setPlaceholderText(f"Next Project #{next_num} Title (e.g. 'Build Laravel Auth API')...")
+            self.next_title_input.setPlaceholderText(
+                "Project #1 title (e.g. 'Build Laravel Auth API')..."
+            )
         if hasattr(self, "btn_add_next"):
-            self.btn_add_next.setText(f"+ Add Project #{next_num} to Pipeline")
+            self.btn_add_next.setText("+ Add Project #1 to Pipeline")
         if hasattr(self, "queue_badge_lbl"):
             self.queue_badge_lbl.setText(f"{total_projects} Project(s) • {total_tasks} Step(s)")
 
