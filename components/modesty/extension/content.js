@@ -84,6 +84,11 @@
   function removeRender(el) {
     const st = info.get(el);
     if (!st) return;
+    if (st.overlay) {
+      st.overlay.remove();
+      st.overlay = null;
+      resize.unobserve(el);
+    }
     if (st.svg) {
       if (el.style.filter === st.appliedFilter) {
         if (st.originalFilter) el.style.setProperty('filter', st.originalFilter, st.filterPriority);
@@ -117,7 +122,21 @@
   }
 
   function positionMask(el, st) {
-    if (!st || !st.filterImage) return;
+    if (!st) return;
+    if (st.overlay) {
+      const r = el.getBoundingClientRect();
+      const ov = st.overlay;
+      // fixed = track the on-screen image through Google Images scroll/virtualization
+      ov.style.position = 'fixed';
+      ov.style.left = `${r.left}px`;
+      ov.style.top = `${r.top}px`;
+      ov.style.width = `${Math.max(1, r.width)}px`;
+      ov.style.height = `${Math.max(1, r.height)}px`;
+      ov.style.display = (r.width < 2 || r.height < 2 || r.bottom < 0 || r.right < 0 ||
+        r.top > innerHeight || r.left > innerWidth) ? 'none' : 'block';
+      return;
+    }
+    if (!st.filterImage) return;
     const css = getComputedStyle(el);
     const left = (parseFloat(css.borderLeftWidth) || 0) + (parseFloat(css.paddingLeft) || 0);
     const top = (parseFloat(css.borderTopWidth) || 0) + (parseFloat(css.paddingTop) || 0);
@@ -156,60 +175,40 @@
       st.bgApplied = el.style.backgroundImage;
       setBlurred(el, true); return;
     }
-    const masks = await Promise.all(verdict.regions.map((r) => new Promise((resolve, reject) => {
-      const im = new Image(); im.onload = () => resolve(im); im.onerror = reject; im.src = r.mask;
+    // Prefer painted overlays (blurLayer). Google Images often ignores SVG
+    // filters on <img>, so overlays are what the user actually sees.
+    const layers = await Promise.all(verdict.regions.map((r) => new Promise((resolve, reject) => {
+      const im = new Image(); im.onload = () => resolve(im); im.onerror = reject; im.src = r.blurLayer || r.mask;
     })));
     if (st.generation !== generation || !settings.enabled || !el.isConnected) return;
-    const mask = document.createElement('canvas');
-    mask.width = st.result.width; mask.height = st.result.height;
-    const ctx = mask.getContext('2d');
-    masks.forEach((im) => ctx.drawImage(im, 0, 0, mask.width, mask.height));
     removeRender(el);
-    st.originalFilter = el.style.getPropertyValue('filter');
-    st.filterPriority = el.style.getPropertyPriority('filter');
-    const existing = getComputedStyle(el).filter;
-    const id = `devos-body-mask-${++filterSequence}`;
-    const svg = svgNode('svg', { width: 0, height: 0, 'aria-hidden': 'true', 'data-dm-internal': '' });
-    svg.style.cssText = 'position:absolute;pointer-events:none;overflow:hidden;width:0;height:0;left:0;top:0;';
-    const defs = svgNode('defs');
-    const filter = svgNode('filter', {
-      id,
-      x: '0%',
-      y: '0%',
-      width: '100%',
-      height: '100%',
-      filterUnits: 'objectBoundingBox',
-      primitiveUnits: 'objectBoundingBox',
-      'color-interpolation-filters': 'sRGB'
-    });
-    const maskUrl = mask.toDataURL('image/png');
-    const image = document.createElementNS(SVG_NS, 'feImage');
-    image.setAttribute('href', maskUrl);
-    image.setAttributeNS(XLINK_NS, 'xlink:href', maskUrl);
-    image.setAttribute('preserveAspectRatio', 'none');
-    image.setAttribute('result', 'bodyMask');
-    image.setAttribute('x', '0');
-    image.setAttribute('y', '0');
-    image.setAttribute('width', '1');
-    image.setAttribute('height', '1');
 
-    filter.append(
-      image,
-      svgNode('feGaussianBlur', { in: 'SourceGraphic', stdDeviation: 14, result: 'soft' }),
-      svgNode('feComposite', { in: 'soft', in2: 'bodyMask', operator: 'in', result: 'softBody' }),
-      svgNode('feComposite', { in: 'SourceGraphic', in2: 'bodyMask', operator: 'out', result: 'clearArea' })
-    );
-    const merge = svgNode('feMerge');
-    merge.append(svgNode('feMergeNode', { in: 'clearArea' }), svgNode('feMergeNode', { in: 'softBody' }));
-    filter.append(merge);
-    defs.append(filter);
-    svg.append(defs);
+    const sheet = document.createElement('canvas');
+    sheet.width = st.result.width;
+    sheet.height = st.result.height;
+    const sctx = sheet.getContext('2d');
+    layers.forEach((im) => sctx.drawImage(im, 0, 0, sheet.width, sheet.height));
 
-    const root = el.getRootNode(); (root.nodeType === 11 ? root : document.documentElement).append(svg);
-    st.svg = svg; st.filterImage = image;
-    positionMask(el, st); resize.observe(el);
-    el.style.setProperty('filter', `${existing === 'none' ? '' : existing + ' '}url("#${id}")`, 'important');
-    st.appliedFilter = el.style.filter;
+    const overlay = document.createElement('img');
+    overlay.src = sheet.toDataURL('image/png');
+    overlay.alt = '';
+    overlay.setAttribute('data-dm-internal', '');
+    overlay.setAttribute('aria-hidden', 'true');
+    overlay.draggable = false;
+    overlay.style.cssText = [
+      'position:absolute',
+      'margin:0',
+      'padding:0',
+      'border:0',
+      'pointer-events:none',
+      'z-index:2147483646',
+      'object-fit:fill',
+      'image-rendering:auto',
+    ].join(';');
+    document.documentElement.appendChild(overlay);
+    st.overlay = overlay;
+    positionMask(el, st);
+    resize.observe(el);
     setBlurred(el, true);
   }
 
@@ -529,6 +528,13 @@
     }, 400);
   }
   window.addEventListener('scroll', scheduleScrollScan, { passive: true, capture: true });
+  // Keep painted body overlays locked to their images while the page scrolls.
+  window.addEventListener('scroll', () => {
+    for (const el of tracked) {
+      const st = info.get(el);
+      if (st && st.overlay) positionMask(el, st);
+    }
+  }, { passive: true, capture: true });
 
   // ------------------------------------------------------------ start
   observer.observe(document.documentElement || document, OBSERVE_OPTS);

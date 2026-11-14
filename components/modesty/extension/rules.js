@@ -27,7 +27,7 @@
     bodySkinRatio: 0.12,
     // High visible-skin share on a body mask with NO usable face — midriff,
     // lingerie, and torso crops in image search. Lean to blur for modesty.
-    bodySkinOnlyRatio: 0.20,
+    bodySkinOnlyRatio: 0.15,
   });
 
   function clamp01(x, fallback) {

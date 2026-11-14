@@ -258,7 +258,7 @@ function detect(dataUrl) {
         for (let i = 0; i < segment.data.length; i++) pixels.data[i * 4 + 3] = segment.data[i] ? 255 : 0;
         ctx.putImageData(pixels, 0, 0);
         const layer = document.createElement('canvas'); layer.width = mask.width; layer.height = mask.height;
-        const lc = layer.getContext('2d'); lc.filter = 'blur(14px)'; lc.drawImage(img, 0, 0, layer.width, layer.height);
+        const lc = layer.getContext('2d'); lc.filter = 'blur(22px)'; lc.drawImage(img, 0, 0, layer.width, layer.height);
         lc.filter = 'none'; lc.globalCompositeOperation = 'destination-in'; lc.drawImage(mask, 0, 0);
         return { faceIndex, skinRatio, torsoY, mask: mask.toDataURL('image/png'), blurLayer: layer.toDataURL('image/png') };
       });

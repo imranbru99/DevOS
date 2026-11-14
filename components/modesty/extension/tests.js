@@ -25,6 +25,8 @@
   eq('low-skin unmatched body stays clear', R.decide(D([], [P(-1, { skinRatio: .08 })]), women).blur, false);
   eq('high-skin body crop without face is selected',
     R.decide(D([], [P(-1, { skinRatio: .25 })]), women).blur, true);
+  eq('modest skin-only threshold selects midriff crops',
+    R.decide(D([], [P(-1, { skinRatio: .16 })]), women).blur, true);
   eq('skin-heavy body with adult woman face is selected',
     R.decide(D([F('female', .95, { y: 20 })], [P(-1, { skinRatio: .25, torsoY: 160 })]), women).blur, true);
   eq('strict people mode selects unmatched body', R.decide(D([], [P(-1)]), people).blur, true);

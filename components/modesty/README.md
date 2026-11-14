@@ -43,7 +43,7 @@ sudo devos-modesty status
 sudo devos-modesty disable
 ```
 
-Re-enabling repacks version 1.2.1 and refreshes browser policy. Fully quit and
+Re-enabling repacks version 1.2.2 and refreshes browser policy. Fully quit and
 reopen Chrome so the new extension loads. A signing key is created per device in
 `/var/lib/devos-modesty/key.pem`, preserved across disable/re-enable. An existing
 local legacy key is reused so its extension ID does not change.
