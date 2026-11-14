@@ -689,7 +689,10 @@ def _find_icontasks_general_section(text: str):
         start = match.end()
         nxt = re.search(r"(?m)^\[", text[start:])
         block = text[start: start + nxt.start()] if nxt else text[start:]
-        if re.search(r"(?m)^plugin=org\.kde\.plasma\.icontasks\s*$", block):
+        if re.search(
+            r"(?m)^plugin=org\.kde\.plasma\.(icontasks|taskmanager)\s*$",
+            block,
+        ):
             return f"[Containments][{cont}][Applets][{applet}][Configuration][General]"
     return None
 
@@ -753,39 +756,50 @@ def _idle_chrome_launcher(existing, home_dir=None):
 def apply_plasma_launchers_live(launcher_csv: str, grouping: str = "1") -> bool:
     """Push Icon Tasks launchers through plasmashell without a full restart."""
     group = "0" if str(grouping).strip() == "0" else "1"
+    popups = "false" if group == "0" else "true"
     script = (
         "var parts = '%s'.split(',');"
         "var panels = panels();"
         "for (var i = 0; i < panels.length; i++) {"
         "  var widgets = panels[i].widgets();"
         "  for (var j = 0; j < widgets.length; j++) {"
-        "    if (widgets[j].type !== 'org.kde.plasma.icontasks') continue;"
+        "    if (widgets[j].type !== 'org.kde.plasma.icontasks'"
+        "        && widgets[j].type !== 'org.kde.plasma.taskmanager') continue;"
         "    widgets[j].currentConfigGroup = ['General'];"
         "    widgets[j].writeConfig('launchers', parts.join(','));"
         "    widgets[j].writeConfig('separateLaunchers', 'true');"
         "    widgets[j].writeConfig('groupingStrategy', '%s');"
+        "    widgets[j].writeConfig('groupPopups', '%s');"
+        "    widgets[j].writeConfig('onlyGroupWhenFull', 'false');"
         "    widgets[j].writeConfig('launchInPlace', 'true');"
         "    widgets[j].writeConfig('hideActivatedLaunchers', 'false');"
         "    widgets[j].reloadConfig();"
         "  }"
         "}"
-    ) % (launcher_csv.replace("'", "\\'"), group)
+    ) % (launcher_csv.replace("'", "\\'"), group, popups)
     try:
         import subprocess
-        r = subprocess.run(
-            [
-                "qdbus",
-                "org.kde.plasmashell",
-                "/PlasmaShell",
-                "org.kde.PlasmaShell.evaluateScript",
-                script,
-            ],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=8,
-        )
-        return r.returncode == 0
+        ok = False
+        for bus in ("qdbus", "qdbus6", "qdbus-qt6"):
+            if not shutil.which(bus):
+                continue
+            r = subprocess.run(
+                [
+                    bus,
+                    "org.kde.plasmashell",
+                    "/PlasmaShell",
+                    "org.kde.PlasmaShell.evaluateScript",
+                    script,
+                ],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=8,
+            )
+            if r.returncode == 0:
+                ok = True
+                break
+        return ok
     except Exception:
         return False
 
@@ -854,14 +868,19 @@ def sync_plasma_profile_launchers(home_dir=None, active_slugs=None):
 
     launchers = preserved + chrome_launchers
     launcher_csv = ",".join(launchers) if launchers else idle_pin
-    # While multiple Chrome profiles are open, disable Icon Tasks grouping so
-    # Plasma cannot merge chrome-guest + chrome-<profile> into one tile.
-    multi = len(chrome_launchers) >= 2 and all("chrome-" in x for x in chrome_launchers)
+    # Any open Chrome profile pin → Do Not Group. Plasma's "By program name"
+    # keeps merging windows that still briefly share google-chrome, and live
+    # WM_CLASS edits do not rebuild an already-grouped tile.
+    force_ungroup = bool(active) or (
+        len(chrome_launchers) >= 1 and any("chrome-" in x for x in chrome_launchers)
+    )
     updates = {
         "launchers": launcher_csv,
         # Keep launchers visible as their own buttons (Windows profile icons).
         "separateLaunchers": "true",
-        "groupingStrategy": "0" if multi else "1",
+        "groupingStrategy": "0" if force_ungroup else "1",
+        "groupPopups": "false" if force_ungroup else "true",
+        "onlyGroupWhenFull": "false",
         "launchInPlace": "true",
         # Windows-like: open apps keep the same pin with an indicator under the icon
         # (never hide the pin / spawn a blank second tile for every running app).
@@ -1116,18 +1135,17 @@ def _cmdline_looks_guest(raw: str) -> bool:
     )
 
 
-def _cmdline_is_guest(pid: int) -> bool:
-    """True when this Chrome process (or a close parent) is a Guest session."""
+def _walk_proc_cmdlines(pid: int, depth: int = 6):
+    """Yield cmdline strings walking from pid up toward the session leader."""
     if not pid:
-        return False
+        return
     seen = set()
-    cur = pid
-    for _ in range(4):
+    cur = int(pid)
+    for _ in range(max(1, depth)):
         if not cur or cur in seen:
             break
         seen.add(cur)
-        if _cmdline_looks_guest(_read_proc_cmdline(cur)):
-            return True
+        yield _read_proc_cmdline(cur)
         try:
             with open(f"/proc/{cur}/status", encoding="utf-8", errors="ignore") as handle:
                 for line in handle:
@@ -1138,7 +1156,31 @@ def _cmdline_is_guest(pid: int) -> bool:
                     break
         except (OSError, ValueError):
             break
+
+
+def _cmdline_is_guest(pid: int) -> bool:
+    """True when this Chrome process (or a close parent) is a Guest session."""
+    for raw in _walk_proc_cmdlines(pid):
+        if _cmdline_looks_guest(raw):
+            return True
     return False
+
+
+def _cmdline_profile_directory(pid: int) -> str:
+    """Return Chrome --profile-directory= value from this window's process tree."""
+    for raw in _walk_proc_cmdlines(pid):
+        if not raw or "chrome" not in raw.lower():
+            continue
+        m = re.search(r"--profile-directory=([^\s]+)", raw)
+        if m:
+            key = m.group(1).strip().strip('"').strip("'")
+            if key:
+                return key
+        # Quoted form used by some launchers: --profile-directory="Profile 1"
+        m = re.search(r'--profile-directory="([^"]+)"', raw)
+        if m:
+            return m.group(1).strip()
+    return ""
 
 
 def _any_guest_chrome_pid() -> bool:
@@ -1180,6 +1222,7 @@ def detect_window_profile(w, profiles, home_dir=None, assigned_profiles=None, pr
     wm_class = (w.get("wm_class", "") if isinstance(w, dict) else "").lower()
     pid = _window_pid(wid) if wid else 0
     is_guest_proc = bool(wid and _cmdline_is_guest(pid))
+    proc_profile_key = _cmdline_profile_directory(pid) if wid and pid else ""
 
     if not home_dir:
         home_dir = os.path.expanduser("~")
@@ -1202,6 +1245,14 @@ def detect_window_profile(w, profiles, home_dir=None, assigned_profiles=None, pr
         if wid:
             WINDOW_PROFILE_CACHE[wid] = "Guest"
         return "Guest"
+
+    # Strongest signal for multi-window Chrome: the process --profile-directory.
+    # Plain "New Tab" titles otherwise all collapse to the same avatar (Work).
+    if proc_profile_key and proc_profile_key in profiles:
+        p_name = profiles[proc_profile_key]
+        if wid:
+            WINDOW_PROFILE_CACHE[wid] = p_name
+        return p_name
 
     # Trust chrome-<slug> only if that profile is among Chrome's open browser
     # profiles. A shared Chrome PID previously got Work windows rewritten to
@@ -1350,11 +1401,15 @@ def apply_window_profiles(home_dir=None):
             or "chrome-" in wc
             or "google-chrome.devos-real" in wc
         )
+        title_l = title.lower().strip()
         if is_chrome and (
-            "google chrome" in title.lower()
+            "google chrome" in title_l
             or wc.startswith("chrome-")
-            or "gmail" in title.lower()
+            or "gmail" in title_l
             or " - " in title
+            or title_l in ("new tab", "new incognito tab", "about:blank")
+            or title_l.startswith("new tab")
+            or "browsing as a guest" in title_l
         ):
             chrome_wins.append(w)
 
@@ -1404,9 +1459,13 @@ def apply_window_profiles(home_dir=None):
     # Ensure .desktop files exist for every active slug before swapping pins.
     sync_all_profiles(home_dir)
     launcher_key = tuple(active_slugs)
+    # Restart plasmashell only when the pin set changes. Live WM_CLASS edits
+    # alone leave Plasma's old group popup; a rebuild picks up Do Not Group.
     if sync_plasma_profile_launchers(home_dir, active_slugs):
         if launcher_key != _LAST_PLASMA_LAUNCHERS:
             _LAST_PLASMA_LAUNCHERS = launcher_key
+            if len(active_slugs) >= 2:
+                os.environ["DEVOS_FORCE_PLASMA_RELOAD"] = "1"
             reload_plasmashell()
 
     return processed

@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Restore Windows-like Chrome taskbar: one avatar icon per open profile (not grouped).
+# Force Windows-like Chrome taskbar: one avatar icon per open profile (not grouped).
 set -euo pipefail
 
 BRANCH="${1:-cursor/fix-chrome-profile-taskbar-icons-6cbe}"
 RAW="https://raw.githubusercontent.com/imranbru99/DevOS/${BRANCH}"
 DEST=/usr/local/share/devos/components/browser/chrome_profiles.py
 TMP="$(mktemp)"
+CFG="${XDG_CONFIG_HOME:-$HOME/.config}/plasma-org.kde.plasma.desktop-appletsrc"
 
 echo "== Update Chrome profile taskbar manager (${BRANCH}) =="
 curl -fsSL "${RAW}/components/browser/chrome_profiles.py" -o "$TMP" \
@@ -16,25 +17,92 @@ rm -f "$TMP"
 export DISPLAY="${DISPLAY:-:0}"
 export DEVOS_FORCE_PLASMA_RELOAD=1
 
-echo "== Sync profile launchers + restart watcher =="
+echo "== Sync profile desktops + force Do Not Group on Icon Tasks =="
 /usr/bin/python3 "$DEST" sync || true
+
+# Hard-write groupingStrategy=0 into every Icon Tasks / Task Manager applet.
+/usr/bin/python3 - <<'PY'
+import re, os
+from pathlib import Path
+cfg = Path(os.path.expanduser("~/.config/plasma-org.kde.plasma.desktop-appletsrc"))
+if not cfg.is_file():
+    raise SystemExit(0)
+text = cfg.read_text(encoding="utf-8", errors="replace")
+parts = re.split(r"(?m)(?=^\[)", text)
+out = []
+changed = False
+for part in parts:
+    header = part.split("\n", 1)[0].strip()
+    m = re.match(r"^\[Containments\]\[(\d+)\]\[Applets\]\[(\d+)\]$", header)
+    if m:
+        body = part.split("\n", 1)[1] if "\n" in part else ""
+        if re.search(r"(?m)^plugin=org\.kde\.plasma\.(icontasks|taskmanager)\s*$", body):
+            # Find matching General section later; mark containment/applet.
+            out.append(part)
+            cont, applet = m.group(1), m.group(2)
+            # Stash for next matching General rewrite via side channel
+            os.environ["_DEVOS_TASKS"] = os.environ.get("_DEVOS_TASKS", "") + f"{cont}:{applet},"
+            continue
+    gen = re.match(
+        r"^\[Containments\]\[(\d+)\]\[Applets\]\[(\d+)\]\[Configuration\]\[General\]$",
+        header,
+    )
+    if gen:
+        key = f"{gen.group(1)}:{gen.group(2)}"
+        tasks = os.environ.get("_DEVOS_TASKS", "")
+        if key in tasks.split(","):
+            lines = []
+            keys = {
+                "groupingStrategy": "0",
+                "groupPopups": "false",
+                "onlyGroupWhenFull": "false",
+                "separateLaunchers": "true",
+                "hideActivatedLaunchers": "false",
+                "launchInPlace": "true",
+            }
+            seen = set()
+            rest = part.split("\n", 1)[1] if "\n" in part else ""
+            for line in rest.splitlines(keepends=True):
+                k = line.split("=", 1)[0].strip() if "=" in line and not line.startswith("[") else None
+                if k in keys:
+                    lines.append(f"{k}={keys[k]}\n")
+                    seen.add(k)
+                    changed = True
+                else:
+                    lines.append(line)
+            for k, v in keys.items():
+                if k not in seen:
+                    lines.append(f"{k}={v}\n")
+                    changed = True
+            part = header + "\n" + "".join(lines)
+            if not part.endswith("\n"):
+                part += "\n"
+    out.append(part)
+if changed:
+    cfg.write_text("".join(out), encoding="utf-8")
+    print("Wrote groupingStrategy=0 to Icon Tasks")
+else:
+    print("Icon Tasks section not rewritten (already set or missing)")
+PY
+
 systemctl --user enable --now devos-browser-profiles.service 2>/dev/null || true
 systemctl --user restart devos-browser-profiles.service 2>/dev/null \
   || (pkill -f 'chrome_profiles.py watch' 2>/dev/null || true;
       nohup /usr/local/bin/devos-browser-profiles-daemon >/dev/null 2>&1 &)
-sleep 2
+
+echo "== Restart plasmashell so taskbar rebuilds ungrouped =="
+systemctl --user reset-failed plasma-plasmashell.service 2>/dev/null || true
+systemctl --user restart plasma-plasmashell.service 2>/dev/null \
+  || (kquitapp6 plasmashell 2>/dev/null || kquitapp5 plasmashell 2>/dev/null || true; sleep 2; plasmashell --replace >/dev/null 2>&1 &)
+sleep 3
 /usr/bin/python3 "$DEST" apply || true
 
 echo
-echo "== Current Chrome windows (should show chrome-<profile>, not only google-chrome) =="
-wmctrl -lx 2>/dev/null | grep -iE 'chrome|google-chrome' || true
+echo "== Chrome windows (want distinct chrome-<profile> classes) =="
+wmctrl -lx 2>/dev/null | grep -iE 'chrome|google-chrome' || echo "(no chrome windows — open Guest + Work, then re-run apply)"
 echo
-echo "== Taskbar Chrome pins (should list chrome-*.desktop while Chrome is open) =="
-grep -E 'launchers=|groupingStrategy=' \
-  "${XDG_CONFIG_HOME:-$HOME/.config}/plasma-org.kde.plasma.desktop-appletsrc" 2>/dev/null \
-  | head -20 || true
-
+echo "== Taskbar pins / grouping =="
+grep -E 'launchers=|groupingStrategy=|groupPopups=' "$CFG" 2>/dev/null | head -30 || true
 echo
-echo "If still one icon: log out/in once, or run:"
-echo "  DEVOS_FORCE_PLASMA_RELOAD=1 systemctl --user restart plasma-plasmashell.service"
-echo "Then reopen Guest + your profile."
+echo "Close Chrome fully, then open TWO profiles (e.g. Work + Guest)."
+echo "You should see TWO taskbar icons — not one with a group preview."
