@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Update AI Pipeline on a running DevOS PC from the DevOS GitHub repo.
+# Pulls pipeline_gui.py (and task_pipeline.py) so you see new UI without rebuilding the ISO.
+#
+# Usage:
+#   sudo devos-update-ai-pipeline              # latest main
+#   sudo devos-update-ai-pipeline <branch>    # e.g. cursor/pipeline-add-another-project-6cbe
+set -euo pipefail
+
+BRANCH="${1:-main}"
+REPO_RAW="https://raw.githubusercontent.com/imranbru99/DevOS/${BRANCH}"
+DEST_DIR="/usr/local/share/devos/components/ai-agent"
+USER_DEST="${SUDO_USER:+/home/$SUDO_USER/.local/share/devos/components/ai-agent}"
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo "Run with sudo: sudo devos-update-ai-pipeline ${BRANCH}"
+  exit 1
+fi
+
+mkdir -p "$DEST_DIR"
+
+echo "== Fetching AI Pipeline from branch: ${BRANCH} =="
+for f in pipeline_gui.py task_pipeline.py pipeline_premium.py; do
+  url="${REPO_RAW}/components/ai-agent/${f}"
+  echo "  GET $url"
+  if curl -fsSL "$url" -o "${TMP}/${f}"; then
+    install -m 0644 "${TMP}/${f}" "${DEST_DIR}/${f}"
+    echo "  ✔ installed ${DEST_DIR}/${f}"
+    # Also overwrite any user override copy that would shadow system files
+    if [ -n "${USER_DEST:-}" ] && [ -d "$USER_DEST" ]; then
+      install -m 0644 "${TMP}/${f}" "${USER_DEST}/${f}"
+      echo "  ✔ also updated ${USER_DEST}/${f}"
+    fi
+  else
+    echo "  (skip ${f} — not on this branch or download failed)"
+  fi
+done
+
+# Verify this branch removed Batch 20 (when expected)
+if [ -f "${DEST_DIR}/pipeline_gui.py" ]; then
+  if grep -q 'Batch 20' "${DEST_DIR}/pipeline_gui.py"; then
+    echo
+    echo "⚠ WARNING: installed pipeline_gui.py still contains 'Batch 20'."
+    echo "  Branch may be wrong or download failed. Check:"
+    echo "  curl -fsSL ${REPO_RAW}/components/ai-agent/pipeline_gui.py | grep -n 'Batch 20\\|Add another project'"
+  else
+    echo "  ✔ verified: no 'Batch 20' button in installed UI"
+  fi
+  if grep -q 'Add another project' "${DEST_DIR}/pipeline_gui.py"; then
+    echo "  ✔ verified: '+ Add another project' footer present"
+  fi
+fi
+
+echo "== Close running AI Pipeline windows =="
+# Kill every known launch path so the next open loads the new file
+pkill -f '/usr/local/share/devos/components/ai-agent/pipeline_gui.py' 2>/dev/null || true
+pkill -f '/.local/share/devos/components/ai-agent/pipeline_gui.py' 2>/dev/null || true
+pkill -f 'components/ai-agent/pipeline_gui.py' 2>/dev/null || true
+pkill -f 'pipeline_gui.py' 2>/dev/null || true
+pkill -f 'devos-ai-pipeline' 2>/dev/null || true
+sleep 0.8
+
+echo
+echo "Done. Open AI Pipeline again from the Start menu (or run: devos-ai-pipeline)."
+echo "You should see '+ Add another project' — not 'Batch 20 Projects'."
