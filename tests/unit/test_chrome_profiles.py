@@ -227,6 +227,54 @@ class TestChromeProfiles(unittest.TestCase):
             self.assertEqual(ranked[1], "Profile 1")
             self.assertIn("Default", ranked)
 
+    def test_main_profile_uses_google_account_not_the_letter_m(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with open(os.path.join(tmpdir, "Local State"), "w", encoding="utf-8") as handle:
+                json.dump(
+                    {
+                        "profile": {
+                            "info_cache": {
+                                "Default": {
+                                    "name": "Main",
+                                    "gaia_name": "IMRAN",
+                                    "gaia_given_name": "IMRAN",
+                                    "user_name": "imranbru99@gmail.com",
+                                },
+                                "Profile 1": {
+                                    "name": "Mirza",
+                                    "gaia_given_name": "Mirza",
+                                    "user_name": "mirzatoma18@gmail.com",
+                                },
+                            }
+                        }
+                    },
+                    handle,
+                )
+            profiles = chrome_profiles.get_chrome_profiles(tmpdir)
+            self.assertEqual(profiles["Default"], "IMRAN")
+            self.assertEqual(profiles["Profile 1"], "Mirza")
+            self.assertEqual(chrome_profiles.badge_letter(profiles["Default"]), "I")
+            self.assertEqual(chrome_profiles.badge_letter(profiles["Profile 1"]), "M")
+
+    def test_profile_directory_beats_a_sticky_mirza_class(self):
+        profiles = {"Default": "IMRAN", "Profile 1": "Mirza"}
+        window = {
+            "id": 9091,
+            "title": "Facebook - Google Chrome",
+            "wm_class": "chrome-mirza",
+        }
+        original_pid = chrome_profiles._window_pid
+        original_key = chrome_profiles._cmdline_profile_key
+        chrome_profiles.WINDOW_PROFILE_CACHE.pop(9091, None)
+        chrome_profiles._window_pid = lambda wid: 4242
+        chrome_profiles._cmdline_profile_key = lambda pid: "Default" if pid == 4242 else None
+        try:
+            self.assertEqual(chrome_profiles.detect_window_profile(window, profiles), "IMRAN")
+        finally:
+            chrome_profiles._window_pid = original_pid
+            chrome_profiles._cmdline_profile_key = original_key
+            chrome_profiles.WINDOW_PROFILE_CACHE.pop(9091, None)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -35,8 +35,7 @@ def get_chrome_profiles(config_dir=None):
                 data = json.load(f)
             cache = data.get("profile", {}).get("info_cache", {})
             for key, val in cache.items():
-                name = val.get("name") or key
-                profiles[key] = name
+                profiles[key] = profile_label(val if isinstance(val, dict) else {}, key)
         except Exception:
             pass
     # Never invent fake "Work" / Guest Start-menu apps. Empty Chrome config =
@@ -94,6 +93,53 @@ def slugify(name):
     """Convert a profile name or key to a safe filename slug."""
     s = re.sub(r"[^\w\d]+", "-", name.strip().lower()).strip("-")
     return s or "default"
+
+
+_GENERIC_PROFILE_NAMES = {
+    "main",
+    "your chrome",
+    "chrome",
+    "default",
+    "user",
+    "person 1",
+}
+
+
+def _is_generic_profile_name(name):
+    """True for Chrome's own placeholder names, not a name the person chose."""
+    key = (name or "").strip().lower()
+    if key in _GENERIC_PROFILE_NAMES:
+        return True
+    return bool(re.fullmatch(r"(person|profile)\s+\d+", key))
+
+
+def profile_label(info, fallback=""):
+    """
+    Name to show on the taskbar.
+
+    Chrome's menu prints "IMRAN • Main": IMRAN is the Google account and Main
+    is the leftover profile name. A badge built from Main is the letter M,
+    the same letter as Mirza. Prefer the Google account when the profile name
+    is still that placeholder.
+    """
+    if not isinstance(info, dict):
+        info = {}
+    name = (info.get("name") or "").strip()
+    given = (info.get("gaia_given_name") or "").strip()
+    if not given:
+        full = (info.get("gaia_name") or "").strip()
+        given = full.split()[0] if full else ""
+    if _is_generic_profile_name(name) and given:
+        return given
+    return name or given or (fallback or "").strip() or "Chrome"
+
+
+def badge_letter(name):
+    """One capital letter for the taskbar pill. Mirza → M, IMRAN → I."""
+    for ch in (name or ""):
+        if ch.isalnum():
+            return ch.upper()
+    return "C"
 
 
 def get_profile_color(name):
@@ -189,7 +235,7 @@ def generate_badged_icon(name, output_48, output_128=None, base_icon=None, avata
             used_avatar = False
 
     if not used_avatar:
-        label = (name or "Chrome").strip().split()[0][:7].upper() or "CHROME"
+        label = badge_letter(name)
         bg_color = get_profile_color(name or "Chrome")
         font = None
         for font_path in [
@@ -199,8 +245,7 @@ def generate_badged_icon(name, output_48, output_128=None, base_icon=None, avata
         ]:
             if os.path.isfile(font_path):
                 try:
-                    font_size = 22 if len(label) <= 4 else (19 if len(label) <= 6 else 16)
-                    font = ImageFont.truetype(font_path, font_size)
+                    font = ImageFont.truetype(font_path, 42)
                     break
                 except Exception:
                     pass
@@ -1001,6 +1046,59 @@ def _read_proc_cmdline(pid: int) -> str:
         return ""
 
 
+def _profile_key_from_cmdline(raw: str):
+    """Return the Chrome --profile-directory value, or None."""
+    match = re.search(
+        r'--profile-directory(?:=|\s+)("[^"]+"|\'[^\']+\'|\S+)',
+        raw or "",
+    )
+    if not match:
+        return None
+    value = match.group(1).strip().strip('"').strip("'")
+    if not value or value.lower() == "guest":
+        return None
+    return value
+
+
+def _cmdline_profile_key(pid: int):
+    """Profile directory of this Chrome window, walking up to the browser process."""
+    if not pid:
+        return None
+    seen = set()
+    cur = int(pid)
+    for _ in range(8):
+        if not cur or cur in seen or cur <= 1:
+            break
+        seen.add(cur)
+        key = _profile_key_from_cmdline(_read_proc_cmdline(cur))
+        if key:
+            return key
+        try:
+            with open(f"/proc/{cur}/status", encoding="utf-8", errors="ignore") as handle:
+                for line in handle:
+                    if line.startswith("PPid:"):
+                        cur = int(line.split()[1])
+                        break
+                else:
+                    break
+        except (OSError, ValueError):
+            break
+    return None
+
+
+def profile_name_for_key(profile_key, profiles):
+    """Map a --profile-directory value onto the display name."""
+    if not profile_key or not profiles:
+        return None
+    if profile_key in profiles:
+        return profiles[profile_key]
+    wanted = profile_key.strip().lower()
+    for key, name in profiles.items():
+        if (key or "").strip().lower() == wanted:
+            return name
+    return None
+
+
 def _cmdline_looks_guest(raw: str) -> bool:
     text = f" {(raw or '').lower()} "
     return (
@@ -1093,6 +1191,16 @@ def detect_window_profile(w, profiles, home_dir=None, assigned_profiles=None, pr
         if wid:
             WINDOW_PROFILE_CACHE[wid] = "Guest"
         return "Guest"
+
+    # The process flag is the profile Chrome actually opened. A previous pass
+    # can leave the wrong chrome-<slug> class on the window (both icons then
+    # show Mirza's M). The directory wins over that sticky class.
+    if pid:
+        keyed = profile_name_for_key(_cmdline_profile_key(pid), profiles)
+        if keyed:
+            if wid:
+                WINDOW_PROFILE_CACHE[wid] = keyed
+            return keyed
 
     # Trust chrome-<slug> only if that profile is among Chrome's open browser
     # profiles. A shared Chrome PID previously got Work windows rewritten to
