@@ -55,6 +55,8 @@ APP_PROMPT = (
     "app launch gaps). If they ask for a tool and it did not run, tell them the exact phrase to say.\n"
     "Be a capable agent: clear next step, short plan when useful, never invent menus, repair steps, or "
     "PC facts — only use facts given here or from tools. Prefer doing over lecturing.\n"
+    "Greetings and small talk (hi, how are you, kemon acho/aco, …): answer warmly and naturally first — "
+    "do not jump straight to “what do you want to do?” unless they ask for a task.\n"
     "Language: always match the user (Bangla/বাংলা, English, Hindi, Arabic, Chinese, …). Romanized Bangla "
     "(“ami kemon acho”) → reply in clear বাংলা. Messy voice transcripts: infer intent; do not force English.\n"
     "Use short Markdown: short paragraphs, bullets, **bold** for key words."
@@ -694,8 +696,14 @@ _RE_ACK = re.compile(
     r"^(?:ok|okay|alright|got\s+it|fine|cool|great|awesome|perfect|thik\s+ache|ঠিক\s+আছে|accha|আচ্ছা|done)[\s!.,:;]*$", re.I)
 
 _RE_STATUS = re.compile(
-    r"^(?:how\s+are\s+you\s+doing|kemon\s+acho|kemon\s+asen|kemon\s+achen|"
-    r"কেমন\s+আছো|কেমন\s+আছেন|valoni|bhalo\s+acho)[\s!?,.:;]*$", re.I)
+    r"^(?:how\s+are\s+you(?:\s+doing)?(?:\s+today)?|"
+    r"kemon\s+(?:acho|aco|achho|achhen|achen|asen|aso|ase)|"
+    r"(?:ami\s+)?kemon\s+(?:acho|aco|achho)|"
+    r"কেমন\s+(?:আছো|আছ|আছেন|আছো\??)|"
+    r"valoni|bhalo\s+(?:acho|aco)|how's\s+it\s+going|how\s+r\s+u)"
+    r"[\s!?,.:;]*$",
+    re.I,
+)
 
 
 def fast_chat_reply(text: str, history: Optional[History] = None) -> Optional[Reply]:
