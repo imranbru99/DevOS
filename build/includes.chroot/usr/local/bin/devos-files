@@ -4971,12 +4971,14 @@ class WindowsFileExplorer(QMainWindow):
         # Icons List View (Hidden unless icons mode selected)
         self.list_view = ExplorerListWidget()
         self.list_view.setObjectName("fileList")
+        # Light-authored on purpose. A navy selection (#235073) stays navy in
+        # light mode and the name is painted dark, so the label vanishes.
         self.list_view.setStyleSheet("""
-            QListWidget#fileList { font-size: 12px; background: transparent; color: #dce7f7; padding: 10px; border: none; }
-            QListWidget#fileList::item { background: transparent; color: #dce7f7; border: 1px solid transparent; border-radius: 10px; padding: 8px; margin: 5px; }
-            QListWidget#fileList::item:hover { background: #203951; color: #f8fafc; border-color: #4f8bb5; }
+            QListWidget#fileList { font-size: 12px; background: transparent; color: #0f172a; padding: 10px; border: none; }
+            QListWidget#fileList::item { background: transparent; color: #0f172a; border: 1px solid transparent; border-radius: 10px; padding: 8px; margin: 5px; }
+            QListWidget#fileList::item:hover { background: #e8f1fb; color: #0f172a; border: 1px solid #bfdbfe; }
             QListWidget#fileList::item:selected,
-            QListWidget#fileList::item:selected:hover { background: #0078d4; color: #ffffff; border: 1px solid #0078d4; }
+            QListWidget#fileList::item:selected:hover { background: #d7e9fb; color: #0f172a; border: 1px solid #0078d4; }
         """)
         self.list_view.setViewMode(QListWidget.IconMode)
         self.list_view.setIconSize(QSize(96, 96))
@@ -5594,6 +5596,7 @@ class WindowsFileExplorer(QMainWindow):
                     pass
             return
         self._appearance_locked = True
+        self._sync_icon_name_colors()
         self.setStyleSheet("""
             QMainWindow, QDialog { background: #0c131f; color: #f1f5f9; font-family: 'Segoe UI', 'Inter', sans-serif; }
             QWidget#tabContainer { background: #090e17; border-bottom: 1px solid #1a2638; }
@@ -6512,6 +6515,7 @@ class WindowsFileExplorer(QMainWindow):
         n = len(all_items)
         self.status_items_count.setText("1 item" if n == 1 else f"{n} items")
         self.status_selected_info.setText("")
+        self._sync_icon_name_colors()
 
     def _folder_rows(self, path, in_trash):
         """Return [(name, full_path), ...] or None when the folder cannot be read."""
@@ -6754,6 +6758,41 @@ class WindowsFileExplorer(QMainWindow):
                 self.picker_name_edit.setText(text)
 
         self._update_command_bar()
+        self._sync_icon_name_colors()
+
+    def _icon_view_is_light(self):
+        try:
+            from devos_appearance import current_mode
+            return current_mode() in ("light", "mac-light")
+        except Exception:
+            return True
+
+    def _sync_icon_name_colors(self):
+        """Keep the name readable on a marked icon. The selection fill is pale
+        in light mode, so the name stays dark. Dark mode uses white."""
+        if not hasattr(self, "list_view"):
+            return
+        light = self._icon_view_is_light()
+        normal = QColor("#0f172a" if light else "#f8fafc")
+        marked = QColor("#0f172a" if light else "#ffffff")
+        hidden_normal = QColor("#64748b")
+        hidden_marked = QColor("#0f172a" if light else "#e2e8f0")
+        for index in range(self.list_view.count()):
+            item = self.list_view.item(index)
+            name = os.path.basename(item.data(Qt.UserRole) or "")
+            hidden = name.startswith(".")
+            item.setForeground(hidden_marked if hidden and item.isSelected()
+                               else marked if item.isSelected()
+                               else hidden_normal if hidden else normal)
+        palette = self.list_view.palette()
+        if light:
+            palette.setColor(QPalette.Highlight, QColor("#d7e9fb"))
+            palette.setColor(QPalette.HighlightedText, QColor("#0f172a"))
+        else:
+            palette.setColor(QPalette.Highlight, QColor("#0078d4"))
+            palette.setColor(QPalette.HighlightedText, QColor("#ffffff"))
+        self.list_view.setPalette(palette)
+        self.list_view.viewport().setPalette(palette)
 
     def _on_picker_filter_changed(self, index):
         self._current_filter_patterns = self.picker_filter_combo.currentData() or []
