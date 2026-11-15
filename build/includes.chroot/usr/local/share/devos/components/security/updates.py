@@ -146,12 +146,19 @@ def _default_run(argv, timeout=7200):
 
 
 def snapshot_before_changes(description="Before security updates"):
-    """Take a restore point. UNAVAILABLE (not btrfs) does not block updates."""
+    """Take a btrfs restore point. Timeshift copies are not created automatically."""
     settings = os.path.abspath(os.path.join(HERE, "..", "settings"))
     if settings not in sys.path:
         sys.path.insert(0, settings)
     import snapshot_manager
-    return snapshot_manager.SnapshotManager().create_restore_point(description)
+    manager = snapshot_manager.SnapshotManager()
+    if manager.filesystem() != "btrfs":
+        return {
+            "status": "UNAVAILABLE",
+            "backend": None,
+            "message": "Automatic Timeshift copies stay off so the data disk keeps its free space.",
+        }
+    return manager.create_restore_point(description)
 
 
 def upgrade_now(runner=None, snapshot=None):

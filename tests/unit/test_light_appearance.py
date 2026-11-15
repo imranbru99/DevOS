@@ -10,6 +10,24 @@ from devos_appearance import (
 from PyQt5 import QtWidgets
 
 
+def test_selected_icon_name_stays_dark_on_a_pale_tile_in_light_mode():
+    source = Path(__file__).resolve().parents[2].joinpath(
+        "build/includes.chroot/usr/local/bin/devos-files"
+    ).read_text()
+    start = source.index("QListWidget#fileList { font-size")
+    sheet = source[start:source.index('"""', start)]
+    assert "#235073" not in sheet
+    light = adapt_stylesheet(sheet, "light")
+    selected = light.split("item:selected:hover")[1].split("}", 1)[0]
+    assert "#d7e9fb" in selected
+    assert "#0f172a" in selected
+    assert "#235073" not in selected
+    dark = adapt_stylesheet(sheet, "dark")
+    dark_selected = dark.split("item:selected:hover")[1].split("}", 1)[0]
+    assert "#0f172a" not in dark_selected
+    assert "#f1f5f9" in dark_selected or "#ffffff" in dark_selected
+
+
 def test_light_surfaces_text_and_action_contrast():
     result=light_stylesheet('QWidget {background:#0b1220;color:#f8fafc;border:1px solid #283344;} QPushButton {background:#0078d4;color:#ffffff;}')
     assert 'background: #ffffff' in result
@@ -17,6 +35,14 @@ def test_light_surfaces_text_and_action_contrast():
     assert '#64748b' in result
     assert 'background: #0078d4' in result
     assert 'color: #ffffff' in result
+
+
+def test_command_button_keeps_a_visible_bottom_edge_in_light_mode():
+    result = light_stylesheet(
+        'QPushButton#cmdIconBtn { background: #162337; border: 1px solid #2a3f5c; color: #e8f1ff; }'
+    )
+    assert 'border: 1px solid #64748b' in result
+    assert '#cbd5e1' not in result
 
 
 def test_pastel_primary_keeps_dark_ink():

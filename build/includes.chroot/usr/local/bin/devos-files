@@ -14,6 +14,7 @@ Provides the authentic Windows 10/11 File Explorer experience:
 """
 
 import datetime
+import errno
 import json
 import mimetypes
 import os
@@ -45,6 +46,7 @@ try:
         QRectF,
         QSize,
         Qt,
+        QProcess,
         QThread,
         QUrl,
         pyqtSignal,
@@ -1062,26 +1064,74 @@ def get_icon_for_file(path, is_dir=False, size=48):
 
 
 def is_recycle_bin_path(path: str) -> bool:
-    """Check if given path represents the Recycle Bin or an item within it."""
+    """Check if given path represents the Recycle Bin or an item within it.
+
+    The home bin lives in ~/.local/share/Trash. Each other disk keeps its own
+    bin at .Trash-$UID or .Trash/$UID, per the FreeDesktop trash spec.
+    """
     if not path:
         return False
     if str(path).strip() in ("trash:/", "trash:", "trash", "Recycle Bin"):
         return True
     try:
         norm = os.path.normpath(os.path.abspath(os.path.expanduser(str(path))))
-        trash_files = os.path.normpath(os.path.expanduser("~/.local/share/Trash/files"))
-        trash_root = os.path.normpath(os.path.expanduser("~/.local/share/Trash"))
-        return norm == trash_files or norm == trash_root or norm.startswith(trash_files + os.sep)
     except Exception:
         return False
+    trash_files = os.path.normpath(os.path.expanduser("~/.local/share/Trash/files"))
+    trash_root = os.path.normpath(os.path.expanduser("~/.local/share/Trash"))
+    if norm == trash_files or norm == trash_root or norm.startswith(trash_files + os.sep):
+        return True
+    uid = str(os.getuid())
+    parts = norm.split(os.sep)
+    for index, part in enumerate(parts):
+        if part != "files" or index < 1:
+            continue
+        parent = parts[index - 1]
+        grand = parts[index - 2] if index >= 2 else ""
+        if parent == f".Trash-{uid}" or (parent == uid and grand == ".Trash"):
+            return True
+    return False
+
+
+def is_primary_recycle_bin(path: str) -> bool:
+    """True for the sidebar Recycle Bin, which lists every disk's bin."""
+    if str(path).strip() in ("trash:/", "trash:", "trash", "Recycle Bin"):
+        return True
+    try:
+        norm = os.path.normpath(os.path.abspath(os.path.expanduser(str(path))))
+    except Exception:
+        return False
+    home_files = os.path.normpath(os.path.expanduser("~/.local/share/Trash/files"))
+    return norm == home_files
+
+
+def is_system_snapshot(path: str) -> bool:
+    """Timeshift restore points are root-owned copies, not documents."""
+    parts = [part.lower() for part in os.path.normpath(os.path.abspath(path)).split(os.sep) if part]
+    if "timeshift" not in parts:
+        return False
+    if "snapshots" in parts:
+        return True
+    return parts[-1] == "timeshift"
+
+
+def trashinfo_for(trash_file_path: str, name: str = None) -> str:
+    """Locate the .trashinfo sibling for an item already inside a bin."""
+    base = name or os.path.basename(trash_file_path)
+    files_dir = os.path.dirname(os.path.abspath(trash_file_path))
+    if os.path.basename(files_dir) == "files":
+        info_dir = os.path.join(os.path.dirname(files_dir), "info")
+    else:
+        info_dir = os.path.expanduser("~/.local/share/Trash/info")
+    return os.path.join(info_dir, f"{base}.trashinfo")
 
 
 def get_trash_info(trash_file_path: str):
-    """Parse FreeDesktop trashinfo for a file in ~/.local/share/Trash/files/."""
+    """Parse FreeDesktop trashinfo for a file in a Recycle Bin files directory."""
     try:
         base = os.path.basename(trash_file_path)
-        info_dir = os.path.expanduser("~/.local/share/Trash/info")
-        info_path = os.path.join(info_dir, f"{base}.trashinfo")
+        info_path = trashinfo_for(trash_file_path)
+        info_dir = os.path.dirname(info_path)
         orig_path = None
         del_date = None
         if os.path.exists(info_path):
@@ -1547,7 +1597,7 @@ def prompt_name_dialog(parent, title: str, label: str, initial: str,
                     pass
                 action.triggered.connect(_paste_into_edit)
                 break
-        menu.exec_(edit.mapToGlobal(pos))
+        polish_menu(menu).exec_(edit.mapToGlobal(pos))
 
     def _select():
         sync_clipboard_text_into_qt()
@@ -2173,7 +2223,7 @@ class BreadcrumbBar(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("breadcrumbBar")
-        self.setFixedHeight(34)
+        self.setFixedHeight(36)
         self._current_path = ""
         self._current_label = "This PC"
 
@@ -2259,7 +2309,7 @@ class BreadcrumbBar(QWidget):
         menu.addSeparator()
         act_edit = menu.addAction("Edit address")
         act_edit.triggered.connect(self.switch_to_edit)
-        menu.exec_(global_pos)
+        polish_menu(menu).exec_(global_pos)
 
     def _show_crumb_context_menu(self, path, global_pos):
         menu = make_menu(self)
@@ -2278,7 +2328,7 @@ class BreadcrumbBar(QWidget):
         menu.addSeparator()
         act_edit = menu.addAction("Edit address")
         act_edit.triggered.connect(self.switch_to_edit)
-        menu.exec_(global_pos)
+        polish_menu(menu).exec_(global_pos)
 
     def set_location(self, path, label=""):
         self._current_path = path
@@ -2957,6 +3007,211 @@ def is_volume_recovery_folder(path):
     return stat.S_ISDIR(info.st_mode) and info.st_uid == 0 and not info.st_mode & 0o077
 
 
+def home_trash_dirs():
+    files = os.path.expanduser("~/.local/share/Trash/files")
+    info = os.path.expanduser("~/.local/share/Trash/info")
+    return files, info
+
+
+def filesystem_top(path):
+    """Mount point of the filesystem that holds path."""
+    path = os.path.abspath(path)
+    try:
+        device = os.lstat(path).st_dev
+    except OSError:
+        return path
+    current = path
+    while True:
+        parent = os.path.dirname(current)
+        if parent == current:
+            return current
+        try:
+            parent_device = os.lstat(parent).st_dev
+        except OSError:
+            return current
+        if parent_device != device:
+            return current
+        current = parent
+
+
+def trash_directories(path):
+    """Return (files, info) on the same filesystem as path.
+
+    Home's Recycle Bin is on DevOS (C:). A rename onto that bin fails for
+    files on A: or any other disk, so those disks get their own bin.
+    """
+    home_files, home_info = home_trash_dirs()
+    try:
+        os.makedirs(home_files, exist_ok=True)
+        os.makedirs(home_info, exist_ok=True)
+        if os.lstat(path).st_dev == os.stat(home_files).st_dev:
+            return home_files, home_info
+    except OSError:
+        pass
+
+    top = filesystem_top(path)
+    uid = str(os.getuid())
+    candidates = []
+    sticky = os.path.join(top, ".Trash")
+    try:
+        info = os.lstat(sticky)
+        if stat.S_ISDIR(info.st_mode) and not stat.S_ISLNK(info.st_mode) and info.st_mode & stat.S_ISVTX:
+            candidates.append(os.path.join(sticky, uid))
+    except OSError:
+        pass
+    candidates.append(os.path.join(top, f".Trash-{uid}"))
+    source_device = os.lstat(path).st_dev
+    for base in candidates:
+        files = os.path.join(base, "files")
+        info_dir = os.path.join(base, "info")
+        try:
+            os.makedirs(files, exist_ok=True)
+            os.makedirs(info_dir, exist_ok=True)
+            try:
+                os.chmod(base, 0o700)
+            except OSError:
+                pass
+            if os.stat(files).st_dev == source_device:
+                return files, info_dir
+        except OSError:
+            continue
+    return None
+
+
+def iter_trash_file_dirs():
+    """Home bin plus every mounted disk bin this user can see."""
+    home_files, _info = home_trash_dirs()
+    yield home_files
+    uid = str(os.getuid())
+    user = os.path.basename(os.path.expanduser("~")) or uid
+    roots = [
+        os.path.join("/run/media", user),
+        os.path.join("/media", user),
+        "/mnt",
+    ]
+    seen = set()
+    for root in roots:
+        if not os.path.isdir(root):
+            continue
+        try:
+            names = os.listdir(root)
+        except OSError:
+            continue
+        for name in names:
+            top = os.path.join(root, name)
+            for files in (
+                os.path.join(top, ".Trash", uid, "files"),
+                os.path.join(top, f".Trash-{uid}", "files"),
+            ):
+                if files in seen or not os.path.isdir(files):
+                    continue
+                seen.add(files)
+                yield files
+
+
+def recycle_bin_items():
+    items = []
+    for files_dir in iter_trash_file_dirs():
+        try:
+            names = os.listdir(files_dir)
+        except OSError:
+            continue
+        for name in names:
+            if name in (".", ".."):
+                continue
+            items.append(os.path.join(files_dir, name))
+    return items
+
+
+def forget_trashinfo(path):
+    base = os.path.basename(path)
+    clean_base = re.sub(r"\s+\(\d+\)(\.[^.]+)?$", r"\1", base)
+    info_dir = os.path.expanduser("~/.local/share/Trash/info")
+    candidates = [
+        trashinfo_for(path),
+        os.path.join(info_dir, f"{base}.trashinfo"),
+        os.path.join(info_dir, f"{clean_base}.trashinfo"),
+    ]
+    for info_path in candidates:
+        if info_path and os.path.exists(info_path):
+            try:
+                os.remove(info_path)
+            except OSError:
+                pass
+
+
+_PRIVILEGED_EXACT = {
+    "/", "/bin", "/boot", "/dev", "/etc", "/home", "/lib", "/lib64",
+    "/opt", "/proc", "/root", "/run", "/sbin", "/sys", "/tmp", "/usr", "/var",
+    "/media", "/mnt",
+}
+
+
+def _safe_delete_target(path):
+    """Block privileged removal of a filesystem root or a system directory."""
+    if not path or not os.path.isabs(path) or not os.path.lexists(path):
+        return False
+    if os.path.ismount(path):
+        return False
+    real = os.path.realpath(path)
+    home = os.path.realpath(os.path.expanduser("~"))
+    if real in _PRIVILEGED_EXACT or real == home:
+        return False
+    if len([part for part in real.split(os.sep) if part]) < 2:
+        return False
+    return True
+
+
+def remove_path(path, allow_privileged=True):
+    """Delete one item. Return None, 'privileged', or an error string."""
+    base = os.path.basename(path) or path
+    try:
+        if os.path.isdir(path) and not os.path.islink(path):
+            shutil.rmtree(path)
+        else:
+            os.remove(path)
+        return None
+    except OSError as err:
+        denied = isinstance(err, PermissionError) or getattr(err, "errno", None) in (errno.EACCES, errno.EPERM)
+        if denied and allow_privileged:
+            return "privileged"
+        return f"{base}: {err}"
+
+
+def remove_privileged(paths, runner=None):
+    """Remove root-owned items after the user confirms, via one pkexec call."""
+    errors = []
+    safe = []
+    for path in paths:
+        if _safe_delete_target(path):
+            safe.append(path)
+        else:
+            errors.append(f"{os.path.basename(path) or path}: Refusing to delete this location.")
+    if not safe:
+        return errors
+    if runner is None:
+        if os.environ.get("DEVOS_NO_PKEXEC") == "1" or not shutil.which("pkexec"):
+            for path in safe:
+                errors.append(f"{os.path.basename(path)}: Permission denied")
+            return errors
+        runner = subprocess.run
+    # Leave stdout and stderr alone. Piping them makes pkexec skip the
+    # graphical password window and the folder stays on disk.
+    result = runner(["pkexec", "rm", "-rf", "--", *safe])
+    if getattr(result, "returncode", 1) in (126, 127):
+        return errors + ["Permission request was cancelled."]
+    if getattr(result, "returncode", 1) != 0:
+        detail = (getattr(result, "stderr", "") or getattr(result, "stdout", "") or "could not delete").strip()
+        for path in safe:
+            if os.path.lexists(path):
+                errors.append(f"{os.path.basename(path)}: {detail}")
+        return errors
+    for path in safe:
+        if os.path.lexists(path):
+            errors.append(f"{os.path.basename(path)}: still present")
+    return errors
+
+
 class FileOpWorker(QThread):
     """Trash / delete / empty / restore off the UI thread so large trees do not freeze Explorer."""
 
@@ -2968,12 +3223,16 @@ class FileOpWorker(QThread):
         self.op = op  # trash | delete | empty | restore
         self.paths = list(paths or [])
         self._cancel = False
+        self.needs_permanent = []
+        self.needs_admin = []
 
     def request_cancel(self):
         self._cancel = True
 
     def run(self):
         errors = []
+        self.needs_permanent = []
+        self.needs_admin = []
         try:
             if self.op == "trash":
                 errors = self._trash()
@@ -2988,14 +3247,7 @@ class FileOpWorker(QThread):
         self.finished_ok.emit(errors)
 
     def _trash(self):
-        trash_files = os.path.expanduser("~/.local/share/Trash/files")
-        trash_info = os.path.expanduser("~/.local/share/Trash/info")
-        try:
-            os.makedirs(trash_files, exist_ok=True)
-            os.makedirs(trash_info, exist_ok=True)
-        except OSError:
-            pass
-
+        self.needs_permanent = []
         errors = []
         for p in self.paths:
             if self._cancel:
@@ -3005,9 +3257,16 @@ class FileOpWorker(QThread):
             if is_volume_recovery_folder(p):
                 errors.append("lost+found is a protected filesystem recovery folder.")
                 continue
-            self.progress.emit(os.path.basename(p) or p)
-            deleted = False
+            base = os.path.basename(p) or p
+            self.progress.emit(base)
+            # Restore points are root-owned. Moving them into a bin keeps the
+            # space used, and the rename is refused. Ask to delete them for good.
+            if is_system_snapshot(p):
+                self.needs_permanent.append(p)
+                errors.append(f"{base}: Recycle Bin is unavailable on this volume.")
+                continue
 
+            deleted = False
             for cmd in (["gio", "trash", p], ["kioclient6", "move", p, "trash:/"],
                         ["kioclient5", "move", p, "trash:/"]):
                 if self._cancel:
@@ -3030,11 +3289,15 @@ class FileOpWorker(QThread):
             if deleted or self._cancel or not os.path.exists(p):
                 continue
 
+            dirs = trash_directories(p)
+            if not dirs:
+                self.needs_permanent.append(p)
+                errors.append(f"{base}: Recycle Bin is unavailable on this volume.")
+                continue
+            trash_files, trash_info = dirs
             try:
-                # A fallback rename is atomic only on the same filesystem.
                 if os.lstat(p).st_dev != os.stat(trash_files).st_dev:
                     raise OSError("Recycle Bin is unavailable on this volume.")
-                base = os.path.basename(p)
                 stem, ext = os.path.splitext(base)
                 dst = os.path.join(trash_files, base)
                 counter = 2
@@ -3045,22 +3308,33 @@ class FileOpWorker(QThread):
                     counter += 1
 
                 now_str = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-                info_content = f"[Trash Info]\nPath={os.path.abspath(p)}\nDeletionDate={now_str}\n"
+                info_content = (
+                    "[Trash Info]\n"
+                    f"Path={quote(os.path.abspath(p))}\n"
+                    f"DeletionDate={now_str}\n"
+                )
                 info_path = os.path.join(trash_info, f"{os.path.basename(dst)}.trashinfo")
                 with open(info_path, "x", encoding="utf-8") as handle:
                     handle.write(info_content)
                 try:
                     os.rename(p, dst)
                 except OSError:
-                    os.unlink(info_path)
+                    try:
+                        os.unlink(info_path)
+                    except OSError:
+                        pass
                     raise
             except OSError as err:
-                errors.append(f"{os.path.basename(p)}: {err}")
+                denied = isinstance(err, PermissionError) or getattr(err, "errno", None) in (errno.EACCES, errno.EPERM)
+                if denied or "unavailable" in str(err).lower():
+                    self.needs_permanent.append(p)
+                errors.append(f"{base}: {err}")
         return errors
 
     def _delete(self):
         errors = []
-        info_dir = os.path.expanduser("~/.local/share/Trash/info")
+        privileged = []
+        self.needs_admin = []
         for p in self.paths:
             if self._cancel:
                 break
@@ -3070,51 +3344,36 @@ class FileOpWorker(QThread):
                 errors.append("lost+found is a protected filesystem recovery folder.")
                 continue
             self.progress.emit(os.path.basename(p) or p)
-            base = os.path.basename(p)
-            try:
-                if os.path.isdir(p) and not os.path.islink(p):
-                    shutil.rmtree(p)
-                else:
-                    os.remove(p)
-            except Exception as err:
-                errors.append(f"{base}: {err}")
-            clean_base = re.sub(r"\s+\(\d+\)(\.[^.]+)?$", r"\1", base)
-            for info_path in (
-                os.path.join(info_dir, f"{base}.trashinfo"),
-                os.path.join(info_dir, f"{clean_base}.trashinfo"),
-            ):
-                if os.path.exists(info_path):
-                    try:
-                        os.remove(info_path)
-                    except OSError:
-                        pass
+            result = remove_path(p, allow_privileged=True)
+            if result == "privileged":
+                privileged.append(p)
+            elif result:
+                errors.append(result)
+            else:
+                forget_trashinfo(p)
+        if privileged and not self._cancel:
+            # Ask for the password on the window thread. pkexec inside this
+            # worker, under the progress dialog, never shows the prompt.
+            self.needs_admin = list(privileged)
         return errors
 
     def _empty(self):
-        trash_dir = os.path.expanduser("~/.local/share/Trash/files")
-        trash_info = os.path.expanduser("~/.local/share/Trash/info")
-        if os.path.exists(trash_dir):
-            for item in os.listdir(trash_dir):
-                if self._cancel:
-                    break
-                fp = os.path.join(trash_dir, item)
-                self.progress.emit(item)
-                try:
-                    if os.path.isdir(fp) and not os.path.islink(fp):
-                        shutil.rmtree(fp, ignore_errors=True)
-                    else:
-                        os.remove(fp)
-                except Exception:
-                    pass
-        if os.path.exists(trash_info):
-            for item in os.listdir(trash_info):
-                if self._cancel:
-                    break
-                fp = os.path.join(trash_info, item)
-                try:
-                    os.remove(fp)
-                except Exception:
-                    pass
+        for fp in recycle_bin_items():
+            if self._cancel:
+                break
+            self.progress.emit(os.path.basename(fp) or fp)
+            remove_path(fp, allow_privileged=False)
+            forget_trashinfo(fp)
+        for files_dir in list(iter_trash_file_dirs()):
+            info_dir = os.path.join(os.path.dirname(files_dir), "info")
+            if os.path.isdir(info_dir):
+                for item in os.listdir(info_dir):
+                    if self._cancel:
+                        break
+                    try:
+                        os.remove(os.path.join(info_dir, item))
+                    except OSError:
+                        pass
         sizes_file = os.path.expanduser("~/.local/share/Trash/directorysizes")
         if os.path.exists(sizes_file):
             try:
@@ -4702,9 +4961,11 @@ class WindowsFileExplorer(QMainWindow):
         # 1. Top Navigation & Address Toolbar
         nav_toolbar = QWidget()
         nav_toolbar.setObjectName("navToolbar")
+        nav_toolbar.setFixedHeight(52)
         nav_layout = QHBoxLayout(nav_toolbar)
-        nav_layout.setContentsMargins(10, 8, 10, 6)
+        nav_layout.setContentsMargins(12, 0, 12, 0)
         nav_layout.setSpacing(6)
+        nav_layout.setAlignment(Qt.AlignVCenter)
 
         # Navigation Buttons: Back, Forward, Up, Refresh
         self.btn_back = QToolButton()
@@ -4712,6 +4973,7 @@ class WindowsFileExplorer(QMainWindow):
         self.btn_back.setObjectName("navBtn")
         self.btn_back.setToolTip("Back (Alt+Left)")
         self.btn_back.setEnabled(False)
+        self.btn_back.setFixedSize(36, 36)
         self.btn_back.clicked.connect(self.go_back)
 
         self.btn_forward = QToolButton()
@@ -4719,18 +4981,21 @@ class WindowsFileExplorer(QMainWindow):
         self.btn_forward.setObjectName("navBtn")
         self.btn_forward.setToolTip("Forward (Alt+Right)")
         self.btn_forward.setEnabled(False)
+        self.btn_forward.setFixedSize(36, 36)
         self.btn_forward.clicked.connect(self.go_forward)
 
         self.btn_up = QToolButton()
         self.btn_up.setText("↑")
         self.btn_up.setObjectName("navBtn")
         self.btn_up.setToolTip("Up to parent (Alt+Up)")
+        self.btn_up.setFixedSize(36, 36)
         self.btn_up.clicked.connect(self.go_up)
 
         self.btn_refresh = QToolButton()
         self.btn_refresh.setText("↻")
         self.btn_refresh.setObjectName("navBtn")
         self.btn_refresh.setToolTip("Refresh (F5)")
+        self.btn_refresh.setFixedSize(36, 36)
         self.btn_refresh.clicked.connect(self.refresh)
 
         nav_layout.addWidget(self.btn_back)
@@ -4747,7 +5012,7 @@ class WindowsFileExplorer(QMainWindow):
         self.search_box = QLineEdit()
         self.search_box.setObjectName("searchBox")
         self.search_box.setPlaceholderText("Search This PC")
-        self.search_box.setFixedWidth(240)
+        self.search_box.setFixedSize(240, 36)
         self.search_box.textChanged.connect(self._on_search_text_changed)
         nav_layout.addWidget(self.search_box)
 
@@ -4756,6 +5021,7 @@ class WindowsFileExplorer(QMainWindow):
         # 2. Command Ribbon (Windows 11 Fluent) — compact, flat until hover
         cmd_bar = QWidget()
         cmd_bar.setObjectName("commandBar")
+        cmd_bar.setFixedHeight(52)
         cmd_layout = QHBoxLayout(cmd_bar)
         cmd_layout.setContentsMargins(8, 4, 8, 4)
         cmd_layout.setSpacing(2)
@@ -4775,7 +5041,7 @@ class WindowsFileExplorer(QMainWindow):
         act_new_md.triggered.connect(self.action_new_markdown_document)
         act_new_zip = new_menu.addAction(get_win_icon("file-archive", 16), "Compressed (zipped) Folder")
         act_new_zip.triggered.connect(self.action_compress_zip)
-        self.btn_new.setMenu(new_menu)
+        self.btn_new.setMenu(polish_menu(new_menu))
         cmd_layout.addWidget(self.btn_new)
 
         self.btn_new_folder = self.btn_new  # Alias for backward compatibility & tests
@@ -4870,11 +5136,11 @@ class WindowsFileExplorer(QMainWindow):
         self.btn_sort.setCursor(Qt.PointingHandCursor)
         sort_menu = make_menu(self.btn_sort)
         for col_idx, col_name in enumerate(["Name", "Date modified", "Type", "Size"]):
-            sort_menu.addAction(col_name, lambda c=col_idx: self.table_view.sortItems(c, self.table_view.horizontalHeader().sortIndicatorOrder()))
+            sort_menu.addAction(get_win_icon(sort_icons[col_idx], 16), col_name, lambda c=col_idx: self.table_view.sortItems(c, self.table_view.horizontalHeader().sortIndicatorOrder()))
         sort_menu.addSeparator()
-        sort_menu.addAction("Ascending", lambda: self.table_view.sortItems(self.table_view.horizontalHeader().sortIndicatorSection(), Qt.AscendingOrder))
-        sort_menu.addAction("Descending", lambda: self.table_view.sortItems(self.table_view.horizontalHeader().sortIndicatorSection(), Qt.DescendingOrder))
-        self.btn_sort.setMenu(sort_menu)
+        sort_menu.addAction(get_win_icon("sort", 16), "Ascending", lambda: self.table_view.sortItems(self.table_view.horizontalHeader().sortIndicatorSection(), Qt.AscendingOrder))
+        sort_menu.addAction(get_win_icon("sort", 16), "Descending", lambda: self.table_view.sortItems(self.table_view.horizontalHeader().sortIndicatorSection(), Qt.DescendingOrder))
+        self.btn_sort.setMenu(polish_menu(sort_menu))
         cmd_layout.addWidget(self.btn_sort)
 
         # "⊞ View ˇ"
@@ -4890,37 +5156,39 @@ class WindowsFileExplorer(QMainWindow):
         view_menu.addAction("Medium icons", lambda: self.set_view_mode("icons", 64))
         view_menu.addAction("Small icons", lambda: self.set_view_mode("icons", 48))
         view_menu.addSeparator()
-        view_menu.addAction("List", lambda: self.set_view_mode("icons", 32))
-        view_menu.addAction("Details", lambda: self.set_view_mode("details"))
-        view_menu.addAction("Tiles", lambda: self.set_view_mode("icons", 80))
+        view_menu.addAction(get_win_icon("view", 16), "List", lambda: self.set_view_mode("icons", 32))
+        view_menu.addAction(get_win_icon("file-doc", 16), "Details", lambda: self.set_view_mode("details"))
+        view_menu.addAction(get_win_icon("view", 16), "Tiles", lambda: self.set_view_mode("icons", 80))
         view_menu.addSeparator()
 
-        act_compact = view_menu.addAction("Compact view")
+        act_compact = view_menu.addAction(get_win_icon("more", 16), "Compact view")
         act_compact.setCheckable(True)
         act_compact.setChecked(self._settings.get("compact", False))
         act_compact.toggled.connect(self.toggle_compact_view)
 
-        show_submenu = view_menu.addMenu("Show")
-        self.act_show_hidden = show_submenu.addAction("Hidden items")
+        show_submenu = view_menu.addMenu(get_win_icon("preview", 16), "Show")
+        self.act_show_hidden = show_submenu.addAction(get_win_icon("preview", 16), "Hidden items")
         self.act_show_hidden.setCheckable(True)
         self.act_show_hidden.setChecked(self._show_hidden)
         self.act_show_hidden.triggered.connect(self.toggle_hidden_files)
 
-        self.act_show_ext = show_submenu.addAction("File name extensions")
+        self.act_show_ext = show_submenu.addAction(get_win_icon("file-doc", 16), "File name extensions")
         self.act_show_ext.setCheckable(True)
         self.act_show_ext.setChecked(self._settings.get("extensions", True))
         self.act_show_ext.triggered.connect(self.toggle_extensions)
 
-        self.act_show_checks = show_submenu.addAction("Item check boxes")
+        self.act_show_checks = show_submenu.addAction(get_win_icon("select-all", 16), "Item check boxes")
         self.act_show_checks.setCheckable(True)
         self.act_show_checks.setChecked(self._settings.get("use_checkboxes", True))
         self.act_show_checks.triggered.connect(self.toggle_checkboxes)
 
-        self.btn_view.setMenu(view_menu)
+        self.btn_view.setMenu(polish_menu(view_menu))
         cmd_layout.addWidget(self.btn_view)
 
         # "···" See More Menu
-        self.btn_more = QPushButton("…")
+        self.btn_more = QPushButton()
+        self.btn_more.setIcon(get_win_icon("more", 18))
+        self.btn_more.setIconSize(QSize(18, 18))
         self.btn_more.setObjectName("cmdIconBtn")
         self.btn_more.setFixedSize(28, 28)
         self.btn_more.setToolTip("See more")
@@ -4930,23 +5198,23 @@ class WindowsFileExplorer(QMainWindow):
         more_menu.addAction("Pin to Quick access", lambda: self.pin_to_quick_access(self._current_path))
         more_menu.addAction(get_win_icon("copy-path", 16), "Copy path\tCtrl+Shift+C", lambda: self.action_copy_path(self._current_path))
         more_menu.addSeparator()
-        more_menu.addAction("Map network drive…", self.action_map_network_drive)
-        more_menu.addAction("Disconnect network drive…", self.action_disconnect_network_drive)
-        more_menu.addAction("Add a network location", self.action_add_network_location)
+        more_menu.addAction(get_win_icon("network", 16), "Map network drive…", self.action_map_network_drive)
+        more_menu.addAction(get_win_icon("unplug", 16), "Disconnect network drive…", self.action_disconnect_network_drive)
+        more_menu.addAction(get_win_icon("folder", 16), "Add a network location", self.action_add_network_location)
         more_menu.addSeparator()
-        more_menu.addAction("Select all\tCtrl+A", lambda: (self.table_view if self._view_mode == "details" else self.list_view).selectAll())
-        more_menu.addAction("Select none", lambda: (self.table_view if self._view_mode == "details" else self.list_view).clearSelection())
-        more_menu.addAction("Invert selection", self.action_invert_selection)
+        more_menu.addAction(get_win_icon("select-all", 16), "Select all\tCtrl+A", lambda: (self.table_view if self._view_mode == "details" else self.list_view).selectAll())
+        more_menu.addAction(get_win_icon("select-none", 16), "Select none", lambda: (self.table_view if self._view_mode == "details" else self.list_view).clearSelection())
+        more_menu.addAction(get_win_icon("invert", 16), "Invert selection", self.action_invert_selection)
         more_menu.addSeparator()
-        self.btn_terminal = more_menu.addAction("Open in Terminal")
+        self.btn_terminal = more_menu.addAction(get_win_icon("terminal", 16), "Open in Terminal")
         self.btn_terminal.triggered.connect(lambda: open_in_terminal(self._current_path or os.path.expanduser("~")))
-        self.btn_props = more_menu.addAction("Properties\tAlt+Enter")
+        self.btn_props = more_menu.addAction(get_win_icon("properties", 16), "Properties\tAlt+Enter")
         self.btn_props.triggered.connect(lambda: self.show_properties(self._current_path))
         more_menu.addSeparator()
         act_options = more_menu.addAction(get_win_icon("folder-options", 16), "Options")
         act_options.triggered.connect(self.show_folder_options)
 
-        self.btn_more.setMenu(more_menu)
+        self.btn_more.setMenu(polish_menu(more_menu))
         cmd_layout.addWidget(self.btn_more)
 
         # Stretch
@@ -5173,15 +5441,18 @@ class WindowsFileExplorer(QMainWindow):
         # Icons List View (Hidden unless icons mode selected)
         self.list_view = ExplorerListWidget()
         self.list_view.setObjectName("fileList")
+        # Light-authored on purpose. A navy selection (#235073) stays navy in
+        # light mode and the name is painted dark, so the label vanishes.
         self.list_view.setStyleSheet("""
-            QListWidget#fileList { font-size: 12px; background: #0e1827; color: #dce7f7; padding: 10px; border: none; }
-            QListWidget#fileList::item { background: #16273c; border: 1px solid #243b56; border-radius: 10px; padding: 8px; margin: 5px; }
-            QListWidget#fileList::item:hover { background: #203951; border-color: #4f8bb5; }
-            QListWidget#fileList::item:selected { background: #235073; border-color: #7dd3fc; }
+            QListWidget#fileList { font-size: 12px; background: transparent; color: #0f172a; padding: 10px; border: none; }
+            QListWidget#fileList::item { background: transparent; color: #0f172a; border: 1px solid transparent; border-radius: 10px; padding: 8px; margin: 5px; }
+            QListWidget#fileList::item:hover { background: #e8f1fb; color: #0f172a; border: 1px solid #bfdbfe; }
+            QListWidget#fileList::item:selected,
+            QListWidget#fileList::item:selected:hover { background: #d7e9fb; color: #0f172a; border: 1px solid #0078d4; }
         """)
         self.list_view.setViewMode(QListWidget.IconMode)
-        self.list_view.setIconSize(QSize(128, 88))
-        self.list_view.setGridSize(QSize(174, 150))
+        self.list_view.setIconSize(QSize(96, 96))
+        self.list_view.setGridSize(QSize(152, 174))
         self.list_view.setResizeMode(QListWidget.Adjust)
         self.list_view.setWordWrap(True)
         self.list_view.itemDoubleClicked.connect(lambda item: self._on_list_item_double_clicked(item) if self._picker_mode or not self._settings.get("single_click", False) else None)
@@ -5551,6 +5822,10 @@ class WindowsFileExplorer(QMainWindow):
                 background: #0078d4;
                 color: #ffffff;
             }
+            QListWidget#fileList::item:selected:hover {
+                background: #0078d4;
+                color: #ffffff;
+            }
             QRubberBand {
                 background-color: rgba(0, 120, 212, 60);
                 border: 1px solid #0078d4;
@@ -5792,6 +6067,7 @@ class WindowsFileExplorer(QMainWindow):
                     pass
             return
         self._appearance_locked = True
+        self._sync_icon_name_colors()
         self.setStyleSheet("""
             QMainWindow, QDialog { background: #0c131f; color: #f1f5f9; font-family: 'Segoe UI', 'Inter', sans-serif; }
             QWidget#tabContainer { background: #090e17; border-bottom: 1px solid #1a2638; }
@@ -5827,12 +6103,13 @@ class WindowsFileExplorer(QMainWindow):
             }
             QToolButton#addTabBtn:hover { background: #1a273b; border-color: #2b3e58; color: #ffffff; }
 
-            QWidget#navToolbar { background: #0f1725; border: none; padding: 4px 8px; }
+            QWidget#navToolbar { background: #0f1725; border: none; border-bottom: 1px solid #2563eb; padding: 0; }
             QToolButton#navBtn {
                 background: #152132;
                 border: 1px solid #23344d;
                 border-radius: 6px;
-                padding: 5px 8px;
+                padding: 0;
+                min-height: 0px;
                 color: #cbd5e1;
                 font-size: 13px;
                 font-weight: bold;
@@ -5844,7 +6121,8 @@ class WindowsFileExplorer(QMainWindow):
                 background: #090e17;
                 border: 1px solid #1f2f45;
                 border-radius: 6px;
-                padding: 6px 12px;
+                padding: 0 12px;
+                min-height: 0px;
                 color: #ecf4ff;
                 font-size: 12px;
             }
@@ -5977,7 +6255,8 @@ class WindowsFileExplorer(QMainWindow):
             }
 
             QTableWidget#fileTable, QListWidget#fileList { background: #090f18; alternate-background-color: #0c1421; border: none; color: #dce7f7; }
-            QTableWidget#fileTable::item:selected, QListWidget#fileList::item:selected { background: #17375a; color: white; border: 1px solid #0078d4; border-radius: 4px; }
+            QTableWidget#fileTable::item:selected, QListWidget#fileList::item:selected,
+            QListWidget#fileList::item:selected:hover { background: #0078d4; color: #ffffff; border: 1px solid #0078d4; border-radius: 4px; }
             QHeaderView::section {
                 background: #0e1624;
                 color: #94a3b8;
@@ -6417,8 +6696,7 @@ class WindowsFileExplorer(QMainWindow):
             self.btn_restore_selected.setEnabled(count > 0)
             self.btn_delete_permanently.setEnabled(count > 0)
 
-            trash_files_dir = os.path.expanduser("~/.local/share/Trash/files")
-            has_any = os.path.exists(trash_files_dir) and bool(os.listdir(trash_files_dir))
+            has_any = bool(recycle_bin_items())
             self.btn_empty_trash.setEnabled(has_any)
             self.btn_restore_all.setEnabled(has_any)
         else:
@@ -6631,46 +6909,14 @@ class WindowsFileExplorer(QMainWindow):
         else:
             self.table_view.setHorizontalHeaderLabels(["Name", "Date modified", "Type", "Size"])
 
-        try:
-            entries = os.listdir(path)
-        except OSError as err:
-            self.status_items_count.setText(f"Unable to access: {err.strerror}")
-            self._loading_folder = False
+        rows = self._folder_rows(path, in_trash)
+        if rows is None:
             return
-
-        # Separate folders and files
-        dirs = []
-        files = []
-        for entry in entries:
-            if entry in [".", ".."]:
-                continue
-            full_path = os.path.join(path, entry)
-            if not self._show_hidden and (entry.startswith(".") or is_volume_recovery_folder(full_path)):
-                continue
-            if os.path.isdir(full_path):
-                dirs.append(entry)
-            else:
-                if self._picker_mode:
-                    if self._picker_options.get("directory"):
-                        continue
-                    if self._current_filter_patterns:
-                        matched = False
-                        for pat in self._current_filter_patterns:
-                            if pat in ("*", "*.*", "") or fnmatch.fnmatch(entry.lower(), pat.lower()):
-                                matched = True
-                                break
-                        if not matched:
-                            continue
-                files.append(entry)
-
-        dirs.sort(key=str.lower)
-        files.sort(key=str.lower)
-        all_items = dirs + files
+        all_items = rows
 
         self.table_view.setRowCount(len(all_items))
 
-        for row, entry in enumerate(all_items):
-            full_path = os.path.join(path, entry)
+        for row, (entry, full_path) in enumerate(all_items):
             is_dir = os.path.isdir(full_path)
 
             try:
@@ -6740,6 +6986,7 @@ class WindowsFileExplorer(QMainWindow):
 
             # Also populate Icon list view
             list_item = QListWidgetItem(icon, display_name)
+            list_item.setTextAlignment(Qt.AlignHCenter | Qt.AlignBottom)
             tip_bits = [display_name]
             if entry.lower().endswith(".desktop") and display_name != entry:
                 tip_bits.append(entry)
@@ -6981,6 +7228,41 @@ class WindowsFileExplorer(QMainWindow):
                 self.picker_name_edit.setText(text)
 
         self._update_command_bar()
+        self._sync_icon_name_colors()
+
+    def _icon_view_is_light(self):
+        try:
+            from devos_appearance import current_mode
+            return current_mode() in ("light", "mac-light")
+        except Exception:
+            return True
+
+    def _sync_icon_name_colors(self):
+        """Keep the name readable on a marked icon. The selection fill is pale
+        in light mode, so the name stays dark. Dark mode uses white."""
+        if not hasattr(self, "list_view"):
+            return
+        light = self._icon_view_is_light()
+        normal = QColor("#0f172a" if light else "#f8fafc")
+        marked = QColor("#0f172a" if light else "#ffffff")
+        hidden_normal = QColor("#64748b")
+        hidden_marked = QColor("#0f172a" if light else "#e2e8f0")
+        for index in range(self.list_view.count()):
+            item = self.list_view.item(index)
+            name = os.path.basename(item.data(Qt.UserRole) or "")
+            hidden = name.startswith(".")
+            item.setForeground(hidden_marked if hidden and item.isSelected()
+                               else marked if item.isSelected()
+                               else hidden_normal if hidden else normal)
+        palette = self.list_view.palette()
+        if light:
+            palette.setColor(QPalette.Highlight, QColor("#d7e9fb"))
+            palette.setColor(QPalette.HighlightedText, QColor("#0f172a"))
+        else:
+            palette.setColor(QPalette.Highlight, QColor("#0078d4"))
+            palette.setColor(QPalette.HighlightedText, QColor("#ffffff"))
+        self.list_view.setPalette(palette)
+        self.list_view.viewport().setPalette(palette)
 
     def _on_picker_filter_changed(self, index):
         self._current_filter_patterns = self.picker_filter_combo.currentData() or []
@@ -7110,7 +7392,8 @@ class WindowsFileExplorer(QMainWindow):
             self.list_view.show()
             size = icon_size or 96
             self.list_view.setIconSize(QSize(size, size))
-            self.list_view.setGridSize(QSize(size + 40, size + 52))
+            # Leave a full line under the icon. A short cell clips the name.
+            self.list_view.setGridSize(QSize(size + 56, size + 78))
             self.btn_view.setText("View: Icons")
             self.details_button.setChecked(False)
             self._thumbnail_timer.start()
@@ -7450,16 +7733,27 @@ class WindowsFileExplorer(QMainWindow):
             dlg.reset()
             dlg.hide()
             self.refresh()
-            if not errors and hasattr(self, "status") and done_message:
+            needs = [p for p in (getattr(worker, "needs_permanent", None) or []) if os.path.lexists(p)]
+            admin = [p for p in (getattr(worker, "needs_admin", None) or []) if os.path.lexists(p)]
+            if not errors and not needs and not admin and hasattr(self, "status") and done_message:
                 self.status.showMessage(done_message, 4000)
-            elif not errors and hasattr(self, "status_selected_info") and done_message:
+            elif not errors and not needs and not admin and hasattr(self, "status_selected_info") and done_message:
                 self.status_selected_info.setText(done_message)
-            if errors:
+            perm_names = {os.path.basename(p) for p in needs}
+            other = []
+            for err in errors or []:
+                if err.split(":", 1)[0] not in perm_names:
+                    other.append(err)
+            if other:
                 QMessageBox.critical(
                     self,
                     "File operation",
-                    "Some items could not be processed:\n" + "\n".join(errors[:12]),
+                    "Some items could not be processed:\n" + "\n".join(other[:12]),
                 )
+            if needs:
+                self._offer_permanent_delete(needs)
+            if admin:
+                self._start_admin_delete(admin)
             worker.deleteLater()
             if getattr(self, "_file_op_worker", None) is worker:
                 self._file_op_worker = None
@@ -7474,6 +7768,93 @@ class WindowsFileExplorer(QMainWindow):
         count = len(paths or [])
         label = "Moving to Recycle Bin…" if count != 1 else f"Moving “{os.path.basename(paths[0])}” to Recycle Bin…"
         self._start_file_op(label, "trash", paths, done_message=f"Moved {count} item(s) to Recycle Bin")
+
+    def _offer_permanent_delete(self, paths):
+        """Ask before removing items the Recycle Bin cannot hold."""
+        count = len(paths)
+        if count == 1:
+            name = os.path.basename(paths[0])
+            detail = f"“{name}” stays on this disk."
+        else:
+            detail = f"{count} items stay on this disk."
+        reply = QMessageBox.warning(
+            self,
+            "Delete permanently",
+            f"{detail} Timeshift snapshots are owned by the system, and the Recycle Bin "
+            "on DevOS (C:) is a different disk.\n\n"
+            "Permanently delete them and free the space? This cannot be undone.\n\n"
+            "Click Yes, then enter your password in the next window. "
+            "The timeshift folder is owned by the system, so Delete cannot remove it until then.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply == QMessageBox.Yes:
+            self._start_file_op(
+                "Deleting permanently…",
+                "delete",
+                paths,
+                done_message=f"Permanently deleted {count} item(s)",
+            )
+
+    def _start_admin_delete(self, paths):
+        """Remove system-owned folders after the password window is visible."""
+        safe = []
+        refused = []
+        for path in paths:
+            if _safe_delete_target(path):
+                safe.append(path)
+            else:
+                refused.append(os.path.basename(path) or path)
+        if refused:
+            QMessageBox.critical(
+                self,
+                "Delete",
+                "Refusing to delete:\n" + "\n".join(refused),
+            )
+        if not safe:
+            return
+        if os.environ.get("DEVOS_NO_PKEXEC") == "1" or not shutil.which("pkexec"):
+            quoted = " ".join(shlex.quote(path) for path in safe)
+            QMessageBox.critical(
+                self,
+                "Delete",
+                "These folders are owned by the system.\n\n"
+                f"Run this in a terminal:\n\npkexec rm -rf -- {quoted}",
+            )
+            return
+        current = getattr(self, "_admin_proc", None)
+        if current is not None and current.state() != QProcess.NotRunning:
+            QMessageBox.information(self, "Busy", "A delete is already waiting for your password.")
+            return
+        proc = QProcess(self)
+        self._admin_proc = proc
+        self._admin_paths = list(safe)
+        proc.finished.connect(self._admin_delete_finished)
+        if hasattr(self, "status"):
+            self.status.showMessage("Enter your password to delete the timeshift folder. Large folders take a few minutes.")
+        proc.start("pkexec", ["rm", "-rf", "--", *safe])
+
+    def _admin_delete_finished(self, code, _status):
+        paths = list(getattr(self, "_admin_paths", []))
+        self.refresh()
+        left = [path for path in paths if os.path.lexists(path)]
+        if code in (126, 127):
+            if hasattr(self, "status"):
+                self.status.showMessage("Delete cancelled.", 4000)
+            return
+        if left:
+            QMessageBox.critical(
+                self,
+                "Delete",
+                "Could not delete:\n" + "\n".join(os.path.basename(path) for path in left),
+            )
+            return
+        if hasattr(self, "status"):
+            count = len(paths)
+            self.status.showMessage(
+                "Permanently deleted 1 item" if count == 1 else f"Permanently deleted {count} items",
+                4000,
+            )
 
     def show_properties(self, target_path=None):
         """Open authentic Windows Properties dialog based on target type."""
@@ -7571,7 +7952,7 @@ class WindowsFileExplorer(QMainWindow):
         menu.addSeparator()
         act_props = menu.addAction("Properties")
         act_props.triggered.connect(self.show_system_properties)
-        menu.exec_(global_pos)
+        polish_menu(menu).exec_(global_pos)
 
     def _show_this_pc_bg_context_menu(self, pos):
         """Context menu on empty background in This PC view."""
@@ -7597,7 +7978,7 @@ class WindowsFileExplorer(QMainWindow):
         act_props.triggered.connect(self.show_system_properties)
         sender = self.sender()
         global_pos = sender.mapToGlobal(pos) if (sender and hasattr(sender, "mapToGlobal")) else self.mapToGlobal(pos)
-        menu.exec_(global_pos)
+        polish_menu(menu).exec_(global_pos)
 
     def _show_drive_context_menu(self, drive, global_pos):
         """Windows Drive right-click context menu."""
@@ -7627,7 +8008,7 @@ class WindowsFileExplorer(QMainWindow):
         menu.addSeparator()
         act_props = menu.addAction("Properties")
         act_props.triggered.connect(lambda: self.show_drive_properties(drive))
-        menu.exec_(global_pos)
+        polish_menu(menu).exec_(global_pos)
 
     def _show_folder_tile_context_menu(self, path, global_pos):
         """Context menu for folder tile in This PC view."""
@@ -7669,7 +8050,7 @@ class WindowsFileExplorer(QMainWindow):
         menu.addSeparator()
         act_props = menu.addAction("Properties")
         act_props.triggered.connect(lambda: self.show_properties(path))
-        menu.exec_(global_pos)
+        polish_menu(menu).exec_(global_pos)
 
     def _show_network_context_menu(self, global_pos):
         menu = make_menu(self)
@@ -7680,7 +8061,7 @@ class WindowsFileExplorer(QMainWindow):
         menu.addSeparator()
         act_props = menu.addAction("Properties")
         act_props.triggered.connect(lambda: QMessageBox.information(self, "Network", "DevOS Network Discovery is active."))
-        menu.exec_(global_pos)
+        polish_menu(menu).exec_(global_pos)
 
     def _show_bin_context_menu(self, global_pos):
         trash_path = os.path.expanduser("~/.local/share/Trash/files")
@@ -7694,18 +8075,13 @@ class WindowsFileExplorer(QMainWindow):
         menu.addSeparator()
         act_props = menu.addAction("Properties")
         act_props.triggered.connect(lambda: self.show_properties(trash_path))
-        menu.exec_(global_pos)
+        polish_menu(menu).exec_(global_pos)
 
     def _empty_trash(self):
         self.action_empty_recycle_bin()
 
     def action_empty_recycle_bin(self):
-        trash_dir = os.path.expanduser("~/.local/share/Trash/files")
-        trash_info = os.path.expanduser("~/.local/share/Trash/info")
-
-        has_items = False
-        if os.path.exists(trash_dir) and os.listdir(trash_dir):
-            has_items = True
+        has_items = bool(recycle_bin_items())
 
         if not has_items:
             QMessageBox.information(self, "Recycle Bin", "The Recycle Bin is already empty.")
@@ -7735,13 +8111,7 @@ class WindowsFileExplorer(QMainWindow):
         self._restore_paths(paths)
 
     def action_restore_all(self):
-        trash_dir = os.path.expanduser("~/.local/share/Trash/files")
-        if not os.path.exists(trash_dir):
-            return
-        try:
-            items = [os.path.join(trash_dir, f) for f in os.listdir(trash_dir)]
-        except OSError:
-            items = []
+        items = recycle_bin_items()
         if not items:
             QMessageBox.information(self, "Recycle Bin", "The Recycle Bin is already empty.")
             return
@@ -7843,7 +8213,7 @@ class WindowsFileExplorer(QMainWindow):
 
             sender = self.sender()
             global_pos = sender.mapToGlobal(pos) if (sender and hasattr(sender, "mapToGlobal")) else self.mapToGlobal(pos)
-            menu.exec_(global_pos)
+            polish_menu(menu).exec_(global_pos)
             return
 
         if paths:
@@ -7971,7 +8341,7 @@ class WindowsFileExplorer(QMainWindow):
 
         sender = self.sender()
         global_pos = sender.mapToGlobal(pos) if (sender and hasattr(sender, "mapToGlobal")) else self.mapToGlobal(pos)
-        menu.exec_(global_pos)
+        polish_menu(menu).exec_(global_pos)
 
     def action_new_text_document(self):
         if not self._current_path or not os.path.exists(self._current_path):
