@@ -16,10 +16,36 @@ import subprocess
 import sys
 
 
+def _path_rank(path):
+    """Prefer the normal drive mount over Timeshift's temporary mounts."""
+    if path.startswith("/run/media/") or path.startswith("/media/"):
+        return 0
+    if path.startswith("/run/timeshift/"):
+        return 2
+    return 1
+
+
+def unique_stores(stores, identity):
+    """One entry per disk folder. Several /run/timeshift mounts are the same folder."""
+    chosen = {}
+    order = []
+    for store in stores:
+        try:
+            key = identity(store)
+        except OSError:
+            continue
+        if key in chosen:
+            if _path_rank(store) < _path_rank(chosen[key]):
+                chosen[key] = store
+            continue
+        chosen[key] = store
+        order.append(key)
+    return [chosen[key] for key in order]
+
+
 def find_snapshot_stores(mountpoints):
     """Return timeshift folders that sit on a data disk and hold snapshots."""
     found = []
-    seen = set()
     for mount in mountpoints:
         mount = os.path.abspath(mount)
         try:
@@ -40,12 +66,13 @@ def find_snapshot_stores(mountpoints):
             continue
         if os.path.dirname(store) != mount:
             continue
-        key = os.path.realpath(store)
-        if key in seen:
-            continue
-        seen.add(key)
         found.append(store)
-    return found
+
+    def identity(path):
+        info = os.stat(path, follow_symlinks=False)
+        return (info.st_dev, info.st_ino)
+
+    return unique_stores(found, identity)
 
 
 def data_mounts():

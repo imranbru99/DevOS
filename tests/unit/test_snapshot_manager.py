@@ -102,6 +102,18 @@ def test_reclaim_removes_only_the_timeshift_snapshot_store(tmp_path):
     assert (disk / "project" / "timeshift" / "snapshots").is_dir()
 
 
+def test_reclaim_counts_one_folder_when_timeshift_mounted_it_many_times():
+    reclaim = _reclaim()
+    stores = [
+        "/run/timeshift/40988/backup/timeshift",
+        "/run/media/dev/A/timeshift",
+        "/run/timeshift/68667/backup/timeshift",
+    ]
+    assert reclaim.unique_stores(stores, lambda _path: ("disk-a", 1)) == [
+        "/run/media/dev/A/timeshift"
+    ]
+
+
 def test_reclaim_ignores_a_timeshift_symlink(tmp_path):
     disk = tmp_path / "drive-a"
     real = tmp_path / "real-snapshots"
