@@ -28,6 +28,7 @@ import stat
 import tempfile
 import threading
 from pathlib import Path
+from typing import Optional
 from urllib.parse import unquote
 
 try:
@@ -74,7 +75,6 @@ try:
         QCheckBox,
         QComboBox,
         QDialog,
-        QDialogButtonBox,
         QFileDialog,
         QFrame,
         QGridLayout,
@@ -97,6 +97,9 @@ try:
         QScrollArea,
         QShortcut,
         QSizePolicy,
+        QStyle,
+        QStyledItemDelegate,
+        QStyleOptionViewItem,
         QSplitter,
         QStackedWidget,
         QStatusBar,
@@ -773,6 +776,35 @@ def get_win_icon(name, size=32):
         p.drawLine(QPointF(26 * s, 28 * s), QPointF(38 * s, 40 * s))
         p.drawLine(QPointF(38 * s, 28 * s), QPointF(26 * s, 40 * s))
 
+    elif name == "refresh":
+        p.setPen(QPen(QColor("#38bdf8"), 4 * s, Qt.SolidLine, Qt.RoundCap))
+        p.setBrush(Qt.NoBrush)
+        p.drawArc(QRectF(14 * s, 14 * s, 36 * s, 36 * s), 40 * 16, 280 * 16)
+        p.setBrush(QColor("#38bdf8"))
+        p.setPen(Qt.NoPen)
+        p.drawPolygon(QPolygonF([
+            QPointF(44 * s, 12 * s),
+            QPointF(50 * s, 24 * s),
+            QPointF(36 * s, 22 * s),
+        ]))
+
+    elif name == "terminal":
+        p.setBrush(QColor("#0f172a"))
+        p.setPen(QPen(QColor("#38bdf8"), 2 * s))
+        p.drawRoundedRect(QRectF(8 * s, 12 * s, 48 * s, 40 * s), 4 * s, 4 * s)
+        p.setPen(QPen(QColor("#4ade80"), 3 * s, Qt.SolidLine, Qt.RoundCap))
+        p.drawLine(QPointF(18 * s, 26 * s), QPointF(26 * s, 32 * s))
+        p.drawLine(QPointF(26 * s, 32 * s), QPointF(18 * s, 38 * s))
+        p.drawLine(QPointF(30 * s, 38 * s), QPointF(42 * s, 38 * s))
+
+    elif name == "properties":
+        p.setBrush(QColor("#1d4ed8"))
+        p.setPen(Qt.NoPen)
+        p.drawEllipse(QPointF(32 * s, 32 * s), 22 * s, 22 * s)
+        p.setPen(QPen(QColor("#ffffff"), 4 * s, Qt.SolidLine, Qt.RoundCap))
+        p.drawPoint(QPointF(32 * s, 22 * s))
+        p.drawLine(QPointF(32 * s, 28 * s), QPointF(32 * s, 44 * s))
+
     else:
         # Fallback to system icon or clean generic document
         sys_icon = QIcon.fromTheme(name)
@@ -788,6 +820,47 @@ def get_win_icon(name, size=32):
     icon = QIcon(pix)
     _ICON_CACHE[key] = icon
     return icon
+
+
+EXPLORER_MENU_STYLE = """
+QMenu {
+    background: #1e222a;
+    color: #f8fafc;
+    border: 1px solid #334155;
+    border-radius: 10px;
+    padding: 6px;
+}
+QMenu::item {
+    background: transparent;
+    color: #f8fafc;
+    padding: 8px 32px 8px 12px;
+    margin: 2px 4px;
+    border-radius: 6px;
+    font-size: 13px;
+}
+QMenu::item:selected {
+    background: #1d4ed8;
+    color: #ffffff;
+}
+QMenu::item:disabled {
+    color: #64748b;
+}
+QMenu::separator {
+    height: 1px;
+    background: #475569;
+    margin: 5px 10px;
+}
+"""
+
+
+def make_menu(parent=None):
+    """Right-click and toolbar menus. Own sheet so the popup is not the same color as the folder."""
+    menu = QMenu(parent)
+    menu.setObjectName("explorerMenu")
+    menu.setAttribute(Qt.WA_StyledBackground, True)
+    menu.setMinimumWidth(220)
+    menu.setStyleSheet(EXPLORER_MENU_STYLE)
+    return menu
 
 
 def format_bytes(num):
@@ -1330,18 +1403,127 @@ def prompt_name_dialog(parent, title: str, label: str, initial: str,
                        select_stem: bool = False) -> Optional[str]:
     """Name prompt that focuses the field and accepts Ctrl+V / context Paste."""
     dlg = QDialog(parent)
+    dlg.setObjectName("namePrompt")
     dlg.setWindowTitle(title)
-    dlg.setMinimumWidth(320)
+    dlg.setWindowFlags(Qt.Dialog | Qt.WindowTitleHint | Qt.WindowCloseButtonHint)
+    dlg.setMinimumWidth(440)
+    dlg.setAttribute(Qt.WA_StyledBackground, True)
+    icon_name = "folder" if "folder" in (title or "").lower() else "file-doc"
+    dlg.setWindowIcon(get_win_icon(icon_name, 32))
+    # Dark source. DevOS light mode rewrites these colors when the window opens.
+    dlg.setStyleSheet("""
+        QDialog#namePrompt {
+            background: #0c131f;
+            color: #f1f5f9;
+            font-family: 'Segoe UI', 'Inter', sans-serif;
+        }
+        QLabel#nameHeading {
+            color: #f8fafc;
+            font-size: 16px;
+            font-weight: 600;
+            background: transparent;
+        }
+        QLabel#nameLabel {
+            color: #94a3b8;
+            font-size: 12px;
+            background: transparent;
+        }
+        QLineEdit#nameField {
+            background: #0f1525;
+            color: #f8fafc;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 8px 12px;
+            min-height: 22px;
+            font-size: 14px;
+        }
+        QLineEdit#nameField:focus {
+            border: 2px solid #38bdf8;
+            padding: 7px 11px;
+        }
+        QPushButton#nameCancel {
+            background: #172135;
+            color: #f1f5f9;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            min-height: 36px;
+            min-width: 104px;
+            padding: 0 16px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        QPushButton#nameCancel:hover { background: #1e293b; }
+        QPushButton#nameCancel:pressed { background: #0f172a; }
+        QPushButton#nameOk {
+            background: #1d4ed8;
+            color: #ffffff;
+            border: 1px solid #1e40af;
+            border-radius: 8px;
+            min-height: 36px;
+            min-width: 104px;
+            padding: 0 16px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        QPushButton#nameOk:hover { background: #1e40af; }
+        QPushButton#nameOk:pressed { background: #1e3a8a; }
+        QPushButton#nameOk:disabled {
+            background: #1e293b;
+            color: #64748b;
+            border-color: #334155;
+        }
+    """)
     layout = QVBoxLayout(dlg)
-    layout.addWidget(QLabel(label))
+    layout.setContentsMargins(22, 18, 22, 18)
+    layout.setSpacing(14)
+
+    header = QHBoxLayout()
+    header.setSpacing(12)
+    icon_label = QLabel()
+    icon_label.setPixmap(get_win_icon(icon_name, 36).pixmap(36, 36))
+    icon_label.setFixedSize(36, 36)
+    header.addWidget(icon_label, 0, Qt.AlignTop)
+    titles = QVBoxLayout()
+    titles.setSpacing(2)
+    heading = QLabel(title)
+    heading.setObjectName("nameHeading")
+    hint = QLabel(label)
+    hint.setObjectName("nameLabel")
+    titles.addWidget(heading)
+    titles.addWidget(hint)
+    header.addLayout(titles, 1)
+    layout.addLayout(header)
+
     edit = QLineEdit(initial)
+    edit.setObjectName("nameField")
     edit.setClearButtonEnabled(True)
     edit.setContextMenuPolicy(Qt.CustomContextMenu)
     layout.addWidget(edit)
-    btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-    btns.accepted.connect(dlg.accept)
-    btns.rejected.connect(dlg.reject)
-    layout.addWidget(btns)
+
+    buttons = QHBoxLayout()
+    buttons.setSpacing(10)
+    buttons.addStretch(1)
+    cancel = QPushButton("Cancel")
+    cancel.setObjectName("nameCancel")
+    cancel.setAutoDefault(False)
+    cancel.setIcon(QIcon())
+    ok = QPushButton("OK")
+    ok.setObjectName("nameOk")
+    ok.setDefault(True)
+    ok.setAutoDefault(True)
+    ok.setIcon(QIcon())
+    buttons.addWidget(cancel)
+    buttons.addWidget(ok)
+    layout.addLayout(buttons)
+    def _accept():
+        if (edit.text() or "").strip():
+            dlg.accept()
+
+    cancel.clicked.connect(dlg.reject)
+    ok.clicked.connect(_accept)
+    edit.returnPressed.connect(_accept)
+    edit.textChanged.connect(lambda text: ok.setEnabled(bool((text or "").strip())))
+    ok.setEnabled(bool((initial or "").strip()))
 
     def _paste_into_edit():
         text = sync_clipboard_text_into_qt()
@@ -2069,7 +2251,7 @@ class BreadcrumbBar(QWidget):
 
     def _show_address_context_menu(self, global_pos, target_path=None):
         target = target_path if target_path is not None else (self._current_path or "This PC")
-        menu = QMenu(self)
+        menu = make_menu(self)
         act_copy = menu.addAction(get_win_icon("copy-path", 16), "Copy address")
         act_copy.triggered.connect(lambda: self._copy_address(target))
         act_copy_text = menu.addAction("Copy address as text")
@@ -2080,7 +2262,7 @@ class BreadcrumbBar(QWidget):
         menu.exec_(global_pos)
 
     def _show_crumb_context_menu(self, path, global_pos):
-        menu = QMenu(self)
+        menu = make_menu(self)
         label = "This PC" if not path else ("Recycle Bin" if is_recycle_bin_path(path) else os.path.basename(path))
         icon_name = "this-pc" if not path else ("recycle-bin" if is_recycle_bin_path(path) else "folder")
         act_open = menu.addAction(get_win_icon(icon_name, 16), f"Open '{label}'")
@@ -2510,11 +2692,54 @@ class ExplorerTableWidget(QTableWidget):
         super().dropEvent(event)
 
 
+class IconNameDelegate(QStyledItemDelegate):
+    """Icon view names. The style paints a marked name in white, which vanishes on a light folder."""
+
+    def paint(self, painter, option, index):
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        widget = opt.widget
+        style = widget.style() if widget is not None else QApplication.style()
+        text = opt.text or ""
+        opt.text = ""
+        style.drawControl(QStyle.CE_ItemViewItem, opt, painter, widget)
+        if not text:
+            return
+        selected = bool(option.state & QStyle.State_Selected)
+        light = opt.palette.color(QPalette.Base).lightness() > 128
+        # Qt's own text rectangle for icon view has zero width, so the marked
+        # name was clipped. Place it in the gap under the icon instead.
+        icon_h = widget.iconSize().height() if widget is not None else 48
+        top = option.rect.top() + min(icon_h + 6, option.rect.height() - 22)
+        band = QRect(option.rect.left() + 4, top, max(20, option.rect.width() - 8), max(18, option.rect.bottom() - top - 2))
+        painter.save()
+        painter.setClipRect(option.rect.adjusted(-2, 0, 2, 4))
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setFont(opt.font)
+        flags = int(Qt.AlignHCenter | Qt.AlignTop | Qt.TextWordWrap)
+        shown = painter.fontMetrics().elidedText(text, Qt.ElideRight, band.width())
+        text = shown
+        bounds = painter.fontMetrics().boundingRect(band, flags, text)
+        if selected:
+            fill = QColor("#dbeafe") if light else QColor("#1e3a5f")
+            ink = QColor("#1e3a8a") if light else QColor("#f8fafc")
+            pill = bounds.adjusted(-8, -3, 8, 3).intersected(option.rect.adjusted(4, 4, -4, -2))
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(fill)
+            painter.drawRoundedRect(pill, 6, 6)
+        else:
+            ink = QColor("#0f172a") if light else QColor("#e2e8f0")
+        painter.setPen(ink)
+        painter.drawText(band, flags, text)
+        painter.restore()
+
+
 class ExplorerListWidget(QListWidget):
     """Icon list widget supporting native OS drag-out, drop-in, and rubber-band marquee selection."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setItemDelegate(IconNameDelegate(self))
         self.setDragEnabled(True)
         self.setAcceptDrops(True)
         self.setDropIndicatorShown(True)
@@ -2977,6 +3202,216 @@ class DrivePieWidget(QWidget):
         p.drawEllipse(QPointF(65, 65), 32, 32)
 
 
+PROPERTIES_STYLE = """
+QDialog#propDialog {
+    background: #0c131f;
+    color: #f1f5f9;
+    font-family: 'Segoe UI', 'Inter', sans-serif;
+}
+QTabWidget::pane {
+    border: 1px solid #334155;
+    border-radius: 10px;
+    background: #111827;
+    top: -1px;
+}
+QTabBar::tab {
+    background: #172135;
+    color: #94a3b8;
+    border: 1px solid #334155;
+    border-bottom: none;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    padding: 8px 18px;
+    margin-right: 4px;
+    font-size: 13px;
+}
+QTabBar::tab:selected {
+    background: #111827;
+    color: #f8fafc;
+    font-weight: 600;
+    border-top: 2px solid #38bdf8;
+}
+QLineEdit#propNameEdit {
+    background: #0f1525;
+    color: #f8fafc;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 8px 12px;
+    min-height: 20px;
+    font-size: 14px;
+    font-weight: 600;
+}
+QLineEdit#propNameEdit:focus { border: 2px solid #38bdf8; }
+QPushButton#dialogBtn {
+    background: #172135;
+    color: #f1f5f9;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    min-height: 36px;
+    min-width: 92px;
+    padding: 0 14px;
+    font-size: 13px;
+    font-weight: 600;
+}
+QPushButton#dialogBtn:hover { background: #1e293b; }
+QPushButton#dialogBtn:disabled {
+    background: #111827;
+    color: #64748b;
+    border-color: #1e293b;
+}
+QPushButton#dialogBtnPrimary {
+    background: #1d4ed8;
+    color: #ffffff;
+    border: 1px solid #1e40af;
+    border-radius: 8px;
+    min-height: 36px;
+    min-width: 92px;
+    padding: 0 14px;
+    font-size: 13px;
+    font-weight: 600;
+}
+QPushButton#dialogBtnPrimary:hover { background: #1e40af; }
+QCheckBox#propCheck { color: #e2e8f0; spacing: 8px; font-size: 13px; }
+QLabel#propLabel { color: #94a3b8; font-size: 12px; background: transparent; }
+QLabel#propValue { color: #f8fafc; font-size: 13px; background: transparent; }
+QFrame#propRule { background: #334155; border: none; max-height: 1px; }
+"""
+
+
+def polish_properties_dialog(dialog):
+    """Properties sheets. Their button styles used to live on a stylesheet that was replaced."""
+    dialog.setObjectName("propDialog")
+    dialog.setAttribute(Qt.WA_StyledBackground, True)
+    dialog.setMinimumWidth(460)
+    dialog.setStyleSheet(PROPERTIES_STYLE)
+
+
+# Painted on the button itself. A parent stylesheet was not enough: KDE still
+# drew OK, Cancel, and Apply as plain text.
+_PROP_BTN_SECONDARY = """
+QPushButton {
+    background: #ffffff;
+    color: #0f172a;
+    border: 1px solid #94a3b8;
+    border-radius: 8px;
+    min-height: 36px;
+    padding: 0 16px;
+    font-size: 13px;
+    font-weight: 600;
+}
+QPushButton:hover { background: #f1f5f9; border-color: #64748b; }
+QPushButton:disabled { background: #f8fafc; color: #94a3b8; border-color: #e2e8f0; }
+"""
+_PROP_BTN_PRIMARY = """
+QPushButton {
+    background: #1d4ed8;
+    color: #ffffff;
+    border: none;
+    border-radius: 8px;
+    min-height: 36px;
+    padding: 0 18px;
+    font-size: 13px;
+    font-weight: 600;
+}
+QPushButton:hover { background: #1e40af; }
+QPushButton:pressed { background: #1e3a8a; }
+"""
+
+
+# Painted on the command bar itself. The window sheet still had a taller
+# chip rule, and that is the row that stayed on screen.
+_CMD_BAR_STYLE = """
+QWidget#commandBar {
+    background: #ffffff;
+    border: none;
+    border-bottom: 1px solid #e2e8f0;
+    padding: 0;
+}
+QPushButton#newBtn {
+    background: #1d4ed8;
+    color: #ffffff;
+    border: none;
+    border-radius: 6px;
+    padding: 0 12px 0 8px;
+    font-size: 12px;
+    font-weight: 700;
+    min-height: 28px;
+    max-height: 28px;
+}
+QPushButton#newBtn:hover { background: #1e40af; }
+QPushButton#newBtn:pressed { background: #1e3a8a; }
+QPushButton#cmdIconBtn {
+    background: transparent;
+    color: #0f172a;
+    border: none;
+    border-radius: 6px;
+    padding: 0;
+    min-width: 28px;
+    max-width: 28px;
+    min-height: 28px;
+    max-height: 28px;
+}
+QPushButton#cmdIconBtn:hover { background: #e2e8f0; }
+QPushButton#cmdIconBtn:pressed { background: #cbd5e1; }
+QPushButton#cmdBtn, QPushButton#cmdMenuBtn {
+    background: transparent;
+    color: #0f172a;
+    border: none;
+    border-radius: 6px;
+    padding: 0 10px;
+    font-size: 12px;
+    font-weight: 600;
+    min-height: 28px;
+    max-height: 28px;
+}
+QPushButton#cmdBtn:hover, QPushButton#cmdMenuBtn:hover { background: #e2e8f0; }
+QPushButton#cmdBtn:pressed, QPushButton#cmdMenuBtn:pressed { background: #cbd5e1; }
+QPushButton#cmdBtn:checked {
+    background: #1d4ed8;
+    color: #ffffff;
+}
+QPushButton#cmdBtn:disabled, QPushButton#cmdIconBtn:disabled {
+    color: #94a3b8;
+    background: transparent;
+}
+QFrame#cmdSep { background: #cbd5e1; max-width: 1px; min-width: 1px; margin: 6px 2px; }
+"""
+
+
+def polish_command_bar(bar):
+    bar.setObjectName("commandBar")
+    bar.setFixedHeight(36)
+    bar.setStyleSheet(_CMD_BAR_STYLE)
+    for button in bar.findChildren(QPushButton):
+        button.setCursor(Qt.PointingHandCursor)
+        name = button.objectName()
+        if name == "newBtn":
+            button.setFixedHeight(28)
+            button.setIconSize(QSize(16, 16))
+        elif name == "cmdIconBtn":
+            button.setFixedSize(28, 28)
+            button.setIconSize(QSize(16, 16))
+        else:
+            button.setFixedHeight(28)
+
+
+def finish_properties_buttons(dialog):
+    for button in dialog.findChildren(QPushButton):
+        button.setIcon(QIcon())
+        button.setCursor(Qt.PointingHandCursor)
+        button.setMinimumHeight(36)
+        button.setMinimumWidth(96)
+        button.setMaximumWidth(16777215)
+        button.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+        if button.objectName() == "dialogBtnPrimary":
+            button.setStyleSheet(_PROP_BTN_PRIMARY)
+            button.setDefault(True)
+            button.setAutoDefault(True)
+        else:
+            button.setStyleSheet(_PROP_BTN_SECONDARY)
+            button.setAutoDefault(False)
+
+
 class WindowsFolderPropertiesDialog(QDialog):
     def __init__(self, path, parent=None):
         super().__init__(parent)
@@ -2984,8 +3419,9 @@ class WindowsFolderPropertiesDialog(QDialog):
         self.folder_name = os.path.basename(self.path) or self.path
         self.setWindowTitle(f"{self.folder_name} Properties")
         self.setWindowIcon(get_win_icon("folder", 32))
-        self.resize(390, 520)
+        self.resize(480, 540)
         self.setModal(True)
+        polish_properties_dialog(self)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 14, 14, 14)
@@ -3108,9 +3544,11 @@ class WindowsFolderPropertiesDialog(QDialog):
 
         btn_share = QPushButton("Share...")
         btn_share.setObjectName("dialogBtn")
-        btn_share.setFixedWidth(100)
         btn_share.clicked.connect(lambda: QMessageBox.information(self, "Sharing", f"Sharing configuration for '{self.folder_name}' is managed by DevOS Network."))
-        sh_layout.addWidget(btn_share)
+        share_row = QHBoxLayout()
+        share_row.addWidget(btn_share)
+        share_row.addStretch(1)
+        sh_layout.addLayout(share_row)
 
         sh_layout.addWidget(self._make_line())
 
@@ -3124,13 +3562,17 @@ class WindowsFolderPropertiesDialog(QDialog):
 
         btn_adv = QPushButton("Advanced Sharing...")
         btn_adv.setObjectName("dialogBtn")
-        btn_adv.setFixedWidth(150)
-        sh_layout.addWidget(btn_adv)
+        adv_row = QHBoxLayout()
+        adv_row.addWidget(btn_adv)
+        adv_row.addStretch(1)
+        sh_layout.addLayout(adv_row)
         sh_layout.addStretch(1)
         tabs.addTab(sharing_tab, "Sharing")
 
         # Bottom Buttons
         btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+        btn_row.setContentsMargins(0, 8, 0, 0)
         btn_row.addStretch(1)
 
         btn_ok = QPushButton("OK")
@@ -3150,6 +3592,7 @@ class WindowsFolderPropertiesDialog(QDialog):
         btn_row.addWidget(btn_apply)
 
         layout.addLayout(btn_row)
+        finish_properties_buttons(self)
 
         self._thread = FolderSizeThread(self.path)
         self._thread.progress.connect(self._on_size_update)
@@ -3194,18 +3637,20 @@ class WindowsFolderPropertiesDialog(QDialog):
 
     def _make_line(self):
         line = QFrame()
+        line.setObjectName("propRule")
         line.setFrameShape(QFrame.HLine)
-        line.setStyleSheet("background: #2b3240; max-height: 1px;")
+        line.setFixedHeight(1)
         return line
 
     def _make_label(self, text):
         lbl = QLabel(text)
-        lbl.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        lbl.setObjectName("propLabel")
         return lbl
 
     def _make_value_label(self, text):
         lbl = QLabel(text)
-        lbl.setStyleSheet("color: #f1f5f9; font-size: 12px;")
+        lbl.setObjectName("propValue")
+        lbl.setWordWrap(True)
         lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
         return lbl
 
@@ -3217,8 +3662,9 @@ class WindowsFilePropertiesDialog(QDialog):
         self.file_name = os.path.basename(self.path)
         self.setWindowTitle(f"{self.file_name} Properties")
         self.setWindowIcon(get_icon_for_file(self.path, False))
-        self.resize(390, 500)
+        self.resize(480, 540)
         self.setModal(True)
+        polish_properties_dialog(self)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 14, 14, 14)
@@ -3346,18 +3792,26 @@ class WindowsFilePropertiesDialog(QDialog):
         btn_row.addStretch(1)
         btn_ok = QPushButton("OK")
         btn_ok.setObjectName("dialogBtnPrimary")
+        btn_ok.setDefault(True)
+        btn_ok.setAutoDefault(True)
+        btn_ok.setIcon(QIcon())
         btn_ok.clicked.connect(self._on_ok_clicked)
         btn_row.addWidget(btn_ok)
         btn_cancel = QPushButton("Cancel")
         btn_cancel.setObjectName("dialogBtn")
+        btn_cancel.setAutoDefault(False)
+        btn_cancel.setIcon(QIcon())
         btn_cancel.clicked.connect(self.reject)
         btn_row.addWidget(btn_cancel)
         btn_apply = QPushButton("Apply")
         btn_apply.setObjectName("dialogBtn")
+        btn_apply.setAutoDefault(False)
+        btn_apply.setIcon(QIcon())
         btn_apply.setEnabled(False)
         btn_row.addWidget(btn_apply)
 
         layout.addLayout(btn_row)
+        finish_properties_buttons(self)
 
     def _on_ok_clicked(self):
         new_name = self.name_edit.text().strip()
@@ -3372,18 +3826,20 @@ class WindowsFilePropertiesDialog(QDialog):
 
     def _make_line(self):
         line = QFrame()
+        line.setObjectName("propRule")
         line.setFrameShape(QFrame.HLine)
-        line.setStyleSheet("background: #2b3240; max-height: 1px;")
+        line.setFixedHeight(1)
         return line
 
     def _make_label(self, text):
         lbl = QLabel(text)
-        lbl.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        lbl.setObjectName("propLabel")
         return lbl
 
     def _make_value_label(self, text):
         lbl = QLabel(text)
-        lbl.setStyleSheet("color: #f1f5f9; font-size: 12px;")
+        lbl.setObjectName("propValue")
+        lbl.setWordWrap(True)
         lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
         return lbl
 
@@ -3395,8 +3851,9 @@ class WindowsDrivePropertiesDialog(QDialog):
         self.setWindowTitle(f"{drive.get('title', 'Local Disk')} Properties")
         icon_type = "drive-c" if drive.get("is_system") else ("drive-usb" if drive.get("removable") else "drive-fixed")
         self.setWindowIcon(get_win_icon(icon_type, 32))
-        self.resize(390, 530)
+        self.resize(480, 560)
         self.setModal(True)
+        polish_properties_dialog(self)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 14, 14, 14)
@@ -3558,6 +4015,7 @@ class WindowsDrivePropertiesDialog(QDialog):
         btn_row.addWidget(btn_apply)
 
         layout.addLayout(btn_row)
+        finish_properties_buttons(self)
 
     def _fill_storage_insight(self):
         mount = self.drive.get("mount") or "/"
@@ -3601,18 +4059,20 @@ class WindowsDrivePropertiesDialog(QDialog):
 
     def _make_line(self):
         line = QFrame()
+        line.setObjectName("propRule")
         line.setFrameShape(QFrame.HLine)
-        line.setStyleSheet("background: #2b3240; max-height: 1px;")
+        line.setFixedHeight(1)
         return line
 
     def _make_label(self, text):
         lbl = QLabel(text)
-        lbl.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        lbl.setObjectName("propLabel")
         return lbl
 
     def _make_value_label(self, text):
         lbl = QLabel(text)
-        lbl.setStyleSheet("color: #f1f5f9; font-size: 12px;")
+        lbl.setObjectName("propValue")
+        lbl.setWordWrap(True)
         lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
         return lbl
 
@@ -3780,6 +4240,7 @@ class WindowsSystemPropertiesDialog(QDialog):
         btn_bar.addWidget(btn_ok)
 
         layout.addLayout(btn_bar)
+        finish_properties_buttons(self)
 
     def _open_device_manager(self):
         for cmd in [["python3", "/usr/local/share/devos/components/settings/hardware_manager.py"], ["kinfocenter"]]:
@@ -3807,12 +4268,13 @@ class WindowsSystemPropertiesDialog(QDialog):
 
     def _make_label(self, text):
         lbl = QLabel(text)
-        lbl.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        lbl.setObjectName("propLabel")
         return lbl
 
     def _make_val(self, text):
         lbl = QLabel(text)
-        lbl.setStyleSheet("color: #f1f5f9; font-size: 12px;")
+        lbl.setObjectName("propValue")
+        lbl.setWordWrap(True)
         lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
         return lbl
 
@@ -4133,10 +4595,11 @@ class WindowsFolderOptionsDialog(QDialog):
 class WindowsFileExplorer(QMainWindow):
     """Full-featured Windows 10/11 File Explorer for DevOS."""
 
-    def __init__(self, initial_path="", picker_mode=False, picker_options=None):
+    def __init__(self, initial_path="", picker_mode=False, picker_options=None, select_paths=None):
         super().__init__()
         self._picker_mode = picker_mode
         self._picker_options = picker_options or {}
+        self._pending_select = [os.path.abspath(p) for p in (select_paths or []) if p]
         self._picker_accepted = False
         self.selected_files = []
         self._current_filter_patterns = []
@@ -4290,20 +4753,20 @@ class WindowsFileExplorer(QMainWindow):
 
         main_layout.addWidget(nav_toolbar)
 
-        # 2. Command Ribbon (Windows 11 Fluent) — roomy, theme-colored chips
+        # 2. Command Ribbon (Windows 11 Fluent) — compact, flat until hover
         cmd_bar = QWidget()
         cmd_bar.setObjectName("commandBar")
         cmd_layout = QHBoxLayout(cmd_bar)
-        cmd_layout.setContentsMargins(14, 8, 14, 8)
-        cmd_layout.setSpacing(8)
+        cmd_layout.setContentsMargins(8, 4, 8, 4)
+        cmd_layout.setSpacing(2)
 
         # "+ New ˇ" Dropdown Button
         self.btn_new = QPushButton("  New  ")
-        self.btn_new.setIcon(get_win_icon("new", 18))
+        self.btn_new.setIcon(get_win_icon("new", 16))
         self.btn_new.setObjectName("newBtn")
         self.btn_new.setToolTip("Create new item")
-        self.btn_new.setFixedHeight(34)
-        new_menu = QMenu(self.btn_new)
+        self.btn_new.setFixedHeight(28)
+        new_menu = make_menu(self.btn_new)
         act_new_folder = new_menu.addAction(get_win_icon("folder", 16), "Folder\tCtrl+Shift+N")
         act_new_folder.triggered.connect(self.action_new_folder)
         act_new_txt = new_menu.addAction(get_win_icon("file-doc", 16), "Text Document (.txt)")
@@ -4317,7 +4780,7 @@ class WindowsFileExplorer(QMainWindow):
 
         self.btn_new_folder = self.btn_new  # Alias for backward compatibility & tests
 
-        cmd_layout.addSpacing(10)
+        cmd_layout.addSpacing(6)
 
         # Action Icon Buttons
         self.btn_cut = QPushButton()
@@ -4338,11 +4801,11 @@ class WindowsFileExplorer(QMainWindow):
             (self.btn_delete, "delete", "Delete (Delete)", self.action_delete),
         ]
         for btn, name, tip, cb in action_defs:
-            btn.setIcon(get_win_icon(name, 20))
+            btn.setIcon(get_win_icon(name, 18))
             btn.setObjectName("cmdIconBtn")
             btn.setToolTip(tip)
-            btn.setFixedSize(38, 34)
-            btn.setIconSize(QSize(20, 20))
+            btn.setFixedSize(28, 28)
+            btn.setIconSize(QSize(16, 16))
             btn.setCursor(Qt.PointingHandCursor)
             btn.clicked.connect(cb)
             cmd_layout.addWidget(btn)
@@ -4395,19 +4858,17 @@ class WindowsFileExplorer(QMainWindow):
         sep = QFrame()
         sep.setFrameShape(QFrame.VLine)
         sep.setObjectName("cmdSep")
-        sep.setFixedHeight(28)
-        cmd_layout.addSpacing(4)
+        sep.setFixedHeight(16)
         cmd_layout.addWidget(sep)
-        cmd_layout.addSpacing(4)
 
         # "⇅ Sort ˇ"
         self.btn_sort = QPushButton("Sort")
-        self.btn_sort.setIcon(get_win_icon("sort", 18))
+        self.btn_sort.setIcon(get_win_icon("sort", 16))
         self.btn_sort.setObjectName("cmdMenuBtn")
-        self.btn_sort.setMinimumWidth(88)
-        self.btn_sort.setFixedHeight(34)
+        self.btn_sort.setMinimumWidth(72)
+        self.btn_sort.setFixedHeight(28)
         self.btn_sort.setCursor(Qt.PointingHandCursor)
-        sort_menu = QMenu(self.btn_sort)
+        sort_menu = make_menu(self.btn_sort)
         for col_idx, col_name in enumerate(["Name", "Date modified", "Type", "Size"]):
             sort_menu.addAction(col_name, lambda c=col_idx: self.table_view.sortItems(c, self.table_view.horizontalHeader().sortIndicatorOrder()))
         sort_menu.addSeparator()
@@ -4418,12 +4879,12 @@ class WindowsFileExplorer(QMainWindow):
 
         # "⊞ View ˇ"
         self.btn_view = QPushButton("View")
-        self.btn_view.setIcon(get_win_icon("view", 18))
+        self.btn_view.setIcon(get_win_icon("view", 16))
         self.btn_view.setObjectName("cmdMenuBtn")
-        self.btn_view.setMinimumWidth(88)
-        self.btn_view.setFixedHeight(34)
+        self.btn_view.setMinimumWidth(72)
+        self.btn_view.setFixedHeight(28)
         self.btn_view.setCursor(Qt.PointingHandCursor)
-        view_menu = QMenu(self.btn_view)
+        view_menu = make_menu(self.btn_view)
         view_menu.addAction("Extra large icons", lambda: self.set_view_mode("icons", 128))
         view_menu.addAction("Large icons", lambda: self.set_view_mode("icons", 96))
         view_menu.addAction("Medium icons", lambda: self.set_view_mode("icons", 64))
@@ -4461,10 +4922,10 @@ class WindowsFileExplorer(QMainWindow):
         # "···" See More Menu
         self.btn_more = QPushButton("…")
         self.btn_more.setObjectName("cmdIconBtn")
-        self.btn_more.setFixedSize(38, 34)
+        self.btn_more.setFixedSize(28, 28)
         self.btn_more.setToolTip("See more")
         self.btn_more.setCursor(Qt.PointingHandCursor)
-        more_menu = QMenu(self.btn_more)
+        more_menu = make_menu(self.btn_more)
         more_menu.addAction("Undo\tCtrl+Z", self.action_undo)
         more_menu.addAction("Pin to Quick access", lambda: self.pin_to_quick_access(self._current_path))
         more_menu.addAction(get_win_icon("copy-path", 16), "Copy path\tCtrl+Shift+C", lambda: self.action_copy_path(self._current_path))
@@ -4496,8 +4957,8 @@ class WindowsFileExplorer(QMainWindow):
         self.details_button.setIcon(get_win_icon("file-doc", 16))
         self.details_button.setObjectName("cmdBtn")
         self.details_button.setCheckable(True)
-        self.details_button.setMinimumWidth(88)
-        self.details_button.setFixedHeight(34)
+        self.details_button.setMinimumWidth(72)
+        self.details_button.setFixedHeight(28)
         self.details_button.setCursor(Qt.PointingHandCursor)
         self.details_button.setChecked(self._view_mode == "details")
         self.details_button.setToolTip("Details view")
@@ -4508,8 +4969,8 @@ class WindowsFileExplorer(QMainWindow):
         self.preview_button.setIcon(get_win_icon("preview", 16))
         self.preview_button.setObjectName("cmdBtn")
         self.preview_button.setCheckable(True)
-        self.preview_button.setMinimumWidth(92)
-        self.preview_button.setFixedHeight(34)
+        self.preview_button.setMinimumWidth(76)
+        self.preview_button.setFixedHeight(28)
         self.preview_button.setCursor(Qt.PointingHandCursor)
         self.preview_button.setChecked(self._settings.get("preview", False))
         self.preview_button.setToolTip("Preview pane (Alt+P)")
@@ -4524,6 +4985,7 @@ class WindowsFileExplorer(QMainWindow):
                 elif hasattr(b, "setVisible"):
                     b.setVisible(False)
 
+        polish_command_bar(cmd_bar)
         main_layout.addWidget(cmd_bar)
 
         # 3. Main Splitter: Sidebar (Left) + Content (Right)
@@ -4968,28 +5430,28 @@ class WindowsFileExplorer(QMainWindow):
                 border-color: #0078d4;
             }
             #commandBar {
-                background: #0f1a2a;
-                border-bottom: 1px solid #243447;
+                background: transparent;
+                border-bottom: 1px solid #1c2b3e;
+                padding: 0;
             }
             QPushButton#cmdBtn, QPushButton#cmdIconBtn, QPushButton#cmdMenuBtn {
-                background: #162337;
-                border: 1px solid #2a3f5c;
-                border-radius: 8px;
-                color: #e8f1ff;
-                font-size: 12.5px;
+                background: transparent;
+                border: none;
+                border-radius: 6px;
+                color: #e2e8f0;
+                font-size: 12px;
                 font-weight: 600;
-                padding: 6px 12px;
-                min-height: 32px;
+                padding: 0 8px;
+                min-height: 28px;
+                max-height: 28px;
             }
             QPushButton#cmdBtn:hover, QPushButton#cmdIconBtn:hover, QPushButton#cmdMenuBtn:hover {
-                background: #1c3350;
-                border-color: #38bdf8;
+                background: #1a283c;
                 color: #ffffff;
             }
             QPushButton#cmdBtn:checked {
-                background: #0c4a6e;
-                border-color: #38bdf8;
-                color: #e0f2fe;
+                background: #1d4ed8;
+                color: #ffffff;
             }
             #sidebar {
                 background: #17191e;
@@ -5125,20 +5587,21 @@ class WindowsFileExplorer(QMainWindow):
             }
             QMenu {
                 background: #1e222a;
-                border: 1px solid #333d4e;
-                border-radius: 8px;
-                padding: 5px;
+                color: #f8fafc;
+                border: 1px solid #334155;
+                border-radius: 10px;
+                padding: 6px;
             }
             QMenu::item {
                 background: transparent;
-                padding: 6px 28px 6px 12px;
-                border-radius: 5px;
-                color: #e2e8f0;
+                padding: 8px 32px 8px 12px;
+                border-radius: 6px;
+                color: #f8fafc;
                 font-size: 13px;
-                margin: 1px 4px;
+                margin: 2px 4px;
             }
             QMenu::item:selected {
-                background: #0078d4;
+                background: #1d4ed8;
                 color: #ffffff;
             }
             QMenu::item:disabled {
@@ -5146,8 +5609,8 @@ class WindowsFileExplorer(QMainWindow):
             }
             QMenu::separator {
                 height: 1px;
-                background: #2b3341;
-                margin: 4px 8px;
+                background: #475569;
+                margin: 5px 10px;
             }
             QTabWidget#propTabs::pane {
                 border: 1px solid #2d3340;
@@ -5388,103 +5851,105 @@ class WindowsFileExplorer(QMainWindow):
             QLineEdit#searchBox:focus { border-color: #0078d4; background: #0d1522; }
 
             QWidget#commandBar {
-                background: #0f1a2a;
-                border-bottom: 1px solid #243447;
-                padding: 6px 12px;
+                background: #0d1522;
+                border-bottom: 1px solid #1c2b3e;
+                padding: 0;
             }
             QPushButton#cmdBtn, QToolButton#cmdBtn {
-                background: #162337;
-                border: 1px solid #2a3f5c;
-                border-radius: 8px;
-                padding: 6px 14px;
-                color: #e8f1ff;
-                font-size: 12.5px;
+                background: transparent;
+                border: 1px solid transparent;
+                border-radius: 6px;
+                padding: 0 8px;
+                color: #e2e8f0;
+                font-size: 12px;
                 font-weight: 600;
-                min-height: 32px;
+                min-height: 28px;
+                max-height: 28px;
             }
             QPushButton#cmdBtn:hover, QToolButton#cmdBtn:hover {
-                background: #1c3350;
-                border-color: #38bdf8;
+                background: #1a283c;
+                border-color: #273d5c;
                 color: #ffffff;
             }
-            QPushButton#cmdBtn:pressed, QToolButton#cmdBtn:pressed { background: #1e3a5f; }
+            QPushButton#cmdBtn:pressed, QToolButton#cmdBtn:pressed { background: #223753; }
             QPushButton#cmdBtn:checked, QToolButton#cmdBtn:checked {
-                background: #0c4a6e;
-                border-color: #38bdf8;
+                background: #1a365d;
+                border-color: #0078d4;
                 color: #e0f2fe;
             }
-            QPushButton#cmdBtn:disabled { color: #64748b; background: #121a27; border-color: #1e293b; }
+            QPushButton#cmdBtn:disabled { color: #64748b; background: transparent; border-color: transparent; }
 
             QPushButton#cmdIconBtn {
-                background: #162337;
-                border: 1px solid #2a3f5c;
-                border-radius: 8px;
-                padding: 5px;
-                min-width: 36px;
-                max-width: 40px;
-                min-height: 32px;
-                max-height: 36px;
-                color: #e8f1ff;
+                background: transparent;
+                border: 1px solid transparent;
+                border-radius: 6px;
+                padding: 0;
+                min-width: 28px;
+                max-width: 28px;
+                min-height: 28px;
+                max-height: 28px;
+                color: #e2e8f0;
             }
             QPushButton#cmdIconBtn:hover {
-                background: #1c3350;
-                border-color: #38bdf8;
+                background: #1a283c;
+                border-color: #273d5c;
                 color: #ffffff;
             }
-            QPushButton#cmdIconBtn:pressed { background: #1e3a5f; border-color: #0284c7; }
-            QPushButton#cmdIconBtn:disabled { color: #64748b; background: #121a27; border-color: #1e293b; }
+            QPushButton#cmdIconBtn:pressed { background: #223753; border-color: #273d5c; }
+            QPushButton#cmdIconBtn:disabled { color: #64748b; background: transparent; border-color: transparent; }
 
             QPushButton#cmdMenuBtn {
-                background: #162337;
-                border: 1px solid #2a3f5c;
-                border-radius: 8px;
-                padding: 6px 26px 6px 12px;
-                color: #e8f1ff;
-                font-size: 12.5px;
+                background: transparent;
+                border: 1px solid transparent;
+                border-radius: 6px;
+                padding: 0 16px 0 8px;
+                color: #e2e8f0;
+                font-size: 12px;
                 font-weight: 600;
-                min-height: 32px;
-                min-width: 84px;
+                min-height: 28px;
+                max-height: 28px;
+                min-width: 72px;
             }
             QPushButton#cmdMenuBtn:hover {
-                background: #1c3350;
-                border-color: #38bdf8;
+                background: #1a283c;
+                border-color: #273d5c;
                 color: #ffffff;
             }
-            QPushButton#cmdMenuBtn:pressed { background: #1e3a5f; }
+            QPushButton#cmdMenuBtn:pressed { background: #223753; }
             QPushButton#cmdMenuBtn::menu-indicator {
                 subcontrol-origin: padding;
                 subcontrol-position: center right;
-                right: 8px;
-                width: 10px;
-                height: 10px;
+                right: 6px;
+                width: 9px;
+                height: 9px;
             }
 
             QPushButton#newBtn {
                 background: #0078d4;
                 color: white;
-                font-weight: 700;
-                border: 1px solid #38bdf8;
-                border-radius: 8px;
-                padding: 6px 20px 6px 14px;
-                font-size: 12.5px;
-                min-height: 32px;
+                font-weight: 600;
+                border: 1px solid #2563eb;
+                border-radius: 6px;
+                padding: 0 12px 0 8px;
+                font-size: 12px;
+                min-height: 28px;
+                max-height: 28px;
             }
-            QPushButton#newBtn:hover { background: #0284c7; border-color: #7dd3fc; }
-            QPushButton#newBtn:pressed { background: #0369a1; }
+            QPushButton#newBtn:hover { background: #1d4ed8; border-color: #1d4ed8; }
+            QPushButton#newBtn:pressed { background: #1e40af; }
             QPushButton#newBtn::menu-indicator {
                 subcontrol-origin: padding;
                 subcontrol-position: center right;
-                right: 8px;
-                width: 10px;
-                height: 10px;
+                right: 6px;
+                width: 9px;
+                height: 9px;
             }
 
             QFrame#cmdSep {
-                background: #334155;
-                max-width: 2px;
-                min-width: 2px;
-                margin: 4px 8px;
-                border-radius: 1px;
+                background: #22334a;
+                max-width: 1px;
+                min-width: 1px;
+                margin: 6px 4px;
             }
 
             QWidget#sidebar { background: #0c131f; border-right: 1px solid #1a2638; }
@@ -5996,13 +6461,45 @@ class WindowsFileExplorer(QMainWindow):
                     elif hasattr(button, "setVisible"):
                         button.setVisible(False)
 
+    def _select_paths(self, paths):
+        """Highlight files Chrome asked to show, such as a finished download."""
+        wanted = {os.path.normpath(p) for p in paths if p}
+        if not wanted:
+            return
+        self.table_view.clearSelection()
+        self.list_view.clearSelection()
+        first_row = None
+        first_list = None
+        for row in range(self.table_view.rowCount()):
+            item = self.table_view.item(row, 0)
+            if item and os.path.normpath(item.data(Qt.UserRole) or "") in wanted:
+                item.setSelected(True)
+                if first_row is None:
+                    first_row = item
+        for index in range(self.list_view.count()):
+            item = self.list_view.item(index)
+            if item and os.path.normpath(item.data(Qt.UserRole) or "") in wanted:
+                item.setSelected(True)
+                if first_list is None:
+                    first_list = item
+        if first_row is not None:
+            self.table_view.scrollToItem(first_row)
+        if first_list is not None:
+            self.list_view.scrollToItem(first_list)
+        self._on_selection_changed()
+        self.raise_()
+        self.activateWindow()
+
     def navigate_to(self, path, label="", add_to_history=True):
         """Navigate to 'This PC' (empty string) or any folder path."""
         # Clean path if passed as file:// or computer:/
         if path.startswith("file://"):
-            path = path[7:]
+            path = unquote(path[7:])
         if path in ("computer:/", "computer:", "thispc"):
             path = ""
+        if path and os.path.isfile(path):
+            self._pending_select = [os.path.abspath(path)]
+            path = os.path.dirname(path) or path
 
         if add_to_history and self._current_path != path:
             self._history.append(self._current_path)
@@ -6278,6 +6775,10 @@ class WindowsFileExplorer(QMainWindow):
         n = len(all_items)
         self.status_items_count.setText("1 item" if n == 1 else f"{n} items")
         self.status_selected_info.setText("")
+        pending = getattr(self, "_pending_select", None)
+        if pending:
+            self._select_paths(pending)
+            self._pending_select = []
 
     def _prompt_trash_item_action(self, target):
         name = os.path.basename(target)
@@ -7052,7 +7553,7 @@ class WindowsFileExplorer(QMainWindow):
 
     def _show_this_pc_context_menu(self, global_pos):
         """Windows This PC right-click context menu."""
-        menu = QMenu(self)
+        menu = make_menu(self)
         act_open = menu.addAction(get_win_icon("this-pc", 18), "Open")
         act_open.triggered.connect(lambda: self.navigate_to(""))
         act_new_win = menu.addAction("Open in new window")
@@ -7074,7 +7575,7 @@ class WindowsFileExplorer(QMainWindow):
 
     def _show_this_pc_bg_context_menu(self, pos):
         """Context menu on empty background in This PC view."""
-        menu = QMenu(self)
+        menu = make_menu(self)
         view_menu = menu.addMenu("View")
         act_details = view_menu.addAction("Details")
         act_details.triggered.connect(lambda: self.set_view_mode("details"))
@@ -7100,7 +7601,7 @@ class WindowsFileExplorer(QMainWindow):
 
     def _show_drive_context_menu(self, drive, global_pos):
         """Windows Drive right-click context menu."""
-        menu = QMenu(self)
+        menu = make_menu(self)
         icon_type = "drive-c" if drive.get("is_system") else ("drive-usb" if drive.get("removable") else "drive-fixed")
         act_open = menu.addAction(get_win_icon(icon_type, 18), "Open")
         act_open.triggered.connect(lambda: self.open_drive(drive))
@@ -7138,7 +7639,7 @@ class WindowsFileExplorer(QMainWindow):
 
     def _show_folder_context_menu(self, path, global_pos, is_pinned=False):
         """Generic Windows folder context menu."""
-        menu = QMenu(self)
+        menu = make_menu(self)
         act_open = menu.addAction(get_win_icon("folder", 18), "Open")
         act_open.triggered.connect(lambda: self.navigate_to(path))
         act_new_win = menu.addAction("Open in new window")
@@ -7171,7 +7672,7 @@ class WindowsFileExplorer(QMainWindow):
         menu.exec_(global_pos)
 
     def _show_network_context_menu(self, global_pos):
-        menu = QMenu(self)
+        menu = make_menu(self)
         act_open = menu.addAction(get_win_icon("network", 18), "Open")
         act_open.triggered.connect(lambda: self.navigate_to("network:/"))
         act_map = menu.addAction("Map network drive...")
@@ -7183,7 +7684,7 @@ class WindowsFileExplorer(QMainWindow):
 
     def _show_bin_context_menu(self, global_pos):
         trash_path = os.path.expanduser("~/.local/share/Trash/files")
-        menu = QMenu(self)
+        menu = make_menu(self)
         act_open = menu.addAction(get_win_icon("recycle-bin", 18), "Open")
         act_open.triggered.connect(lambda: self.navigate_to(trash_path))
         act_empty = menu.addAction(get_win_icon("recycle-bin", 16), "Empty Recycle Bin")
@@ -7295,7 +7796,7 @@ class WindowsFileExplorer(QMainWindow):
 
     def _show_context_menu(self, pos):
         """Context menu for items or empty space in folder view."""
-        menu = QMenu(self)
+        menu = make_menu(self)
         paths = self.get_selected_paths()
         in_trash = self.is_in_recycle_bin()
 
@@ -7425,10 +7926,10 @@ class WindowsFileExplorer(QMainWindow):
             act_props = menu.addAction("Properties")
             act_props.triggered.connect(lambda: self.show_properties(target))
         else:
-            view_menu = menu.addMenu("View")
-            act_details = view_menu.addAction("Details")
+            view_menu = menu.addMenu(get_win_icon("view", 16), "View")
+            act_details = view_menu.addAction(get_win_icon("view", 16), "Details")
             act_details.triggered.connect(lambda: self.set_view_mode("details"))
-            act_icons = view_menu.addAction("Large icons")
+            act_icons = view_menu.addAction(get_win_icon("preview", 16), "Large icons")
             act_icons.triggered.connect(lambda: self.set_view_mode("icons"))
             view_menu.addSeparator()
             act_hidden = view_menu.addAction("Hidden items")
@@ -7436,17 +7937,17 @@ class WindowsFileExplorer(QMainWindow):
             act_hidden.setChecked(self._show_hidden)
             act_hidden.triggered.connect(self.toggle_hidden_files)
 
-            sort_menu = menu.addMenu("Sort by")
+            sort_menu = menu.addMenu(get_win_icon("sort", 16), "Sort by")
             for s in ["Name", "Date modified", "Type", "Size"]:
                 act_s = sort_menu.addAction(s)
                 act_s.triggered.connect(self.refresh)
 
-            act_refresh = menu.addAction("Refresh")
+            act_refresh = menu.addAction(get_win_icon("refresh", 16), "Refresh")
             act_refresh.triggered.connect(self.refresh)
             menu.addSeparator()
 
             if self._clipboard["paths"]:
-                act_paste = menu.addAction("Paste")
+                act_paste = menu.addAction(get_win_icon("paste", 16), "Paste")
                 act_paste.triggered.connect(self.action_paste)
                 menu.addSeparator()
 
@@ -7454,18 +7955,18 @@ class WindowsFileExplorer(QMainWindow):
             act_copy_path.triggered.connect(lambda: self.action_copy_path(self._current_path))
             menu.addSeparator()
 
-            act_term = menu.addAction("Open in Terminal")
+            act_term = menu.addAction(get_win_icon("terminal", 16), "Open in Terminal")
             act_term.triggered.connect(lambda: open_in_terminal(self._current_path))
             menu.addSeparator()
 
-            new_menu = menu.addMenu("New")
+            new_menu = menu.addMenu(get_win_icon("new", 16), "New")
             act_new_f = new_menu.addAction(get_win_icon("folder", 16), "Folder")
             act_new_f.triggered.connect(self.action_new_folder)
             act_new_doc = new_menu.addAction(get_win_icon("file-doc", 16), "Text Document")
             act_new_doc.triggered.connect(self.action_new_text_document)
             menu.addSeparator()
 
-            act_props = menu.addAction("Properties")
+            act_props = menu.addAction(get_win_icon("properties", 16), "Properties")
             act_props.triggered.connect(lambda: self.show_properties(self._current_path))
 
         sender = self.sender()
@@ -7621,6 +8122,7 @@ def main():
     parser.add_argument("--filter", type=str, default="", help="Filter pattern(s), e.g. 'Images (*.png *.jpg);;All Files (*.*)'")
     parser.add_argument("--resume", action="store_true", help="Resume the last folder in open-file dialogs")
     parser.add_argument("--output", type=str, default="", help="File to write chosen JSON array of paths to")
+    parser.add_argument("--select", action="append", default=[], help="File to highlight when the folder opens")
 
     args, unknown = parser.parse_known_args()
     picker_mode = bool(args.picker or args.save or args.directory or args.multiple)
@@ -7672,7 +8174,25 @@ def main():
         if not picker_options["name"]:
             picker_options["name"] = file_name
 
-    window = WindowsFileExplorer(initial_path, picker_mode=picker_mode, picker_options=picker_options)
+    select_paths = []
+    for raw in args.select or []:
+        chosen = os.path.abspath(os.path.expanduser(raw))
+        if os.path.isdir(chosen) and not initial_path:
+            initial_path = chosen
+        elif chosen:
+            select_paths.append(chosen)
+    if initial_path and os.path.isfile(initial_path):
+        select_paths.insert(0, os.path.abspath(initial_path))
+        initial_path = os.path.dirname(initial_path)
+    if select_paths and not initial_path:
+        initial_path = os.path.dirname(select_paths[0]) or initial_path
+
+    window = WindowsFileExplorer(
+        initial_path,
+        picker_mode=picker_mode,
+        picker_options=picker_options,
+        select_paths=select_paths,
+    )
     # Always keep system min / max / close (never borderless-maximized chrome loss).
     try:
         from app_identity import show_window

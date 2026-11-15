@@ -16,6 +16,8 @@ import subprocess
 import sys
 import threading
 import uuid
+from collections import defaultdict
+from urllib.parse import unquote, urlparse
 
 try:
     import dbus
@@ -25,6 +27,65 @@ try:
 except ImportError as e:
     sys.stderr.write(f"[devos-portal-filechooser] Missing D-Bus dependencies: {e}\n")
     sys.exit(1)
+
+
+def uri_to_path(uri):
+    """Turn a file:// URI from Chrome into a local path."""
+    text = str(uri or "").strip()
+    if not text:
+        return ""
+    if text.startswith("file:"):
+        parsed = urlparse(text)
+        path = unquote(parsed.path or "")
+        if parsed.netloc and parsed.netloc != "localhost":
+            path = f"//{parsed.netloc}{path}"
+        return path
+    return os.path.expanduser(text)
+
+
+def devos_files_bin():
+    return (
+        shutil.which("devos-files")
+        or os.path.expanduser("~/.local/bin/devos-files")
+        or "/usr/local/bin/devos-files"
+    )
+
+
+def open_in_explorer(paths, select=False):
+    """Open File Explorer on these paths. Chrome's download and upload actions land here."""
+    binary = devos_files_bin()
+    if not os.path.isfile(binary):
+        sys.stderr.write(f"[devos-portal-filechooser] devos-files not found at {binary}\n")
+        return
+    paths = [p for p in paths if p]
+    if not paths:
+        return
+    if select:
+        cmd = [binary]
+        for path in paths:
+            cmd.extend(["--select", path])
+    else:
+        cmd = [binary, paths[0]]
+    try:
+        subprocess.Popen(cmd, env=os.environ.copy(), start_new_session=True)
+    except OSError as err:
+        sys.stderr.write(f"[devos-portal-filechooser] Could not open File Explorer: {err}\n")
+
+
+def prefer_devos_for_folders():
+    """Make folder opens use File Explorer, including after Dolphin claimed them."""
+    desktop = "/usr/share/applications/devos-thispc.desktop"
+    if not os.path.isfile(desktop):
+        return
+    try:
+        subprocess.run(
+            ["xdg-mime", "default", "devos-thispc.desktop", "inode/directory"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError:
+        pass
 
 
 def parse_portal_folder(folder_val):
@@ -149,15 +210,7 @@ class DevOSFileChooserPortal(dbus.service.Object):
                 current_folder = os.path.dirname(current_file)
         filters_data = options.get("filters", [])
 
-        # Locate devos-files executable
-        devos_files_bin = (
-            shutil.which("devos-files")
-            or os.path.expanduser("~/.local/bin/devos-files")
-            or os.path.expanduser("~/.gemini/antigravity/bin/devos-files")
-            or "/usr/local/bin/devos-files"
-        )
-
-        cmd = [devos_files_bin, "--picker", "--output", tmp_out, "--title", dialog_title]
+        cmd = [devos_files_bin(), "--picker", "--output", tmp_out, "--title", dialog_title]
         if save_mode:
             cmd.append("--save")
         else:
@@ -218,6 +271,41 @@ class DevOSFileChooserPortal(dbus.service.Object):
             GLib.idle_add(ok_cb, dbus.UInt32(1), dbus.Dictionary({}, signature="sv"))
 
 
+class DevOSFileManager(dbus.service.Object):
+    """org.freedesktop.FileManager1 — Chrome uses this to show a download in a folder."""
+
+    def __init__(self, bus):
+        super().__init__(bus, "/org/freedesktop/FileManager1")
+
+    @dbus.service.method("org.freedesktop.FileManager1", in_signature="ass", out_signature="")
+    def ShowFolders(self, uris, startup_id):
+        for uri in uris:
+            path = uri_to_path(uri)
+            if path:
+                open_in_explorer([path], select=False)
+
+    @dbus.service.method("org.freedesktop.FileManager1", in_signature="ass", out_signature="")
+    def ShowItems(self, uris, startup_id):
+        groups = defaultdict(list)
+        for uri in uris:
+            path = uri_to_path(uri)
+            if not path:
+                continue
+            if os.path.isdir(path):
+                groups[path]
+            else:
+                groups[os.path.dirname(path) or "/"].append(path)
+        for folder, files in groups.items():
+            if files:
+                open_in_explorer(files, select=True)
+            else:
+                open_in_explorer([folder], select=False)
+
+    @dbus.service.method("org.freedesktop.FileManager1", in_signature="ass", out_signature="")
+    def ShowItemProperties(self, uris, startup_id):
+        self.ShowItems(uris, startup_id)
+
+
 def main():
     try:
         import ctypes
@@ -228,8 +316,38 @@ def main():
 
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
     bus = dbus.SessionBus()
-    name = dbus.service.BusName("org.freedesktop.impl.portal.desktop.devos", bus)
-    portal = DevOSFileChooserPortal(bus)
+    held = {"portal_name": None, "portal": None, "manager_name": None, "manager": None}
+    try:
+        held["portal_name"] = dbus.service.BusName(
+            "org.freedesktop.impl.portal.desktop.devos",
+            bus,
+            do_not_queue=True,
+        )
+    except dbus.exceptions.NameExistsException:
+        # Another copy is already the portal. Leave it in charge.
+        return
+    held["portal"] = DevOSFileChooserPortal(bus)
+    prefer_devos_for_folders()
+
+    def claim_file_manager():
+        if held["manager_name"] is not None:
+            return False
+        try:
+            held["manager_name"] = dbus.service.BusName(
+                "org.freedesktop.FileManager1",
+                bus,
+                do_not_queue=True,
+            )
+        except dbus.exceptions.NameExistsException:
+            # Dolphin still owns folder opens. Try again after it quits.
+            return True
+        held["manager"] = DevOSFileManager(bus)
+        sys.stdout.write("[devos-portal-filechooser] File Explorer answers folder opens from Chrome\n")
+        sys.stdout.flush()
+        return False
+
+    claim_file_manager()
+    GLib.timeout_add_seconds(2, claim_file_manager)
     sys.stdout.write("[devos-portal-filechooser] Backend active on org.freedesktop.impl.portal.desktop.devos\n")
     sys.stdout.flush()
 

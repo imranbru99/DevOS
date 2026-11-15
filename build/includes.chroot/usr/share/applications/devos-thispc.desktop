@@ -7,6 +7,7 @@ Exec=/usr/local/bin/devos-files %U
 Icon=devos-thispc
 Terminal=false
 Categories=Qt;System;FileTools;FileManager;
+MimeType=inode/directory;
 Keywords=files;thispc;computer;drives;folders;
 StartupNotify=true
 StartupWMClass=devos-thispc

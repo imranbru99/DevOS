@@ -1,8 +1,11 @@
 """Unit tests for DevOS File Chooser & Portal Integration."""
 
+import importlib.machinery
+import os
 import subprocess
-import sys
 import unittest
+
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 
 class TestFilePicker(unittest.TestCase):
@@ -63,6 +66,29 @@ class TestFilePicker(unittest.TestCase):
 
         f2 = parse_filter_string("")
         self.assertEqual(f2, [("All Files (*.*)", ["*.*"])])
+
+    def test_chrome_download_uri_becomes_a_local_path(self):
+        portal_path = os.path.join(
+            ROOT, "build", "includes.chroot", "usr", "local", "bin", "devos-portal-filechooser"
+        )
+        loader = importlib.machinery.SourceFileLoader("devos_portal_filechooser", portal_path)
+        portal = loader.load_module()
+        self.assertEqual(
+            portal.uri_to_path("file:///home/dev/Downloads/universal-ai-prompt-saver-main.zip"),
+            "/home/dev/Downloads/universal-ai-prompt-saver-main.zip",
+        )
+        self.assertEqual(
+            portal.uri_to_path("file:///home/dev/My%20Files/a.zip"),
+            "/home/dev/My Files/a.zip",
+        )
+        service = os.path.join(
+            ROOT, "build", "includes.chroot", "usr", "share", "dbus-1", "services",
+            "org.freedesktop.FileManager1.service",
+        )
+        with open(service, encoding="utf-8") as handle:
+            text = handle.read()
+        self.assertIn("Name=org.freedesktop.FileManager1", text)
+        self.assertIn("devos-portal-filechooser", text)
 
 
 if __name__ == "__main__":

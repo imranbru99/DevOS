@@ -52,9 +52,12 @@ QCheckBox, QRadioButton { color: #e2e8f0; }
 QTabBar::tab { padding: 10px 16px; margin-right: 3px; color: #94a3b8; }
 QTabBar::tab:selected { border-bottom: 2px solid #38bdf8; color: #f8fafc; }
 QHeaderView::section { padding: 9px; background: #111827; color: #e2e8f0; }
-QMenu { padding: 6px; background: #111827; color: #f8fafc; }
-QMenu::item { padding: 8px 24px; border-radius: 6px; }
-QMenu::item:selected { background: #1e293b; }
+QMenu { background: #1e222a; color: #f8fafc; border: 1px solid #334155;
+    border-radius: 10px; padding: 6px; }
+QMenu::item { background: transparent; color: #f8fafc; padding: 8px 28px 8px 12px;
+    margin: 2px 4px; border-radius: 6px; }
+QMenu::item:selected { background: #1d4ed8; color: #ffffff; }
+QMenu::separator { height: 1px; background: #475569; margin: 5px 10px; }
 QStatusBar { padding: 4px; color: #94a3b8; }
 QScrollBar:vertical, QScrollBar:horizontal { background: transparent; }
 """
@@ -247,7 +250,13 @@ def light_stylesheet(sheet: str) -> str:
                         out = QtGui.QColor("#0f172a")
                         out.setAlpha(max(c.alpha(), 40))
                         return _fmt_color(out, True)
-                    return "#2563eb" if sat > 0.55 and val > 0.55 else "#cbd5e1"
+                    if sat > 0.55 and val > 0.55:
+                        return "#2563eb"
+                    # A near-white border disappears on the light file pane.
+                    # Dark chrome edges stay visible as slate.
+                    if val < 0.45:
+                        return "#64748b"
+                    return "#cbd5e1"
                 return token
 
             return prop + ": " + COLOR.sub(color, value) + ";"
