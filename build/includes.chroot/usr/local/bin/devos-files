@@ -97,6 +97,9 @@ try:
         QScrollArea,
         QShortcut,
         QSizePolicy,
+        QStyle,
+        QStyledItemDelegate,
+        QStyleOptionViewItem,
         QSplitter,
         QStackedWidget,
         QStatusBar,
@@ -2689,11 +2692,54 @@ class ExplorerTableWidget(QTableWidget):
         super().dropEvent(event)
 
 
+class IconNameDelegate(QStyledItemDelegate):
+    """Icon view names. The style paints a marked name in white, which vanishes on a light folder."""
+
+    def paint(self, painter, option, index):
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        widget = opt.widget
+        style = widget.style() if widget is not None else QApplication.style()
+        text = opt.text or ""
+        opt.text = ""
+        style.drawControl(QStyle.CE_ItemViewItem, opt, painter, widget)
+        if not text:
+            return
+        selected = bool(option.state & QStyle.State_Selected)
+        light = opt.palette.color(QPalette.Base).lightness() > 128
+        # Qt's own text rectangle for icon view has zero width, so the marked
+        # name was clipped. Place it in the gap under the icon instead.
+        icon_h = widget.iconSize().height() if widget is not None else 48
+        top = option.rect.top() + min(icon_h + 6, option.rect.height() - 22)
+        band = QRect(option.rect.left() + 4, top, max(20, option.rect.width() - 8), max(18, option.rect.bottom() - top - 2))
+        painter.save()
+        painter.setClipRect(option.rect.adjusted(-2, 0, 2, 4))
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setFont(opt.font)
+        flags = int(Qt.AlignHCenter | Qt.AlignTop | Qt.TextWordWrap)
+        shown = painter.fontMetrics().elidedText(text, Qt.ElideRight, band.width())
+        text = shown
+        bounds = painter.fontMetrics().boundingRect(band, flags, text)
+        if selected:
+            fill = QColor("#dbeafe") if light else QColor("#1e3a5f")
+            ink = QColor("#1e3a8a") if light else QColor("#f8fafc")
+            pill = bounds.adjusted(-8, -3, 8, 3).intersected(option.rect.adjusted(4, 4, -4, -2))
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(fill)
+            painter.drawRoundedRect(pill, 6, 6)
+        else:
+            ink = QColor("#0f172a") if light else QColor("#e2e8f0")
+        painter.setPen(ink)
+        painter.drawText(band, flags, text)
+        painter.restore()
+
+
 class ExplorerListWidget(QListWidget):
     """Icon list widget supporting native OS drag-out, drop-in, and rubber-band marquee selection."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setItemDelegate(IconNameDelegate(self))
         self.setDragEnabled(True)
         self.setAcceptDrops(True)
         self.setDropIndicatorShown(True)
