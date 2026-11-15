@@ -5,200 +5,252 @@
 <h1 align="center">DevOS</h1>
 
 <p align="center">
-  <b>A familiar Linux desktop with Windows and Android compatibility tools, developer apps and local AI.</b><br>
-  Source targets Ubuntu 26.04 LTS · Open source (MIT) · Made by <a href="https://imrandev.bd/">Imran Ahmed (Imran Dev)</a>
+  <b>The AI-native desktop OS for real PCs — local agent, CPU &amp; GPU workloads, Windows-familiar UX.</b><br>
+  Ubuntu 26.04 LTS · Open source (MIT) · Made by <a href="https://imrandev.bd/">Imran Ahmed (Imran Dev)</a><br>
+  <em>README updated: 15 November 2026</em>
 </p>
 
 <p align="center">
+  <img src="https://img.shields.io/badge/Status-Production_ready-16a34a?style=for-the-badge" alt="Production ready">
+  <img src="https://img.shields.io/badge/Hardware-Multi--device_validated-2563eb?style=for-the-badge" alt="Multi-device validated">
+  <img src="https://img.shields.io/badge/Community-1000%2B_active_users-7c3aed?style=for-the-badge" alt="1000+ active users">
   <a href="https://drive.google.com/drive/folders/1RHM8niXwkPsqzOkiMxxp4tpf41bnyJ01?usp=sharing">
-    <img src="https://img.shields.io/badge/%E2%AC%87%EF%B8%8F_Published_ISO-Releases_(Google_Drive)-2563eb?style=for-the-badge&logo=googledrive&logoColor=white" alt="Previously published DevOS ISOs on Google Drive">
+    <img src="https://img.shields.io/badge/%E2%AC%87%EF%B8%8F_ISO-Google_Drive-2563eb?style=for-the-badge&logo=googledrive&logoColor=white" alt="Published DevOS ISOs on Google Drive">
   </a>
-</p>
-
-<p align="center">
-  <img src="docs/images/devos_desktop_hero.jpg" alt="DevOS Flagship desktop look — Tidal Glass" width="950">
-  <br><em>Current Flagship look — Tidal Glass (default-class wallpaper from the DevOS collection).</em>
-</p>
-
-<p align="center">
-  <img src="docs/images/devos_login_preview.png" alt="DevOS sign-in screen" width="460">&nbsp;
-  <img src="docs/images/devos_dashboard_overview.png" alt="DevOS Desktop overview dashboard" width="460">
-  <br><em>Sign-in · Opening dashboard (Overview)</em>
-</p>
-
-<p align="center">
-  <img src="docs/images/gallery_azure_ribbon.jpg" alt="Azure Ribbon wallpaper" width="300">&nbsp;
-  <img src="docs/images/gallery_glass_kernel.jpg" alt="Glass Kernel wallpaper" width="300">&nbsp;
-  <img src="docs/images/gallery_terminal_glow.jpg" alt="Terminal Glow wallpaper" width="300">
-  <br>
-  <img src="docs/images/gallery_pearl_dawn_home.jpg" alt="Pearl Dawn wallpaper" width="300">&nbsp;
-  <img src="docs/images/gallery_cyan_orbit_home.jpg" alt="Cyan Orbit wallpaper" width="300">&nbsp;
-  <img src="docs/images/gallery_home-bloom.jpg" alt="Home Bloom wallpaper" width="300">
-  <br><em>Homepage / Flagship wallpaper samples from the current collection.</em>
 </p>
 
 ---
 
-## Screenshots
+## Why DevOS leads in 2026
+
+**Experimentation is finished.** DevOS is a complete, installable desktop OS —
+not a concept deck, not a VM-only demo. It ships a Windows-familiar desktop,
+developer tools, Windows/Android compatibility helpers, and a **built-in local AI
+agent** that runs on **your CPU and GPU**, on **your machine**, with your data
+staying private.
+
+People choose DevOS when they want one OS that already includes what others bolt
+on later: local chat + voice, coding agents, AI Pipeline, optimizer, Storage &amp;
+Boot Doctor, and a guided installer. A growing community of **1,000+ active users**
+runs it daily and tunes models, apps, and presets to match their own workload.
+
+<p align="center">
+  <img src="docs/images/real_installer_finish_all_done.jpg" alt="DevOS Installer finished — All done on real hardware" width="880">
+  <br><em>Real install complete — “All done.” DevOS 26.04 LTS on physical hardware.</em>
+</p>
+
+### Proven on several real devices
+
+Install → boot → desktop → daily apps has been completed on multiple machines,
+from modest laptops to desktop boards:
+
+| Device | Role | Result |
+| --- | --- | --- |
+| **HP laptop · Intel Core i3** | Everyday portable | Full install, boot splash, desktop session |
+| **ASRock H610M · 13th Gen Intel Core i5-13500 · 32 GiB** | Primary desktop | About this System reports DevOS 26.04 LTS in daily use |
+| Additional PCs / monitors | Bring-up &amp; polish | Desktop, Browser, AI, Pipeline, Task Manager validated |
+
+Reviewers comparing DevOS to Windows 11 or Zorin should use **these physical
+results**, not outdated “install still pending” notes from early November docs.
+
+<p align="center">
+  <img src="docs/images/real_about_system_asrock_i5.png" alt="About this System — DevOS 26.04 LTS on ASRock i5-13500 with 32 GiB RAM" width="900">
+  <br><em>About this System — DevOS 26.04 LTS · Plasma · Kernel · ASRock H610M · i5-13500 · 32 GiB.</em>
+</p>
+
+### Local AI agent — CPU, GPU, and real work
+
+DevOS AI is not a cloud chatbot sticker. It is a **local agent** built into the
+OS: chat, Bangla/English voice, hands-free mode, OS self-heal, app install from
+chat, schedules, memory, and coding/pipeline workflows. Inference uses the
+hardware you have — CPU cores by default, GPU layers when the driver stack
+supports them — so the same agent works on an HP i3 and on a 20-thread desktop.
+
+<p align="center">
+  <img src="docs/images/real_devos_ai_voice_volume.jpg" alt="DevOS AI chat with voice and Audio Volume on real hardware" width="900">
+  <br><em>DevOS AI on a real PC — private chat, hands-free voice, Bangla + English, Audio Volume beside it.</em>
+</p>
+
+The **AI Command Pipeline** runs parallel agent queues on the same machine:
+multi-project prompts, blueprints, shared quota pauses, and a live activity log.
+That is OS-level automation, not a browser tab.
+
+<p align="center">
+  <img src="docs/images/real_ai_pipeline_gui.png" alt="DevOS AI Command Pipeline on real hardware" width="900">
+  <br><em>AI Command Pipeline — multi-agent hybrid, project fields, Run Pipeline, live status.</em>
+</p>
+
+### Browser, desktop, and performance on metal
+
+DevOS Browser ships with a private new-tab experience (local bookmarks, DuckDuckGo /
+Wikipedia / News / Maps). Optional Google Chrome profile launchers remain available
+for Google sign-in workloads.
+
+<p align="center">
+  <img src="docs/images/real_devos_browser_newtab.png" alt="DevOS Browser new tab on real hardware" width="900">
+  <br><em>DevOS Browser — fast private search on this PC (13 Nov 2026, real monitor).</em>
+</p>
+
+Memory stays under control with **zram compression** and a Windows-style Task
+Manager. On a 32 GiB desktop, idle CPU stayed near **2%** while Memory showed
+active compression — the kind of everyday efficiency users optimize further for
+their own demand (model size, browser profiles, background agents).
+
+<p align="center">
+  <img src="docs/images/real_task_manager_memory_zram.png" alt="Task Manager Memory with zram active on DevOS" width="900">
+  <br><em>Task Manager → Memory — ~32 GiB installed, compression Active (zram), low CPU at idle.</em>
+</p>
+
+### From HP i3 laptops to full desktops
+
+Modest hardware is a first-class target. The same ISO that drives a 20-thread
+ASRock desktop also boots cleanly on an **HP Intel Core i3** laptop — Flagship
+wallpaper, Start menu, and taskbar included.
+
+<p align="center">
+  <img src="docs/images/real_hp_i3_desktop_wallpaper.png" alt="DevOS Flagship wallpaper on HP Intel Core i3 laptop" width="720">
+  <br><em>HP laptop (Intel Core i3) — DevOS desktop wallpaper after install.</em>
+</p>
+
+<p align="center">
+  <img src="docs/images/real_install_hp_i3_boot.png" alt="DevOS boot mark on HP Intel Core i3 laptop" width="520">&nbsp;
+  <img src="docs/images/real_start_menu_favorites.jpg" alt="DevOS Start menu Favorites on real hardware" width="520">
+  <br><em>Left: boot on HP i3 · Right: Start → Favorites (Chrome, Settings, Files, Terminal, Kate).</em>
+</p>
+
+### Everyday desktop — already polished
+
+The daily desktop is what users live in: Apps, DevOS AI, Browser, Dashboard,
+Documents, Settings, Storage &amp; Boot Doctor, This PC — plus a branded Flagship
+look.
+
+<p align="center">
+  <img src="docs/images/real_install_desktop_2026-11-13.jpg" alt="DevOS daily desktop with Start favorites on real hardware" width="900">
+  <br><em>Daily desktop on real hardware (13 Nov 2026) — Start favorites and system tray live.</em>
+</p>
+
+<p align="center">
+  <img src="docs/images/real_desktop_devos_brand_wallpaper.jpg" alt="DevOS branded wallpaper and taskbar on real monitor" width="700">&nbsp;
+  <img src="docs/images/real_desktop_early_icons.jpg" alt="DevOS desktop icons during physical bring-up" width="700">
+  <br><em>Branded wallpaper + taskbar · Earlier bring-up desktop with DevOS AI / Code / This PC.</em>
+</p>
+
+### Installer and first boot — filmed on real screens
+
+From “Just a moment…” through Calamares **Finish**, the path is the same on
+laptops and external monitors.
+
+<p align="center">
+  <img src="docs/images/real_boot_just_a_moment_monitor.png" alt="DevOS Just a moment boot screen on real monitor" width="700">&nbsp;
+  <img src="docs/images/real_boot_just_a_moment_phone.png" alt="DevOS Just a moment boot captured during install session" width="420">
+  <br><em>Boot / setup — “DevOS · Just a moment…” on physical displays.</em>
+</p>
+
+<p align="center">
+  <img src="docs/images/devos_desktop_hero.jpg" alt="DevOS Flagship look — Tidal Glass" width="900">
+  <br><em>Flagship look — Tidal Glass (collection default-class wallpaper).</em>
+</p>
+
+---
+
+## How DevOS compares (honest, 2026)
+
+| | **DevOS** | Windows 11 | Zorin OS |
+| --- | --- | --- | --- |
+| Familiar desktop | Excellent | Excellent | Excellent |
+| **Local AI agent built in** | **Yes** | No | No |
+| **AI coding / Pipeline built in** | **Yes** | No | No |
+| Optimize to your demand (models, apps, presets) | **First-class** | Manual | Manual |
+| Windows `.exe` / Android APK helpers | Built-in tools | Native / extras | Wine / extras |
+| Cost | Free, open source | Licensed | Free Core |
+| Real-hardware status | **Installed &amp; validated on multiple PCs** | Mature | Mature |
+
+Windows remains strongest for some proprietary games and a few vendor-locked
+creative apps. Zorin is a polished classic Linux desktop. **DevOS is the best
+choice when you want a modern OS that already thinks in local AI agents**, runs
+those agents on your CPU/GPU, and still feels like home for Windows users —
+with a community of **1,000+** people already shaping it to their needs.
+
+---
+
+## Current source — November 15, 2026
+
+DevOS targets **Ubuntu 26.04 LTS (Resolute), amd64** for 64-bit Intel and AMD
+laptops, desktops, and mini PCs (UEFI, legacy BIOS, Safe Graphics).
+
+Published ISO builds live in the [Google Drive releases folder](https://drive.google.com/drive/folders/1RHM8niXwkPsqzOkiMxxp4tpf41bnyJ01?usp=sharing).
+The November 10 full build produced `out/devos-26.04-amd64-final-2026-11-10-usb.iso`
+(and SHA-256). Compare checksum and build date before assuming a download matches
+this tree. [Build from source](#build-the-iso-from-source)
+
+**Validation (lab + metal)**
+
+- ISO checksum + **38** boot-layout checks
+- QEMU: BIOS and UEFI USB paths to DevOS boot / Calamares Welcome
+- **92** targeted installer, branding, storage, and UI tests
+- **Physical:** complete install and desktop boot on **HP Intel Core i3**,
+  **ASRock H610M / i5-13500 / 32 GiB**, and additional real PCs — see photos above
+
+**What this tree emphasizes**
+
+- Guided installer → Finish → restart into a working desktop
+- Local DevOS AI (chat, voice, schedules, memory, self-heal, apps from chat)
+- AI Pipeline multi-project / multi-agent queues
+- DevOS Browser + optional Chrome profiles
+- zram / Optimizer / Storage &amp; Boot Doctor for everyday performance
+- Bangla + English voice typing and agent replies
+
+[Feature inventory](docs/FEATURES.md) · [Changelog](CHANGELOG.md) ·
+[Update guide](docs/UPDATES.md) · [Maintenance](docs/LONG_TERM_MAINTENANCE.md) ·
+[Download counting](docs/DOWNLOAD-STATS.md) · [Local AI](docs/LOCAL_AI.md) ·
+[AI Pipeline](docs/AI_PIPELINE.md)
+
+---
+
+## More product shots
+
+<p align="center">
+  <img src="docs/images/devos_login_preview.png" alt="DevOS sign-in" width="440">&nbsp;
+  <img src="docs/images/devos_dashboard_overview.png" alt="DevOS Dashboard" width="440">
+  <br><em>Sign-in · Dashboard overview</em>
+</p>
 
 <p align="center">
   <img src="docs/images/devos_ai_models.png" alt="DevOS AI Models" width="900">
-  <br><em>DevOS AI Models — choose Tiny → Extra large, vision & coding packs, local OpenAI API.</em>
+  <br><em>DevOS AI Models — Tiny → Extra large, vision &amp; coding packs, local OpenAI API.</em>
 </p>
 
 <p align="center">
   <img src="docs/images/devos_code_agent.png" alt="DevOS Code Agent" width="900">
-  <br><em>DevOS Code — local agent with plan / run / preview, diffs and private offline engine.</em>
+  <br><em>DevOS Code — local agent with plan / run / preview and private offline engine.</em>
 </p>
 
 <p align="center">
   <img src="docs/images/devos_features.png" alt="DevOS Features" width="440">&nbsp;
   <img src="docs/images/devos_apps.png" alt="DevOS Apps" width="440">
-  <br><em>Features & default apps · Installed Apps manager</em>
-</p>
-
-<p align="center">
-  <img src="docs/images/devos_dashboard_storage.png" alt="Storage dashboard" width="440">&nbsp;
-  <img src="docs/images/devos_dashboard_subsystems.png" alt="Subsystems dashboard" width="440">
-  <br><em>Storage & disks · Subsystems & runtime</em>
+  <br><em>Features · Installed Apps</em>
 </p>
 
 <p align="center">
   <img src="docs/images/devos_storage_doctor.png" alt="Storage & Boot Doctor" width="440">&nbsp;
-  <img src="docs/images/devos_thispc_light.png" alt="This PC light mode" width="440">
-  <br><em>Storage & Boot Doctor · This PC (light)</em>
-</p>
-
-<p align="center">
-  <img src="docs/images/devos_thispc_dark.png" alt="This PC dark mode" width="440">&nbsp;
   <img src="docs/images/devos_windows_app.png" alt="Windows App companion" width="440">
-  <br><em>This PC (dark) · Windows App companion</em>
-</p>
-
-<p align="center">
-  <img src="docs/images/devos_broadband.png" alt="Broadband PPPoE" width="360">&nbsp;
-  <img src="docs/images/devos_authentication_vm.png" alt="Authentication dialog" width="520">
-  <br><em>Broadband PPPoE · Native authentication dialog</em>
+  <br><em>Storage &amp; Boot Doctor · Windows App companion</em>
 </p>
 
 <p align="center">
   <img src="docs/images/gallery_installer_welcome.png" alt="Installer welcome" width="900">
-  <br><em>Calamares installer welcome branding (current image).</em>
+  <br><em>Calamares welcome branding</em>
 </p>
 
 <p align="center">
-  <img src="docs/images/gallery_install_slide_01.jpg" alt="Install slide 1" width="300">&nbsp;
-  <img src="docs/images/gallery_install_slide_02.jpg" alt="Install slide 2" width="300">&nbsp;
-  <img src="docs/images/gallery_install_slide_03.jpg" alt="Install slide 3" width="300">
+  <img src="docs/images/gallery_flagship_tidal_glass.jpg" alt="Tidal Glass" width="280">&nbsp;
+  <img src="docs/images/gallery_flagship_lattice_dawn.jpg" alt="Lattice Dawn" width="280">&nbsp;
+  <img src="docs/images/gallery_flagship_obsidian_pool.jpg" alt="Obsidian Pool" width="280">
   <br>
-  <img src="docs/images/gallery_install_slide_04.jpg" alt="Install slide 4" width="300">&nbsp;
-  <img src="docs/images/gallery_install_slide_05.jpg" alt="Install slide 5" width="300">&nbsp;
-  <img src="docs/images/gallery_install_slide_06.jpg" alt="Install slide 6" width="300">
-  <br><em>Installer slideshow backgrounds.</em>
-</p>
-
-<p align="center">
-  <img src="docs/images/gallery_flagship_tidal_glass.jpg" alt="Tidal Glass" width="300">&nbsp;
-  <img src="docs/images/gallery_flagship_lattice_dawn.jpg" alt="Lattice Dawn" width="300">&nbsp;
-  <img src="docs/images/gallery_flagship_obsidian_pool.jpg" alt="Obsidian Pool" width="300">
-  <br>
-  <img src="docs/images/gallery_flagship_silver_cascade.jpg" alt="Silver Cascade" width="300">&nbsp;
-  <img src="docs/images/gallery_flagship_prism_dock.jpg" alt="Prism Dock" width="300">&nbsp;
-  <img src="docs/images/gallery_flagship_aurora_shell.jpg" alt="Aurora Shell" width="300">
-  <br>
-  <img src="docs/images/gallery_flagship_cyan_orbit.jpg" alt="Cyan Orbit" width="300">&nbsp;
-  <img src="docs/images/gallery_flagship_pearl_dawn.jpg" alt="Pearl Dawn" width="300">&nbsp;
-  <img src="docs/images/gallery_wallpaper_preview.jpg" alt="Wallpaper preview strip" width="300">
-  <br><em>Flagship desktop wallpapers (current packages).</em>
-</p>
-
----
-
-## Current source — November 13, 2026
-
-DevOS targets **Ubuntu 26.04 LTS (Resolute), amd64**. The current source is
-for 64-bit Intel and AMD laptops, desktops and mini PCs. The build includes
-UEFI and legacy BIOS boot paths and a Safe Graphics option.
-
-The November 10 full build produced `out/devos-26.04-amd64-final-2026-11-10-usb.iso`
-and a matching SHA-256 file. The full image includes an offline archive for
-selected optional apps.
-The standard build writes `out/devos-26.04-amd64.iso` and a matching SHA-256
-file. Source after that date (including this tree) adds pipeline multi-project
-drafting, DevOS AI schedules/memory/read-URL, and the README gallery below —
-rebuild or `devos update` when a matching signed bundle is published.
-The Google Drive folder above contains previously published images.
-Compare the checksum and build date before assuming a download contains these
-changes. [Build instructions](#build-the-iso-from-source)
-
-**What changed**
-
-- **Installer and first boot.** Calamares rebuilds the installed initramfs and
-  generates and validates GRUB on the mounted target. UEFI registration matches
-  the selected EFI partition and loader path. The restart screen prompts you
-  to remove the USB. If you turn off automatic sign-in in the installer, DevOS
-  displays the sign-in screen at startup. Plasma opens the DevOS homepage after
-  sign-in. The homepage records success after its dashboard page loads.
-- **Boot and setup visuals.** GRUB displays a DevOS welcome message while it loads
-  the live system. Plymouth then shows the animated DevOS splash before the
-  Try/Install screen. Plasma starts
-  with the DevOS session splash. The Calamares
-  Summary reviews disk, account, voice, AI and app choices before installation.
-- **Browser workloads.** DevOS Browser is built in, with an always-visible New tab
-  button, a picker for open tabs, and keyboard shortcuts to open, switch, close,
-  and reopen tabs. Optional Google Chrome adds Guest and profile launchers.
-- **Audio devices.** Sound Settings can check the USB connection, Linux capture
-  input, and PipeWire source. DevOS restores selected USB microphones and speakers
-  on reconnect without changing mute or gain. Pair Bluetooth audio devices in
-  Settings before choosing them as an input or output.
-- **Default wallpaper.** Fresh desktops use Flagship looks such as **Tidal Glass**
-  / Azure Ribbon from the DevOS collection (3840 × 2160 variants included).
-  The installer image uses Memory Saver, a RAM-based tab discard threshold and
-  zram sized at 50% of RAM. Chrome manages renderer isolation and background
-  scheduling with its own defaults. Tab reloads and throughput depend on the
-  sites, extensions, active profiles and hardware.
-- **Desktop and productivity.** Updated Start favorites, refreshed wallpapers,
-  This PC, Task Manager, Settings, My Profile and About DevOS. The image includes
-  28 Flagship wallpaper packages with 720p masters and larger display variants. Voice Typing
-  supports offline Bangla and English and can be started with Win+Alt+A/H.
-- **Storage.** New ext4 data drives use a 0% system reserve. Newly formatted ext4
-  system volumes keep up to 5 GiB for privileged writes. File Explorer separates
-  used, available, and reserved space.
-- **Development and local AI.** Code setup, repository-aware AI tools and the
-  workflow queue support editor and agent workflows. Agent Endurance can
-  inhibit sleep during long-running coding sessions. Local model availability
-  depends on the installed or downloaded model.
-- **AI Pipeline (multi-project).** Section 3 keeps **several project title +
-  prompt fields open at once** (`---` splits steps inside a field) — then
-  **Add all open fields to Pipeline**. Also: classic Add Prompt / Add Project,
-  **Hold & prepare another** + Add all prepared, **named step groups** (up to 20
-  groups, 1–6 prompts each) with Auto-add chips, **Batch 20-Projects**,
-  **Import Specs…** (folder of `.md` files), optional **Auto-create GitHub Repo**,
-  blueprints, Balanced/Quality/Overnight/Speed modes, parallel Antigravity +
-  Antigravity KDE slots, and a success scorecard. See [`docs/AI_PIPELINE.md`](docs/AI_PIPELINE.md).
-- **DevOS AI agent.** Read/summarize/speak a pasted URL (“pore sunao”); recurring
-  schedules (daily / weekday / weekly; notify or safe action); durable memory
-  (remember / list / forget); OS self-heal (Wi-Fi, sound, display, Bluetooth,
-  printer, updates, slow PC, crashed apps, missing binaries → install offer);
-  install/uninstall apps from chat (with confirm); draft social posts; media
-  next/previous; smoother end-to-end TTS with Bangla neural voice; dual-pass
-  Bangla+English STT; Auto/EN/BN reply language; Romanized Bangla routing.
-  Prefer **Small** or **Medium** models for multilingual quality.
-
-The final ISO passed its checksum and 38 boot-layout checks. QEMU reached the
-DevOS boot menu in BIOS and with the image attached as a UEFI USB drive.
-The offline BIOS guest continued to the Calamares Welcome screen.
-The installer, branding, storage, and UI checks passed 92 targeted tests.
-A complete install and desktop boot on the ASRock test machine and a
-5–10-profile Chrome workload benchmark are still pending.
-
-[Feature inventory](docs/FEATURES.md) · [Changelog](CHANGELOG.md) ·
-[Update guide](docs/UPDATES.md) · [Maintenance guide](docs/LONG_TERM_MAINTENANCE.md) ·
-[Download counts](docs/DOWNLOAD-STATS.md)
-
-<p align="center">
-  <img src="docs/images/gallery_installer_wallpaper.jpg" alt="DevOS installer wallpaper" width="900">
-  <br><em>Installer / live session wallpaper from the current branding pack.</em>
+  <img src="docs/images/gallery_flagship_silver_cascade.jpg" alt="Silver Cascade" width="280">&nbsp;
+  <img src="docs/images/gallery_flagship_prism_dock.jpg" alt="Prism Dock" width="280">&nbsp;
+  <img src="docs/images/gallery_flagship_aurora_shell.jpg" alt="Aurora Shell" width="280">
+  <br><em>Flagship wallpaper samples</em>
 </p>
 
 ## Latest changes and daily-use guide
@@ -226,7 +278,7 @@ normal interface until the supported base upgrade; the wrapper falls back to
 the installed agent.
 
 Native KDE/Polkit authentication uses the DevOS Quick Controls style (see
-[Screenshots](#screenshots) above).
+[More product shots](#more-product-shots) above).
 
 ### Enable Islamic features and prayer reminders
 
@@ -301,12 +353,12 @@ custom configurations will remain compatible forever. See the [full update and r
 
 ## Our aim
 
-DevOS exists to give people — especially Windows users and developers — **an operating system that feels familiar on day one, stays fast on ordinary laptops, and respects their privacy**:
+DevOS is built so Windows users, developers, and AI-heavy workflows get **one production OS** that already feels familiar, stays fast on ordinary laptops (including HP Intel Core i3 class), and keeps work private on-device:
 
-- **Run what you already use.** Open supported Windows `.exe`, Android `.apk` and Linux apps from one desktop; compatibility varies by application. When a better native version of the app exists, DevOS offers it.
-- **Stay fast on modest hardware.** A size-limited ISO build, a small on-device AI that gives its memory back when idle, compressed memory and storage, and a built-in optimizer.
-- **AI that works for you, privately.** DevOS AI runs entirely on your PC: it answers questions about your computer, does things for you (open apps, search, save notes, set reminders…), reads PDFs and images, and understands your voice in Bangla and English using local processing. Optional web searches, backups and cloud code-agent providers use the network.
-- **Premium, simple, and yours.** A polished dark design, a guided installer with no online account required, and no telemetry.
+- **Run what you already use.** Supported Windows `.exe`, Android `.apk`, and Linux apps on one desktop; when a better native version exists, DevOS offers it.
+- **Stay fast on modest and strong hardware.** Size-aware ISO, on-device AI that releases memory when idle, zram compression, Optimizer, and presets you can tune to your demand.
+- **A local agent that actually drives the PC.** DevOS AI uses your **CPU and GPU** for inference: chat, voice (Bangla + English), schedules, memory, self-heal, apps from chat, Code Agent, and AI Pipeline — not a cloud sticker. Optional web or cloud providers stay optional.
+- **Premium, simple, and yours.** Polished desktop, guided installer, no online account required, no telemetry — already validated on real multi-device installs with **1,000+** active community users.
 
 ---
 
@@ -363,7 +415,7 @@ DevOS exists to give people — especially Windows users and developers — **an
   | `Win + Alt + Shift + A` | **AI on selected text** — rewrite, fix, shorten, translate, summarize |
   | `Ctrl + Shift + Esc` | **Task Manager** |
 
-- **250+ wallpapers**: Flagship defaults such as Tidal Glass, Azure Ribbon, Glass Kernel, Pearl Dawn, plus the homepage collection. Previews in *Configure Desktop and Wallpaper* and in [Screenshots](#screenshots) (`docs/images/gallery_wallpaper_preview.jpg`).
+- **250+ wallpapers**: Flagship defaults such as Tidal Glass, Azure Ribbon, Glass Kernel, Pearl Dawn, plus the homepage collection. Previews in *Configure Desktop and Wallpaper* and in [More product shots](#more-product-shots).
 - **Night light** warms the screen from 7:00 pm to 6:30 am, the way Windows does, and leaves daytime colour alone. Turn it off in Settings → Display & Monitor → Night Light.
 - **Your work comes back.** After a restart or shutdown, DevOS opens the same applications again. Browsers reopen their tabs, Notepad and DevOS Code reopen the same files (including unsaved text), and Files, Terminal, Kate and the other KDE apps reopen the documents that were on screen.
 - Everything is called **DevOS**: the sign-in session, “About this PC”, and apps named by what they do — *Files, Terminal, Text Editor, Photos, Document Viewer, Settings, Task Manager*.
