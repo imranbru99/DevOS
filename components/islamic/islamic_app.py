@@ -789,7 +789,7 @@ def run_gui(screenshot=None):
             self.play_sound = QtWidgets.QCheckBox(
                 "Play a sound (system chime, or your own adhan file below)")
             self.speak = QtWidgets.QCheckBox(
-                "Speak prayer name and daily Ayah/Hadith (espeak)")
+                "Speak prayer name and daily Ayah/Hadith (uses DevOS AI voice gender)")
             c.addWidget(self.play_sound)
             c.addWidget(self.speak)
             daily_note = QtWidgets.QLabel(

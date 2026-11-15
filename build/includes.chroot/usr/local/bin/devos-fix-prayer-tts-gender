@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Fix prayer / Islamic TTS to honor DevOS AI female/male voice preference.
+set -euo pipefail
+
+BRANCH="${1:-cursor/fix-tts-gender-and-lag-6cbe}"
+RAW="https://raw.githubusercontent.com/imranbru99/DevOS/${BRANCH}"
+DEST_DIR=/usr/local/share/devos/components/islamic
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+echo "== Update Islamic prayer TTS gender (${BRANCH}) =="
+mkdir -p "$DEST_DIR"
+for f in notifier.py islamic_app.py; do
+  curl -fsSL "${RAW}/components/islamic/${f}" -o "${TMP}/${f}"
+  sudo install -m 0644 "${TMP}/${f}" "${DEST_DIR}/${f}"
+  echo "  ✔ ${DEST_DIR}/${f}"
+done
+
+# Prove female espeak variant is present
+grep -q 'bn+f2' "${DEST_DIR}/notifier.py"
+grep -q '_tts_gender' "${DEST_DIR}/notifier.py"
+echo "  ✔ gender-aware espeak / edge voices present"
+
+echo "== Restart Islamic notifier service =="
+systemctl --user restart devos-islamic.service 2>/dev/null \
+  || systemctl --user restart islamic.service 2>/dev/null \
+  || true
+
+echo
+echo "Done. Prayer / Ayah speech now follows DevOS AI voice gender"
+echo "(Settings → female stays female, including offline espeak)."
+echo "Test from Islamic app → Notifications → Test, or wait for next prayer."
+echo
+echo "Confirm saved gender:"
+echo "  python3 -c \"import sys; sys.path.insert(0,'/usr/local/share/devos/components/assistant'); import voice_prefs; print(voice_prefs.tts_gender())\""

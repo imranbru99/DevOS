@@ -306,11 +306,66 @@ _TTS_CACHE = os.path.join(
     os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache"),
     "devos", "islamic-tts",
 )
-# Clear neural Bangla / English voices (needs network once per phrase).
+# Fallback neural voices when voice_prefs is unavailable (female default).
 _EDGE_VOICES = {
-    "bn": "bn-BD-NabanitaNeural",
-    "en": "en-US-JennyNeural",
+    ("bn", "female"): "bn-BD-NabanitaNeural",
+    ("bn", "male"): "bn-BD-PradeepNeural",
+    ("en", "female"): "en-US-JennyNeural",
+    ("en", "male"): "en-US-GuyNeural",
 }
+
+
+def _tts_gender() -> str:
+    """Honor DevOS AI voice gender (Settings) for prayer / ayah speech too."""
+    try:
+        assistant = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "assistant",
+        )
+        if assistant not in sys.path:
+            sys.path.insert(0, assistant)
+        import voice_prefs  # noqa: WPS433
+        g = str(voice_prefs.tts_gender() or "female").lower()
+        if g in ("female", "male"):
+            return g
+    except Exception:
+        pass
+    # Installer / system default
+    try:
+        with open("/var/lib/DevOS/voice-prefs.json", encoding="utf-8") as fh:
+            raw = json.load(fh)
+        g = str((raw or {}).get("tts_gender") or "female").lower()
+        if g in ("female", "male"):
+            return g
+    except (OSError, ValueError, TypeError):
+        pass
+    return "female"
+
+
+def _edge_voice(language: str, gender: str = None) -> str:
+    lang = "bn" if language == "bn" else "en"
+    g = (gender or _tts_gender()).lower()
+    if g not in ("female", "male"):
+        g = "female"
+    try:
+        assistant = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "assistant",
+        )
+        if assistant not in sys.path:
+            sys.path.insert(0, assistant)
+        import voice_prefs  # noqa: WPS433
+        return voice_prefs.edge_voice_id(lang, gender=g)
+    except Exception:
+        return _EDGE_VOICES.get((lang, g), _EDGE_VOICES[("en", "female")])
+
+
+def _espeak_voice(language: str, gender: str = None) -> str:
+    """Plain ``en``/``bn`` sound male — always attach a female/male variant."""
+    g = (gender or _tts_gender()).lower()
+    if language == "bn":
+        return "bn+f2" if g == "female" else "bn"
+    return "en+f3" if g == "female" else "en+m3"
 
 
 def _stop_speech():
@@ -401,13 +456,14 @@ def ensure_clear_voice():
         return False
 
 
-def _speak_edge_tts(text, language):
+def _speak_edge_tts(text, language, gender=None):
     """Natural neural voice via edge-tts in the DevOS TTS venv (online)."""
     ensure_clear_voice()
     py = os.path.join(_TTS_VENV, "bin", "python")
     if not os.path.isfile(py) or not shutil.which("ffplay"):
         return False
-    voice = _EDGE_VOICES.get(language, _EDGE_VOICES["en"])
+    g = gender or _tts_gender()
+    voice = _edge_voice(language, g)
     os.makedirs(_TTS_CACHE, exist_ok=True)
     try:
         for i, chunk in enumerate(_tts_chunks(text, limit=220)):
@@ -430,24 +486,41 @@ def _speak_edge_tts(text, language):
         return False
 
 
-def _speak_espeak(text, language):
-    """Offline fallback — slowed Bangla so robotic voice is a bit clearer."""
-    voice = "bn" if language == "bn" else "en"
+def _speak_espeak(text, language, gender=None):
+    """Offline fallback — gender-aware voice (plain en/bn sound male)."""
+    g = gender or _tts_gender()
+    voice = _espeak_voice(language, g)
+    lang_flag = "bn" if language == "bn" else "en"
     if not shutil.which("espeak-ng"):
         if shutil.which("spd-say"):
-            subprocess.run(
-                ["spd-say", "-l", voice, "-w", text],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                timeout=120,
-            )
-            return True
+            # Try gendered speech-dispatcher voice, then plain language.
+            for cmd in (
+                ["spd-say", "-l", lang_flag, "-t", g, "-w", text],
+                ["spd-say", "-l", lang_flag, "-w", text],
+            ):
+                try:
+                    proc = subprocess.run(
+                        cmd,
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        timeout=120,
+                    )
+                    if proc.returncode == 0:
+                        return True
+                except (OSError, subprocess.TimeoutExpired):
+                    continue
+            return False
         return False
     # Bangla espeak is hard to follow at default speed; slow it and add gaps.
+    # Pitch nudge reinforces female when variant voices are thin.
     speed = "105" if language == "bn" else "140"
     gap = "14" if language == "bn" else "6"
+    pitch = "60" if g == "female" else "40"
     for chunk in _tts_chunks(text, limit=160):
         subprocess.run(
-            ["espeak-ng", "-v", voice, "-s", speed, "-g", gap, "-a", "180", chunk],
+            [
+                "espeak-ng", "-v", voice, "-s", speed, "-g", gap,
+                "-p", pitch, "-a", "180", chunk,
+            ],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             timeout=120,
         )
@@ -457,9 +530,8 @@ def _speak_espeak(text, language):
 def speak_text(text, language="en"):
     """Speak one line clearly and wait until it finishes (never overlaps).
 
-    Bangla uses a neural voice when the DevOS TTS helper is installed and the
-    network works; otherwise a slowed espeak-ng fallback. English prefers the
-    same neural path, then espeak.
+    Uses the same female/male preference as DevOS AI (voice_prefs). Neural TTS
+    when online; gender-aware espeak-ng offline (never plain male ``en``/``bn``).
     """
     text = " ".join((text or "").split())
     if not text:
@@ -467,11 +539,12 @@ def speak_text(text, language="en"):
     if len(text) > 500:
         text = text[:500].rsplit(" ", 1)[0]
     language = "bn" if str(language).lower().startswith("bn") else "en"
+    gender = _tts_gender()
     _stop_speech()
     try:
-        if _speak_edge_tts(text, language):
+        if _speak_edge_tts(text, language, gender=gender):
             return
-        _speak_espeak(text, language)
+        _speak_espeak(text, language, gender=gender)
     except (OSError, subprocess.TimeoutExpired):
         pass
 
