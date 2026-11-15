@@ -232,6 +232,11 @@ class DevOSFileChooserPortal(dbus.service.Object):
             cmd.append(target_folder)
 
         env = os.environ.copy()
+        # Portal may start with a minimal PATH (systemd user service).
+        env["PATH"] = "/usr/local/bin:/usr/bin:/bin:" + env.get("PATH", "")
+        if not env.get("DISPLAY") and not env.get("WAYLAND_DISPLAY"):
+            # Last-resort for broken activation env; prefer real session values.
+            env.setdefault("DISPLAY", ":0")
         try:
             proc = subprocess.Popen(cmd, env=env)
             with self._lock:
