@@ -27,9 +27,8 @@ fi
 
 unset ELECTRON_RUN_AS_NODE
 export DONT_PROMPT_WSL_INSTALL=1
+# Hub, chats, and the pipeline slot stay under ~/.gemini/antigravity-kde.
 export GEMINI_APP_DATA_DIR="antigravity-kde"
-# Separate keyring / auth from the main Antigravity instance.
-export SSH_CLIENT="127.0.0.1 0 0"
 
 DATA_DIR="${HOME}/.config/Antigravity-KDE"
 EXT_DIR="${HOME}/.antigravity-kde/extensions"
@@ -48,14 +47,140 @@ if [ -z "$(ls -A "$EXT_DIR" 2>/dev/null || true)" ]; then
     done
 fi
 
-rm -f "${HOME}/.gemini/cache/antigravity-keyring-unavailable"
+# Google Antigravity (main) and this window were opening as one app because
+# both read the same login. The editor can use another --user-data-dir, but
+# the account token still lives in one place: the desktop keyring item
+# (service gemini, username antigravity) or the file
+# ~/.gemini/antigravity-cli/antigravity-oauth-token. Signing the second
+# window in overwrote the first, and the next launch focused that same window.
+#
+# This instance keeps the real HOME so project folders still open. Its token
+# files are a private tree, and its keyring is a private session when the
+# tools exist. The browser sign-in still uses the host session, which is the
+# part a fully private bus used to break.
 
-exec "$IDE_BIN" \
-    --ozone-platform=x11 \
-    --no-sandbox \
-    --password-store=basic \
-    --user-data-dir="${DATA_DIR}" \
-    --extensions-dir="${EXT_DIR}" \
-    --class=antigravity-ide \
-    --name=antigravity-ide \
-    "$@"
+PROFILE_ROOT="${HOME}/.local/share/devos/antigravity-kde-profile"
+CLI_DIR="${HOME}/.gemini-profiles/antigravity-kde/antigravity-cli"
+AG_DIR="${HOME}/.gemini-profiles/antigravity-kde/antigravity"
+RUNTIME_DIR="${HOME}/.cache/antigravity-kde/runtime"
+mkdir -p \
+    "$PROFILE_ROOT/.local/share/keyrings" \
+    "$PROFILE_ROOT/.local/bin" \
+    "$CLI_DIR" \
+    "$AG_DIR" \
+    "$RUNTIME_DIR" \
+    "${HOME}/.gemini/antigravity-cli" \
+    "${HOME}/.gemini/antigravity" \
+    "${HOME}/.gemini/antigravity-kde"
+chmod 700 "$RUNTIME_DIR" "$PROFILE_ROOT" || true
+rm -f "${CLI_DIR}/../cache/antigravity-keyring-unavailable" 2>/dev/null || true
+
+HOST_DBUS="${DBUS_SESSION_BUS_ADDRESS:-}"
+export HOST_DBUS_SESSION_BUS_ADDRESS="$HOST_DBUS"
+
+cat > "${PROFILE_ROOT}/.local/bin/xdg-open" << 'EOF'
+#!/bin/bash
+target="${1-}"
+if [[ "$target" =~ ^https?:// ]]; then
+    if command -v google-chrome >/dev/null 2>&1; then
+        exec google-chrome "$target"
+    elif [ -x /opt/google/chrome/chrome ]; then
+        exec /opt/google/chrome/chrome "$target"
+    elif [ -x /usr/local/bin/devos-browser ]; then
+        exec /usr/local/bin/devos-browser "$target"
+    fi
+fi
+if [ -n "${HOST_DBUS_SESSION_BUS_ADDRESS:-}" ]; then
+    DBUS_SESSION_BUS_ADDRESS="$HOST_DBUS_SESSION_BUS_ADDRESS" exec /usr/bin/xdg-open "$@"
+fi
+exec /usr/bin/xdg-open "$@"
+EOF
+cat > "${PROFILE_ROOT}/.local/bin/gio" << 'EOF'
+#!/bin/bash
+if [ "${1-}" = "open" ] && [[ "${2-}" =~ ^https?:// ]]; then
+    url="$2"
+    if command -v google-chrome >/dev/null 2>&1; then
+        exec google-chrome "$url"
+    elif [ -x /opt/google/chrome/chrome ]; then
+        exec /opt/google/chrome/chrome "$url"
+    elif [ -x /usr/local/bin/devos-browser ]; then
+        exec /usr/local/bin/devos-browser "$url"
+    fi
+fi
+if [ -n "${HOST_DBUS_SESSION_BUS_ADDRESS:-}" ]; then
+    DBUS_SESSION_BUS_ADDRESS="$HOST_DBUS_SESSION_BUS_ADDRESS" exec /usr/bin/gio "$@"
+fi
+exec /usr/bin/gio "$@"
+EOF
+chmod 755 "${PROFILE_ROOT}/.local/bin/xdg-open" "${PROFILE_ROOT}/.local/bin/gio"
+
+# Drop SSH markers copied from the main launcher. Those markers make
+# Antigravity store the token in the shared ~/.gemini file instead of this
+# profile's own keyring.
+unset SSH_CLIENT SSH_CONNECTION SSH_TTY || true
+
+ARGS=(
+    --ozone-platform=x11
+    --no-sandbox
+    --password-store=basic
+    --user-data-dir="${DATA_DIR}"
+    --extensions-dir="${EXT_DIR}"
+    --class=antigravity-ide
+    --name=antigravity-ide
+)
+
+bwrap_can_hide_tokens() {
+    command -v bwrap >/dev/null 2>&1 || return 1
+    bwrap --dev-bind / / \
+        --bind "$CLI_DIR" "${HOME}/.gemini/antigravity-cli" \
+        --bind "$AG_DIR" "${HOME}/.gemini/antigravity" \
+        -- true >/dev/null 2>&1
+}
+
+launch_with_private_tokens() {
+    # File-token mode: hide the main account's token directories.
+    export SSH_CLIENT="127.0.0.1 34567 22"
+    export SSH_CONNECTION="127.0.0.1 34567 127.0.0.1 22"
+    export SSH_TTY="/dev/pts/0"
+    if bwrap_can_hide_tokens; then
+        exec bwrap --dev-bind / / \
+            --bind "$CLI_DIR" "${HOME}/.gemini/antigravity-cli" \
+            --bind "$AG_DIR" "${HOME}/.gemini/antigravity" \
+            -- "$IDE_BIN" "${ARGS[@]}" "$@"
+    fi
+    if unshare --user --mount --map-root-user true >/dev/null 2>&1; then
+        exec unshare --user --mount --map-root-user bash -c '
+            mount --bind "$1" "$3/antigravity-cli"
+            mount --bind "$2" "$3/antigravity"
+            shift 3
+            exec "$@"
+        ' _ "$CLI_DIR" "$AG_DIR" "${HOME}/.gemini" "$IDE_BIN" "${ARGS[@]}" "$@"
+    fi
+    exec "$IDE_BIN" "${ARGS[@]}" "$@"
+}
+
+if command -v dbus-run-session >/dev/null 2>&1 && command -v gnome-keyring-daemon >/dev/null 2>&1; then
+    use_bwrap=0
+    if bwrap_can_hide_tokens; then
+        use_bwrap=1
+    fi
+    exec dbus-run-session -- env \
+        XDG_DATA_HOME="${PROFILE_ROOT}/.local/share" \
+        XDG_RUNTIME_DIR="${RUNTIME_DIR}" \
+        HOST_DBUS_SESSION_BUS_ADDRESS="${HOST_DBUS}" \
+        PATH="${PROFILE_ROOT}/.local/bin:${PATH}" \
+        GEMINI_APP_DATA_DIR="antigravity-kde" \
+        USE_BWRAP="${use_bwrap}" \
+        bash -c '
+            eval "$(printf "" | gnome-keyring-daemon --daemonize --unlock --components=secrets 2>/dev/null)" || true
+            if [ "${USE_BWRAP:-}" = "1" ]; then
+                exec bwrap --dev-bind / / \
+                    --bind "$1" "$HOME/.gemini/antigravity-cli" \
+                    --bind "$2" "$HOME/.gemini/antigravity" \
+                    -- "$3" "${@:4}"
+            fi
+            exec "$3" "${@:4}"
+        ' _ "$CLI_DIR" "$AG_DIR" "$IDE_BIN" "${ARGS[@]}" "$@"
+fi
+
+launch_with_private_tokens "$@"
