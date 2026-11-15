@@ -773,6 +773,35 @@ def get_win_icon(name, size=32):
         p.drawLine(QPointF(26 * s, 28 * s), QPointF(38 * s, 40 * s))
         p.drawLine(QPointF(38 * s, 28 * s), QPointF(26 * s, 40 * s))
 
+    elif name == "refresh":
+        p.setPen(QPen(QColor("#38bdf8"), 4 * s, Qt.SolidLine, Qt.RoundCap))
+        p.setBrush(Qt.NoBrush)
+        p.drawArc(QRectF(14 * s, 14 * s, 36 * s, 36 * s), 40 * 16, 280 * 16)
+        p.setBrush(QColor("#38bdf8"))
+        p.setPen(Qt.NoPen)
+        p.drawPolygon(QPolygonF([
+            QPointF(44 * s, 12 * s),
+            QPointF(50 * s, 24 * s),
+            QPointF(36 * s, 22 * s),
+        ]))
+
+    elif name == "terminal":
+        p.setBrush(QColor("#0f172a"))
+        p.setPen(QPen(QColor("#38bdf8"), 2 * s))
+        p.drawRoundedRect(QRectF(8 * s, 12 * s, 48 * s, 40 * s), 4 * s, 4 * s)
+        p.setPen(QPen(QColor("#4ade80"), 3 * s, Qt.SolidLine, Qt.RoundCap))
+        p.drawLine(QPointF(18 * s, 26 * s), QPointF(26 * s, 32 * s))
+        p.drawLine(QPointF(26 * s, 32 * s), QPointF(18 * s, 38 * s))
+        p.drawLine(QPointF(30 * s, 38 * s), QPointF(42 * s, 38 * s))
+
+    elif name == "properties":
+        p.setBrush(QColor("#1d4ed8"))
+        p.setPen(Qt.NoPen)
+        p.drawEllipse(QPointF(32 * s, 32 * s), 22 * s, 22 * s)
+        p.setPen(QPen(QColor("#ffffff"), 4 * s, Qt.SolidLine, Qt.RoundCap))
+        p.drawPoint(QPointF(32 * s, 22 * s))
+        p.drawLine(QPointF(32 * s, 28 * s), QPointF(32 * s, 44 * s))
+
     else:
         # Fallback to system icon or clean generic document
         sys_icon = QIcon.fromTheme(name)
@@ -788,6 +817,47 @@ def get_win_icon(name, size=32):
     icon = QIcon(pix)
     _ICON_CACHE[key] = icon
     return icon
+
+
+EXPLORER_MENU_STYLE = """
+QMenu {
+    background: #1e222a;
+    color: #f8fafc;
+    border: 1px solid #334155;
+    border-radius: 10px;
+    padding: 6px;
+}
+QMenu::item {
+    background: transparent;
+    color: #f8fafc;
+    padding: 8px 32px 8px 12px;
+    margin: 2px 4px;
+    border-radius: 6px;
+    font-size: 13px;
+}
+QMenu::item:selected {
+    background: #1d4ed8;
+    color: #ffffff;
+}
+QMenu::item:disabled {
+    color: #64748b;
+}
+QMenu::separator {
+    height: 1px;
+    background: #475569;
+    margin: 5px 10px;
+}
+"""
+
+
+def make_menu(parent=None):
+    """Right-click and toolbar menus. Own sheet so the popup is not the same color as the folder."""
+    menu = QMenu(parent)
+    menu.setObjectName("explorerMenu")
+    menu.setAttribute(Qt.WA_StyledBackground, True)
+    menu.setMinimumWidth(220)
+    menu.setStyleSheet(EXPLORER_MENU_STYLE)
+    return menu
 
 
 def format_bytes(num):
@@ -2178,7 +2248,7 @@ class BreadcrumbBar(QWidget):
 
     def _show_address_context_menu(self, global_pos, target_path=None):
         target = target_path if target_path is not None else (self._current_path or "This PC")
-        menu = QMenu(self)
+        menu = make_menu(self)
         act_copy = menu.addAction(get_win_icon("copy-path", 16), "Copy address")
         act_copy.triggered.connect(lambda: self._copy_address(target))
         act_copy_text = menu.addAction("Copy address as text")
@@ -2189,7 +2259,7 @@ class BreadcrumbBar(QWidget):
         menu.exec_(global_pos)
 
     def _show_crumb_context_menu(self, path, global_pos):
-        menu = QMenu(self)
+        menu = make_menu(self)
         label = "This PC" if not path else ("Recycle Bin" if is_recycle_bin_path(path) else os.path.basename(path))
         icon_name = "this-pc" if not path else ("recycle-bin" if is_recycle_bin_path(path) else "folder")
         act_open = menu.addAction(get_win_icon(icon_name, 16), f"Open '{label}'")
@@ -4412,7 +4482,7 @@ class WindowsFileExplorer(QMainWindow):
         self.btn_new.setObjectName("newBtn")
         self.btn_new.setToolTip("Create new item")
         self.btn_new.setFixedHeight(34)
-        new_menu = QMenu(self.btn_new)
+        new_menu = make_menu(self.btn_new)
         act_new_folder = new_menu.addAction(get_win_icon("folder", 16), "Folder\tCtrl+Shift+N")
         act_new_folder.triggered.connect(self.action_new_folder)
         act_new_txt = new_menu.addAction(get_win_icon("file-doc", 16), "Text Document (.txt)")
@@ -4516,7 +4586,7 @@ class WindowsFileExplorer(QMainWindow):
         self.btn_sort.setMinimumWidth(88)
         self.btn_sort.setFixedHeight(34)
         self.btn_sort.setCursor(Qt.PointingHandCursor)
-        sort_menu = QMenu(self.btn_sort)
+        sort_menu = make_menu(self.btn_sort)
         for col_idx, col_name in enumerate(["Name", "Date modified", "Type", "Size"]):
             sort_menu.addAction(col_name, lambda c=col_idx: self.table_view.sortItems(c, self.table_view.horizontalHeader().sortIndicatorOrder()))
         sort_menu.addSeparator()
@@ -4532,7 +4602,7 @@ class WindowsFileExplorer(QMainWindow):
         self.btn_view.setMinimumWidth(88)
         self.btn_view.setFixedHeight(34)
         self.btn_view.setCursor(Qt.PointingHandCursor)
-        view_menu = QMenu(self.btn_view)
+        view_menu = make_menu(self.btn_view)
         view_menu.addAction("Extra large icons", lambda: self.set_view_mode("icons", 128))
         view_menu.addAction("Large icons", lambda: self.set_view_mode("icons", 96))
         view_menu.addAction("Medium icons", lambda: self.set_view_mode("icons", 64))
@@ -4573,7 +4643,7 @@ class WindowsFileExplorer(QMainWindow):
         self.btn_more.setFixedSize(38, 34)
         self.btn_more.setToolTip("See more")
         self.btn_more.setCursor(Qt.PointingHandCursor)
-        more_menu = QMenu(self.btn_more)
+        more_menu = make_menu(self.btn_more)
         more_menu.addAction("Undo\tCtrl+Z", self.action_undo)
         more_menu.addAction("Pin to Quick access", lambda: self.pin_to_quick_access(self._current_path))
         more_menu.addAction(get_win_icon("copy-path", 16), "Copy path\tCtrl+Shift+C", lambda: self.action_copy_path(self._current_path))
@@ -5234,20 +5304,21 @@ class WindowsFileExplorer(QMainWindow):
             }
             QMenu {
                 background: #1e222a;
-                border: 1px solid #333d4e;
-                border-radius: 8px;
-                padding: 5px;
+                color: #f8fafc;
+                border: 1px solid #334155;
+                border-radius: 10px;
+                padding: 6px;
             }
             QMenu::item {
                 background: transparent;
-                padding: 6px 28px 6px 12px;
-                border-radius: 5px;
-                color: #e2e8f0;
+                padding: 8px 32px 8px 12px;
+                border-radius: 6px;
+                color: #f8fafc;
                 font-size: 13px;
-                margin: 1px 4px;
+                margin: 2px 4px;
             }
             QMenu::item:selected {
-                background: #0078d4;
+                background: #1d4ed8;
                 color: #ffffff;
             }
             QMenu::item:disabled {
@@ -5255,8 +5326,8 @@ class WindowsFileExplorer(QMainWindow):
             }
             QMenu::separator {
                 height: 1px;
-                background: #2b3341;
-                margin: 4px 8px;
+                background: #475569;
+                margin: 5px 10px;
             }
             QTabWidget#propTabs::pane {
                 border: 1px solid #2d3340;
@@ -7161,7 +7232,7 @@ class WindowsFileExplorer(QMainWindow):
 
     def _show_this_pc_context_menu(self, global_pos):
         """Windows This PC right-click context menu."""
-        menu = QMenu(self)
+        menu = make_menu(self)
         act_open = menu.addAction(get_win_icon("this-pc", 18), "Open")
         act_open.triggered.connect(lambda: self.navigate_to(""))
         act_new_win = menu.addAction("Open in new window")
@@ -7183,7 +7254,7 @@ class WindowsFileExplorer(QMainWindow):
 
     def _show_this_pc_bg_context_menu(self, pos):
         """Context menu on empty background in This PC view."""
-        menu = QMenu(self)
+        menu = make_menu(self)
         view_menu = menu.addMenu("View")
         act_details = view_menu.addAction("Details")
         act_details.triggered.connect(lambda: self.set_view_mode("details"))
@@ -7209,7 +7280,7 @@ class WindowsFileExplorer(QMainWindow):
 
     def _show_drive_context_menu(self, drive, global_pos):
         """Windows Drive right-click context menu."""
-        menu = QMenu(self)
+        menu = make_menu(self)
         icon_type = "drive-c" if drive.get("is_system") else ("drive-usb" if drive.get("removable") else "drive-fixed")
         act_open = menu.addAction(get_win_icon(icon_type, 18), "Open")
         act_open.triggered.connect(lambda: self.open_drive(drive))
@@ -7247,7 +7318,7 @@ class WindowsFileExplorer(QMainWindow):
 
     def _show_folder_context_menu(self, path, global_pos, is_pinned=False):
         """Generic Windows folder context menu."""
-        menu = QMenu(self)
+        menu = make_menu(self)
         act_open = menu.addAction(get_win_icon("folder", 18), "Open")
         act_open.triggered.connect(lambda: self.navigate_to(path))
         act_new_win = menu.addAction("Open in new window")
@@ -7280,7 +7351,7 @@ class WindowsFileExplorer(QMainWindow):
         menu.exec_(global_pos)
 
     def _show_network_context_menu(self, global_pos):
-        menu = QMenu(self)
+        menu = make_menu(self)
         act_open = menu.addAction(get_win_icon("network", 18), "Open")
         act_open.triggered.connect(lambda: self.navigate_to("network:/"))
         act_map = menu.addAction("Map network drive...")
@@ -7292,7 +7363,7 @@ class WindowsFileExplorer(QMainWindow):
 
     def _show_bin_context_menu(self, global_pos):
         trash_path = os.path.expanduser("~/.local/share/Trash/files")
-        menu = QMenu(self)
+        menu = make_menu(self)
         act_open = menu.addAction(get_win_icon("recycle-bin", 18), "Open")
         act_open.triggered.connect(lambda: self.navigate_to(trash_path))
         act_empty = menu.addAction(get_win_icon("recycle-bin", 16), "Empty Recycle Bin")
@@ -7404,7 +7475,7 @@ class WindowsFileExplorer(QMainWindow):
 
     def _show_context_menu(self, pos):
         """Context menu for items or empty space in folder view."""
-        menu = QMenu(self)
+        menu = make_menu(self)
         paths = self.get_selected_paths()
         in_trash = self.is_in_recycle_bin()
 
@@ -7534,10 +7605,10 @@ class WindowsFileExplorer(QMainWindow):
             act_props = menu.addAction("Properties")
             act_props.triggered.connect(lambda: self.show_properties(target))
         else:
-            view_menu = menu.addMenu("View")
-            act_details = view_menu.addAction("Details")
+            view_menu = menu.addMenu(get_win_icon("view", 16), "View")
+            act_details = view_menu.addAction(get_win_icon("view", 16), "Details")
             act_details.triggered.connect(lambda: self.set_view_mode("details"))
-            act_icons = view_menu.addAction("Large icons")
+            act_icons = view_menu.addAction(get_win_icon("preview", 16), "Large icons")
             act_icons.triggered.connect(lambda: self.set_view_mode("icons"))
             view_menu.addSeparator()
             act_hidden = view_menu.addAction("Hidden items")
@@ -7545,17 +7616,17 @@ class WindowsFileExplorer(QMainWindow):
             act_hidden.setChecked(self._show_hidden)
             act_hidden.triggered.connect(self.toggle_hidden_files)
 
-            sort_menu = menu.addMenu("Sort by")
+            sort_menu = menu.addMenu(get_win_icon("sort", 16), "Sort by")
             for s in ["Name", "Date modified", "Type", "Size"]:
                 act_s = sort_menu.addAction(s)
                 act_s.triggered.connect(self.refresh)
 
-            act_refresh = menu.addAction("Refresh")
+            act_refresh = menu.addAction(get_win_icon("refresh", 16), "Refresh")
             act_refresh.triggered.connect(self.refresh)
             menu.addSeparator()
 
             if self._clipboard["paths"]:
-                act_paste = menu.addAction("Paste")
+                act_paste = menu.addAction(get_win_icon("paste", 16), "Paste")
                 act_paste.triggered.connect(self.action_paste)
                 menu.addSeparator()
 
@@ -7563,18 +7634,18 @@ class WindowsFileExplorer(QMainWindow):
             act_copy_path.triggered.connect(lambda: self.action_copy_path(self._current_path))
             menu.addSeparator()
 
-            act_term = menu.addAction("Open in Terminal")
+            act_term = menu.addAction(get_win_icon("terminal", 16), "Open in Terminal")
             act_term.triggered.connect(lambda: open_in_terminal(self._current_path))
             menu.addSeparator()
 
-            new_menu = menu.addMenu("New")
+            new_menu = menu.addMenu(get_win_icon("new", 16), "New")
             act_new_f = new_menu.addAction(get_win_icon("folder", 16), "Folder")
             act_new_f.triggered.connect(self.action_new_folder)
             act_new_doc = new_menu.addAction(get_win_icon("file-doc", 16), "Text Document")
             act_new_doc.triggered.connect(self.action_new_text_document)
             menu.addSeparator()
 
-            act_props = menu.addAction("Properties")
+            act_props = menu.addAction(get_win_icon("properties", 16), "Properties")
             act_props.triggered.connect(lambda: self.show_properties(self._current_path))
 
         sender = self.sender()

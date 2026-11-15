@@ -14,7 +14,7 @@ def test_light_surfaces_text_and_action_contrast():
     result=light_stylesheet('QWidget {background:#0b1220;color:#f8fafc;border:1px solid #283344;} QPushButton {background:#0078d4;color:#ffffff;}')
     assert 'background: #ffffff' in result
     assert 'color: #0f172a' in result or 'color: #172438' in result
-    assert '#cbd5e1' in result
+    assert '#64748b' in result
     assert 'background: #0078d4' in result
     assert 'color: #ffffff' in result
 
