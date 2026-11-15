@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Fix Features: Cursor via official .deb + KeePassXC via apt/universe.
+set -euo pipefail
+
+BRANCH="${1:-cursor/fix-features-cursor-keepassxc-6cbe}"
+RAW="https://raw.githubusercontent.com/imranbru99/DevOS/${BRANCH}"
+BASE=/usr/local/share/devos/components/features
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+echo "== Update Features installers (${BRANCH}) =="
+curl -fsSL "${RAW}/build/includes.chroot/usr/local/sbin/devos-install-cursor" -o "${TMP}/devos-install-cursor"
+curl -fsSL "${RAW}/build/includes.chroot/usr/local/share/devos/components/features/feature_catalog.py" -o "${TMP}/feature_catalog.py"
+curl -fsSL "${RAW}/build/includes.chroot/usr/local/share/devos/components/features/features_cli.py" -o "${TMP}/features_cli.py"
+curl -fsSL "${RAW}/build/includes.chroot/usr/local/share/devos/components/features/features_gui.py" -o "${TMP}/features_gui.py"
+
+sudo install -m 0755 "${TMP}/devos-install-cursor" /usr/local/sbin/devos-install-cursor
+sudo mkdir -p "$BASE"
+sudo install -m 0644 "${TMP}/feature_catalog.py" "${BASE}/feature_catalog.py"
+sudo install -m 0644 "${TMP}/features_cli.py" "${BASE}/features_cli.py"
+sudo install -m 0644 "${TMP}/features_gui.py" "${BASE}/features_gui.py"
+
+echo "== Enable universe (KeePassXC) =="
+sudo add-apt-repository -y universe 2>/dev/null || true
+sudo apt-get update -y || true
+
+echo "== Install Cursor + KeePassXC now =="
+sudo /usr/local/sbin/devos-install-cursor
+sudo apt-get install -y --no-install-recommends keepassxc || true
+
+echo
+echo "Done. Open DevOS Features → Try again if anything still shows failed."
+echo "  Cursor:    command -v cursor && cursor --version"
+echo "  KeePassXC: command -v keepassxc && dpkg -l keepassxc | tail -1"
+echo "  Log:       sudo tail -50 /var/log/devos-features.log"
