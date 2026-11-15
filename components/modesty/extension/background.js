@@ -22,17 +22,47 @@ const tabFrames = new Map();       // tabId -> Map(frameId -> count)
 async function readManaged() {
   try { return await chrome.storage.managed.get(null); } catch (e) { return {}; }
 }
+function monthKey(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
 async function readLocal() {
   try {
-    const got = await chrome.storage.local.get(['settings', 'totalBlurred']);
-    return { settings: got.settings || {}, totalBlurred: got.totalBlurred || 0 };
+    const got = await chrome.storage.local.get(['settings', 'totalBlurred', 'monthlyBlurred']);
+    return {
+      settings: got.settings || {},
+      totalBlurred: got.totalBlurred || 0,
+      monthlyBlurred: got.monthlyBlurred || {},
+    };
   } catch (e) {
-    return { settings: {}, totalBlurred: 0 };
+    return { settings: {}, totalBlurred: 0, monthlyBlurred: {} };
   }
 }
 async function currentSettings() {
   const [managed, local] = await Promise.all([readManaged(), readLocal()]);
-  return { managed, local: local.settings, effective: ModestyRules.effectiveSettings(managed, local.settings), totalBlurred: local.totalBlurred };
+  return {
+    managed,
+    local: local.settings,
+    effective: ModestyRules.effectiveSettings(managed, local.settings),
+    totalBlurred: local.totalBlurred,
+    monthlyBlurred: local.monthlyBlurred,
+  };
+}
+
+async function recordBlurred(newly) {
+  const n = Math.max(0, newly | 0);
+  if (!n) return;
+  const g = await chrome.storage.local.get(['totalBlurred', 'monthlyBlurred']);
+  const monthly = Object.assign({}, g.monthlyBlurred || {});
+  const key = monthKey();
+  monthly[key] = (monthly[key] || 0) + n;
+  // Keep at most 24 month buckets.
+  const keys = Object.keys(monthly).sort();
+  while (keys.length > 24) delete monthly[keys.shift()];
+  await chrome.storage.local.set({
+    totalBlurred: (g.totalBlurred || 0) + n,
+    monthlyBlurred: monthly,
+  });
 }
 
 // ---------------------------------------------------------------- offscreen
@@ -136,8 +166,12 @@ function updateBadge(tabId) {
   const frames = tabFrames.get(tabId);
   let n = 0;
   if (frames) for (const c of frames.values()) n += c;
-  chrome.action.setBadgeBackgroundColor({ tabId, color: '#3a5a40' }).catch(() => {});
-  chrome.action.setBadgeText({ tabId, text: n ? String(n > 999 ? '999+' : n) : '' }).catch(() => {});
+  // No numeric badge on the toolbar — counts live under Settings → monthly.
+  chrome.action.setBadgeText({ tabId, text: '' }).catch(() => {});
+  chrome.action.setTitle({
+    tabId,
+    title: n ? `Modesty filter · ${n} blurred on this page` : 'Modesty filter',
+  }).catch(() => {});
   return n;
 }
 function tabCount(tabId) {
@@ -171,18 +205,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (!tabFrames.has(tabId)) tabFrames.set(tabId, new Map());
       tabFrames.get(tabId).set(sender.frameId || 0, Math.max(0, msg.count | 0));
       updateBadge(tabId);
-      if (msg.newly > 0) {
-        chrome.storage.local.get('totalBlurred').then((g) =>
-          chrome.storage.local.set({ totalBlurred: (g.totalBlurred || 0) + (msg.newly | 0) }));
-      }
+      if (msg.newly > 0) recordBlurred(msg.newly).catch(() => {});
       return false;
     }
     case 'popup-state':
       currentSettings().then((s) => sendResponse({
         effective: s.effective, managed: s.managed, local: s.local,
-        total: s.totalBlurred, tab: msg.tabId !== undefined ? tabCount(msg.tabId) : 0,
+        total: s.totalBlurred,
+        monthly: s.monthlyBlurred || {},
+        tab: msg.tabId !== undefined ? tabCount(msg.tabId) : 0,
       })).catch((err) => {
-        sendResponse({ effective: ModestyRules.DEFAULTS, managed: {}, local: {}, total: 0, tab: 0, error: String(err) });
+        sendResponse({
+          effective: ModestyRules.DEFAULTS, managed: {}, local: {},
+          total: 0, monthly: {}, tab: 0, error: String(err),
+        });
       });
       return true;
     case 'popup-set': {

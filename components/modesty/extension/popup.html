@@ -6,28 +6,52 @@
 <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-  <h1>Modesty filter</h1>
-  <p id="lock" class="lock" hidden>Locked by DevOS. It stays on; you can only make it stricter.</p>
-  <div class="row" id="enabledRow">
-    <label for="enabled">Filter on</label>
-    <label class="switch">
-      <input type="checkbox" id="enabled">
-      <span class="slider"></span>
-    </label>
-  </div>
-  <div class="row">
-    <label for="mode">Blur</label>
-    <select id="mode">
-      <option value="women">Adult women</option>
-      <option value="people">All people</option>
-    </select>
-  </div>
-  <div class="counts">
-    <div><strong id="tabCount">0</strong><span>blurred on this page</span></div>
-    <div><strong id="total">0</strong><span>blurred in total</span></div>
-  </div>
-  <p class="note">Checked on this PC only. No picture leaves your computer.
-     Only detected body regions are blurred. Text stays readable. Age, gender and body estimates can be wrong or missed.</p>
+  <!-- Main -->
+  <section id="viewMain">
+    <div class="head">
+      <h1>Modesty filter</h1>
+      <button type="button" id="openSettings" class="linkbtn" title="Settings">Settings</button>
+    </div>
+    <p id="lock" class="lock" hidden>Locked by DevOS. It stays on; you can only make it stricter.</p>
+    <div class="row" id="enabledRow">
+      <label for="enabled">Filter on</label>
+      <label class="switch">
+        <input type="checkbox" id="enabled">
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div class="row">
+      <label for="mode">Blur</label>
+      <select id="mode">
+        <option value="women">Adult women</option>
+        <option value="people">All people</option>
+      </select>
+    </div>
+    <p class="note">Checked on this PC only. No picture leaves your computer.
+       Only body regions are blurred. Open <strong>Settings</strong> for monthly stats.</p>
+  </section>
+
+  <!-- Settings / monthly details -->
+  <section id="viewSettings" hidden>
+    <div class="head">
+      <button type="button" id="backMain" class="linkbtn" title="Back">← Back</button>
+      <h1>Settings</h1>
+    </div>
+    <p class="section-label">This month</p>
+    <div class="stat-card">
+      <strong id="monthCount">0</strong>
+      <span id="monthLabel">blurred this month</span>
+    </div>
+    <p class="section-label">Details</p>
+    <div class="detail-rows">
+      <div class="detail"><span>On this page</span><strong id="tabCount">0</strong></div>
+      <div class="detail"><span>All time</span><strong id="total">0</strong></div>
+    </div>
+    <p class="section-label">Recent months</p>
+    <ul id="monthList" class="month-list"></ul>
+    <p class="note">Age, gender and body estimates can be wrong or missed. Nothing is uploaded.</p>
+  </section>
+
   <script src="rules.js"></script>
   <script src="popup.js"></script>
 </body>

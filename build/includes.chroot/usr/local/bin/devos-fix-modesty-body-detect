@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# Re-enable DevOS Modesty filter (v1.2.1+): blur high-skin body crops too.
+set -euo pipefail
+
+BRANCH="${1:-cursor/fix-modesty-body-detect-6cbe}"
+RAW="https://raw.githubusercontent.com/imranbru99/DevOS/${BRANCH}"
+DEST_DIR=/usr/local/share/devos/components/modesty
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+echo "== Update Modesty filter sources (${BRANCH}) =="
+mkdir -p "$DEST_DIR/extension"
+# Core packager + extension files needed for enable/repack
+for f in modesty.py crx3.py; do
+  curl -fsSL "${RAW}/components/modesty/${f}" -o "${TMP}/${f}"
+  sudo install -m 0644 "${TMP}/${f}" "${DEST_DIR}/${f}"
+  echo "  ✔ ${DEST_DIR}/${f}"
+done
+
+# Sync extension tree (rules, content, offscreen, manifest, models stay if present)
+curl -fsSL "${RAW}/components/modesty/extension/manifest.json" -o "${TMP}/manifest.json"
+curl -fsSL "${RAW}/components/modesty/extension/rules.js" -o "${TMP}/rules.js"
+curl -fsSL "${RAW}/components/modesty/extension/content.js" -o "${TMP}/content.js"
+curl -fsSL "${RAW}/components/modesty/extension/offscreen.js" -o "${TMP}/offscreen.js"
+curl -fsSL "${RAW}/components/modesty/extension/tests.js" -o "${TMP}/tests.js"
+curl -fsSL "${RAW}/components/modesty/extension/popup.html" -o "${TMP}/popup.html"
+curl -fsSL "${RAW}/components/modesty/extension/popup.css" -o "${TMP}/popup.css"
+curl -fsSL "${RAW}/components/modesty/extension/popup.js" -o "${TMP}/popup.js"
+curl -fsSL "${RAW}/components/modesty/extension/background.js" -o "${TMP}/background.js"
+grep -q 'bodySkinOnlyRatio' "${TMP}/rules.js"
+grep -q 'openSettings' "${TMP}/popup.html"
+grep -q 'monthlyBlurred' "${TMP}/background.js"
+grep -q '"version": "1.2.2"' "${TMP}/manifest.json" || grep -q '"1.2.2"' "${TMP}/manifest.json"
+sudo install -m 0644 "${TMP}/manifest.json" "${DEST_DIR}/extension/manifest.json"
+sudo install -m 0644 "${TMP}/rules.js" "${DEST_DIR}/extension/rules.js"
+sudo install -m 0644 "${TMP}/content.js" "${DEST_DIR}/extension/content.js"
+sudo install -m 0644 "${TMP}/offscreen.js" "${DEST_DIR}/extension/offscreen.js"
+sudo install -m 0644 "${TMP}/tests.js" "${DEST_DIR}/extension/tests.js"
+sudo install -m 0644 "${TMP}/popup.html" "${DEST_DIR}/extension/popup.html"
+sudo install -m 0644 "${TMP}/popup.css" "${DEST_DIR}/extension/popup.css"
+sudo install -m 0644 "${TMP}/popup.js" "${DEST_DIR}/extension/popup.js"
+sudo install -m 0644 "${TMP}/background.js" "${DEST_DIR}/extension/background.js"
+echo "  ✔ extension UI + detector (1.2.2)"
+
+# Ensure CLI wrappers exist
+for wrap in /usr/local/bin/devos-modesty /usr/local/sbin/devos-modesty; do
+  if [[ ! -x "$wrap" ]]; then
+    echo "#!/bin/bash
+exec /usr/bin/python3 ${DEST_DIR}/modesty.py \"\$@\"" | sudo tee "$wrap" >/dev/null
+    sudo chmod 0755 "$wrap"
+  fi
+done
+
+if [[ ! -f "${DEST_DIR}/extension/models/body-pix/model.json" ]]; then
+  echo "ERROR: Modesty ML models missing under ${DEST_DIR}/extension/models/"
+  echo "Install/turn on Modesty once from DevOS Features (Islamic/Family), then rerun."
+  exit 1
+fi
+
+echo "== Enable Modesty (women mode) + feature marker =="
+sudo /usr/bin/python3 "${DEST_DIR}/modesty.py" enable --mode women
+sudo mkdir -p /etc/devos/features.d
+sudo touch /etc/devos/features.d/modesty.on
+
+echo
+echo "== Status =="
+sudo /usr/bin/python3 "${DEST_DIR}/modesty.py" status || true
+echo
+if [[ -f /etc/opt/chrome/policies/managed/devos-modesty.json ]]; then
+  echo "  ✔ Chrome policy: /etc/opt/chrome/policies/managed/devos-modesty.json"
+  grep -E 'force_installed|"mode"' /etc/opt/chrome/policies/managed/devos-modesty.json | head -5 || true
+else
+  echo "  ✖ Chrome policy missing — enable may have failed"
+fi
+if [[ -f /usr/share/devos/modesty/devos-modesty.crx ]]; then
+  echo "  ✔ CRX: /usr/share/devos/modesty/devos-modesty.crx"
+else
+  echo "  ✖ CRX missing"
+fi
+
+echo
+echo "IMPORTANT: fully quit Google Chrome (all windows), then reopen."
+echo "Toolbar should show a pinned Modesty icon. Open google.com/imghp,"
+echo "search again — midriff / body crops should blur within a few seconds."
+echo
+echo "Check: chrome://policy  → ExtensionSettings should list DevOS Modesty"
+echo "Check: chrome://extensions → DevOS Modesty Filter enabled (1.2.2)"
+echo "Popup: main view has no counts; Settings shows this month + history."
