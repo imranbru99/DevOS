@@ -4595,10 +4595,11 @@ class WindowsFolderOptionsDialog(QDialog):
 class WindowsFileExplorer(QMainWindow):
     """Full-featured Windows 10/11 File Explorer for DevOS."""
 
-    def __init__(self, initial_path="", picker_mode=False, picker_options=None):
+    def __init__(self, initial_path="", picker_mode=False, picker_options=None, select_paths=None):
         super().__init__()
         self._picker_mode = picker_mode
         self._picker_options = picker_options or {}
+        self._pending_select = [os.path.abspath(p) for p in (select_paths or []) if p]
         self._picker_accepted = False
         self.selected_files = []
         self._current_filter_patterns = []
@@ -6460,13 +6461,45 @@ class WindowsFileExplorer(QMainWindow):
                     elif hasattr(button, "setVisible"):
                         button.setVisible(False)
 
+    def _select_paths(self, paths):
+        """Highlight files Chrome asked to show, such as a finished download."""
+        wanted = {os.path.normpath(p) for p in paths if p}
+        if not wanted:
+            return
+        self.table_view.clearSelection()
+        self.list_view.clearSelection()
+        first_row = None
+        first_list = None
+        for row in range(self.table_view.rowCount()):
+            item = self.table_view.item(row, 0)
+            if item and os.path.normpath(item.data(Qt.UserRole) or "") in wanted:
+                item.setSelected(True)
+                if first_row is None:
+                    first_row = item
+        for index in range(self.list_view.count()):
+            item = self.list_view.item(index)
+            if item and os.path.normpath(item.data(Qt.UserRole) or "") in wanted:
+                item.setSelected(True)
+                if first_list is None:
+                    first_list = item
+        if first_row is not None:
+            self.table_view.scrollToItem(first_row)
+        if first_list is not None:
+            self.list_view.scrollToItem(first_list)
+        self._on_selection_changed()
+        self.raise_()
+        self.activateWindow()
+
     def navigate_to(self, path, label="", add_to_history=True):
         """Navigate to 'This PC' (empty string) or any folder path."""
         # Clean path if passed as file:// or computer:/
         if path.startswith("file://"):
-            path = path[7:]
+            path = unquote(path[7:])
         if path in ("computer:/", "computer:", "thispc"):
             path = ""
+        if path and os.path.isfile(path):
+            self._pending_select = [os.path.abspath(path)]
+            path = os.path.dirname(path) or path
 
         if add_to_history and self._current_path != path:
             self._history.append(self._current_path)
@@ -6742,6 +6775,10 @@ class WindowsFileExplorer(QMainWindow):
         n = len(all_items)
         self.status_items_count.setText("1 item" if n == 1 else f"{n} items")
         self.status_selected_info.setText("")
+        pending = getattr(self, "_pending_select", None)
+        if pending:
+            self._select_paths(pending)
+            self._pending_select = []
 
     def _prompt_trash_item_action(self, target):
         name = os.path.basename(target)
@@ -8085,6 +8122,7 @@ def main():
     parser.add_argument("--filter", type=str, default="", help="Filter pattern(s), e.g. 'Images (*.png *.jpg);;All Files (*.*)'")
     parser.add_argument("--resume", action="store_true", help="Resume the last folder in open-file dialogs")
     parser.add_argument("--output", type=str, default="", help="File to write chosen JSON array of paths to")
+    parser.add_argument("--select", action="append", default=[], help="File to highlight when the folder opens")
 
     args, unknown = parser.parse_known_args()
     picker_mode = bool(args.picker or args.save or args.directory or args.multiple)
@@ -8136,7 +8174,25 @@ def main():
         if not picker_options["name"]:
             picker_options["name"] = file_name
 
-    window = WindowsFileExplorer(initial_path, picker_mode=picker_mode, picker_options=picker_options)
+    select_paths = []
+    for raw in args.select or []:
+        chosen = os.path.abspath(os.path.expanduser(raw))
+        if os.path.isdir(chosen) and not initial_path:
+            initial_path = chosen
+        elif chosen:
+            select_paths.append(chosen)
+    if initial_path and os.path.isfile(initial_path):
+        select_paths.insert(0, os.path.abspath(initial_path))
+        initial_path = os.path.dirname(initial_path)
+    if select_paths and not initial_path:
+        initial_path = os.path.dirname(select_paths[0]) or initial_path
+
+    window = WindowsFileExplorer(
+        initial_path,
+        picker_mode=picker_mode,
+        picker_options=picker_options,
+        select_paths=select_paths,
+    )
     # Always keep system min / max / close (never borderless-maximized chrome loss).
     try:
         from app_identity import show_window
