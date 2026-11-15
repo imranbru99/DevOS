@@ -15,6 +15,54 @@ HOST_KDE_GEMINI="${REAL_HOME}/.gemini/antigravity-kde"
 FALLBACK_URL_X64="https://edgedl.me.gvt1.com/edgedl/release2/j0qc3/antigravity/stable/2.7.0-4507555968450560/linux-x64/Antigravity%20IDE.tar.gz"
 FALLBACK_URL_ARM="https://edgedl.me.gvt1.com/edgedl/release2/j0qc3/antigravity/stable/2.7.0-4507555968450560/linux-arm/Antigravity%20IDE.tar.gz"
 
+LOCK_DIR=""
+PROG_REF=""
+
+progress_set() {
+    local value="$1"
+    local text="${2:-}"
+    [ -n "${PROG_REF:-}" ] || return 0
+    if command -v qdbus6 >/dev/null 2>&1; then
+        # shellcheck disable=SC2086
+        qdbus6 $PROG_REF Set "" value "$value" >/dev/null 2>&1 || true
+        if [ -n "$text" ]; then
+            # shellcheck disable=SC2086
+            qdbus6 $PROG_REF setLabelText "$text" >/dev/null 2>&1 || true
+        fi
+    elif command -v qdbus >/dev/null 2>&1; then
+        # shellcheck disable=SC2086
+        qdbus $PROG_REF Set "" value "$value" >/dev/null 2>&1 || true
+        if [ -n "$text" ]; then
+            # shellcheck disable=SC2086
+            qdbus $PROG_REF setLabelText "$text" >/dev/null 2>&1 || true
+        fi
+    fi
+}
+
+progress_begin() {
+    PROG_REF=""
+    if command -v kdialog >/dev/null 2>&1; then
+        PROG_REF="$(kdialog --title "Antigravity IDE" --progressbar "$1" 100 2>/dev/null || true)"
+    fi
+    progress_set 3 "$1"
+}
+
+progress_close() {
+    [ -n "${PROG_REF:-}" ] || return 0
+    if command -v qdbus6 >/dev/null 2>&1; then
+        # shellcheck disable=SC2086
+        qdbus6 $PROG_REF close >/dev/null 2>&1 || true
+    elif command -v qdbus >/dev/null 2>&1; then
+        # shellcheck disable=SC2086
+        qdbus $PROG_REF close >/dev/null 2>&1 || true
+    else
+        local pid="${PROG_REF#org.kde.kdialog-}"
+        pid="${pid%% *}"
+        kill "$pid" 2>/dev/null || true
+    fi
+    PROG_REF=""
+}
+
 say() {
     printf '%s\n' "$1" >&2
     if command -v notify-send >/dev/null 2>&1; then
@@ -23,6 +71,7 @@ say() {
 }
 
 fail() {
+    progress_close
     printf 'Error: %s\n' "$1" >&2
     if command -v kdialog >/dev/null 2>&1; then
         kdialog --title "Antigravity IDE" --error "$1" >/dev/null 2>&1 || true
@@ -30,6 +79,50 @@ fail() {
         say "$1"
     fi
     exit 1
+}
+
+release_lock() {
+    [ -n "${LOCK_DIR:-}" ] || return 0
+    if [ "$(cat "$LOCK_DIR/pid" 2>/dev/null || true)" = "$$" ]; then
+        rm -rf "$LOCK_DIR"
+    fi
+}
+trap release_lock EXIT INT TERM
+
+# A previous click can die during the download and leave the lock directory
+# behind. That lock is what shows "already downloading" forever.
+claim_install_lock() {
+    local lock="${REAL_HOME}/.cache/antigravity-kde/installing"
+    local oldpid age now
+    mkdir -p "${REAL_HOME}/.cache/antigravity-kde"
+    if [ -d "$lock" ]; then
+        oldpid="$(cat "$lock/pid" 2>/dev/null || true)"
+        now="$(date +%s)"
+        age=0
+        if [ -n "$(stat -c %Y "$lock" 2>/dev/null || true)" ]; then
+            age=$((now - $(stat -c %Y "$lock")))
+        fi
+        if [ -n "$oldpid" ] && [ "$oldpid" != "$$" ] && kill -0 "$oldpid" 2>/dev/null && [ "$age" -lt 1200 ]; then
+            fail "Antigravity IDE is still downloading. Leave the progress window open. When it closes, the IDE opens by itself."
+        fi
+        if [ -n "$oldpid" ] && kill -0 "$oldpid" 2>/dev/null; then
+            kill "$oldpid" 2>/dev/null || true
+        fi
+        # Older launchers never wrote a pid, so a dead click left this folder
+        # forever. Stop that leftover copy before starting a new download.
+        if [ -z "$oldpid" ] || ! kill -0 "$oldpid" 2>/dev/null; then
+            local other
+            while read -r other; do
+                [ -n "$other" ] && [ "$other" != "$$" ] || continue
+                kill "$other" 2>/dev/null || true
+            done < <(pgrep -f '/usr/local/bin/antigravity-kde' || true)
+        fi
+        pkill -f 'edgedl.me.gvt1.com/.+Antigravity(%20| )IDE.tar.gz' >/dev/null 2>&1 || true
+        rm -rf "$lock"
+    fi
+    mkdir "$lock"
+    echo $$ > "$lock/pid"
+    LOCK_DIR="$lock"
 }
 
 ide_url() {
@@ -71,31 +164,27 @@ find_installed() {
 }
 
 install_ide() {
-    local url tmp bin appdir lock
-    lock="${REAL_HOME}/.cache/antigravity-kde/installing"
-    mkdir -p "${REAL_HOME}/.cache/antigravity-kde"
-    if ! mkdir "$lock" 2>/dev/null; then
-        fail "Antigravity IDE is already downloading. Wait for that to finish, then click Antigravity IDE again."
-    fi
+    local url tmp bin appdir
+    claim_install_lock
+    progress_begin "Preparing Antigravity IDE. This is a different program from the white Antigravity window."
+    progress_set 8 "Finding the latest Antigravity IDE…"
     url="$(ide_url)"
-    say "Downloading Antigravity IDE (about 190 MB). This is a different program from the white Antigravity window."
+    progress_set 15 "Downloading Antigravity IDE, about 190 MB. The window opens when this finishes."
     tmp="$(mktemp -d)"
     if ! curl --fail --location --retry 3 --retry-delay 2 --proto '=https' --tlsv1.2 \
         -o "$tmp/ide.tar.gz" "$url"; then
         rm -rf "$tmp"
-        rmdir "$lock" 2>/dev/null || true
         fail "Could not download Antigravity IDE. Check the internet connection, then click Antigravity IDE again."
     fi
+    progress_set 88 "Unpacking Antigravity IDE…"
     mkdir -p "$tmp/src"
     if ! tar -xzf "$tmp/ide.tar.gz" -C "$tmp/src"; then
         rm -rf "$tmp"
-        rmdir "$lock" 2>/dev/null || true
         fail "The Antigravity IDE download could not be unpacked."
     fi
     bin="$(find "$tmp/src" -type f -name antigravity-ide | head -n 1 || true)"
     if [ -z "$bin" ]; then
         rm -rf "$tmp"
-        rmdir "$lock" 2>/dev/null || true
         fail "The download did not contain Antigravity IDE."
     fi
     appdir="$(dirname "$bin")"
@@ -104,7 +193,8 @@ install_ide() {
     mv "$appdir" "$IDE_ROOT"
     chmod 755 "$IDE_BIN" 2>/dev/null || true
     rm -rf "$tmp"
-    rmdir "$lock" 2>/dev/null || true
+    progress_set 100 "Opening Antigravity IDE…"
+    progress_close
     IDE_BIN="${IDE_ROOT}/antigravity-ide"
 }
 

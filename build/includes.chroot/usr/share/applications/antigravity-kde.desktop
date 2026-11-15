@@ -11,5 +11,5 @@ Terminal=false
 Categories=Development;IDE;
 MimeType=text/plain;inode/directory;
 Keywords=antigravity;ide;studio;kde;
-StartupNotify=true
+StartupNotify=false
 StartupWMClass=antigravity-ide
