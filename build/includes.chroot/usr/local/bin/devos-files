@@ -3202,6 +3202,90 @@ class DrivePieWidget(QWidget):
         p.drawEllipse(QPointF(65, 65), 32, 32)
 
 
+PROPERTIES_STYLE = """
+QDialog#propDialog {
+    background: #0c131f;
+    color: #f1f5f9;
+    font-family: 'Segoe UI', 'Inter', sans-serif;
+}
+QTabWidget::pane {
+    border: 1px solid #334155;
+    border-radius: 10px;
+    background: #111827;
+    top: -1px;
+}
+QTabBar::tab {
+    background: #172135;
+    color: #94a3b8;
+    border: 1px solid #334155;
+    border-bottom: none;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    padding: 8px 18px;
+    margin-right: 4px;
+    font-size: 13px;
+}
+QTabBar::tab:selected {
+    background: #111827;
+    color: #f8fafc;
+    font-weight: 600;
+    border-top: 2px solid #38bdf8;
+}
+QLineEdit#propNameEdit {
+    background: #0f1525;
+    color: #f8fafc;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 8px 12px;
+    min-height: 20px;
+    font-size: 14px;
+    font-weight: 600;
+}
+QLineEdit#propNameEdit:focus { border: 2px solid #38bdf8; }
+QPushButton#dialogBtn {
+    background: #172135;
+    color: #f1f5f9;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    min-height: 36px;
+    min-width: 92px;
+    padding: 0 14px;
+    font-size: 13px;
+    font-weight: 600;
+}
+QPushButton#dialogBtn:hover { background: #1e293b; }
+QPushButton#dialogBtn:disabled {
+    background: #111827;
+    color: #64748b;
+    border-color: #1e293b;
+}
+QPushButton#dialogBtnPrimary {
+    background: #1d4ed8;
+    color: #ffffff;
+    border: 1px solid #1e40af;
+    border-radius: 8px;
+    min-height: 36px;
+    min-width: 92px;
+    padding: 0 14px;
+    font-size: 13px;
+    font-weight: 600;
+}
+QPushButton#dialogBtnPrimary:hover { background: #1e40af; }
+QCheckBox#propCheck { color: #e2e8f0; spacing: 8px; font-size: 13px; }
+QLabel#propLabel { color: #94a3b8; font-size: 12px; background: transparent; }
+QLabel#propValue { color: #f8fafc; font-size: 13px; background: transparent; }
+QFrame#propRule { background: #334155; border: none; max-height: 1px; }
+"""
+
+
+def polish_properties_dialog(dialog):
+    """Properties sheets. Their button styles used to live on a stylesheet that was replaced."""
+    dialog.setObjectName("propDialog")
+    dialog.setAttribute(Qt.WA_StyledBackground, True)
+    dialog.setMinimumWidth(460)
+    dialog.setStyleSheet(PROPERTIES_STYLE)
+
+
 class WindowsFolderPropertiesDialog(QDialog):
     def __init__(self, path, parent=None):
         super().__init__(parent)
@@ -3209,8 +3293,9 @@ class WindowsFolderPropertiesDialog(QDialog):
         self.folder_name = os.path.basename(self.path) or self.path
         self.setWindowTitle(f"{self.folder_name} Properties")
         self.setWindowIcon(get_win_icon("folder", 32))
-        self.resize(390, 520)
+        self.resize(480, 540)
         self.setModal(True)
+        polish_properties_dialog(self)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 14, 14, 14)
@@ -3419,18 +3504,20 @@ class WindowsFolderPropertiesDialog(QDialog):
 
     def _make_line(self):
         line = QFrame()
+        line.setObjectName("propRule")
         line.setFrameShape(QFrame.HLine)
-        line.setStyleSheet("background: #2b3240; max-height: 1px;")
+        line.setFixedHeight(1)
         return line
 
     def _make_label(self, text):
         lbl = QLabel(text)
-        lbl.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        lbl.setObjectName("propLabel")
         return lbl
 
     def _make_value_label(self, text):
         lbl = QLabel(text)
-        lbl.setStyleSheet("color: #f1f5f9; font-size: 12px;")
+        lbl.setObjectName("propValue")
+        lbl.setWordWrap(True)
         lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
         return lbl
 
@@ -3442,8 +3529,9 @@ class WindowsFilePropertiesDialog(QDialog):
         self.file_name = os.path.basename(self.path)
         self.setWindowTitle(f"{self.file_name} Properties")
         self.setWindowIcon(get_icon_for_file(self.path, False))
-        self.resize(390, 500)
+        self.resize(480, 540)
         self.setModal(True)
+        polish_properties_dialog(self)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 14, 14, 14)
@@ -3571,14 +3659,21 @@ class WindowsFilePropertiesDialog(QDialog):
         btn_row.addStretch(1)
         btn_ok = QPushButton("OK")
         btn_ok.setObjectName("dialogBtnPrimary")
+        btn_ok.setDefault(True)
+        btn_ok.setAutoDefault(True)
+        btn_ok.setIcon(QIcon())
         btn_ok.clicked.connect(self._on_ok_clicked)
         btn_row.addWidget(btn_ok)
         btn_cancel = QPushButton("Cancel")
         btn_cancel.setObjectName("dialogBtn")
+        btn_cancel.setAutoDefault(False)
+        btn_cancel.setIcon(QIcon())
         btn_cancel.clicked.connect(self.reject)
         btn_row.addWidget(btn_cancel)
         btn_apply = QPushButton("Apply")
         btn_apply.setObjectName("dialogBtn")
+        btn_apply.setAutoDefault(False)
+        btn_apply.setIcon(QIcon())
         btn_apply.setEnabled(False)
         btn_row.addWidget(btn_apply)
 
@@ -3597,18 +3692,20 @@ class WindowsFilePropertiesDialog(QDialog):
 
     def _make_line(self):
         line = QFrame()
+        line.setObjectName("propRule")
         line.setFrameShape(QFrame.HLine)
-        line.setStyleSheet("background: #2b3240; max-height: 1px;")
+        line.setFixedHeight(1)
         return line
 
     def _make_label(self, text):
         lbl = QLabel(text)
-        lbl.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        lbl.setObjectName("propLabel")
         return lbl
 
     def _make_value_label(self, text):
         lbl = QLabel(text)
-        lbl.setStyleSheet("color: #f1f5f9; font-size: 12px;")
+        lbl.setObjectName("propValue")
+        lbl.setWordWrap(True)
         lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
         return lbl
 
@@ -3620,8 +3717,9 @@ class WindowsDrivePropertiesDialog(QDialog):
         self.setWindowTitle(f"{drive.get('title', 'Local Disk')} Properties")
         icon_type = "drive-c" if drive.get("is_system") else ("drive-usb" if drive.get("removable") else "drive-fixed")
         self.setWindowIcon(get_win_icon(icon_type, 32))
-        self.resize(390, 530)
+        self.resize(480, 560)
         self.setModal(True)
+        polish_properties_dialog(self)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 14, 14, 14)
@@ -3826,18 +3924,20 @@ class WindowsDrivePropertiesDialog(QDialog):
 
     def _make_line(self):
         line = QFrame()
+        line.setObjectName("propRule")
         line.setFrameShape(QFrame.HLine)
-        line.setStyleSheet("background: #2b3240; max-height: 1px;")
+        line.setFixedHeight(1)
         return line
 
     def _make_label(self, text):
         lbl = QLabel(text)
-        lbl.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        lbl.setObjectName("propLabel")
         return lbl
 
     def _make_value_label(self, text):
         lbl = QLabel(text)
-        lbl.setStyleSheet("color: #f1f5f9; font-size: 12px;")
+        lbl.setObjectName("propValue")
+        lbl.setWordWrap(True)
         lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
         return lbl
 
@@ -4032,12 +4132,13 @@ class WindowsSystemPropertiesDialog(QDialog):
 
     def _make_label(self, text):
         lbl = QLabel(text)
-        lbl.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        lbl.setObjectName("propLabel")
         return lbl
 
     def _make_val(self, text):
         lbl = QLabel(text)
-        lbl.setStyleSheet("color: #f1f5f9; font-size: 12px;")
+        lbl.setObjectName("propValue")
+        lbl.setWordWrap(True)
         lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
         return lbl
 
