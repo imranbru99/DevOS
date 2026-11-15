@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=KWallet
+Comment=DevOS silent keyring. No password window.
+Exec=/usr/local/bin/devos-kwallet-compat
+NoDisplay=true
+X-KDE-StartupNotify=false
+OnlyShowIn=KDE;
+Terminal=false

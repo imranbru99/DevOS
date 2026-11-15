@@ -303,7 +303,6 @@ launch_log="${REAL_HOME}/.cache/antigravity-kde/launch.log"
 "$IDE_BIN" \
     --ozone-platform=x11 \
     --no-sandbox \
-    --password-store=basic \
     --user-data-dir="${DATA_DIR}" \
     --extensions-dir="${EXT_DIR}" \
     --class=antigravity-ide \
