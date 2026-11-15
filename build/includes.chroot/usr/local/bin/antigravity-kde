@@ -143,20 +143,31 @@ ide_url() {
     fi
 }
 
+# The archive contains two files named antigravity-ide. bin/antigravity-ide is a
+# 2 KB shell script. The real program is the large file next to resources/.
+# Keeping only the script makes the window close, and the next click downloads again.
+app_is_complete() {
+    local root="$1"
+    [ -n "$root" ] || return 1
+    [ -x "$root/antigravity-ide" ] || return 1
+    [ -d "$root/resources/app" ] || return 1
+    # Reject the shell launcher if it was saved in place of the real program.
+    [ "$(stat -c %s "$root/antigravity-ide" 2>/dev/null || echo 0)" -gt 1000000 ]
+}
+
 find_installed() {
     local candidate
-    if [ -x "$IDE_BIN" ]; then
-        printf '%s\n' "$IDE_BIN"
+    if app_is_complete "$IDE_ROOT"; then
+        printf '%s\n' "$IDE_ROOT/antigravity-ide"
         return 0
     fi
     for candidate in \
-        "/usr/local/share/devos/antigravity-ide/antigravity-ide" \
-        "/usr/local/share/devos/antigravity-ide/bin/antigravity-ide" \
-        "/opt/antigravity-ide/antigravity-ide" \
-        "${REAL_HOME}/Applications/antigravity-ide/antigravity-ide"
+        "/usr/local/share/devos/antigravity-ide" \
+        "/opt/antigravity-ide" \
+        "${REAL_HOME}/Applications/antigravity-ide"
     do
-        if [ -x "$candidate" ]; then
-            printf '%s\n' "$candidate"
+        if app_is_complete "$candidate"; then
+            printf '%s\n' "$candidate/antigravity-ide"
             return 0
         fi
     done
@@ -164,35 +175,47 @@ find_installed() {
 }
 
 install_ide() {
-    local url tmp bin appdir
+    local url work appdir errfile
     claim_install_lock
     progress_begin "Preparing Antigravity IDE. This is a different program from the white Antigravity window."
     progress_set 8 "Finding the latest Antigravity IDE…"
     url="$(ide_url)"
+    # Unpack in the home folder. /tmp is often too small for the 190 MB archive
+    # plus the unpacked program, and a failed unpack was closing the window.
+    work="${REAL_HOME}/.cache/antigravity-kde/work"
+    errfile="${REAL_HOME}/.cache/antigravity-kde/install-error.txt"
+    rm -rf "$work"
+    mkdir -p "$work/src"
     progress_set 15 "Downloading Antigravity IDE, about 190 MB. The window opens when this finishes."
-    tmp="$(mktemp -d)"
     if ! curl --fail --location --retry 3 --retry-delay 2 --proto '=https' --tlsv1.2 \
-        -o "$tmp/ide.tar.gz" "$url"; then
-        rm -rf "$tmp"
+        -o "$work/ide.tar.gz" "$url"; then
+        rm -rf "$work"
         fail "Could not download Antigravity IDE. Check the internet connection, then click Antigravity IDE again."
     fi
     progress_set 88 "Unpacking Antigravity IDE…"
-    mkdir -p "$tmp/src"
-    if ! tar -xzf "$tmp/ide.tar.gz" -C "$tmp/src"; then
-        rm -rf "$tmp"
-        fail "The Antigravity IDE download could not be unpacked."
+    if ! tar -xzf "$work/ide.tar.gz" -C "$work/src" 2>"$errfile"; then
+        rm -rf "$work"
+        fail "The Antigravity IDE download could not be unpacked. Free some disk space, then click Antigravity IDE again."
     fi
-    bin="$(find "$tmp/src" -type f -name antigravity-ide | head -n 1 || true)"
-    if [ -z "$bin" ]; then
-        rm -rf "$tmp"
-        fail "The download did not contain Antigravity IDE."
+    rm -f "$work/ide.tar.gz"
+    appdir="$(find "$work/src" -type d -path '*/resources/app' -printf '%h\n' 2>/dev/null | head -n 1 || true)"
+    appdir="$(dirname "$appdir")"
+    if ! app_is_complete "$appdir"; then
+        rm -rf "$work"
+        fail "The download did not contain the full Antigravity IDE program."
     fi
-    appdir="$(dirname "$bin")"
     rm -rf "$IDE_ROOT"
     mkdir -p "$(dirname "$IDE_ROOT")"
-    mv "$appdir" "$IDE_ROOT"
-    chmod 755 "$IDE_BIN" 2>/dev/null || true
-    rm -rf "$tmp"
+    if ! mv "$appdir" "$IDE_ROOT"; then
+        rm -rf "$work"
+        fail "Antigravity IDE could not be saved into the home folder."
+    fi
+    chmod 755 "$IDE_ROOT/antigravity-ide" "$IDE_ROOT/chrome-sandbox" 2>/dev/null || true
+    rm -rf "$work"
+    if ! app_is_complete "$IDE_ROOT"; then
+        rm -rf "$IDE_ROOT"
+        fail "Antigravity IDE was unpacked, but the program files were incomplete."
+    fi
     progress_set 100 "Opening Antigravity IDE…"
     progress_close
     IDE_BIN="${IDE_ROOT}/antigravity-ide"
@@ -274,7 +297,10 @@ export HOME="$IDE_HOME"
 unset XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME
 export TMPDIR="${REAL_HOME}/.cache/antigravity-kde/tmp"
 
-exec "$IDE_BIN" \
+# Launch the real program and keep this script long enough to see it stay open.
+# exec would hide an immediate crash, and the next click would look the same.
+launch_log="${REAL_HOME}/.cache/antigravity-kde/launch.log"
+"$IDE_BIN" \
     --ozone-platform=x11 \
     --no-sandbox \
     --password-store=basic \
@@ -282,4 +308,11 @@ exec "$IDE_BIN" \
     --extensions-dir="${EXT_DIR}" \
     --class=antigravity-ide \
     --name=antigravity-ide \
-    "$@"
+    "$@" >>"$launch_log" 2>&1 &
+launch_pid=$!
+sleep 2
+if ! kill -0 "$launch_pid" 2>/dev/null && ! pgrep -f "$IDE_ROOT/antigravity-ide" >/dev/null 2>&1; then
+    fail "Antigravity IDE closed as soon as it opened. The copy on disk is kept, so the next click will not download it again."
+fi
+disown "$launch_pid" 2>/dev/null || true
+exit 0
