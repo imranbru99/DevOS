@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Fix PC Optimizer: unused apps notify at 10 / 20 / 30… minutes; skip while working.
+set -euo pipefail
+
+BRANCH="${1:-cursor/fix-optimizer-idle-notify-6cbe}"
+RAW="https://raw.githubusercontent.com/imranbru99/DevOS/${BRANCH}/build/includes.chroot/usr/local/share/devos/components/optimizer/optimizer.py"
+DEST=/usr/local/share/devos/components/optimizer/optimizer.py
+CFG="${XDG_CONFIG_HOME:-$HOME/.config}/devos/optimizer.json"
+
+echo "== Update Optimizer (${BRANCH}) =="
+TMP="$(mktemp)"
+curl -fsSL "$RAW" -o "$TMP"
+sudo install -m 0644 "$TMP" "$DEST"
+rm -f "$TMP"
+
+mkdir -p "$(dirname "$CFG")"
+python3 - <<PY
+import json, os
+path = os.path.expanduser("${CFG}")
+cfg = {"idle_minutes": 10, "never_ask": [], "paused_until": 0, "auto_cleanup": True}
+if os.path.isfile(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            cfg.update(data)
+    except Exception:
+        pass
+cfg["idle_minutes"] = 10
+cfg["paused_until"] = 0
+with open(path, "w", encoding="utf-8") as f:
+    json.dump(cfg, f, indent=2, sort_keys=True)
+print("  config → idle_minutes=10, pause cleared:", path)
+PY
+
+echo "== Restart Optimizer tray =="
+systemctl --user restart devos-optimizer.service 2>/dev/null \
+  || (pkill -f 'optimizer.py --tray' 2>/dev/null || true; sleep 1;
+      nohup /usr/bin/python3 "$DEST" --tray >/dev/null 2>&1 & )
+
+echo
+echo "Rules now:"
+echo "  • Unused app (Windows App, Chrome, …) → notify at 10 min, again at 20, 30…"
+echo "  • Code Agent / Antigravity while AI is working → no notify"
+echo "  • After work finishes → 10 min unused → notify to stop"
