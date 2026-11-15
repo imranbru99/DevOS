@@ -1,6 +1,7 @@
 #!/bin/bash
-# Ensure the Antigravity KDE / Studio wrapper is ready (second pipeline agent slot).
-# Reuses /opt/antigravity/antigravity; no second download required.
+# Install Antigravity IDE as a *second* app (own binary name + product.json).
+# Sharing /opt/antigravity/antigravity makes Plasma group both under Google Antigravity
+# and Electron can attach to the main single-instance lock.
 set -euo pipefail
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -9,13 +10,21 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 WRAPPER=/usr/local/bin/antigravity-kde
-BIN=/opt/antigravity/antigravity
-IDE_LOCAL=/usr/local/share/devos/antigravity-ide/bin/antigravity-ide
+SRC=/opt/antigravity
+BIN="${SRC}/antigravity"
+IDE_ROOT=/usr/local/lib/antigravity-ide
+IDE_BIN="${IDE_ROOT}/antigravity-ide"
+LEGACY_WRAPPER=/usr/local/share/devos/antigravity-ide/bin/antigravity-ide
 
-if [ ! -x "$BIN" ] && [ ! -x "$IDE_LOCAL" ]; then
+if [ ! -x "$BIN" ]; then
     if [ -x /usr/local/sbin/devos-install-antigravity ]; then
         /usr/local/sbin/devos-install-antigravity
     fi
+fi
+
+if [ ! -x "$BIN" ]; then
+    echo "Antigravity IDE needs Google Antigravity first (DevOS Features → Google Antigravity)." >&2
+    exit 1
 fi
 
 if [ ! -x "$WRAPPER" ]; then
@@ -23,12 +32,102 @@ if [ ! -x "$WRAPPER" ]; then
     exit 1
 fi
 
-if [ ! -x "$BIN" ] \
-    && [ ! -x "$IDE_LOCAL" ] \
-    && [ ! -x "${HOME:-/root}/.local/lib/antigravity-ide/antigravity-ide" ]; then
-    echo "Antigravity IDE binary not found. Install Google Antigravity first (DevOS Features → Google Antigravity)." >&2
-    exit 1
+# Remove the old recursive stub (exec antigravity-kde → itself).
+if [ -e "$LEGACY_WRAPPER" ]; then
+    # Only remove if it is a tiny wrapper, not a real binary tree.
+    if [ "$(stat -c%s "$LEGACY_WRAPPER" 2>/dev/null || echo 0)" -lt 4096 ] \
+        && grep -q 'antigravity-kde' "$LEGACY_WRAPPER" 2>/dev/null; then
+        rm -f "$LEGACY_WRAPPER"
+    fi
 fi
 
-echo "Antigravity KDE (Studio) is ready."
+echo "Building dedicated Antigravity IDE tree at ${IDE_ROOT} ..."
+rm -rf "$IDE_ROOT"
+mkdir -p "$IDE_ROOT"
+
+# Prefer hardlinks (fast, little disk). Fall back to copy if cross-device.
+if cp -al "$SRC/." "$IDE_ROOT/" 2>/dev/null; then
+    :
+else
+    cp -a "$SRC/." "$IDE_ROOT/"
+fi
+
+# Distinct binary name so process/taskbar identity is not "antigravity".
+if [ -e "${IDE_ROOT}/antigravity" ]; then
+    rm -f "$IDE_BIN"
+    # Break hardlink on the binary name entry so rename is local to IDE tree.
+    if cp -a --remove-destination "${IDE_ROOT}/antigravity" "$IDE_BIN" 2>/dev/null; then
+        rm -f "${IDE_ROOT}/antigravity"
+    else
+        mv -f "${IDE_ROOT}/antigravity" "$IDE_BIN"
+    fi
+fi
+chmod 755 "$IDE_BIN" 2>/dev/null || true
+
+# Patch product.json so Electron reports Antigravity IDE (not Google Antigravity).
+patch_product() {
+    local pj="$1"
+    [ -f "$pj" ] || return 0
+    # Break hardlink so we do not rewrite the main Antigravity product.json.
+    local tmp
+    tmp="$(mktemp)"
+    cp -a "$pj" "$tmp"
+    python3 - "$tmp" <<'PY'
+import json, sys
+path = sys.argv[1]
+with open(path, encoding="utf-8") as f:
+    data = json.load(f)
+data["nameShort"] = "Antigravity IDE"
+data["nameLong"] = "Antigravity IDE"
+data["applicationName"] = "antigravity-ide"
+data["dataFolderName"] = ".antigravity-ide"
+data["linuxIconName"] = "antigravity-kde"
+data["urlProtocol"] = "antigravity-ide"
+data["win32MutexName"] = "antigravityide"
+data["darwinBundleIdentifier"] = "com.devos.antigravity-ide"
+data["win32AppUserModelId"] = "DevOS.AntigravityIDE"
+# Keep license / update URLs from upstream; only identity fields change.
+with open(path, "w", encoding="utf-8") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+PY
+    install -m 0644 "$tmp" "$pj"
+    rm -f "$tmp"
+}
+
+# Common locations for VS Code / Electron product.json
+for candidate in \
+    "${IDE_ROOT}/resources/app/product.json" \
+    "${IDE_ROOT}/product.json" \
+    "${IDE_ROOT}/resources/product.json"
+do
+    if [ -f "$candidate" ]; then
+        patch_product "$candidate"
+        echo "  patched $candidate"
+    fi
+done
+
+# Ensure launcher is on PATH
+ln -sfn "$WRAPPER" /usr/bin/antigravity-kde
+
+# Unhide the Studio / IDE Start-menu tile
+for desktop in devos-antigravity-studio.desktop antigravity-ide.desktop; do
+    for dir in /usr/local/share/applications /usr/share/applications; do
+        path="${dir}/${desktop}"
+        if [ -f "$path" ]; then
+            sed -i \
+                -e '/^Hidden=true$/d' \
+                -e '/^NoDisplay=true$/d' \
+                -e '/^X-DevOS-Hidden=true$/d' \
+                "$path" 2>/dev/null || true
+        fi
+    done
+done
+
+update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
+
+echo "Antigravity IDE is ready (separate from Google Antigravity)."
+echo "  Binary:  $IDE_BIN"
+echo "  Launch:  antigravity-kde   or menu → Antigravity IDE"
+echo "  Profile: ~/.config/Antigravity-KDE"
 exit 0

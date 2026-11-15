@@ -288,6 +288,7 @@ printf '%s binary=%s data=%s\n' "$(date -Is)" "$IDE_BIN" "$DATA_DIR" \
 
 unset ELECTRON_RUN_AS_NODE
 export DONT_PROMPT_WSL_INSTALL=1
+# Must differ from Google Antigravity (main uses "antigravity").
 export GEMINI_APP_DATA_DIR="antigravity-kde"
 # Keep this Google login in the IDE's own folder, not the shared keyring.
 export SSH_CLIENT="127.0.0.1 34567 22"
