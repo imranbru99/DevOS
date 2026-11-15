@@ -247,7 +247,13 @@ def light_stylesheet(sheet: str) -> str:
                         out = QtGui.QColor("#0f172a")
                         out.setAlpha(max(c.alpha(), 40))
                         return _fmt_color(out, True)
-                    return "#2563eb" if sat > 0.55 and val > 0.55 else "#cbd5e1"
+                    # A dark edge has to stay visible on a white page. Pale #cbd5e1
+                    # disappears under the command buttons.
+                    if sat > 0.55 and val > 0.55:
+                        return "#2563eb"
+                    if val < 0.62:
+                        return "#64748b"
+                    return "#cbd5e1"
                 return token
 
             return prop + ": " + COLOR.sub(color, value) + ";"

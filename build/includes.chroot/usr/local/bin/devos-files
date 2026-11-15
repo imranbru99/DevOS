@@ -4646,9 +4646,8 @@ class WindowsFileExplorer(QMainWindow):
         # 2. Command Ribbon (Windows 11 Fluent) — roomy, theme-colored chips
         cmd_bar = QWidget()
         cmd_bar.setObjectName("commandBar")
-        cmd_bar.setFixedHeight(52)
         cmd_layout = QHBoxLayout(cmd_bar)
-        cmd_layout.setContentsMargins(12, 0, 12, 0)
+        cmd_layout.setContentsMargins(12, 8, 12, 8)
         cmd_layout.setSpacing(6)
 
         # "+ New ˇ" Dropdown Button
@@ -4656,7 +4655,7 @@ class WindowsFileExplorer(QMainWindow):
         self.btn_new.setIcon(get_win_icon("new", 18))
         self.btn_new.setObjectName("newBtn")
         self.btn_new.setToolTip("Create new item")
-        self.btn_new.setFixedHeight(34)
+        self.btn_new.setFixedHeight(36)
         new_menu = QMenu(self.btn_new)
         act_new_folder = new_menu.addAction(get_win_icon("folder", 16), "Folder\tCtrl+Shift+N")
         act_new_folder.triggered.connect(self.action_new_folder)
@@ -4695,7 +4694,7 @@ class WindowsFileExplorer(QMainWindow):
             btn.setIcon(get_win_icon(name, 20))
             btn.setObjectName("cmdIconBtn")
             btn.setToolTip(tip)
-            btn.setFixedSize(38, 34)
+            btn.setFixedSize(38, 36)
             btn.setIconSize(QSize(20, 20))
             btn.setCursor(Qt.PointingHandCursor)
             btn.clicked.connect(cb)
@@ -4759,7 +4758,7 @@ class WindowsFileExplorer(QMainWindow):
         self.btn_sort.setIcon(get_win_icon("sort", 18))
         self.btn_sort.setObjectName("cmdMenuBtn")
         self.btn_sort.setMinimumWidth(88)
-        self.btn_sort.setFixedHeight(34)
+        self.btn_sort.setFixedHeight(36)
         self.btn_sort.setCursor(Qt.PointingHandCursor)
         sort_menu = QMenu(self.btn_sort)
         sort_icons = ["rename", "properties", "file-code", "sort"]
@@ -4776,7 +4775,7 @@ class WindowsFileExplorer(QMainWindow):
         self.btn_view.setIcon(get_win_icon("view", 18))
         self.btn_view.setObjectName("cmdMenuBtn")
         self.btn_view.setMinimumWidth(88)
-        self.btn_view.setFixedHeight(34)
+        self.btn_view.setFixedHeight(36)
         self.btn_view.setCursor(Qt.PointingHandCursor)
         view_menu = QMenu(self.btn_view)
         view_menu.addAction(get_win_icon("view", 16), "Extra large icons", lambda: self.set_view_mode("icons", 128))
@@ -4818,7 +4817,7 @@ class WindowsFileExplorer(QMainWindow):
         self.btn_more.setIcon(get_win_icon("more", 18))
         self.btn_more.setIconSize(QSize(18, 18))
         self.btn_more.setObjectName("cmdIconBtn")
-        self.btn_more.setFixedSize(38, 34)
+        self.btn_more.setFixedSize(38, 36)
         self.btn_more.setToolTip("See more")
         self.btn_more.setCursor(Qt.PointingHandCursor)
         more_menu = QMenu(self.btn_more)
@@ -4854,7 +4853,7 @@ class WindowsFileExplorer(QMainWindow):
         self.details_button.setObjectName("cmdBtn")
         self.details_button.setCheckable(True)
         self.details_button.setMinimumWidth(88)
-        self.details_button.setFixedHeight(34)
+        self.details_button.setFixedHeight(36)
         self.details_button.setCursor(Qt.PointingHandCursor)
         self.details_button.setChecked(self._view_mode == "details")
         self.details_button.setToolTip("Details view")
@@ -4866,7 +4865,7 @@ class WindowsFileExplorer(QMainWindow):
         self.preview_button.setObjectName("cmdBtn")
         self.preview_button.setCheckable(True)
         self.preview_button.setMinimumWidth(92)
-        self.preview_button.setFixedHeight(34)
+        self.preview_button.setFixedHeight(36)
         self.preview_button.setCursor(Qt.PointingHandCursor)
         self.preview_button.setChecked(self._settings.get("preview", False))
         self.preview_button.setToolTip("Preview pane (Alt+P)")
@@ -5329,11 +5328,12 @@ class WindowsFileExplorer(QMainWindow):
             }
             #commandBar {
                 background: #0f1a2a;
-                border-bottom: 1px solid #243447;
+                border-bottom: 1px solid #2563eb;
             }
             QPushButton#cmdBtn, QPushButton#cmdIconBtn, QPushButton#cmdMenuBtn {
                 background: #162337;
                 border: 1px solid #2a3f5c;
+                border-bottom: 2px solid #2563eb;
                 border-radius: 8px;
                 color: #e8f1ff;
                 font-size: 12.5px;
@@ -5755,18 +5755,19 @@ class WindowsFileExplorer(QMainWindow):
 
             QWidget#commandBar {
                 background: #0f1a2a;
-                border-bottom: 1px solid #243447;
-                padding: 6px 12px;
+                border-bottom: 1px solid #2563eb;
+                padding: 0;
             }
             QPushButton#cmdBtn, QToolButton#cmdBtn {
                 background: #162337;
                 border: 1px solid #2a3f5c;
+                border-bottom: 2px solid #2563eb;
                 border-radius: 8px;
-                padding: 6px 14px;
+                padding: 2px 14px;
                 color: #e8f1ff;
                 font-size: 12.5px;
                 font-weight: 600;
-                min-height: 32px;
+                min-height: 0px;
             }
             QPushButton#cmdBtn:hover, QToolButton#cmdBtn:hover {
                 background: #1c3350;
@@ -5784,11 +5785,12 @@ class WindowsFileExplorer(QMainWindow):
             QPushButton#cmdIconBtn {
                 background: #162337;
                 border: 1px solid #2a3f5c;
+                border-bottom: 2px solid #2563eb;
                 border-radius: 8px;
-                padding: 5px;
+                padding: 0px;
                 min-width: 36px;
                 max-width: 40px;
-                min-height: 32px;
+                min-height: 0px;
                 max-height: 36px;
                 color: #e8f1ff;
             }
@@ -5803,12 +5805,13 @@ class WindowsFileExplorer(QMainWindow):
             QPushButton#cmdMenuBtn {
                 background: #162337;
                 border: 1px solid #2a3f5c;
+                border-bottom: 2px solid #2563eb;
                 border-radius: 8px;
-                padding: 6px 26px 6px 12px;
+                padding: 2px 26px 2px 12px;
                 color: #e8f1ff;
                 font-size: 12.5px;
                 font-weight: 600;
-                min-height: 32px;
+                min-height: 0px;
                 min-width: 84px;
             }
             QPushButton#cmdMenuBtn:hover {
