@@ -28,6 +28,7 @@ import stat
 import tempfile
 import threading
 from pathlib import Path
+from typing import Optional
 from urllib.parse import unquote
 
 try:
@@ -74,7 +75,6 @@ try:
         QCheckBox,
         QComboBox,
         QDialog,
-        QDialogButtonBox,
         QFileDialog,
         QFrame,
         QGridLayout,
@@ -1330,18 +1330,127 @@ def prompt_name_dialog(parent, title: str, label: str, initial: str,
                        select_stem: bool = False) -> Optional[str]:
     """Name prompt that focuses the field and accepts Ctrl+V / context Paste."""
     dlg = QDialog(parent)
+    dlg.setObjectName("namePrompt")
     dlg.setWindowTitle(title)
-    dlg.setMinimumWidth(320)
+    dlg.setWindowFlags(Qt.Dialog | Qt.WindowTitleHint | Qt.WindowCloseButtonHint)
+    dlg.setMinimumWidth(440)
+    dlg.setAttribute(Qt.WA_StyledBackground, True)
+    icon_name = "folder" if "folder" in (title or "").lower() else "file-doc"
+    dlg.setWindowIcon(get_win_icon(icon_name, 32))
+    # Dark source. DevOS light mode rewrites these colors when the window opens.
+    dlg.setStyleSheet("""
+        QDialog#namePrompt {
+            background: #0c131f;
+            color: #f1f5f9;
+            font-family: 'Segoe UI', 'Inter', sans-serif;
+        }
+        QLabel#nameHeading {
+            color: #f8fafc;
+            font-size: 16px;
+            font-weight: 600;
+            background: transparent;
+        }
+        QLabel#nameLabel {
+            color: #94a3b8;
+            font-size: 12px;
+            background: transparent;
+        }
+        QLineEdit#nameField {
+            background: #0f1525;
+            color: #f8fafc;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 8px 12px;
+            min-height: 22px;
+            font-size: 14px;
+        }
+        QLineEdit#nameField:focus {
+            border: 2px solid #38bdf8;
+            padding: 7px 11px;
+        }
+        QPushButton#nameCancel {
+            background: #172135;
+            color: #f1f5f9;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            min-height: 36px;
+            min-width: 104px;
+            padding: 0 16px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        QPushButton#nameCancel:hover { background: #1e293b; }
+        QPushButton#nameCancel:pressed { background: #0f172a; }
+        QPushButton#nameOk {
+            background: #1d4ed8;
+            color: #ffffff;
+            border: 1px solid #1e40af;
+            border-radius: 8px;
+            min-height: 36px;
+            min-width: 104px;
+            padding: 0 16px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        QPushButton#nameOk:hover { background: #1e40af; }
+        QPushButton#nameOk:pressed { background: #1e3a8a; }
+        QPushButton#nameOk:disabled {
+            background: #1e293b;
+            color: #64748b;
+            border-color: #334155;
+        }
+    """)
     layout = QVBoxLayout(dlg)
-    layout.addWidget(QLabel(label))
+    layout.setContentsMargins(22, 18, 22, 18)
+    layout.setSpacing(14)
+
+    header = QHBoxLayout()
+    header.setSpacing(12)
+    icon_label = QLabel()
+    icon_label.setPixmap(get_win_icon(icon_name, 36).pixmap(36, 36))
+    icon_label.setFixedSize(36, 36)
+    header.addWidget(icon_label, 0, Qt.AlignTop)
+    titles = QVBoxLayout()
+    titles.setSpacing(2)
+    heading = QLabel(title)
+    heading.setObjectName("nameHeading")
+    hint = QLabel(label)
+    hint.setObjectName("nameLabel")
+    titles.addWidget(heading)
+    titles.addWidget(hint)
+    header.addLayout(titles, 1)
+    layout.addLayout(header)
+
     edit = QLineEdit(initial)
+    edit.setObjectName("nameField")
     edit.setClearButtonEnabled(True)
     edit.setContextMenuPolicy(Qt.CustomContextMenu)
     layout.addWidget(edit)
-    btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-    btns.accepted.connect(dlg.accept)
-    btns.rejected.connect(dlg.reject)
-    layout.addWidget(btns)
+
+    buttons = QHBoxLayout()
+    buttons.setSpacing(10)
+    buttons.addStretch(1)
+    cancel = QPushButton("Cancel")
+    cancel.setObjectName("nameCancel")
+    cancel.setAutoDefault(False)
+    cancel.setIcon(QIcon())
+    ok = QPushButton("OK")
+    ok.setObjectName("nameOk")
+    ok.setDefault(True)
+    ok.setAutoDefault(True)
+    ok.setIcon(QIcon())
+    buttons.addWidget(cancel)
+    buttons.addWidget(ok)
+    layout.addLayout(buttons)
+    def _accept():
+        if (edit.text() or "").strip():
+            dlg.accept()
+
+    cancel.clicked.connect(dlg.reject)
+    ok.clicked.connect(_accept)
+    edit.returnPressed.connect(_accept)
+    edit.textChanged.connect(lambda text: ok.setEnabled(bool((text or "").strip())))
+    ok.setEnabled(bool((initial or "").strip()))
 
     def _paste_into_edit():
         text = sync_clipboard_text_into_qt()
