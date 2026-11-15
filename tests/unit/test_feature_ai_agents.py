@@ -42,11 +42,13 @@ def test_antigravity_and_kde_have_install_hooks():
 def test_antigravity_launchers_keep_separate_accounts():
     kde = (ROOT / "build/includes.chroot/usr/local/bin/antigravity-kde").read_text(encoding="utf-8")
     main = (ROOT / "build/includes.chroot/usr/local/bin/devos-antigravity").read_text(encoding="utf-8")
-    assert 'DATA_DIR="${REAL_HOME}/.config/Antigravity-KDE"' in kde
+    assert 'DATA_DIR="${REAL_HOME}/.config/Antigravity-IDE"' in kde
+    assert 'IDE_ROOT="${REAL_HOME}/.local/lib/antigravity-ide"' in kde
     assert 'IDE_HOME="${REAL_HOME}/.local/share/devos/antigravity-ide-home"' in kde
+    assert "Antigravity%20IDE.tar.gz" in kde
+    assert "/opt/antigravity/antigravity" not in kde
     assert "--user-data-dir=" in kde
     assert "--class=antigravity-ide" in kde
-    assert 'ln -sfn "$DATA_DIR" "$IDE_HOME/.config/Antigravity"' in kde
     assert "bwrap" not in kde
     assert "SSH_CONNECTION" in kde
     assert "Antigravity-KDE" not in main
