@@ -1,0 +1,17 @@
+[General]
+autoSaveImage=true
+clipboardGroup=PostScreenshotCopyImage
+useReleaseToCapture=true
+disableSaveAsAction=false
+
+[GuiConfig]
+captureMode=0
+captureOnClick=false
+includePointer=false
+includeDecorations=true
+# After Copy or Save, close Spectacle instead of opening/keeping the editor window.
+quitAfterSaveCopyExport=true
+
+[Save]
+saveFilenameFormat=Screenshot_%Y%M%D_%H%m%S
+defaultSaveImageFormat=PNG
