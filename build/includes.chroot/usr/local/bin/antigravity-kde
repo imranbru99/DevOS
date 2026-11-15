@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Antigravity IDE — second app, second Google account.
-# Google Antigravity keeps ~/.config/Antigravity and ~/.gemini. This launcher
-# must not see those directories, or the running app takes the click and the
-# taskbar stays on the same icon.
+# Antigravity IDE — second Google account, normal window.
+# A mount sandbox hid the main profile but also broke the display, so the
+# click turned into a black Antigravity window with the same icon.
+# This launch keeps your real screen and session. It only gives the process
+# a home where the main profile and the main login are not present.
 set -euo pipefail
 
 IDE_BIN=""
@@ -27,37 +28,19 @@ if [ -z "$IDE_BIN" ]; then
     exit 1
 fi
 
-fail_isolated() {
-    msg='Antigravity IDE needs its own window, and this system could not hide the main Antigravity profile. Install bubblewrap, then open Antigravity IDE again: sudo apt-get install -y bubblewrap'
-    echo "Error: $msg" >&2
-    if command -v kdialog >/dev/null 2>&1; then
-        kdialog --title "Antigravity IDE" --error "$msg" >/dev/null 2>&1 || true
-    elif command -v notify-send >/dev/null 2>&1; then
-        notify-send -a "DevOS" -i "dialog-error" "Antigravity IDE" "$msg" || true
-    fi
-    exit 1
-}
-
-unset ELECTRON_RUN_AS_NODE
-export DONT_PROMPT_WSL_INSTALL=1
-# Pipeline slot and chats: ~/.gemini/antigravity-kde on the real home.
-export GEMINI_APP_DATA_DIR="antigravity-kde"
-# File token inside the private ~/.gemini, not the shared desktop keyring.
-export SSH_CLIENT="127.0.0.1 34567 22"
-export SSH_CONNECTION="127.0.0.1 34567 127.0.0.1 22"
-export SSH_TTY="/dev/pts/0"
-
-DATA_DIR="${HOME}/.config/Antigravity-KDE"
-MAIN_CONFIG="${HOME}/.config/Antigravity"
-EXT_DIR="${HOME}/.antigravity-kde/extensions"
-PRIVATE_GEMINI="${HOME}/.gemini-profiles/antigravity-kde-root"
-HOST_KDE_GEMINI="${HOME}/.gemini/antigravity-kde"
-mkdir -p "$DATA_DIR" "$EXT_DIR" "$PRIVATE_GEMINI/antigravity-kde" "$HOST_KDE_GEMINI" "$MAIN_CONFIG"
+REAL_HOME="$HOME"
+DATA_DIR="${REAL_HOME}/.config/Antigravity-KDE"
+EXT_DIR="${REAL_HOME}/.antigravity-kde/extensions"
+IDE_HOME="${REAL_HOME}/.local/share/devos/antigravity-ide-home"
+HOST_KDE_GEMINI="${REAL_HOME}/.gemini/antigravity-kde"
+mkdir -p "$DATA_DIR" "$EXT_DIR" "$HOST_KDE_GEMINI" \
+    "$IDE_HOME/.config" "$IDE_HOME/.gemini" "$IDE_HOME/.local/share/keyrings" \
+    "${REAL_HOME}/.cache/antigravity-kde/tmp"
 
 if [ -z "$(ls -A "$EXT_DIR" 2>/dev/null || true)" ]; then
     for candidate in \
-        "${HOME}/.antigravity/extensions" \
-        "${HOME}/.config/Antigravity/extensions"
+        "${REAL_HOME}/.antigravity/extensions" \
+        "${REAL_HOME}/.config/Antigravity/extensions"
     do
         if [ -d "$candidate" ] && [ -n "$(ls -A "$candidate" 2>/dev/null || true)" ]; then
             EXT_DIR="$candidate"
@@ -66,45 +49,70 @@ if [ -z "$(ls -A "$EXT_DIR" 2>/dev/null || true)" ]; then
     done
 fi
 
-ARGS=(
-    --ozone-platform=x11
-    --no-sandbox
-    --password-store=basic
-    --user-data-dir="${DATA_DIR}"
-    --extensions-dir="${EXT_DIR}"
-    --class=antigravity-ide
-    --name=antigravity-ide
-)
+link_children() {
+    local source="$1" dest="$2" skip="${3:-}"
+    mkdir -p "$dest"
+    local item base
+    for item in "$source"/*; do
+        [ -e "$item" ] || [ -L "$item" ] || continue
+        base="$(basename "$item")"
+        [ "$base" = "$skip" ] && continue
+        ln -sfn "$item" "$dest/$base"
+    done
+}
 
-# Inside the sandbox:
-#   ~/.config/Antigravity  -> this IDE's own folder (main lock is invisible)
-#   ~/.gemini              -> this IDE's own tree
-#   ~/.gemini/antigravity-kde stays the host folder the pipeline already reads
-HOST_KDE_MIRROR="${HOME}/.gemini-profiles/antigravity-kde-host"
-mkdir -p "$HOST_KDE_MIRROR"
+# Projects, ssh keys, and the desktop stay reachable. The main Antigravity
+# profile and its Gemini login do not.
+shopt -s dotglob nullglob
+for item in "$REAL_HOME"/*; do
+    base="$(basename "$item")"
+    case "$base" in
+        .|..|.config|.gemini|.local|.cache|.Xauthority) continue ;;
+    esac
+    ln -sfn "$item" "$IDE_HOME/$base"
+done
+shopt -u dotglob nullglob
 
-if command -v bwrap >/dev/null 2>&1 && bwrap --dev-bind / / \
-    --bind "$DATA_DIR" "$MAIN_CONFIG" \
-    --bind "$PRIVATE_GEMINI" "${HOME}/.gemini" \
-    --bind "$HOST_KDE_GEMINI" "${HOME}/.gemini/antigravity-kde" \
-    -- true >/dev/null 2>&1; then
-    exec bwrap --die-with-parent --dev-bind / / \
-        --bind "$DATA_DIR" "$MAIN_CONFIG" \
-        --bind "$PRIVATE_GEMINI" "${HOME}/.gemini" \
-        --bind "$HOST_KDE_GEMINI" "${HOME}/.gemini/antigravity-kde" \
-        -- "$IDE_BIN" "${ARGS[@]}" "$@"
+link_children "$REAL_HOME/.config" "$IDE_HOME/.config" "Antigravity"
+ln -sfn "$DATA_DIR" "$IDE_HOME/.config/Antigravity"
+ln -sfn "$HOST_KDE_GEMINI" "$IDE_HOME/.gemini/antigravity-kde"
+if [ -e "$REAL_HOME/.gemini/skills" ]; then
+    ln -sfn "$REAL_HOME/.gemini/skills" "$IDE_HOME/.gemini/skills"
+fi
+if [ -d "$REAL_HOME/.agents/skills" ]; then
+    ln -sfn "$REAL_HOME/.agents/skills" "$IDE_HOME/.gemini/skills"
 fi
 
-if unshare --user --mount --map-root-user true >/dev/null 2>&1; then
-    exec unshare --user --mount --map-root-user bash -c '
-        mount --bind "$5" "$6"
-        mount --bind "$1" "$2"
-        mount --bind "$3" "$4"
-        mkdir -p "$4/antigravity-kde"
-        mount --bind "$6" "$4/antigravity-kde"
-        shift 6
-        exec "$@"
-    ' _ "$DATA_DIR" "$MAIN_CONFIG" "$PRIVATE_GEMINI" "${HOME}/.gemini" "$HOST_KDE_GEMINI" "$HOST_KDE_MIRROR" "$IDE_BIN" "${ARGS[@]}" "$@"
+mkdir -p "$IDE_HOME/.local"
+if [ -d "$REAL_HOME/.local" ]; then
+    link_children "$REAL_HOME/.local" "$IDE_HOME/.local" "share"
+    link_children "$REAL_HOME/.local/share" "$IDE_HOME/.local/share" "keyrings"
+fi
+mkdir -p "$IDE_HOME/.local/share/keyrings"
+
+if [ -n "${XAUTHORITY:-}" ] && [ -e "$XAUTHORITY" ]; then
+    ln -sfn "$XAUTHORITY" "$IDE_HOME/.Xauthority"
+elif [ -e "$REAL_HOME/.Xauthority" ]; then
+    ln -sfn "$REAL_HOME/.Xauthority" "$IDE_HOME/.Xauthority"
 fi
 
-fail_isolated
+unset ELECTRON_RUN_AS_NODE
+export DONT_PROMPT_WSL_INSTALL=1
+export GEMINI_APP_DATA_DIR="antigravity-kde"
+# Store this account in the private Gemini folder, not the shared keyring.
+export SSH_CLIENT="127.0.0.1 34567 22"
+export SSH_CONNECTION="127.0.0.1 34567 127.0.0.1 22"
+export SSH_TTY="/dev/pts/0"
+export HOME="$IDE_HOME"
+unset XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME
+export TMPDIR="${REAL_HOME}/.cache/antigravity-kde/tmp"
+
+exec "$IDE_BIN" \
+    --ozone-platform=x11 \
+    --no-sandbox \
+    --password-store=basic \
+    --user-data-dir="${DATA_DIR}" \
+    --extensions-dir="${EXT_DIR}" \
+    --class=antigravity-ide \
+    --name=antigravity-ide \
+    "$@"
