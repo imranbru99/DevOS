@@ -3,7 +3,8 @@
 DevOS restore points.
 
 btrfs: Snapper when configured, otherwise a read-only subvolume under /.snapshots.
-ext4 (and other non-btrfs): Timeshift rsync snapshots when `timeshift` is installed.
+ext4 (and other non-btrfs): no automatic copy. Timeshift rsync snapshots duplicate
+the whole system onto the data disk and are not created by DevOS.
 
 A JSON file is only a cache of successful snapshots. Nothing is reported as
 created unless the snapshot command exits 0.
@@ -119,32 +120,15 @@ class SnapshotManager:
         }
 
     def _create_timeshift(self, description: str) -> Dict[str, Any]:
-        if not self._has("timeshift"):
-            return {
-                "status": "UNAVAILABLE",
-                "backend": None,
-                "message": "This disk is not btrfs. Install Timeshift from DevOS Features "
-                           "to create restore points on ext4.",
-            }
-        if self._euid != 0:
-            return self._needs_root(description, "create")
-        code, out, err = self.runner(
-            ["timeshift", "--create", "--comments", description, "--scripted"])
-        if code != 0:
-            return {
-                "status": "FAILED",
-                "backend": "timeshift",
-                "error": (err or out or "timeshift --create failed").strip(),
-            }
-        points = self._list_timeshift()
-        snap_id = points[-1]["id"] if points else description
+        # Timeshift --create copies the system onto another disk and keeps every
+        # on-demand copy. Apt used to start one before each install, and a 2-minute
+        # timeout left the partial copy behind. That folder is the space on drive A.
         return {
-            "status": "CREATED",
-            "id": snap_id,
-            "description": description,
-            "backend": "timeshift",
-            "path": str(snap_id),
-            "message": f"Timeshift restore point '{description}' is on the disk.",
+            "status": "UNAVAILABLE",
+            "backend": None,
+            "skipped": description,
+            "message": "DevOS does not copy the system onto another disk. "
+                       "Timeshift snapshots were filling the data drive and are turned off.",
         }
 
     def _list_timeshift(self) -> List[Dict[str, Any]]:
@@ -184,9 +168,6 @@ class SnapshotManager:
         else:
             snapper_error = ""
         if not self._has("btrfs"):
-            # Fall through to Timeshift if present on a mis-detected system.
-            if self._has("timeshift"):
-                return self._create_timeshift(description)
             return {"status": "FAILED", "error": snapper_error or "btrfs and snapper are not installed."}
         snap_id = int(time.time())
         dest = f"/.snapshots/devos-{snap_id}"

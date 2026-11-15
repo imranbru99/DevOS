@@ -1,0 +1,209 @@
+#!/usr/bin/env python3
+"""Remove Timeshift snapshot stores from data disks.
+
+Timeshift keeps full system copies in a top-level folder named timeshift, next
+to project files. lost+found, project, and websites are never removed.
+
+    devos-reclaim-timeshift           # show what would be removed
+    sudo devos-reclaim-timeshift --apply
+"""
+
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+
+
+def _path_rank(path):
+    """Prefer the normal drive mount over Timeshift's temporary mounts."""
+    if path.startswith("/run/media/") or path.startswith("/media/"):
+        return 0
+    if path.startswith("/run/timeshift/"):
+        return 2
+    return 1
+
+
+def unique_stores(stores, identity):
+    """One entry per disk folder. Several /run/timeshift mounts are the same folder."""
+    chosen = {}
+    order = []
+    for store in stores:
+        try:
+            key = identity(store)
+        except OSError:
+            continue
+        if key in chosen:
+            if _path_rank(store) < _path_rank(chosen[key]):
+                chosen[key] = store
+            continue
+        chosen[key] = store
+        order.append(key)
+    return [chosen[key] for key in order]
+
+
+def find_snapshot_stores(mountpoints):
+    """Return timeshift folders that sit on a data disk and hold snapshots."""
+    found = []
+    for mount in mountpoints:
+        mount = os.path.abspath(mount)
+        try:
+            if os.path.realpath(mount) == "/":
+                continue
+        except OSError:
+            continue
+        store = os.path.join(mount, "timeshift")
+        snaps = os.path.join(store, "snapshots")
+        try:
+            if os.path.islink(store) or os.path.islink(snaps):
+                continue
+            if not os.path.isdir(snaps):
+                continue
+        except OSError:
+            continue
+        if os.path.basename(store) != "timeshift":
+            continue
+        if os.path.dirname(store) != mount:
+            continue
+        found.append(store)
+
+    def identity(path):
+        info = os.stat(path, follow_symlinks=False)
+        return (info.st_dev, info.st_ino)
+
+    return unique_stores(found, identity)
+
+
+def data_mounts():
+    """Mounted filesystems other than the running system disk."""
+    try:
+        proc = subprocess.run(
+            ["findmnt", "-nro", "TARGET"],
+            capture_output=True, text=True, timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    mounts = []
+    for line in (proc.stdout or "").splitlines():
+        target = line.strip()
+        if not target or target == "/":
+            continue
+        mounts.append(target)
+    return mounts
+
+
+def folder_bytes(path):
+    try:
+        proc = subprocess.run(
+            ["du", "-sb", "-x", path],
+            capture_output=True, text=True, timeout=600,
+        )
+        line = (proc.stdout or "").strip().split()
+        if line:
+            return int(line[0])
+    except (OSError, subprocess.SubprocessError, ValueError):
+        pass
+    return 0
+
+
+def human(num):
+    value = float(num)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if value < 1024 or unit == "TB":
+            if unit == "B":
+                return f"{int(value)} {unit}"
+            return f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{num} B"
+
+
+def disable_schedule(path):
+    """Turn off Timeshift's own hourly/daily/boot copies. Leave the file if it is not JSON."""
+    if not os.path.isfile(path):
+        return False
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    for key in (
+        "schedule_monthly", "schedule_weekly", "schedule_daily",
+        "schedule_hourly", "schedule_boot",
+    ):
+        data[key] = "false"
+    data["do_first_run"] = "false"
+    tmp = path + ".devos-tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(data, handle, indent=2)
+        handle.write("\n")
+    os.replace(tmp, path)
+    return True
+
+
+def unmount_leftovers(run_dir="/run/timeshift"):
+    """Drop Timeshift's temporary mounts. A killed copy leaves one per attempt."""
+    removed = []
+    if not os.path.isdir(run_dir):
+        return removed
+    for name in sorted(os.listdir(run_dir)):
+        backup = os.path.join(run_dir, name, "backup")
+        if not os.path.isdir(backup):
+            continue
+        proc = subprocess.run(["umount", backup], capture_output=True, text=True)
+        if proc.returncode == 0:
+            removed.append(backup)
+    return removed
+
+
+def remove_stores(stores):
+    removed = []
+    for store in stores:
+        if os.path.basename(store) != "timeshift" or os.path.islink(store):
+            continue
+        if not os.path.isdir(os.path.join(store, "snapshots")):
+            continue
+        shutil.rmtree(store)
+        removed.append(store)
+    return removed
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Remove Timeshift copies from data disks.")
+    parser.add_argument("--apply", action="store_true", help="delete the snapshot stores")
+    parser.add_argument("--mount", action="append", default=[], help=argparse.SUPPRESS)
+    parser.add_argument("--config", default="/etc/timeshift/timeshift.json")
+    args = parser.parse_args(argv)
+
+    mounts = args.mount or data_mounts()
+    stores = find_snapshot_stores(mounts)
+    total = 0
+    if not stores:
+        print("No Timeshift snapshot folder was found on a data disk.")
+    for store in stores:
+        size = folder_bytes(store)
+        total += size
+        print(f"{store}  {human(size)}")
+    if stores:
+        print(f"Total {human(total)}")
+        print("project, websites, and lost+found are not part of this.")
+    if not args.apply:
+        if stores:
+            print("Nothing was deleted. Run: sudo devos-reclaim-timeshift --apply")
+        return 0
+    if os.geteuid() != 0:
+        print("Removing snapshots needs an administrator: sudo devos-reclaim-timeshift --apply", file=sys.stderr)
+        return 1
+    for store in remove_stores(find_snapshot_stores(mounts)):
+        print(f"Removed {store}")
+    if disable_schedule(args.config):
+        print(f"Turned off automatic Timeshift copies in {args.config}")
+    for backup in unmount_leftovers():
+        print(f"Unmounted {backup}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

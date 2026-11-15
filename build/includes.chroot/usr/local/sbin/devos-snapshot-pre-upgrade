@@ -1,16 +1,19 @@
 #!/bin/bash
 # apt calls this before unpacking packages. stdin is the package list; we do
 # not need it. Failure to snapshot must not stop a security update.
+#
+# Only btrfs gets a restore point here. A btrfs snapshot is a cheap reference,
+# and Snapper keeps at most 8 of them. ext4 Timeshift copies the whole system
+# onto the data disk and keeps every copy, so it must not run from apt.
 FSTYPE="$(findmnt -n -o FSTYPE / 2>/dev/null || true)"
 case "$FSTYPE" in
   btrfs)
     ;;
   *)
-    # Default installer disk is ext4 — use Timeshift when present.
-    command -v timeshift >/dev/null 2>&1 || exit 0
+    exit 0
     ;;
 esac
-# Bound a slow filesystem or snapshot backend so security updates can continue.
+# Bound a slow filesystem so security updates can continue.
 timeout -k 5 120 python3 /usr/local/share/devos/components/settings/snapshot_manager.py create "Before package changes" \
     >>/var/log/devos-snapshot.log 2>&1 || true
 exit 0
