@@ -39,6 +39,23 @@ def test_antigravity_and_kde_have_install_hooks():
     assert ag["name"] != kde["name"]
 
 
+def test_antigravity_launchers_keep_separate_accounts():
+    kde = (ROOT / "build/includes.chroot/usr/local/bin/antigravity-kde").read_text(encoding="utf-8")
+    main = (ROOT / "build/includes.chroot/usr/local/bin/devos-antigravity").read_text(encoding="utf-8")
+    assert 'DATA_DIR="${REAL_HOME}/.config/Antigravity-IDE"' in kde
+    assert 'IDE_ROOT="${REAL_HOME}/.local/lib/antigravity-ide"' in kde
+    assert 'IDE_HOME="${REAL_HOME}/.local/share/devos/antigravity-ide-home"' in kde
+    assert "Antigravity%20IDE.tar.gz" in kde
+    assert "/opt/antigravity/antigravity" not in kde
+    assert "--user-data-dir=" in kde
+    assert "--class=antigravity-ide" in kde
+    assert "bwrap" not in kde
+    assert "SSH_CONNECTION" in kde
+    assert "Antigravity-KDE" not in main
+    assert 'DATA_DIR="${HOME}/.config/Antigravity"' in main
+    assert "--class=antigravity" in main
+
+
 def test_cursor_agent_has_install_hook():
     ca = _by_id("cursor-agent")
     assert ca["script"] == "/usr/local/sbin/devos-install-cursor-agent"

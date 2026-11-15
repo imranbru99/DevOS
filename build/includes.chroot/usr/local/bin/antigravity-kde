@@ -1,56 +1,306 @@
 #!/usr/bin/env bash
-# Antigravity IDE — second independent instance (own Google account + projects).
-# Isolated from Google Antigravity (main) via separate data dirs and WM class.
+# Antigravity IDE — a different program from Google Antigravity.
+# The white window is the Antigravity app at /opt/antigravity. Starting that
+# same program again only focuses the window that is already open. This
+# launcher downloads the standalone Antigravity IDE and opens that.
 set -euo pipefail
 
-IDE_BIN=""
-if [ -x "${HOME}/.local/lib/antigravity-ide/antigravity-ide" ]; then
-    IDE_BIN="${HOME}/.local/lib/antigravity-ide/antigravity-ide"
-elif [ -x "${HOME}/.local/lib/antigravity-ide/bin/antigravity-ide" ]; then
-    IDE_BIN="${HOME}/.local/lib/antigravity-ide/bin/antigravity-ide"
-elif [ -x "/usr/local/share/devos/antigravity-ide/bin/antigravity-ide" ]; then
-    IDE_BIN="/usr/local/share/devos/antigravity-ide/bin/antigravity-ide"
-elif [ -x "/opt/antigravity/antigravity" ]; then
-    IDE_BIN="/opt/antigravity/antigravity"
-fi
+REAL_HOME="${HOME}"
+IDE_ROOT="${REAL_HOME}/.local/lib/antigravity-ide"
+IDE_BIN="${IDE_ROOT}/antigravity-ide"
+DATA_DIR="${REAL_HOME}/.config/Antigravity-IDE"
+EXT_DIR="${REAL_HOME}/.antigravity-ide/extensions"
+IDE_HOME="${REAL_HOME}/.local/share/devos/antigravity-ide-home"
+HOST_KDE_GEMINI="${REAL_HOME}/.gemini/antigravity-kde"
+FALLBACK_URL_X64="https://edgedl.me.gvt1.com/edgedl/release2/j0qc3/antigravity/stable/2.7.0-4507555968450560/linux-x64/Antigravity%20IDE.tar.gz"
+FALLBACK_URL_ARM="https://edgedl.me.gvt1.com/edgedl/release2/j0qc3/antigravity/stable/2.7.0-4507555968450560/linux-arm/Antigravity%20IDE.tar.gz"
 
-if [ -z "$IDE_BIN" ]; then
-    msg='Antigravity IDE is not installed yet. Open DevOS Features, install Google Antigravity (or Antigravity IDE), then try again.'
-    echo "Error: $msg" >&2
+LOCK_DIR=""
+PROG_REF=""
+
+progress_set() {
+    local value="$1"
+    local text="${2:-}"
+    [ -n "${PROG_REF:-}" ] || return 0
+    if command -v qdbus6 >/dev/null 2>&1; then
+        # shellcheck disable=SC2086
+        qdbus6 $PROG_REF Set "" value "$value" >/dev/null 2>&1 || true
+        if [ -n "$text" ]; then
+            # shellcheck disable=SC2086
+            qdbus6 $PROG_REF setLabelText "$text" >/dev/null 2>&1 || true
+        fi
+    elif command -v qdbus >/dev/null 2>&1; then
+        # shellcheck disable=SC2086
+        qdbus $PROG_REF Set "" value "$value" >/dev/null 2>&1 || true
+        if [ -n "$text" ]; then
+            # shellcheck disable=SC2086
+            qdbus $PROG_REF setLabelText "$text" >/dev/null 2>&1 || true
+        fi
+    fi
+}
+
+progress_begin() {
+    PROG_REF=""
     if command -v kdialog >/dev/null 2>&1; then
-        kdialog --title "Antigravity IDE" --error "$msg" >/dev/null 2>&1 || true
-    elif command -v notify-send >/dev/null 2>&1; then
-        notify-send -a "DevOS" -i "dialog-error" "Antigravity IDE" "$msg" || true
+        PROG_REF="$(kdialog --title "Antigravity IDE" --progressbar "$1" 100 2>/dev/null || true)"
+    fi
+    progress_set 3 "$1"
+}
+
+progress_close() {
+    [ -n "${PROG_REF:-}" ] || return 0
+    if command -v qdbus6 >/dev/null 2>&1; then
+        # shellcheck disable=SC2086
+        qdbus6 $PROG_REF close >/dev/null 2>&1 || true
+    elif command -v qdbus >/dev/null 2>&1; then
+        # shellcheck disable=SC2086
+        qdbus $PROG_REF close >/dev/null 2>&1 || true
+    else
+        local pid="${PROG_REF#org.kde.kdialog-}"
+        pid="${pid%% *}"
+        kill "$pid" 2>/dev/null || true
+    fi
+    PROG_REF=""
+}
+
+say() {
+    printf '%s\n' "$1" >&2
+    if command -v notify-send >/dev/null 2>&1; then
+        notify-send -a "DevOS" "Antigravity IDE" "$1" || true
+    fi
+}
+
+fail() {
+    progress_close
+    printf 'Error: %s\n' "$1" >&2
+    if command -v kdialog >/dev/null 2>&1; then
+        kdialog --title "Antigravity IDE" --error "$1" >/dev/null 2>&1 || true
+    else
+        say "$1"
     fi
     exit 1
+}
+
+release_lock() {
+    [ -n "${LOCK_DIR:-}" ] || return 0
+    if [ "$(cat "$LOCK_DIR/pid" 2>/dev/null || true)" = "$$" ]; then
+        rm -rf "$LOCK_DIR"
+    fi
+}
+trap release_lock EXIT INT TERM
+
+# A previous click can die during the download and leave the lock directory
+# behind. That lock is what shows "already downloading" forever.
+claim_install_lock() {
+    local lock="${REAL_HOME}/.cache/antigravity-kde/installing"
+    local oldpid age now
+    mkdir -p "${REAL_HOME}/.cache/antigravity-kde"
+    if [ -d "$lock" ]; then
+        oldpid="$(cat "$lock/pid" 2>/dev/null || true)"
+        now="$(date +%s)"
+        age=0
+        if [ -n "$(stat -c %Y "$lock" 2>/dev/null || true)" ]; then
+            age=$((now - $(stat -c %Y "$lock")))
+        fi
+        if [ -n "$oldpid" ] && [ "$oldpid" != "$$" ] && kill -0 "$oldpid" 2>/dev/null && [ "$age" -lt 1200 ]; then
+            fail "Antigravity IDE is still downloading. Leave the progress window open. When it closes, the IDE opens by itself."
+        fi
+        if [ -n "$oldpid" ] && kill -0 "$oldpid" 2>/dev/null; then
+            kill "$oldpid" 2>/dev/null || true
+        fi
+        # Older launchers never wrote a pid, so a dead click left this folder
+        # forever. Stop that leftover copy before starting a new download.
+        if [ -z "$oldpid" ] || ! kill -0 "$oldpid" 2>/dev/null; then
+            local other
+            while read -r other; do
+                [ -n "$other" ] && [ "$other" != "$$" ] || continue
+                kill "$other" 2>/dev/null || true
+            done < <(pgrep -f '/usr/local/bin/antigravity-kde' || true)
+        fi
+        pkill -f 'edgedl.me.gvt1.com/.+Antigravity(%20| )IDE.tar.gz' >/dev/null 2>&1 || true
+        rm -rf "$lock"
+    fi
+    mkdir "$lock"
+    echo $$ > "$lock/pid"
+    LOCK_DIR="$lock"
+}
+
+ide_url() {
+    local arch="linux-x64" html url
+    case "$(uname -m)" in
+        aarch64|arm64) arch="linux-arm" ;;
+    esac
+    html="$(curl -fsSL --compressed --max-time 20 "https://antigravity.google/download" || true)"
+    url="$(printf '%s' "$html" | grep -oE "https://[^\"']+/${arch}/Antigravity%20IDE\\.tar\\.gz" | head -n 1 || true)"
+    if [ -n "$url" ]; then
+        printf '%s\n' "$url"
+        return
+    fi
+    if [ "$arch" = "linux-arm" ]; then
+        printf '%s\n' "$FALLBACK_URL_ARM"
+    else
+        printf '%s\n' "$FALLBACK_URL_X64"
+    fi
+}
+
+# The archive contains two files named antigravity-ide. bin/antigravity-ide is a
+# 2 KB shell script. The real program is the large file next to resources/.
+# Keeping only the script makes the window close, and the next click downloads again.
+app_is_complete() {
+    local root="$1"
+    [ -n "$root" ] || return 1
+    [ -x "$root/antigravity-ide" ] || return 1
+    [ -d "$root/resources/app" ] || return 1
+    # Reject the shell launcher if it was saved in place of the real program.
+    [ "$(stat -c %s "$root/antigravity-ide" 2>/dev/null || echo 0)" -gt 1000000 ]
+}
+
+find_installed() {
+    local candidate
+    if app_is_complete "$IDE_ROOT"; then
+        printf '%s\n' "$IDE_ROOT/antigravity-ide"
+        return 0
+    fi
+    for candidate in \
+        "/usr/local/share/devos/antigravity-ide" \
+        "/opt/antigravity-ide" \
+        "${REAL_HOME}/Applications/antigravity-ide"
+    do
+        if app_is_complete "$candidate"; then
+            printf '%s\n' "$candidate/antigravity-ide"
+            return 0
+        fi
+    done
+    return 1
+}
+
+install_ide() {
+    local url work appdir errfile
+    claim_install_lock
+    progress_begin "Preparing Antigravity IDE. This is a different program from the white Antigravity window."
+    progress_set 8 "Finding the latest Antigravity IDE…"
+    url="$(ide_url)"
+    # Unpack in the home folder. /tmp is often too small for the 190 MB archive
+    # plus the unpacked program, and a failed unpack was closing the window.
+    work="${REAL_HOME}/.cache/antigravity-kde/work"
+    errfile="${REAL_HOME}/.cache/antigravity-kde/install-error.txt"
+    rm -rf "$work"
+    mkdir -p "$work/src"
+    progress_set 15 "Downloading Antigravity IDE, about 190 MB. The window opens when this finishes."
+    if ! curl --fail --location --retry 3 --retry-delay 2 --proto '=https' --tlsv1.2 \
+        -o "$work/ide.tar.gz" "$url"; then
+        rm -rf "$work"
+        fail "Could not download Antigravity IDE. Check the internet connection, then click Antigravity IDE again."
+    fi
+    progress_set 88 "Unpacking Antigravity IDE…"
+    if ! tar -xzf "$work/ide.tar.gz" -C "$work/src" 2>"$errfile"; then
+        rm -rf "$work"
+        fail "The Antigravity IDE download could not be unpacked. Free some disk space, then click Antigravity IDE again."
+    fi
+    rm -f "$work/ide.tar.gz"
+    appdir="$(find "$work/src" -type d -path '*/resources/app' -printf '%h\n' 2>/dev/null | head -n 1 || true)"
+    appdir="$(dirname "$appdir")"
+    if ! app_is_complete "$appdir"; then
+        rm -rf "$work"
+        fail "The download did not contain the full Antigravity IDE program."
+    fi
+    rm -rf "$IDE_ROOT"
+    mkdir -p "$(dirname "$IDE_ROOT")"
+    if ! mv "$appdir" "$IDE_ROOT"; then
+        rm -rf "$work"
+        fail "Antigravity IDE could not be saved into the home folder."
+    fi
+    chmod 755 "$IDE_ROOT/antigravity-ide" "$IDE_ROOT/chrome-sandbox" 2>/dev/null || true
+    rm -rf "$work"
+    if ! app_is_complete "$IDE_ROOT"; then
+        rm -rf "$IDE_ROOT"
+        fail "Antigravity IDE was unpacked, but the program files were incomplete."
+    fi
+    progress_set 100 "Opening Antigravity IDE…"
+    progress_close
+    IDE_BIN="${IDE_ROOT}/antigravity-ide"
+}
+
+link_children() {
+    local source="$1" dest="$2" skip="${3:-}"
+    local item base
+    mkdir -p "$dest"
+    for item in "$source"/*; do
+        [ -e "$item" ] || [ -L "$item" ] || continue
+        base="$(basename "$item")"
+        [ "$base" = "$skip" ] && continue
+        [ "$base" = "Antigravity IDE" ] && continue
+        [ "$base" = "Antigravity-IDE" ] && continue
+        ln -sfn "$item" "$dest/$base"
+    done
+}
+
+if ! IDE_BIN="$(find_installed)"; then
+    install_ide
 fi
+
+mkdir -p "$DATA_DIR" "$EXT_DIR" "$HOST_KDE_GEMINI" \
+    "$IDE_HOME/.config" "$IDE_HOME/.gemini" "$IDE_HOME/.local/share/keyrings" \
+    "${REAL_HOME}/.cache/antigravity-kde/tmp"
+
+# Projects stay reachable. The white Antigravity profile and its login do not.
+shopt -s dotglob nullglob
+for item in "$REAL_HOME"/*; do
+    base="$(basename "$item")"
+    case "$base" in
+        .|..|.config|.gemini|.local|.cache|.Xauthority) continue ;;
+    esac
+    ln -sfn "$item" "$IDE_HOME/$base"
+done
+shopt -u dotglob nullglob
+
+if [ -d "$REAL_HOME/.config" ]; then
+    link_children "$REAL_HOME/.config" "$IDE_HOME/.config" "Antigravity"
+fi
+ln -sfn "$DATA_DIR" "$IDE_HOME/.config/Antigravity IDE"
+ln -sfn "$DATA_DIR" "$IDE_HOME/.config/Antigravity-IDE"
+ln -sfn "$HOST_KDE_GEMINI" "$IDE_HOME/.gemini/antigravity-kde"
+if [ -e "$REAL_HOME/.gemini/skills" ]; then
+    ln -sfn "$REAL_HOME/.gemini/skills" "$IDE_HOME/.gemini/skills"
+fi
+if [ -d "$REAL_HOME/.agents/skills" ]; then
+    ln -sfn "$REAL_HOME/.agents/skills" "$IDE_HOME/.gemini/skills"
+fi
+
+mkdir -p "$IDE_HOME/.local"
+if [ -d "$REAL_HOME/.local" ]; then
+    link_children "$REAL_HOME/.local" "$IDE_HOME/.local" "share"
+    if [ -d "$REAL_HOME/.local/share" ]; then
+        link_children "$REAL_HOME/.local/share" "$IDE_HOME/.local/share" "keyrings"
+    fi
+fi
+mkdir -p "$IDE_HOME/.local/share/keyrings"
+
+if [ -n "${XAUTHORITY:-}" ] && [ -e "$XAUTHORITY" ]; then
+    ln -sfn "$XAUTHORITY" "$IDE_HOME/.Xauthority"
+elif [ -e "$REAL_HOME/.Xauthority" ]; then
+    ln -sfn "$REAL_HOME/.Xauthority" "$IDE_HOME/.Xauthority"
+fi
+
+mkdir -p "${REAL_HOME}/.cache/antigravity-kde"
+printf '%s binary=%s data=%s\n' "$(date -Is)" "$IDE_BIN" "$DATA_DIR" \
+    >> "${REAL_HOME}/.cache/antigravity-kde/launch.log"
 
 unset ELECTRON_RUN_AS_NODE
 export DONT_PROMPT_WSL_INSTALL=1
 export GEMINI_APP_DATA_DIR="antigravity-kde"
-# Separate keyring / auth from the main Antigravity instance.
-export SSH_CLIENT="127.0.0.1 0 0"
+# Keep this Google login in the IDE's own folder, not the shared keyring.
+export SSH_CLIENT="127.0.0.1 34567 22"
+export SSH_CONNECTION="127.0.0.1 34567 127.0.0.1 22"
+export SSH_TTY="/dev/pts/0"
+export HOME="$IDE_HOME"
+unset XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME
+export TMPDIR="${REAL_HOME}/.cache/antigravity-kde/tmp"
 
-DATA_DIR="${HOME}/.config/Antigravity-KDE"
-EXT_DIR="${HOME}/.antigravity-kde/extensions"
-mkdir -p "$DATA_DIR" "$EXT_DIR"
-
-# Prefer this IDE's own extensions; fall back to shared only if empty.
-if [ -z "$(ls -A "$EXT_DIR" 2>/dev/null || true)" ]; then
-    for candidate in \
-        "${HOME}/.antigravity/extensions" \
-        "${HOME}/.config/Antigravity/extensions"
-    do
-        if [ -d "$candidate" ] && [ -n "$(ls -A "$candidate" 2>/dev/null || true)" ]; then
-            EXT_DIR="$candidate"
-            break
-        fi
-    done
-fi
-
-rm -f "${HOME}/.gemini/cache/antigravity-keyring-unavailable"
-
-exec "$IDE_BIN" \
+# Launch the real program and keep this script long enough to see it stay open.
+# exec would hide an immediate crash, and the next click would look the same.
+launch_log="${REAL_HOME}/.cache/antigravity-kde/launch.log"
+"$IDE_BIN" \
     --ozone-platform=x11 \
     --no-sandbox \
     --password-store=basic \
@@ -58,4 +308,11 @@ exec "$IDE_BIN" \
     --extensions-dir="${EXT_DIR}" \
     --class=antigravity-ide \
     --name=antigravity-ide \
-    "$@"
+    "$@" >>"$launch_log" 2>&1 &
+launch_pid=$!
+sleep 2
+if ! kill -0 "$launch_pid" 2>/dev/null && ! pgrep -f "$IDE_ROOT/antigravity-ide" >/dev/null 2>&1; then
+    fail "Antigravity IDE closed as soon as it opened. The copy on disk is kept, so the next click will not download it again."
+fi
+disown "$launch_pid" 2>/dev/null || true
+exit 0

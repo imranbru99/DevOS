@@ -9,16 +9,16 @@ GenericName=AI coding (second account)
 Comment=Second Antigravity — separate Google account, projects, and profile from Google Antigravity
 TryExec=/opt/antigravity/antigravity
 Exec=/usr/local/bin/antigravity-kde %F
-Icon=devos-antigravity-studio
+Icon=antigravity-kde
 Terminal=false
 Categories=Development;IDE;
 MimeType=text/plain;inode/directory;
 Keywords=antigravity;ide;studio;kde;ai;coding;agent;second;
-StartupNotify=true
+StartupNotify=false
 StartupWMClass=antigravity-ide
 Actions=NewWindow;
 
 [Desktop Action NewWindow]
 Name=New Window
 Exec=/usr/local/bin/antigravity-kde --new-window %F
-Icon=devos-antigravity-studio
+Icon=antigravity-kde
