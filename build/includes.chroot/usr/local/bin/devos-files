@@ -2135,7 +2135,7 @@ class BreadcrumbBar(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("breadcrumbBar")
-        self.setFixedHeight(34)
+        self.setFixedHeight(36)
         self._current_path = ""
         self._current_label = "This PC"
 
@@ -4592,9 +4592,11 @@ class WindowsFileExplorer(QMainWindow):
         # 1. Top Navigation & Address Toolbar
         nav_toolbar = QWidget()
         nav_toolbar.setObjectName("navToolbar")
+        nav_toolbar.setFixedHeight(52)
         nav_layout = QHBoxLayout(nav_toolbar)
-        nav_layout.setContentsMargins(10, 8, 10, 6)
+        nav_layout.setContentsMargins(12, 0, 12, 0)
         nav_layout.setSpacing(6)
+        nav_layout.setAlignment(Qt.AlignVCenter)
 
         # Navigation Buttons: Back, Forward, Up, Refresh
         self.btn_back = QToolButton()
@@ -4602,6 +4604,7 @@ class WindowsFileExplorer(QMainWindow):
         self.btn_back.setObjectName("navBtn")
         self.btn_back.setToolTip("Back (Alt+Left)")
         self.btn_back.setEnabled(False)
+        self.btn_back.setFixedSize(36, 36)
         self.btn_back.clicked.connect(self.go_back)
 
         self.btn_forward = QToolButton()
@@ -4609,18 +4612,21 @@ class WindowsFileExplorer(QMainWindow):
         self.btn_forward.setObjectName("navBtn")
         self.btn_forward.setToolTip("Forward (Alt+Right)")
         self.btn_forward.setEnabled(False)
+        self.btn_forward.setFixedSize(36, 36)
         self.btn_forward.clicked.connect(self.go_forward)
 
         self.btn_up = QToolButton()
         self.btn_up.setText("↑")
         self.btn_up.setObjectName("navBtn")
         self.btn_up.setToolTip("Up to parent (Alt+Up)")
+        self.btn_up.setFixedSize(36, 36)
         self.btn_up.clicked.connect(self.go_up)
 
         self.btn_refresh = QToolButton()
         self.btn_refresh.setText("↻")
         self.btn_refresh.setObjectName("navBtn")
         self.btn_refresh.setToolTip("Refresh (F5)")
+        self.btn_refresh.setFixedSize(36, 36)
         self.btn_refresh.clicked.connect(self.refresh)
 
         nav_layout.addWidget(self.btn_back)
@@ -4637,7 +4643,7 @@ class WindowsFileExplorer(QMainWindow):
         self.search_box = QLineEdit()
         self.search_box.setObjectName("searchBox")
         self.search_box.setPlaceholderText("Search This PC")
-        self.search_box.setFixedWidth(240)
+        self.search_box.setFixedSize(240, 36)
         self.search_box.textChanged.connect(self._on_search_text_changed)
         nav_layout.addWidget(self.search_box)
 
@@ -4646,9 +4652,11 @@ class WindowsFileExplorer(QMainWindow):
         # 2. Command Ribbon (Windows 11 Fluent) — roomy, theme-colored chips
         cmd_bar = QWidget()
         cmd_bar.setObjectName("commandBar")
+        cmd_bar.setFixedHeight(52)
         cmd_layout = QHBoxLayout(cmd_bar)
-        cmd_layout.setContentsMargins(12, 8, 12, 8)
+        cmd_layout.setContentsMargins(12, 0, 12, 0)
         cmd_layout.setSpacing(6)
+        cmd_layout.setAlignment(Qt.AlignVCenter)
 
         # "+ New ˇ" Dropdown Button
         self.btn_new = QPushButton("  New  ")
@@ -5328,12 +5336,11 @@ class WindowsFileExplorer(QMainWindow):
             }
             #commandBar {
                 background: #0f1a2a;
-                border-bottom: 1px solid #2563eb;
+                border-bottom: none;
             }
             QPushButton#cmdBtn, QPushButton#cmdIconBtn, QPushButton#cmdMenuBtn {
                 background: #162337;
                 border: 1px solid #2a3f5c;
-                border-bottom: 2px solid #2563eb;
                 border-radius: 8px;
                 color: #e8f1ff;
                 font-size: 12.5px;
@@ -5730,12 +5737,13 @@ class WindowsFileExplorer(QMainWindow):
             }
             QToolButton#addTabBtn:hover { background: #1a273b; border-color: #2b3e58; color: #ffffff; }
 
-            QWidget#navToolbar { background: #0f1725; border: none; padding: 4px 8px; }
+            QWidget#navToolbar { background: #0f1725; border: none; border-bottom: 1px solid #2563eb; padding: 0; }
             QToolButton#navBtn {
                 background: #152132;
                 border: 1px solid #23344d;
                 border-radius: 6px;
-                padding: 5px 8px;
+                padding: 0;
+                min-height: 0px;
                 color: #cbd5e1;
                 font-size: 13px;
                 font-weight: bold;
@@ -5747,7 +5755,8 @@ class WindowsFileExplorer(QMainWindow):
                 background: #090e17;
                 border: 1px solid #1f2f45;
                 border-radius: 6px;
-                padding: 6px 12px;
+                padding: 0 12px;
+                min-height: 0px;
                 color: #ecf4ff;
                 font-size: 12px;
             }
@@ -5755,15 +5764,14 @@ class WindowsFileExplorer(QMainWindow):
 
             QWidget#commandBar {
                 background: #0f1a2a;
-                border-bottom: 1px solid #2563eb;
+                border: none;
                 padding: 0;
             }
             QPushButton#cmdBtn, QToolButton#cmdBtn {
                 background: #162337;
                 border: 1px solid #2a3f5c;
-                border-bottom: 2px solid #2563eb;
                 border-radius: 8px;
-                padding: 2px 14px;
+                padding: 0 14px;
                 color: #e8f1ff;
                 font-size: 12.5px;
                 font-weight: 600;
@@ -5785,7 +5793,6 @@ class WindowsFileExplorer(QMainWindow):
             QPushButton#cmdIconBtn {
                 background: #162337;
                 border: 1px solid #2a3f5c;
-                border-bottom: 2px solid #2563eb;
                 border-radius: 8px;
                 padding: 0px;
                 min-width: 36px;
@@ -5805,9 +5812,8 @@ class WindowsFileExplorer(QMainWindow):
             QPushButton#cmdMenuBtn {
                 background: #162337;
                 border: 1px solid #2a3f5c;
-                border-bottom: 2px solid #2563eb;
                 border-radius: 8px;
-                padding: 2px 26px 2px 12px;
+                padding: 0 26px 0 12px;
                 color: #e8f1ff;
                 font-size: 12.5px;
                 font-weight: 600;
@@ -5834,9 +5840,9 @@ class WindowsFileExplorer(QMainWindow):
                 font-weight: 700;
                 border: 1px solid #38bdf8;
                 border-radius: 8px;
-                padding: 6px 20px 6px 14px;
+                padding: 0 16px 0 12px;
                 font-size: 12.5px;
-                min-height: 32px;
+                min-height: 0px;
             }
             QPushButton#newBtn:hover { background: #0284c7; border-color: #7dd3fc; }
             QPushButton#newBtn:pressed { background: #0369a1; }
