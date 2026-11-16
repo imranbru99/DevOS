@@ -86,7 +86,40 @@ def test_first_speak_cut_prefers_sentences_not_one_word():
     assert "First sentence" in joined
     assert "Second sentence" in joined
     assert "Third sentence" in joined
-    assert len(chunks) >= 3
+    # Already-buffered sentences share one clip, so the voice does not
+    # pause at every full stop.
+    assert len(chunks) == 1
+
+    packed = " ".join(
+        f"This is sentence {i}, with a comma; and a semicolon." for i in range(1, 16)
+    )
+    parts = []
+    cursor = 0
+    while cursor < len(packed):
+        piece, advance = mod._next_speak_cut(packed[cursor:], force=False, first=False)
+        if not piece or advance <= 0:
+            break
+        parts.append(piece)
+        cursor += advance
+    assert 1 < len(parts) < 15
+    assert " ".join(parts).split() == packed.split()
+    for piece in parts[:-1]:
+        assert piece.rstrip().endswith(".")
+        assert not piece.rstrip().endswith(",")
+        assert not piece.rstrip().endswith(";")
+
+    bangla_clause = (
+        "আমি আজ সকালে বাজারে গেলাম, তারপর বাসায় ফিরলাম; সবাই অপেক্ষা করছিল। "
+        "এরপর আবার বের হলাম।"
+    )
+    one, one_adv = mod._next_speak_cut(bangla_clause, first=False)
+    assert one_adv >= len(bangla_clause.strip())
+    assert "," in one and ";" in one and "।" in one
+
+    listed = "1. Practice the interview questions carefully. 2. Prepare a clean resume tonight."
+    listed_chunk, _listed_adv = mod._next_speak_cut(listed, first=True)
+    assert listed_chunk.startswith("1. Practice")
+    assert "resume" in listed_chunk
 
 
 def test_plain_for_speech_keeps_long_answers():
@@ -126,11 +159,13 @@ def test_stream_speaker_keeps_delayed_middle_sentence_and_flushes_tail(monkeypat
     speaker.start("bn")
     try:
         speaker.feed_delta_total("প্রথম বাক্য।")
-        assert first_played.wait(2)
-        threading.Event().wait(0.25)
+        # A dari that just landed is held so the next clause can share the clip.
+        assert not first_played.wait(0.2)
         speaker.feed_delta_total("প্রথম বাক্য। দ্বিতীয় বাক্য। শেষ কথাটি")
         speaker.finish()
-        assert played == ["প্রথম বাক্য।", "দ্বিতীয় বাক্য।", "শেষ কথাটি"]
+        assert played[0] == "প্রথম বাক্য। দ্বিতীয় বাক্য।"
+        assert "শেষ কথাটি" in " ".join(played)
+        assert "দ্বিতীয়" in " ".join(played)
     finally:
         speaker.stop(kill_audio=False)
 

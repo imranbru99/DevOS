@@ -921,6 +921,10 @@ _GAP_BRIDGE_S = 0.35           # short handoff while next sentence finishes synt
 _FIRST_CHUNK_MIN = 48          # first spoken unit ≈ a short clause, not one word
 _FIRST_WORDS = 10              # wait for a natural phrase before the first cut
 _CHUNK_SOFT_MIN = 40
+# One neural clip covers several sentences. A new player at every dari, comma,
+# or semicolon was a pause, so the voice lagged behind text that was already on screen.
+_SPEAK_PACK = 520
+_SPEAK_HARD = 900
 _PLAY_PROCS: List["subprocess.Popen"] = []
 _PLAY_LOCK = threading.Lock()
 _WARM_STARTED = False
@@ -1210,39 +1214,79 @@ def speak_reply(text: str, language: Optional[str] = None, stop_first: bool = Tr
                 next_path = out
 
 
-def _next_speak_cut(pending: str, force: bool = False, first: bool = False) -> Tuple[str, int]:
+_SENTENCE_END_RE = re.compile(r"[.!?।؟]+(?:\s+|$)|\n")
+_LIST_MARK_BEFORE_RE = re.compile(r"(?:^|\s)\d{1,3}$")
+
+
+def _boundary_is_list_marker(pending: str, match: "re.Match") -> bool:
+    """'1. Next step' is a list marker, not a place to stop speaking."""
+    punct = pending[match.start():match.end()]
+    if not punct.startswith("."):
+        return False
+    return _LIST_MARK_BEFORE_RE.search(pending[:match.start()]) is not None
+
+
+def _next_speak_cut(pending: str, force: bool = False, first: bool = False,
+                    hold_short: bool = False) -> Tuple[str, int]:
     """Return (ready_chunk, advance) — advance is how many chars of pending were consumed.
 
-    Prefer full sentences so DevOS AI speaks end-to-end. Never cut after a single
-    word while more text is still arriving (that caused stop–start speech).
+    Commas, semicolons, and list numbers are never a break. Dari and full stops
+    are kept inside one clip until the clip is long enough to be worth a new
+    player, so the voice does not pause at every mark while the text is already done.
+
+    ``hold_short`` waits for more text before speaking a short ending. Streaming
+    uses it so a dari that just arrived is not its own clip. ``force`` flushes.
     """
     pending = pending or ""
     if not pending.strip():
         return "", 0
 
-    # Sentence / line end — speak a complete sentence as soon as it lands.
-    sentence_end = re.compile(r"[.!?।؟]+(?:\s+|$)|\n")
     opener = _OPENER_RE.match(pending.lstrip()) if first else None
     offset = len(pending) - len(pending.lstrip())
     # Keep a greeting with the next sentence so it does not start a separate player.
     start = offset + opener.end() if opener else 0
-    m = sentence_end.search(pending, start)
-    if m and m.end() >= 3:
-        cut = m.end()
-        if cut > 220:
-            idx = pending.rfind(" ", 100, 200)
-            if idx >= 100:
-                cut = idx + 1
-        chunk = pending[:cut].strip()
-        return (chunk, cut) if chunk else ("", 0)
+    ends = []
+    for match in _SENTENCE_END_RE.finditer(pending, start):
+        if match.end() < 3 or _boundary_is_list_marker(pending, match):
+            continue
+        ends.append(match.end())
+
+    chosen = 0
+    if ends:
+        for end in ends:
+            if end > _SPEAK_HARD and chosen:
+                break
+            if not chosen:
+                chosen = end
+                # This sentence is the end of what we have so far: speak it.
+                # If later sentences are already buffered, pack them below.
+                if end >= len(pending.rstrip()) or end >= _SPEAK_PACK:
+                    break
+                continue
+            if end <= _SPEAK_PACK or (chosen < 180 and end <= _SPEAK_HARD):
+                chosen = end
+                if chosen >= _SPEAK_PACK:
+                    break
+                continue
+            break
+        if chosen > _SPEAK_HARD:
+            idx = pending.rfind(" ", _SPEAK_PACK // 2, _SPEAK_HARD)
+            if idx > 0:
+                chosen = idx + 1
+        if chosen:
+            at_end = chosen >= len(pending.rstrip())
+            if hold_short and not force and at_end and chosen < _SPEAK_PACK:
+                return "", 0
+            chunk = pending[:chosen].strip()
+            return (chunk, chosen) if chunk else ("", 0)
 
     # A trailing token can still grow. Only use words followed by whitespace.
     words = list(re.finditer(r"\S+\s+", pending))
-    if first and len(words) >= _FIRST_WORDS and len(pending.strip()) >= _FIRST_CHUNK_MIN:
+    if first and not force and not hold_short and len(words) >= _FIRST_WORDS and len(pending.strip()) >= _FIRST_CHUNK_MIN:
         cut = words[_FIRST_WORDS - 1].end()
         return pending[:cut].strip(), cut
-    if len(pending) > 220:
-        cut = pending.rfind(" ", 100, 200) + 1
+    if len(pending) > _SPEAK_HARD:
+        cut = pending.rfind(" ", _SPEAK_PACK // 2, _SPEAK_HARD) + 1
         if cut:
             return pending[:cut].strip(), cut
     if force:
@@ -1518,7 +1562,9 @@ class StreamSpeaker:
                 self._cursor = len(self._plain)
             while True:
                 pending = self._plain[self._cursor:]
-                chunk, advance = _next_speak_cut(pending, force=False, first=self._first_chunk)
+                chunk, advance = _next_speak_cut(
+                    pending, force=False, first=self._first_chunk, hold_short=True,
+                )
                 if not chunk or advance <= 0:
                     break
                 self._q.put(chunk)

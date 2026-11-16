@@ -732,6 +732,26 @@ class TestMarkdown(unittest.TestCase):
         self.assertIn("x &lt; 1", h)
         self.assertNotIn("<script", markdown_lite.to_html("<script>alert(1)</script>"))
 
+    def test_ordered_list_counts_past_repeated_ones_and_bullets(self):
+        md = "\n".join([
+            "1. Practice interview questions:",
+            "- Why this department?",
+            "- What are your strengths?",
+            "",
+            "1. Prepare a resume.",
+            "1. Mock interviews.",
+            "2. Stay updated.",
+        ])
+        h = markdown_lite.to_html(md)
+        self.assertNotIn("<ol", h)
+        for n in range(1, 5):
+            self.assertIn(">%d.</td>" % n, h)
+        self.assertEqual(h.count(">1.</td>"), 1)
+        self.assertIn("<li", h)
+        fresh = markdown_lite.to_html("1. One.\n2. Two.\n\nA new topic.\n\n1. Again.")
+        self.assertEqual(fresh.count(">1.</td>"), 2)
+        self.assertIn(">2.</td>", fresh)
+
 
 if __name__ == "__main__":
     unittest.main()
