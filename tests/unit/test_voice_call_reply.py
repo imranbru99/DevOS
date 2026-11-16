@@ -122,6 +122,42 @@ def test_first_speak_cut_prefers_sentences_not_one_word():
     assert "resume" in listed_chunk
 
 
+def test_bullet_list_starts_speaking_on_the_first_line():
+    """A list with no full stops must not wait until the last bullet is typed."""
+    import importlib.util
+    path = ROOT / "components/assistant/voice.py"
+    spec = importlib.util.spec_from_file_location("devos_voice_bullets", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    md = (
+        "Sure! Here are the key requirements for a full-stack developer:\n\n"
+        "- **Programming Skills:**\n"
+        "- Proficiency in at least one server-side language (e.g., Python, Node.js, Java, .NET)\n"
+        "- Familiarity with client-side languages (e.g., JavaScript, TypeScript)\n"
+        "- **Database Knowledge:**\n"
+        "- Experience with relational databases (e.g., MySQL, PostgreSQL)\n"
+        "- Experience with cloud platforms (e.g., AWS)\n"
+    )
+    plain = mod.plain_for_speech(md, limit=0)
+    assert "\n" in plain
+    assert "AWS" in plain
+    intro = plain.split("\n", 1)[0]
+    # The opening line alone can still grow; speech starts once the next line begins.
+    assert mod._next_speak_cut(intro, first=True, hold_short=True) == ("", 0)
+    chunk, adv = mod._next_speak_cut(plain, first=True, hold_short=True)
+    assert chunk.startswith("Sure!")
+    assert "AWS" not in chunk
+    assert "PostgreSQL" not in chunk
+    assert adv < len(plain)
+    # Commas inside a bullet are not a place to stop.
+    assert "," in plain
+    rest = plain[adv:]
+    nxt, _nadv = mod._next_speak_cut(rest, first=False, hold_short=True)
+    assert nxt
+    assert not nxt.rstrip().endswith(",")
+    assert not nxt.rstrip().endswith(";")
+
+
 def test_plain_for_speech_keeps_long_answers():
     import importlib.util
     path = ROOT / "components/assistant/voice.py"
@@ -159,13 +195,16 @@ def test_stream_speaker_keeps_delayed_middle_sentence_and_flushes_tail(monkeypat
     speaker.start("bn")
     try:
         speaker.feed_delta_total("প্রথম বাক্য।")
-        # A dari that just landed is held so the next clause can share the clip.
+        # A dari that just landed, with nothing after it, is held for a moment.
         assert not first_played.wait(0.2)
         speaker.feed_delta_total("প্রথম বাক্য। দ্বিতীয় বাক্য। শেষ কথাটি")
+        # The first sentence starts as soon as later words arrive — not after
+        # the whole reply has been typed.
+        assert first_played.wait(1.0)
         speaker.finish()
-        assert played[0] == "প্রথম বাক্য। দ্বিতীয় বাক্য।"
+        assert played[0] == "প্রথম বাক্য।"
+        assert "দ্বিতীয় বাক্য।" in played
         assert "শেষ কথাটি" in " ".join(played)
-        assert "দ্বিতীয়" in " ".join(played)
     finally:
         speaker.stop(kill_audio=False)
 

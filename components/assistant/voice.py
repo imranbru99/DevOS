@@ -902,7 +902,15 @@ def plain_for_speech(md: str, limit: int = 12000) -> str:
     text = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", text)
     text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)
     text = re.sub(r"[*`#_>~]+", " ", text)
-    text = re.sub(r"\s+", " ", text).strip()
+    # Keep line breaks. A bullet list has no full stops, and collapsing it into
+    # one line made the voice wait until the whole reply was typed.
+    text = re.sub(r"[^\S\n]+", " ", text)
+    lines = []
+    for line in text.split("\n"):
+        line = re.sub(r"^(?:[-*•]|–|—)\s+", "", line.strip())
+        if line:
+            lines.append(line)
+    text = "\n".join(lines)
     if limit > 0 and len(text) > limit:
         # Break on a sentence end near the limit when possible — never mid-word.
         cut = text[:limit]
@@ -921,10 +929,12 @@ _GAP_BRIDGE_S = 0.35           # short handoff while next sentence finishes synt
 _FIRST_CHUNK_MIN = 48          # first spoken unit ≈ a short clause, not one word
 _FIRST_WORDS = 10              # wait for a natural phrase before the first cut
 _CHUNK_SOFT_MIN = 40
-# One neural clip covers several sentences. A new player at every dari, comma,
-# or semicolon was a pause, so the voice lagged behind text that was already on screen.
-_SPEAK_PACK = 520
-_SPEAK_HARD = 900
+# Later clips pack a few sentences so the voice does not restart at every dari.
+# The first streaming clip is only the first line: a 500-character pack, or a
+# bullet list with no full stop, stayed silent until typing reached the end.
+_SPEAK_PACK = 320
+_SPEAK_HARD = 420
+_HOLD_TAIL = 48
 _PLAY_PROCS: List["subprocess.Popen"] = []
 _PLAY_LOCK = threading.Lock()
 _WARM_STARTED = False
@@ -1013,6 +1023,7 @@ class _EdgePool:
     _lock = threading.Lock()
     _proc: Optional[subprocess.Popen] = None
     _writer_lock = threading.Lock()
+    _warmed: set = set()
 
     _WORKER = r"""
 import asyncio, sys, edge_tts
@@ -1075,12 +1086,22 @@ if __name__ == "__main__":
 
     @classmethod
     def warm(cls, language: str = "en"):
-        """Fire a tiny synthesis so the first real phrase is warm."""
+        """Fire a tiny synthesis so the first real phrase is warm.
+
+        A second warm holds the one edge-tts writer, so the real first line
+        cannot start until that dummy clip finishes.
+        """
+        lang = language if language in ("en", "bn") else "en"
+        with cls._lock:
+            if lang in cls._warmed:
+                return
         if not cls.ensure():
             return
         os.makedirs(_TTS_CACHE, exist_ok=True)
         out = os.path.join(_TTS_CACHE, "devos-assistant-tts-warm.mp3")
-        cls.synthesize(".", language, out, timeout=20)
+        if cls.synthesize(".", lang, out, timeout=20):
+            with cls._lock:
+                cls._warmed.add(lang)
 
     @classmethod
     def synthesize(cls, text: str, language: str, out: str, rate: str = _TTS_RATE,
@@ -1230,12 +1251,13 @@ def _next_speak_cut(pending: str, force: bool = False, first: bool = False,
                     hold_short: bool = False) -> Tuple[str, int]:
     """Return (ready_chunk, advance) — advance is how many chars of pending were consumed.
 
-    Commas, semicolons, and list numbers are never a break. Dari and full stops
-    are kept inside one clip until the clip is long enough to be worth a new
-    player, so the voice does not pause at every mark while the text is already done.
+    Commas, semicolons, and list numbers are never a break. A streaming reply
+    speaks its first line as soon as that line is real, then packs the lines
+    already typed into the next clips. Waiting to fill a long pack left the
+    voice silent until the typer reached the end of the chat.
 
-    ``hold_short`` waits for more text before speaking a short ending. Streaming
-    uses it so a dari that just arrived is not its own clip. ``force`` flushes.
+    ``hold_short`` holds only a tiny tail (``Sure!``) that may still grow.
+    ``force`` flushes whatever is left.
     """
     pending = pending or ""
     if not pending.strip():
@@ -1243,11 +1265,13 @@ def _next_speak_cut(pending: str, force: bool = False, first: bool = False,
 
     opener = _OPENER_RE.match(pending.lstrip()) if first else None
     offset = len(pending) - len(pending.lstrip())
-    # Keep a greeting with the next sentence so it does not start a separate player.
+    # A greeting stays with the next line. It is not a clip by itself.
     start = offset + opener.end() if opener else 0
     ends = []
     for match in _SENTENCE_END_RE.finditer(pending, start):
         if match.end() < 3 or _boundary_is_list_marker(pending, match):
+            continue
+        if match.end() <= start:
             continue
         ends.append(match.end())
 
@@ -1258,12 +1282,14 @@ def _next_speak_cut(pending: str, force: bool = False, first: bool = False,
                 break
             if not chosen:
                 chosen = end
-                # This sentence is the end of what we have so far: speak it.
-                # If later sentences are already buffered, pack them below.
+                # Live typing: speak this first line now. Do not wait to pack
+                # the bullets that have not been spoken yet.
+                if first and hold_short:
+                    break
                 if end >= len(pending.rstrip()) or end >= _SPEAK_PACK:
                     break
                 continue
-            if end <= _SPEAK_PACK or (chosen < 180 and end <= _SPEAK_HARD):
+            if end <= _SPEAK_PACK or (chosen < 140 and end <= _SPEAK_HARD):
                 chosen = end
                 if chosen >= _SPEAK_PACK:
                     break
@@ -1275,7 +1301,7 @@ def _next_speak_cut(pending: str, force: bool = False, first: bool = False,
                 chosen = idx + 1
         if chosen:
             at_end = chosen >= len(pending.rstrip())
-            if hold_short and not force and at_end and chosen < _SPEAK_PACK:
+            if hold_short and not force and at_end and chosen < _HOLD_TAIL:
                 return "", 0
             chunk = pending[:chosen].strip()
             return (chunk, chosen) if chunk else ("", 0)
@@ -1285,8 +1311,11 @@ def _next_speak_cut(pending: str, force: bool = False, first: bool = False,
     if first and not force and not hold_short and len(words) >= _FIRST_WORDS and len(pending.strip()) >= _FIRST_CHUNK_MIN:
         cut = words[_FIRST_WORDS - 1].end()
         return pending[:cut].strip(), cut
-    if len(pending) > _SPEAK_HARD:
-        cut = pending.rfind(" ", _SPEAK_PACK // 2, _SPEAK_HARD) + 1
+    # No full stop and no line break (one long bullet). Start anyway so speech
+    # is not waiting for the last word of the answer.
+    hard = 180 if (first and hold_short) else _SPEAK_HARD
+    if len(pending) > hard:
+        cut = pending.rfind(" ", hard // 2, hard) + 1
         if cut:
             return pending[:cut].strip(), cut
     if force:
@@ -1645,6 +1674,12 @@ class StreamSpeaker:
                 if current is None:
                     break
                 current_path = None
+
+            # Make this clip's audio before taking the next one. The edge
+            # writer is one lock: synthesizing the rest of the answer first
+            # kept the first line silent until typing had finished.
+            if not current_path:
+                current_path = synth_path(current)
 
             nxt_box: Dict[str, object] = {}
 
