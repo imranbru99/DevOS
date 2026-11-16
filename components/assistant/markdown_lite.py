@@ -151,13 +151,11 @@ def to_html(md: str, link_color: str = LINK, line_height: int = 0, gap: int = 8)
         ol_next = None
 
     def add_numbered(num, text):
-        # The digit is real text. Qt's <ol> draws every item as 1.
+        # Real text, not <ol>. Qt draws every <ol> item as 1 once a blank
+        # line has split the list, which is how models write steps.
         out.append(
-            "<table width='100%' cellspacing='0' cellpadding='0' border='0' "
-            f"style='margin:1px 0 {max(4, gap // 2)}px 0;'><tr>"
-            f"<td width='34' valign='top' style='font-weight:700; padding:1px 8px 0 0;{lh}'>{num}.</td>"
-            f"<td valign='top' style='{lh}'>{_inline(text, link_color)}</td>"
-            "</tr></table>"
+            f"<p style='margin:2px 0 {max(4, gap // 2)}px 0;{lh}'>"
+            f"<b>{num}.</b>&nbsp;&nbsp;{_inline(text, link_color)}</p>"
         )
 
     while i < len(lines):
@@ -203,12 +201,8 @@ def to_html(md: str, link_color: str = LINK, line_height: int = 0, gap: int = 8)
         else:
             if list_kind == "ul" and line.startswith("  "):
                 out[-1] = out[-1][:-5] + "<br>" + _inline(line.strip(), link_color) + "</li>"
-            elif ol_next and line.startswith("  ") and out and "</table>" in out[-1]:
-                out[-1] = out[-1].replace(
-                    "</td></tr></table>",
-                    "<br>" + _inline(line.strip(), link_color) + "</td></tr></table>",
-                    1,
-                )
+            elif ol_next and line.startswith("  ") and out and out[-1].endswith("</p>"):
+                out[-1] = out[-1][:-4] + "<br>" + _inline(line.strip(), link_color) + "</p>"
             else:
                 close_list()
                 reset_numbers()
