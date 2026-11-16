@@ -28,6 +28,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -368,19 +369,118 @@ def _espeak_voice(language: str, gender: str = None) -> str:
     return "en+f3" if g == "female" else "en+m3"
 
 
-def _stop_speech():
-    """Stop any in-flight TTS so a new line is never mixed with an old one."""
-    if shutil.which("pkill"):
-        for name in ("espeak-ng", "espeak", "spd-say", "ffplay"):
-            subprocess.run(
-                ["pkill", "-x", name],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            )
-        # Only our TTS ffplay jobs (pattern is specific).
+# One generation per utterance. Stop (and any newer Speak) bumps it so the
+# in-flight reader notices and exits. Without this, killing ffplay looked like
+# a playback failure and the offline voice restarted the whole hadith.
+_SPEECH_LOCK = threading.Lock()
+_SPEECH_GEN = 0
+_SPEECH_PROCS = []
+
+
+def _speech_generation():
+    with _SPEECH_LOCK:
+        return _SPEECH_GEN
+
+
+def _cancelled(gen):
+    return gen != _speech_generation()
+
+
+def _track_proc(proc):
+    with _SPEECH_LOCK:
+        _SPEECH_PROCS.append(proc)
+    return proc
+
+
+def _untrack_proc(proc):
+    with _SPEECH_LOCK:
+        try:
+            _SPEECH_PROCS.remove(proc)
+        except ValueError:
+            pass
+
+
+def _kill_speech_procs(procs):
+    for proc in procs:
+        try:
+            if proc.poll() is None:
+                proc.kill()
+        except OSError:
+            pass
+    for proc in procs:
+        try:
+            proc.wait(timeout=2)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+
+def _pkill_players():
+    """Stop audio we may have lost track of (Stop must silence the speakers)."""
+    if not shutil.which("pkill"):
+        return
+    for name in ("espeak-ng", "espeak", "spd-say", "ffplay"):
         subprocess.run(
-            ["pkill", "-f", "ffplay.*devos-islamic-tts"],
+            ["pkill", "-x", name],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
+    subprocess.run(
+        ["pkill", "-f", "ffplay.*devos-islamic-tts"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+
+
+def _begin_speech():
+    """Start a new utterance and invalidate whatever was speaking."""
+    global _SPEECH_GEN
+    with _SPEECH_LOCK:
+        _SPEECH_GEN += 1
+        gen = _SPEECH_GEN
+        procs = list(_SPEECH_PROCS)
+    _kill_speech_procs(procs)
+    _pkill_players()
+    return gen
+
+
+def _stop_speech():
+    """Stop any in-flight TTS so a new line is never mixed with an old one."""
+    _begin_speech()
+
+
+def _run_tracked(cmd, gen, timeout):
+    """Run cmd as a child we can kill from Stop. None if cancelled or it failed."""
+    if _cancelled(gen):
+        return None
+    try:
+        proc = _track_proc(subprocess.Popen(
+            cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        ))
+    except OSError:
+        return None
+    if _cancelled(gen):
+        try:
+            proc.kill()
+        except OSError:
+            pass
+        _untrack_proc(proc)
+        return None
+    try:
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+            try:
+                proc.wait(timeout=2)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+            return None
+        if _cancelled(gen):
+            return None
+        return proc.returncode
+    finally:
+        _untrack_proc(proc)
 
 
 def _tts_chunks(text, limit=180):
@@ -415,22 +515,36 @@ def _tts_chunks(text, limit=180):
     return chunks
 
 
-def _play_audio_file(path):
+def _drop_clip(path):
+    try:
+        if path and os.path.isfile(path):
+            os.remove(path)
+    except OSError:
+        pass
+
+
+def _play_audio_file(path, gen=None):
+    """Play one clip to the end. False when Stop cancelled it or playback failed."""
+    if gen is None:
+        gen = _speech_generation()
+    if _cancelled(gen):
+        return False
     if not path or not os.path.isfile(path):
         return False
-    if shutil.which("ffplay"):
-        try:
-            subprocess.run(
-                ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", path],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                timeout=180,
-            )
-            return True
-        except (OSError, subprocess.TimeoutExpired):
+    try:
+        if os.path.getsize(path) < 32:
             return False
+    except OSError:
+        return False
+    if shutil.which("ffplay"):
+        rc = _run_tracked(
+            ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", path],
+            gen, timeout=180,
+        )
+        return rc == 0 and not _cancelled(gen)
     if path.endswith(".wav") or path.endswith(".oga") or path.endswith(".ogg"):
         play_sound(path, wait=True)
-        return True
+        return not _cancelled(gen)
     return False
 
 
@@ -456,38 +570,167 @@ def ensure_clear_voice():
         return False
 
 
-def _speak_edge_tts(text, language, gender=None):
-    """Natural neural voice via edge-tts in the DevOS TTS venv (online)."""
+_EDGE_CHUNK_CHARS = 220
+# Daily notifications stay bounded, but always on a sentence so they do not
+# stop mid-phrase. The Speak button passes full=True and reads the whole card.
+_NOTIFY_SPEECH_CHARS = 4000
+_EDGE_SCRIPT = (
+    "import asyncio, edge_tts, sys\n"
+    "asyncio.run(edge_tts.Communicate(sys.argv[1], sys.argv[2]).save(sys.argv[3]))\n"
+)
+
+
+def _sleep_cancel(seconds, gen):
+    end = time.time() + seconds
+    while time.time() < end:
+        if _cancelled(gen):
+            return False
+        time.sleep(0.05)
+    return not _cancelled(gen)
+
+
+def _cap_speech(text, limit):
+    """Shorten unattended speech on a sentence boundary. None means no cap."""
+    text = " ".join((text or "").split())
+    if not text or limit is None or len(text) <= limit:
+        return text
+    window = text[:limit]
+    best = -1
+    for sep in ("।", ".", "!", "?", "؟"):
+        idx = window.rfind(sep)
+        if idx > best:
+            best = idx
+    if best >= int(limit * 0.5):
+        return window[:best + 1].strip()
+    cut = window.rsplit(" ", 1)[0]
+    return (cut or window).strip()
+
+
+def _synth_edge_chunk(py, chunk, voice, out, gen):
+    """Write one clip in the locked neural voice. Never reuse an older file."""
+    if _cancelled(gen):
+        return False
+    try:
+        if os.path.isfile(out):
+            os.remove(out)
+    except OSError:
+        return False
+    rc = _run_tracked(
+        [py, "-c", _EDGE_SCRIPT, chunk, voice, out],
+        gen, timeout=45,
+    )
+    if rc != 0 or _cancelled(gen):
+        return False
+    try:
+        return os.path.isfile(out) and os.path.getsize(out) > 32
+    except OSError:
+        return False
+
+
+def _speak_edge_chunks(py, text, voice, gen):
+    """Speak every chunk in ``voice``.
+
+    Returns:
+      ok        — the whole passage was played
+      fail      — nothing was played (caller may use the offline voice)
+      partial   — the neural voice already started; do not switch voices
+      cancelled — Stop, or a newer Speak, interrupted it
+      empty     — no speakable text
+    """
+    chunks = _tts_chunks(text, limit=_EDGE_CHUNK_CHARS)
+    if not chunks:
+        return "empty"
+    os.makedirs(_TTS_CACHE, exist_ok=True)
+
+    def synth(index, chunk):
+        # Generation in the name so a Stop/new Speak cannot replay an older clip.
+        out = os.path.join(_TTS_CACHE, "devos-islamic-tts-g%s-%d.mp3" % (gen, index))
+        for attempt in range(3):
+            if _cancelled(gen):
+                return None
+            if _synth_edge_chunk(py, chunk, voice, out, gen):
+                return out
+            if _cancelled(gen) or attempt == 2 or not _sleep_cancel(0.4, gen):
+                break
+        return None
+
+    pending = synth(0, chunks[0])
+    if _cancelled(gen):
+        return "cancelled"
+    if not pending:
+        return "fail"
+    for i, chunk in enumerate(chunks):
+        if _cancelled(gen):
+            return "cancelled"
+        current = pending
+        pending = None
+        if not current:
+            current = synth(i, chunk)
+            if _cancelled(gen):
+                return "cancelled"
+            if not current:
+                # Female (or male) voice already spoke the earlier part.
+                # Restarting here is the "other voice from the beginning" bug.
+                return "partial"
+        holder = {}
+        prefetch = None
+        if i + 1 < len(chunks):
+            nxt_i, nxt = i + 1, chunks[i + 1]
+
+            def _prefetch(index=nxt_i, piece=nxt):
+                holder["path"] = synth(index, piece)
+
+            prefetch = threading.Thread(
+                target=_prefetch, daemon=True, name="devos-islamic-tts-next",
+            )
+            prefetch.start()
+        played = _play_audio_file(current, gen)
+        if _cancelled(gen):
+            return "cancelled"
+        if not played:
+            played = _play_audio_file(current, gen)
+            if _cancelled(gen):
+                return "cancelled"
+            if not played:
+                return "partial" if i else "fail"
+        _drop_clip(current)
+        if prefetch is not None:
+            while prefetch.is_alive():
+                if _cancelled(gen):
+                    return "cancelled"
+                prefetch.join(0.05)
+            pending = holder.get("path")
+    return "ok"
+
+
+def _speak_edge_tts(text, language, gender=None, gen=None):
+    """Natural neural voice via edge-tts in the DevOS TTS venv (online).
+
+    The voice id is chosen once and reused for every chunk of a long hadith,
+    so a later sentence cannot come back as a different speaker.
+    """
+    if gen is None:
+        gen = _speech_generation()
+    if _cancelled(gen):
+        return "cancelled"
     ensure_clear_voice()
     py = os.path.join(_TTS_VENV, "bin", "python")
     if not os.path.isfile(py) or not shutil.which("ffplay"):
-        return False
+        return "fail"
     g = gender or _tts_gender()
     voice = _edge_voice(language, g)
-    os.makedirs(_TTS_CACHE, exist_ok=True)
     try:
-        for i, chunk in enumerate(_tts_chunks(text, limit=220)):
-            out = os.path.join(_TTS_CACHE, "devos-islamic-tts-%d.mp3" % i)
-            script = (
-                "import asyncio, edge_tts, sys\n"
-                "asyncio.run(edge_tts.Communicate(sys.argv[1], sys.argv[2]).save(sys.argv[3]))\n"
-            )
-            proc = subprocess.run(
-                [py, "-c", script, chunk, voice, out],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                timeout=60,
-            )
-            if proc.returncode != 0 or not os.path.isfile(out):
-                return False
-            if not _play_audio_file(out):
-                return False
-        return True
-    except (OSError, subprocess.TimeoutExpired):
+        return _speak_edge_chunks(py, text, voice, gen)
+    except OSError:
+        return "fail"
+
+
+def _speak_espeak(text, language, gender=None, gen=None):
+    """Offline fallback — one gender-aware voice for the whole passage."""
+    if gen is None:
+        gen = _speech_generation()
+    if _cancelled(gen):
         return False
-
-
-def _speak_espeak(text, language, gender=None):
-    """Offline fallback — gender-aware voice (plain en/bn sound male)."""
     g = gender or _tts_gender()
     voice = _espeak_voice(language, g)
     lang_flag = "bn" if language == "bn" else "en"
@@ -498,16 +741,13 @@ def _speak_espeak(text, language, gender=None):
                 ["spd-say", "-l", lang_flag, "-t", g, "-w", text],
                 ["spd-say", "-l", lang_flag, "-w", text],
             ):
-                try:
-                    proc = subprocess.run(
-                        cmd,
-                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                        timeout=120,
-                    )
-                    if proc.returncode == 0:
-                        return True
-                except (OSError, subprocess.TimeoutExpired):
-                    continue
+                if _cancelled(gen):
+                    return False
+                rc = _run_tracked(cmd, gen, timeout=120)
+                if _cancelled(gen):
+                    return False
+                if rc == 0:
+                    return True
             return False
         return False
     # Bangla espeak is hard to follow at default speed; slow it and add gaps.
@@ -516,35 +756,48 @@ def _speak_espeak(text, language, gender=None):
     gap = "14" if language == "bn" else "6"
     pitch = "60" if g == "female" else "40"
     for chunk in _tts_chunks(text, limit=160):
-        subprocess.run(
+        if _cancelled(gen):
+            return False
+        _run_tracked(
             [
                 "espeak-ng", "-v", voice, "-s", speed, "-g", gap,
                 "-p", pitch, "-a", "180", chunk,
             ],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            timeout=120,
+            gen, timeout=120,
         )
+        if _cancelled(gen):
+            return False
     return True
 
 
-def speak_text(text, language="en"):
-    """Speak one line clearly and wait until it finishes (never overlaps).
+def speak_text(text, language="en", full=False):
+    """Speak one passage in a single voice and wait until it finishes.
 
-    Uses the same female/male preference as DevOS AI (voice_prefs). Neural TTS
-    when online; gender-aware espeak-ng offline (never plain male ``en``/``bn``).
+    ``full=True`` (the ayah/hadith Speak button) reads the whole card. Daily
+    notifications are shortened on a sentence boundary.
+
+    Uses the DevOS AI female/male voice. Neural TTS when online; espeak only
+    when that voice never started. A failure in the middle of a long hadith
+    must not start espeak again from the first word — that was a second voice
+    taking over mid-essay. Stop cancels the rest instead of skipping ahead.
     """
     text = " ".join((text or "").split())
     if not text:
         return
-    if len(text) > 500:
-        text = text[:500].rsplit(" ", 1)[0]
+    text = _cap_speech(text, None if full else _NOTIFY_SPEECH_CHARS)
+    if not text:
+        return
     language = "bn" if str(language).lower().startswith("bn") else "en"
     gender = _tts_gender()
-    _stop_speech()
+    gen = _begin_speech()
     try:
-        if _speak_edge_tts(text, language, gender=gender):
-            return
-        _speak_espeak(text, language, gender=gender)
+        status = _speak_edge_tts(text, language, gender=gender, gen=gen)
+    except (OSError, subprocess.TimeoutExpired):
+        status = "fail"
+    if status in ("ok", "cancelled", "partial", "empty") or _cancelled(gen):
+        return
+    try:
+        _speak_espeak(text, language, gender=gender, gen=gen)
     except (OSError, subprocess.TimeoutExpired):
         pass
 
