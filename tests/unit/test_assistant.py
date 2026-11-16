@@ -2251,13 +2251,22 @@ class TestMultiStepChaining(unittest.TestCase):
         en_msgs, en_kw = fake.calls[0]
         bn_msgs, bn_kw = fake.calls[1]
         self.assertEqual(en_msgs[0]["content"], bn_msgs[0]["content"])
-        self.assertIn("Start with the answer", en_msgs[0]["content"])
+        self.assertIn("Answer the question", en_msgs[0]["content"])
+        self.assertNotIn("phrase to say", en_msgs[0]["content"])
         self.assertNotIn("[Language]", en_msgs[0]["content"])
         self.assertNotIn("Reply in বাংলা", en_msgs[-1]["content"])
         self.assertIn("Reply in বাংলা", bn_msgs[-1]["content"])
-        self.assertLessEqual(en_kw["max_tokens"], 200)
+        hard = "As an individual I want to leave society. So what should I do?"
+        a.chat(hard, reply_lang="en")
+        hard_msgs, hard_kw = fake.calls[2]
+        self.assertIn("Answer this directly.", hard_msgs[-1]["content"])
+        self.assertGreaterEqual(hard_kw["max_tokens"], 360)
+        self.assertEqual(hard_msgs[0]["content"], en_msgs[0]["content"])
+        self.assertLessEqual(en_kw["max_tokens"], 240)
         self.assertGreaterEqual(
-            engine.reply_max_tokens("explain the requirements in detail"), 600)
+            engine.reply_max_tokens("what should I do about the civil rights of society"), 360)
+        self.assertGreaterEqual(
+            engine.reply_max_tokens("explain the requirements in detail"), 500)
         self.assertLess(len(en_msgs[0]["content"]), 1200)
 
     def test_modesty_filter_routing_and_execution(self):

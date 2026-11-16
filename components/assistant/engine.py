@@ -46,12 +46,11 @@ MODEL_OFFLINE = ("The DevOS AI service isn't responding. I've asked it to start;
                  "Actions and PC questions still work.")
 
 APP_PROMPT = (
-    "You are DevOS AI, the private on-device assistant for this PC. Nothing the user types leaves this computer.\n"
-    "The app, not you, runs tools (open apps, web search, PC specs, install, volume, notes, reminders, Optimizer). "
-    "If a tool did not run, tell them the phrase to say. Never invent menus, repair steps, or PC facts.\n"
-    "Match the user's language. Romanized Bangla (kemon acho) means reply in বাংলা. Messy voice text: infer the intent.\n"
-    "Start with the answer in the first sentence. Stay short — a few sentences — unless they ask for a list, steps, code, or detail. "
-    "Use short Markdown."
+    "You are DevOS AI, the private assistant on this PC. Answer the question the user actually asked.\n"
+    "Give a direct, useful answer in their language. If they ask what to do, give practical advice. "
+    "Do not turn their words into a command or a menu. Romanized Bangla means reply in বাংলা. "
+    "Voice text may be messy; answer the meaning, and answer a new question instead of repeating the last reply.\n"
+    "Start with the answer. A simple question is a few sentences. A hard or personal question still gets a real answer."
 )
 
 
@@ -325,11 +324,17 @@ def nudge_session_model() -> bool:
 _PRELOAD_LOCK = threading.Lock()
 _PRELOAD_AT = 0.0
 
-# A normal spoken question. Longer only when they ask for a list, steps, or detail,
-# so a 3B model on the CPU is not still writing long after the first words appear.
+# A normal spoken question stays short so the CPU finishes. A hard or open
+# question gets enough room for a real answer, still far below a long essay.
 _LONG_REPLY = re.compile(
     r"\b(?:list|lists|steps|step[- ]by[- ]step|in detail|detailed|explain|essay|write|"
     r"code|requirements|compare|everything|বিস্তারিত|তালিকা|ধাপে)\b",
+    re.I,
+)
+_OPEN_REPLY = re.compile(
+    r"\b(?:what should i|what do i|what can i|how (?:can|do|should) i|why|advice|help me|"
+    r"i want to|i need to|i feel|society|rights|problem|issue|"
+    r"কী কর|কি কর|কিভাবে|কেন)\b",
     re.I,
 )
 _DOC_HINT = re.compile(
@@ -357,11 +362,17 @@ def chat_system_prompt() -> str:
 
 
 def reply_max_tokens(text: str) -> int:
-    """How many tokens to let the model write. Short by default so the reply finishes."""
+    """How many tokens to let the model write. Short by default so the reply finishes.
+
+    Open or difficult questions get a real answer's worth of room, not a one-line
+    command, and not a long essay that keeps the CPU busy.
+    """
     t = text or ""
     if _LONG_REPLY.search(t) or len(t) > 500:
-        return 640
-    return 180
+        return 520
+    if _OPEN_REPLY.search(t) or len(t) > 140:
+        return 380
+    return 220
 
 
 def preload_chat_model(timeout: float = 120.0) -> bool:
@@ -956,6 +967,10 @@ class Assistant:
             asked = text + "\n\n(Reply in বাংলা.)"
         elif lang == "auto":
             asked = text + "\n\n(Reply in the user's language.)"
+        # A line under the question keeps a small model on the question itself.
+        # It is not part of the cached system prompt, so the first word stays fast.
+        if _OPEN_REPLY.search(text or "") or len(text or "") > 140:
+            asked += "\n\n(Answer this directly.)"
         system = chat_system_prompt()
         if self._question_needs_file(text, history):
             doc_ctx = self._recent_file_context(history)
