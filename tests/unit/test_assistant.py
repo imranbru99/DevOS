@@ -1035,6 +1035,7 @@ class TestVoiceEngine(unittest.TestCase):
         self.saved_float = voice.pcm_to_float
         voice.pcm_to_float = lambda pcm: "AUDIO"
         voice.Transcriber._model = None
+        voice.Transcriber.last_language = ""
         FakeWhisperModel.instances = []
 
     def tearDown(self):
@@ -1066,11 +1067,46 @@ class TestVoiceEngine(unittest.TestCase):
         self.assertEqual(m.calls[-1], "bn")
         self.assertEqual(len(FakeWhisperModel.instances), 1, "the model is loaded once and kept")
 
+    def test_call_keeps_a_breath_inside_a_long_sentence(self):
+        self.assertGreaterEqual(voice.CALL_SILENCE_STOP_S, 1.2)
+        self.assertGreaterEqual(voice.CALL_MAX_SECONDS, 25)
+        vad = voice.VAD(
+            silence_s=voice.CALL_SILENCE_STOP_S,
+            max_s=voice.CALL_MAX_SECONDS,
+            min_threshold=voice.CALL_MIN_THRESHOLD,
+            speech_hold_s=voice.CALL_SPEECH_HOLD_S,
+        )
+        loud = voice.synth_tone(voice.FRAME_MS / 1000.0, 8000)
+        quiet = b"\x00" * voice.FRAME_BYTES
+        for _ in range(5):
+            self.assertFalse(vad.feed(loud))
+        self.assertTrue(vad.heard_speech)
+        # A 0.7s breath used to end the call and leave only a fragment.
+        for _ in range(7):
+            self.assertFalse(vad.feed(quiet))
+        breaths = 0
+        while not vad.feed(quiet):
+            breaths += 1
+            self.assertLess(breaths, 30)
+        self.assertEqual(vad.stop_reason, "silence")
+
+    def test_long_utterance_compares_bangla_and_english(self):
+        voice.Transcriber.last_language = "en"
+        long_pcm = b"\x00\x00" * (voice.RATE * 5)
+        voice.Transcriber.transcribe(long_pcm, path=self.model)
+        calls = FakeWhisperModel.instances[0].calls
+        self.assertIn("bn", calls)
+        self.assertIn("en", calls)
+
     def test_other_languages_are_retried_as_english(self):
+        voice.Transcriber.last_language = ""
         voice.Transcriber.load(self.model).detected = "fr"
-        voice.Transcriber.transcribe(b"\0\0" * 100, path=self.model)
-        self.assertEqual(FakeWhisperModel.instances[0].calls, ["en"])
+        text = voice.Transcriber.transcribe(b"\0\0" * 100, path=self.model)
+        calls = FakeWhisperModel.instances[0].calls
+        self.assertIn("en", calls)
+        self.assertNotIn("fr", calls)
         self.assertEqual(voice.Transcriber.last_language, "en")
+        self.assertEqual(voice.fix_transcript(text), "open bluetooth settings")
 
     def test_language_guess_without_detector(self):
         self.assertEqual(voice.guess_language("ব্লুটুথ চালু করো"), "bn")
