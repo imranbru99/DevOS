@@ -3895,6 +3895,7 @@ class AssistantWindow(QtWidgets.QWidget):
         self._run(
             lambda w: [self.assistant.chat(
                 text, hist, on_delta=w.delta.emit, cancel=handle, reply_lang=reply_lang,
+                talk=bool(self._speak_reply),
             )],
             on_replies,
             on_delta=on_delta,
