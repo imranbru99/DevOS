@@ -69,7 +69,9 @@ def test_taskbar_keeps_pin_under_icon_like_windows():
     text = APPLETS.read_text(encoding="utf-8", errors="replace")
     assert "hideActivatedLaunchers=false" in text
     assert "launchInPlace=true" in text
-    assert "groupingStrategy=1" in text
+    # Do not group — each window keeps its own footer icon (Chrome profiles included).
+    assert "groupingStrategy=0" in text
+    assert "groupPopups=false" in text
 
 
 def test_skel_shortcuts_not_python3_wmclass():

@@ -501,9 +501,10 @@ class TestInstalledSystemBoot(unittest.TestCase):
         self.assertIn("two-step.so", branding_hook)
         self.assertIn("branding: devos", read("build/includes.chroot/usr/local/bin/devos-install-gui"))
         self.assertIn("ubuntu-desktop-bootstrap", read("build/hooks/02-disable-services.hook.chroot"))
-        # Icons-only taskbar: group by app so multi-window IDEs stay one icon.
+        # Icons-only taskbar: do not stack windows into one group popup.
         self.assertIn("org.kde.plasma.icontasks", panel)
-        self.assertIn("groupingStrategy=1", panel)
+        self.assertIn("groupingStrategy=0", panel)
+        self.assertNotIn("groupingStrategy=1", panel)
         self.assertIn("sortingStrategy=1", panel)
         self.assertIn("onlyGroupWhenFull=false", panel)
         self.assertTrue(os.path.isfile(os.path.join(ROOT, "build/includes.chroot/usr/local/bin/devos-tray-overflow")))
@@ -524,7 +525,18 @@ class TestInstalledSystemBoot(unittest.TestCase):
         self.assertIn("devos-thispc.desktop", panel)
         self.assertIn("Devices and drives", read("build/includes.chroot/usr/local/bin/devos-files"))
         self.assertIn("python3-pyqt5", desktop)
-        self.assertIn("groupPopups=true", panel)
+        self.assertIn("groupPopups=false", panel)
+        self.assertNotIn("groupPopups=true", panel)
+        layout = read(
+            "build/includes.chroot/usr/share/plasma/look-and-feel/"
+            "org.devos.desktop/contents/layouts/org.kde.plasma.desktop-layout.js"
+        )
+        self.assertIn('writeConfig("groupingStrategy", 0)', layout)
+        self.assertNotIn('writeConfig("groupingStrategy", 1)', layout)
+        self.assertIn('writeConfig("groupPopups", false)', layout)
+        self.assertNotIn('writeConfig("groupPopups", true)', layout)
+        browser = read("build/includes.chroot/usr/local/bin/devos-browser")
+        self.assertIn("CHROME_DESKTOP", browser)
         self.assertIn("invokeShortcut string:Overview", read("build/includes.chroot/usr/local/bin/devos-show-windows"))
         self.assertIn("icon=devos-logo", panel)
         self.assertTrue(os.path.isfile(os.path.join(ROOT, "build/includes.chroot/usr/share/icons/hicolor/48x48/apps/devos-logo.png")))

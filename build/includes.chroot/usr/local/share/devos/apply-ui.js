@@ -60,12 +60,13 @@ function configureTasks(tasks) {
         current = "";
     }
     tasks.writeConfig("launchers", scrubLaunchers(current));
+    // Do not group. groupPopups=true here used to bring the stacked Chrome
+    // popup back after groupingStrategy was set to Do Not Group.
     tasks.writeConfig("groupingStrategy", 0);
     tasks.writeConfig("groupPopups", false);
     tasks.writeConfig("separateLaunchers", true);
     tasks.writeConfig("groupInline", false);
     tasks.writeConfig("iconSpacing", 1);
-    tasks.writeConfig("groupPopups", true);
     tasks.writeConfig("onlyGroupWhenFull", false);
     tasks.writeConfig("showOnlyCurrentDesktop", false);
     tasks.writeConfig("showOnlyCurrentActivity", false);

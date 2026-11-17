@@ -372,8 +372,10 @@ def generate_badged_icon(name, output_48, output_128=None, base_icon=None, avata
         img = Image.open(base_icon).convert("RGBA").resize((128, 128), Image.Resampling.LANCZOS)
     else:
         img = Image.new("RGBA", (128, 128), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(img)
-        draw.ellipse([8, 8, 120, 120], fill=(66, 133, 244, 255))
+        ImageDraw.Draw(img).ellipse([8, 8, 120, 120], fill=(66, 133, 244, 255))
+    # Always a new context. `draw` used to exist only when the Chrome logo was
+    # missing, so a normal install crashed here and the footer kept one icon.
+    draw = ImageDraw.Draw(img)
 
     used_avatar = False
     if avatar_path and _is_usable_profile_photo(avatar_path):
@@ -930,8 +932,173 @@ X-DevOS-ChromeProfileSlug={slug}
 def window_task_class(slug: str, wid: int) -> str:
     """Unique WM_CLASS so Plasma cannot group two Chrome windows into one tile."""
     base = slugify(slug) or "chrome"
-    # Keep it short and X11-safe; include window id so each open window is unique.
-    return f"chrome-{base}-w{int(wid) & 0xFFFF:x}"
+    # Full X11 id. The low 16 bits collide (0x0100002a and 0x0200002a) and those
+    # two windows then fall back into one footer group.
+    return f"chrome-{base}-w{int(wid) & 0xFFFFFFFF:x}"
+
+
+def _kwin_unique_key_map(rows, field):
+    """Map a row field to a desktop file only when that value belongs to one window.
+
+    A shared Chrome PID must not be used: both of that profile's windows would
+    receive one desktop file and the footer would stack them again.
+    """
+    counts = {}
+    for row in rows or []:
+        key = str((row or {}).get(field) or "").strip()
+        if not key or key == "0":
+            continue
+        counts[key] = counts.get(key, 0) + 1
+    out = {}
+    for row in rows or []:
+        key = str((row or {}).get(field) or "").strip()
+        desk = (row or {}).get("desktop") or ""
+        if key and key != "0" and desk and counts.get(key) == 1:
+            out[key] = desk
+    return out
+
+
+def kwin_assignment_maps(rows):
+    """Split rows into window-id, unique-pid, and unique-title desktop maps."""
+    by_window = {}
+    for row in rows or []:
+        try:
+            wid = int((row or {}).get("id") or 0)
+        except (TypeError, ValueError):
+            wid = 0
+        desk = (row or {}).get("desktop") or ""
+        if wid > 0 and desk:
+            by_window[str(wid)] = desk
+    return by_window, _kwin_unique_key_map(rows, "pid"), _kwin_unique_key_map(rows, "title")
+
+
+def kwin_chrome_desktop_script(by_window, by_pid=None, by_title=None) -> str:
+    """KWin script: point each Chrome window at its own taskbar .desktop.
+
+    Plasma groups by the desktop file it stored when the window opened.
+    Rewriting WM_CLASS afterwards does not split that group. Setting
+    desktopFileName does — each file has that profile's badge as Icon=.
+    """
+    def obj(mapping):
+        parts = []
+        for key, desk in (mapping or {}).items():
+            parts.append(f"{json.dumps(str(key))}: {json.dumps(str(desk))}")
+        return "{" + ",".join(parts) + "}"
+
+    return f"""var byWindow = {obj(by_window)};
+var byPid = {obj(by_pid)};
+var byTitle = {obj(by_title)};
+function devosChromeDesk(win) {{
+  if (!win) return;
+  var desk = "";
+  try {{
+    var id = win.windowId;
+    if (typeof id === "function") id = id();
+    id = String(id || 0);
+    if (id && id !== "0" && byWindow[id]) desk = byWindow[id];
+  }} catch (e) {{}}
+  if (!desk) {{
+    try {{
+      var pid = String(win.pid || 0);
+      if (pid && pid !== "0" && byPid[pid]) desk = byPid[pid];
+    }} catch (e2) {{}}
+  }}
+  if (!desk) {{
+    try {{
+      var title = String(win.caption || "");
+      if (title && byTitle[title]) desk = byTitle[title];
+    }} catch (e3) {{}}
+  }}
+  if (!desk) return;
+  try {{
+    if (win.desktopFileName !== desk) win.desktopFileName = desk;
+  }} catch (e4) {{}}
+}}
+function devosChromeApplyAll() {{
+  var list = [];
+  try {{
+    if (typeof workspace.windowList === "function") list = workspace.windowList();
+    else if (typeof workspace.clientList === "function") list = workspace.clientList();
+  }} catch (e) {{ list = []; }}
+  for (var i = 0; i < list.length; i++) devosChromeDesk(list[i]);
+}}
+devosChromeApplyAll();
+try {{
+  if (workspace.windowAdded) workspace.windowAdded.connect(devosChromeDesk);
+  else if (workspace.clientAdded) workspace.clientAdded.connect(devosChromeDesk);
+}} catch (e) {{}}
+"""
+
+
+def apply_kwin_window_desktops(rows, home_dir=None) -> bool:
+    """Load the KWin script that gives every Chrome window its own footer icon."""
+    home = home_dir or os.path.expanduser("~")
+    by_window, by_pid, by_title = kwin_assignment_maps(rows)
+    script = kwin_chrome_desktop_script(by_window, by_pid, by_title)
+    folder = os.path.join(home, ".config", "devos")
+    try:
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, "kwin-chrome-taskbar.js")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(script)
+    except OSError:
+        return False
+    bus = None
+    for name in ("qdbus6", "qdbus", "qdbus-qt6"):
+        if shutil.which(name):
+            bus = name
+            break
+    if not bus:
+        return False
+    plugin = "devoschrometasks"
+    try:
+        import subprocess
+        subprocess.run(
+            [bus, "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting.unloadScript", plugin],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=4,
+        )
+        if not by_window and not by_pid and not by_title:
+            return True
+        subprocess.run(
+            [bus, "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting.loadScript", path, plugin],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=4,
+        )
+        try:
+            listed = subprocess.check_output(
+                [bus, "org.kde.KWin"],
+                text=True,
+                stderr=subprocess.DEVNULL,
+                timeout=4,
+            )
+        except Exception:
+            listed = ""
+        for line in listed.splitlines():
+            obj = line.strip()
+            if not obj.startswith("/Scripting/") or obj == "/Scripting":
+                continue
+            subprocess.run(
+                [bus, "org.kde.KWin", obj, "org.kde.kwin.Script.run"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=4,
+            )
+        subprocess.run(
+            [bus, "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting.start"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=4,
+        )
+        return True
+    except Exception:
+        return False
 
 
 def set_window_wm_class(wid, class_name, class_inst=None):
@@ -1784,6 +1951,7 @@ def apply_window_profiles(home_dir=None):
         del WINDOW_PROFILE_CACHE[wid]
 
     if not chrome_wins:
+        apply_kwin_window_desktops([], home_dir)
         if sync_plasma_profile_launchers(home_dir, []):
             if _LAST_PLASMA_LAUNCHERS != ():
                 _LAST_PLASMA_LAUNCHERS = ()
@@ -1799,6 +1967,7 @@ def apply_window_profiles(home_dir=None):
     processed = 0
     active_slugs = []
     window_classes = []
+    kwin_rows = []
     prof_session_data = get_profile_session_data(chrome_dir)
 
     # Ensure profile avatar icons + pin desktops exist first.
@@ -1842,7 +2011,18 @@ def apply_window_profiles(home_dir=None):
         set_window_wm_class(w["id"], class_name, class_name)
         set_window_desktop_file(w["id"], desktop_name, home_dir=home_dir)
         window_classes.append(class_name)
+        kwin_rows.append({
+            "id": w["id"],
+            "pid": _window_pid(w["id"]),
+            "title": w.get("title") or "",
+            "desktop": desktop_name,
+        })
         processed += 1
+
+    # KWin keeps the app id it saw at map time (usually google-chrome.desktop).
+    # xprop WM_CLASS changes do not split the footer group. desktopFileName does,
+    # and that file's Icon= is this profile's photo or letter — like Windows.
+    apply_kwin_window_desktops(kwin_rows, home_dir)
 
     # Pin each open window's .desktop on Icon Tasks so Plasma shows OUR badge
     # (matching StartupWMClass), not Chrome's gray person window icon.
