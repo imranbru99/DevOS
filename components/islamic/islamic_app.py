@@ -257,7 +257,8 @@ def run_gui(screenshot=None):
 
         def run(self):
             try:
-                notifier.speak_text(self.text, self.lang)
+                # full=True reads the whole card. Notifications stay shorter.
+                notifier.speak_text(self.text, self.lang, full=True)
             finally:
                 self.finished.emit()
 
@@ -373,8 +374,8 @@ def run_gui(screenshot=None):
             self.speak_btn = QtWidgets.QPushButton("Speak")
             self.speak_btn.setObjectName("speak")
             self.speak_btn.setToolTip(
-                "Read this card aloud in a clear voice (Bangla neural TTS when online; "
-                "one voice at a time)")
+                "Read this whole card aloud in one voice (Bangla neural TTS when online). "
+                "Stop ends the reading.")
             self.speak_btn.setEnabled(False)
             self.speak_btn.clicked.connect(self.toggle_speak)
             head.addWidget(self.speak_btn)
