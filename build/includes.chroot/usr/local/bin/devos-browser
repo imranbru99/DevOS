@@ -191,6 +191,9 @@ if [ "$is_guest" -eq 1 ]; then
         rm -rf "$guest_tmp"
     }
     trap cleanup EXIT INT TERM HUP
+    # KWin reads this at map time. Without it every window stays google-chrome
+    # and the footer stacks them into one icon.
+    export CHROME_DESKTOP="chrome-guest.desktop"
     "$chrome" "${args[@]}" --class="chrome-guest" --user-data-dir="$guest_tmp" --no-first-run --no-default-browser-check "$@" &
     cpid=$!
     trap 'kill "$cpid" 2>/dev/null; cleanup; exit 0' INT TERM HUP
@@ -222,6 +225,26 @@ PY
     fi
     class_name=$(chrome_class_for_profile "$prof_dir")
     [ -n "$class_name" ] && args+=(--class="${class_name}")
+fi
+
+# Desktop file name Chrome advertises to KWin (profile badge, not the shared
+# Google Chrome icon). A second profile opened from the window menu inherits
+# this value; the profile watcher retargets those windows by --profile-directory.
+desktop_id=""
+if [ "$has_class" -eq 1 ]; then
+    for arg in "$@"; do
+        case "$arg" in
+            --class=*) desktop_id="${arg#--class=}" ;;
+        esac
+    done
+else
+    desktop_id="${class_name:-}"
+fi
+if [ -n "$desktop_id" ]; then
+    case "$desktop_id" in
+        *.desktop) export CHROME_DESKTOP="$desktop_id" ;;
+        *) export CHROME_DESKTOP="${desktop_id}.desktop" ;;
+    esac
 fi
 
 log=$(mktemp)

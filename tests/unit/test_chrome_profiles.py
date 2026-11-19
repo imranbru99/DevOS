@@ -323,6 +323,35 @@ class TestChromeProfiles(unittest.TestCase):
             chrome_profiles._cmdline_profile_key = original_key
             chrome_profiles.WINDOW_PROFILE_CACHE.pop(9091, None)
 
+    def test_kwin_script_gives_each_window_its_own_desktop(self):
+        rows = [
+            {"id": 0x12A0, "pid": 40, "title": "Inbox - Google Chrome", "desktop": "chrome-imran-w12a0.desktop"},
+            {"id": 0x12B0, "pid": 41, "title": "Create Lab Dip - Neo Zipper ERP", "desktop": "chrome-mirza-w12b0.desktop"},
+        ]
+        by_window, by_pid, by_title = chrome_profiles.kwin_assignment_maps(rows)
+        self.assertEqual(by_window["4768"], "chrome-imran-w12a0.desktop")
+        self.assertEqual(by_window["4784"], "chrome-mirza-w12b0.desktop")
+        self.assertNotEqual(by_window["4768"], by_window["4784"])
+        script = chrome_profiles.kwin_chrome_desktop_script(by_window, by_pid, by_title)
+        self.assertIn("chrome-imran-w12a0.desktop", script)
+        self.assertIn("chrome-mirza-w12b0.desktop", script)
+        self.assertIn("win.desktopFileName = desk", script)
+        self.assertIn("Create Lab Dip - Neo Zipper ERP", script)
+
+    def test_shared_chrome_pid_does_not_collapse_windows(self):
+        rows = [
+            {"id": 1, "pid": 9, "title": "Logs", "desktop": "chrome-imran-w1.desktop"},
+            {"id": 2, "pid": 9, "title": "Logs", "desktop": "chrome-imran-w2.desktop"},
+            {"id": 3, "pid": 8, "title": "Guest", "desktop": "chrome-guest-w3.desktop"},
+        ]
+        by_window, by_pid, by_title = chrome_profiles.kwin_assignment_maps(rows)
+        self.assertEqual(len(by_window), 3)
+        self.assertNotIn("9", by_pid)
+        self.assertEqual(by_pid.get("8"), "chrome-guest-w3.desktop")
+        # Same title on two windows must not pin both to one desktop file.
+        self.assertNotIn("Logs", by_title)
+        self.assertEqual(by_title.get("Guest"), "chrome-guest-w3.desktop")
+
 
 if __name__ == "__main__":
     unittest.main()

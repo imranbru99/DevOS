@@ -29,17 +29,17 @@ menu.writeConfig("favoritesPortedToKAstats", false)
 menu.writeConfig("systemFavorites", "hibernate,reboot,shutdown")
 
 var tasks = panel.addWidget("org.kde.plasma.icontasks")
-tasks.writeConfig("groupingStrategy", "0")
-tasks.writeConfig("groupPopups", "false")
-tasks.writeConfig("separateLaunchers", "true")
 tasks.currentConfigGroup = ["General"]
 tasks.writeConfig("launchers", "applications:devos-search.desktop,applications:devos-taskman.desktop,applications:devos-windows.desktop,applications:devos-browser.desktop,applications:devos-thispc.desktop,applications:devos-chat.desktop,applications:devos-code.desktop,applications:devos-settings.desktop")
-// Group by application so Antigravity/Chrome do not spam one icon per window.
+// Do not group. A later write of groupingStrategy=1 stacked every Chrome
+// window into one footer icon (the group popup). Each browser window keeps
+// its own icon; Chrome profiles supply the badge via their .desktop file.
 // Status icons belong under system tray (^), not as duplicate taskbar entries.
-tasks.writeConfig("groupingStrategy", 1)
+tasks.writeConfig("groupingStrategy", 0)
 tasks.writeConfig("groupInline", false)
 tasks.writeConfig("iconSpacing", 1)
-tasks.writeConfig("groupPopups", true)
+tasks.writeConfig("groupPopups", false)
+tasks.writeConfig("separateLaunchers", true)
 tasks.writeConfig("onlyGroupWhenFull", false)
 tasks.writeConfig("showOnlyCurrentDesktop", false)
 tasks.writeConfig("showOnlyCurrentActivity", false)
