@@ -515,11 +515,16 @@ class TestInstalledSystemBoot(unittest.TestCase):
         overflow = read("build/includes.chroot/usr/local/bin/devos-tray-overflow")
         self.assertIn("showAllItems", overflow)
         self.assertIn("registered_tray_ids", overflow)
-        # Volume + brightness must sit under ^, not as forever-visible panel icons.
+        # Volume, brightness, and the mic-in-use icon sit under ^, not on the panel.
         self.assertIn("org.kde.plasma.volume", overflow)
         self.assertIn("org.kde.plasma.brightness", overflow)
+        self.assertIn('"microphone"', overflow)
+        self.assertIn('"devos-voice"', overflow)
         self.assertIn("org.kde.plasma.volume", panel)
         self.assertIn("org.kde.plasma.brightness", panel)
+        hidden = next(line for line in panel.splitlines() if line.startswith("hiddenItems="))
+        self.assertIn("microphone", hidden)
+        self.assertIn("devos-voice", hidden)
         self.assertIn("devos-windows.desktop", panel)
         self.assertIn("devos-thispc.desktop", panel)
         self.assertIn("Devices and drives", read("build/includes.chroot/usr/local/bin/devos-files"))

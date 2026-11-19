@@ -38,6 +38,13 @@ ALWAYS_HIDE = (
     "org.kde.plasma.printmanager",
     "org.kde.plasma.cameraindicator",
     "org.kde.plasma.volume",
+    # PulseAudio draws this while any app is recording. Status is Active, so
+    # it sticks beside the clock unless it is listed here. Voice and voice
+    # typing should only show it under Status & Notifications (^).
+    "microphone",
+    "Microphone",
+    # Hands-free listener. Qt's tray icon reports Active, which pins it too.
+    "devos-voice",
     "DevOS Optimizer",
     "devos-optimizer",
     "DevOS Sound",
