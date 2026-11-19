@@ -229,6 +229,7 @@ def test_chat_call_speaks_voice_turns_and_resumes():
     assert "self._speak_reply = bool(from_voice)" in text
     assert "voice.speak_reply" in text
     assert "start_call" in text
+    assert "talk=bool(self._speak_reply)" in text
     assert "_continue_call_listen" in text
     # Silent on-screen actions during a call must still resume listening.
     assert "Pure on-screen actions" in text

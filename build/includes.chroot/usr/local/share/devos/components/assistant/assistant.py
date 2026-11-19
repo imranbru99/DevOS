@@ -3895,6 +3895,7 @@ class AssistantWindow(QtWidgets.QWidget):
         self._run(
             lambda w: [self.assistant.chat(
                 text, hist, on_delta=w.delta.emit, cancel=handle, reply_lang=reply_lang,
+                talk=bool(self._speak_reply),
             )],
             on_replies,
             on_delta=on_delta,
@@ -4215,23 +4216,9 @@ class AssistantWindow(QtWidgets.QWidget):
             except Exception:
                 pass
 
-        def _warm_llm():
-            # Only load weights if they are not already in RAM. /health now reports
-            # model_loaded; never fire a dummy chat when the model is already warm
-            # or when the AI service is intentionally asleep.
-            try:
-                model = engine.LocalModel()
-                health = model.health(timeout=1.0) or {}
-                if health.get("model_loaded"):
-                    return
-                slots = health.get("slots") if isinstance(health.get("slots"), dict) else {}
-                if int(slots.get("loaded") or 0) > 0:
-                    return
-                model.chat([{"role": "user", "content": "ok"}], max_tokens=1, temperature=0)
-            except Exception:
-                pass
-
-        threading.Thread(target=_warm_llm, daemon=True, name="devos-llm-warm").start()
+        # Load the same system prompt chat() uses, while the person is still
+        # talking, so Thinking… is not the model reading that prompt from scratch.
+        threading.Thread(target=engine.preload_chat_model, daemon=True, name="devos-llm-warm").start()
         # Free the mic: pause the always-on Mira daemon while this call owns it.
         try:
             listen.save_config(paused=True)
@@ -4565,6 +4552,8 @@ def main(argv=None):
     apply_app_theme(app)
     win = AssistantWindow()
     show_window(win, "devos-chat")
+    # Read the model into memory before the first question, so Thinking… is short.
+    threading.Thread(target=engine.preload_chat_model, daemon=True, name="devos-llm-preload").start()
     # "Open in DevOS AI" from the voice overlay: devos-chat --ask "what was said"
     if "--ask" in argv:
         i = argv.index("--ask")

@@ -46,21 +46,25 @@ MODEL_OFFLINE = ("The DevOS AI service isn't responding. I've asked it to start;
                  "Actions and PC questions still work.")
 
 APP_PROMPT = (
-    "You are **DevOS AI**, the on-device agent for this DevOS PC — private, local-first, built to be the "
-    "best everyday desktop agent (think Copilot Tasks + Claude Cowork style, but everything stays here).\n"
-    "The app (not you) already runs tools for: open/close apps, web search, read/summarize URLs and speak "
-    "them, PC specs, install/remove apps (with confirm), volume/brightness/screenshot/lock, settings, "
-    "notes/typing/email drafts, one-shot reminders, **recurring schedules**, **durable memory**, "
-    "Optimizer/Security, and OS problem checks (Wi-Fi, sound, display, Bluetooth, printer, slow PC, "
-    "app launch gaps). If they ask for a tool and it did not run, tell them the exact phrase to say.\n"
-    "Be a capable agent: clear next step, short plan when useful, never invent menus, repair steps, or "
-    "PC facts — only use facts given here or from tools. Prefer doing over lecturing.\n"
-    "Greetings and small talk (hi, how are you, kemon acho/aco, …): answer warmly and naturally first — "
-    "do not jump straight to “what do you want to do?” unless they ask for a task.\n"
-    "Language: always match the user (Bangla/বাংলা, English, Hindi, Arabic, Chinese, …). Romanized Bangla "
-    "(“ami kemon acho”) → reply in clear বাংলা. Messy voice transcripts: infer intent; do not force English.\n"
-    "Use short Markdown: short paragraphs, bullets, **bold** for key words."
+    "You are DevOS AI, the private assistant on this PC. Answer the question the user actually asked.\n"
+    "Give a direct, useful answer in their language. If they ask what to do, give practical advice. "
+    "Do not turn their words into a command or a menu. Romanized Bangla means reply in বাংলা. "
+    "Voice text may be messy; answer the meaning, and answer a new question instead of repeating the last reply.\n"
+    "Start with the answer. A simple question is a few sentences. A hard or personal question still gets a real answer."
 )
+
+# Spoken chat (a call, or a voice turn that is not a PC command). Short on purpose:
+# a long agent prompt and a long answer delay the first spoken word.
+TALK_PROMPT = (
+    "You are DevOS AI, a warm talking partner on this PC. The person is chatting to pass the time. "
+    "Stay on the topic they just raised. Answer in 2 to 4 short spoken sentences. "
+    "The first sentence answers them directly, in plain speech. Then one short question about that same topic. "
+    "No tool lists, no menus, no headings, no bullet lists. "
+    "Match their language. Romanized Bangla is answered in বাংলা. "
+    "A rough voice transcript still means their real question — answer that, do not correct their spelling."
+)
+TALK_MAX_TOKENS = 160
+TALK_TEMPERATURE = 0.65
 
 
 class ModelUnavailable(Exception):
@@ -330,21 +334,93 @@ def nudge_session_model() -> bool:
     return False
 
 
-def ensure_model_warm(timeout: float = 120.0) -> bool:
-    """Optional preload for voice-call start so the first spoken reply is ready.
+_PRELOAD_LOCK = threading.Lock()
+_PRELOAD_AT = 0.0
 
-    Typed chat should use nudge_session_model() instead — first typed reply may
-    wait on load once, then stay fast without a dummy extra inference.
+# A normal spoken question stays short so the CPU finishes. A hard or open
+# question gets enough room for a real answer, still far below a long essay.
+_LONG_REPLY = re.compile(
+    r"\b(?:list|lists|steps|step[- ]by[- ]step|in detail|detailed|explain|essay|write|"
+    r"code|requirements|compare|everything|বিস্তারিত|তালিকা|ধাপে)\b",
+    re.I,
+)
+_OPEN_REPLY = re.compile(
+    r"\b(?:what should i|what do i|what can i|how (?:can|do|should) i|why|advice|help me|"
+    r"i want to|i need to|i feel|society|rights|problem|issue|"
+    r"কী কর|কি কর|কিভাবে|কেন)\b",
+    re.I,
+)
+_DOC_HINT = re.compile(
+    r"\b(?:image|photo|picture|screenshot|document|pdf|file|attachment|attached|"
+    r"id card|ছবি|ডকুমেন্ট)\b",
+    re.I,
+)
+
+
+def chat_system_prompt() -> str:
+    """System text for every chat. Kept byte-stable so the model reuses it.
+
+    A changing system prompt forces the CPU to re-read the whole prompt before
+    the first word, which is the long "Thinking…" wait.
     """
-    if nudge_session_model():
-        return True
+    system = APP_PROMPT
+    try:
+        import memory as _mem
+        block = _mem.summary_for_prompt()
+        if block:
+            system += block
+    except Exception:
+        pass
+    return system
+
+
+def reply_max_tokens(text: str) -> int:
+    """How many tokens to let the model write. Short by default so the reply finishes.
+
+    Open or difficult questions get a real answer's worth of room, not a one-line
+    command, and not a long essay that keeps the CPU busy.
+    """
+    t = text or ""
+    if _LONG_REPLY.search(t) or len(t) > 500:
+        return 520
+    if _OPEN_REPLY.search(t) or len(t) > 140:
+        return 380
+    return 220
+
+
+def preload_chat_model(timeout: float = 120.0) -> bool:
+    """Load the on-device model and its system prompt before the user asks.
+
+    One token is generated with the same system text chat() sends. The next
+    real question reuses that work and only reads the new words. Safe from a
+    background thread. A second call within a few minutes does nothing.
+    """
+    global _PRELOAD_AT
+    now = time.time()
+    with _PRELOAD_LOCK:
+        if now - _PRELOAD_AT < 180:
+            return True
+        _PRELOAD_AT = now
+    start_ai_service()
     model = LocalModel(timeout=timeout)
     try:
-        model.chat([{"role": "user", "content": "ok"}], max_tokens=1, temperature=0)
+        model.chat(
+            [{"role": "system", "content": chat_system_prompt()},
+             {"role": "user", "content": "ok"}],
+            max_tokens=1,
+            temperature=0,
+        )
         request_ai_awake()
         return True
     except Exception:
+        with _PRELOAD_LOCK:
+            _PRELOAD_AT = 0.0
         return False
+
+
+def ensure_model_warm(timeout: float = 120.0) -> bool:
+    """Load the chat model the way chat() will use it, so the first reply is not a cold start."""
+    return preload_chat_model(timeout=timeout)
 
 
 # ---------------------------------------------------------------------------
@@ -483,7 +559,7 @@ class History:
         except OSError:
             pass
 
-    def for_model(self, limit: int = 6, chars: int = 700) -> List[Dict[str, str]]:
+    def for_model(self, limit: int = 6, chars: int = 700, assistant_chars: int = 220) -> List[Dict[str, str]]:
         out = []
         for m in self.messages[-limit:]:
             text = str(m.get("text", ""))
@@ -492,8 +568,8 @@ class History:
                 # into every new answer; never feed it back.
                 text = _ROLE_LABEL.sub("", text, count=1)
                 # Keep long assistant answers concise in history so CPU prompt prefill stays blazing fast
-                if len(text) > 350:
-                    text = text[:350] + "… [clipped]"
+                if len(text) > assistant_chars:
+                    text = text[:assistant_chars] + "… [clipped]"
             elif len(text) > chars:
                 text = text[:chars] + "…"
             out.append({"role": str(m["role"]), "content": text})
@@ -706,6 +782,26 @@ _RE_STATUS = re.compile(
 )
 
 
+def talk_topic(text: str, history: Optional[History]) -> str:
+    """One line of what this chat is already about, so a new sentence stays on it."""
+    bits: List[str] = []
+    current = " ".join((text or "").split())
+    if history is not None:
+        for m in history.messages:
+            if m.get("role") != "user":
+                continue
+            line = " ".join(str(m.get("text") or "").split())
+            if not line or line == current:
+                continue
+            if len(line) > 120:
+                line = line[:119].rstrip() + "…"
+            bits.append(line)
+    bits = bits[-2:]
+    if not bits:
+        return ""
+    return "\n\nStay on what they have been talking about: " + " · ".join(bits)
+
+
 def fast_chat_reply(text: str, history: Optional[History] = None) -> Optional[Reply]:
     """Instant (< 1ms) contextual response for common pleasantries, thanks, and acknowledgments,
     eliminating 20s cold-start model reload and heavy CPU prompt evaluation."""
@@ -717,23 +813,23 @@ def fast_chat_reply(text: str, history: Optional[History] = None) -> Optional[Re
 
     if _RE_THANKS.match(t):
         if is_bn:
-            ans = "আপনাকে অনেক ধন্যবাদ ও স্বাগতম! আপনার আর কোনো প্রশ্ন বা সহায়তা প্রয়োজন হলে নির্দ্বিধায় জানান। 😊"
+            ans = "স্বাগতম। আর কী নিয়ে গল্প করতে চান?"
         else:
-            ans = "You're very welcome! If you need any more help or have other questions, feel free to ask anytime. 😊"
+            ans = "You're very welcome. What else is on your mind?"
         return Reply(ans, source="model")
 
     if _RE_ACK.match(t):
         if is_bn:
-            ans = "ঠিক আছে! পরবর্তী কোনো নির্দেশ বা জিজ্ঞাসা থাকলে নির্দ্বিধায় বলুন।"
+            ans = "ঠিক আছে। এরপর কী নিয়ে কথা বলবেন?"
         else:
-            ans = "Got it! Let me know whenever you're ready for the next task."
+            ans = "Got it. What do you want to talk about next?"
         return Reply(ans, source="model")
 
     if _RE_STATUS.match(t):
         if is_bn:
-            ans = "আলহামদুলিল্লাহ, আমি ভালো আছি এবং আপনার কাজ সহজ করতে পুরোপুরি প্রস্তুত! আপনি কেমন আছেন?"
+            ans = "আলহামদুলিল্লাহ, আমি ভালো আছি। আপনি কেমন আছেন? আজ কী নিয়ে কথা বলবেন?"
         else:
-            ans = "I'm running smoothly and ready to assist you! How are things going with you?"
+            ans = "I'm good, and ready to talk. How has your day been?"
         return Reply(ans, source="model")
 
     return None
@@ -858,12 +954,30 @@ class Assistant:
                     return {"name": name, "path": p, "text": text}
         return None
 
+    def _question_needs_file(self, text: str, history: Optional[History]) -> bool:
+        """Only pull an old attachment when this question is about it.
+
+        Reading a photo or PDF on every later question held Thinking… and made
+        the prompt too long for a fast first word.
+        """
+        if _DOC_HINT.search(text or ""):
+            return True
+        if history is None or not getattr(history, "messages", None):
+            return False
+        users = [m for m in history.messages if m.get("role") == "user"]
+        if users and str(users[-1].get("text") or "").strip() == (text or "").strip():
+            users = users[:-1]
+        if not users:
+            return False
+        return bool(users[-1].get("paths"))
+
     def chat(self, text: str, history: Optional[History] = None,
              on_delta: Optional[Callable[[str], None]] = None, cancel: Optional[StreamHandle] = None,
-             reply_lang: Optional[str] = None) -> Reply:
+             reply_lang: Optional[str] = None, talk: bool = False) -> Reply:
         """on_delta(piece) gets the answer as it is written (streaming); cancel.stop() ends it early.
 
         reply_lang: ``en`` / ``bn`` — answer in that language (voice turns match what the user spoke).
+        talk: a voice conversation. Short prompt, short reply, stay on their topic.
         """
         fast = fast_chat_reply(text, history)
         if fast is not None:
@@ -871,7 +985,6 @@ class Assistant:
                 on_delta(fast.text)
             return fast
 
-        system = APP_PROMPT
         # Prefer explicit voice/settings lang; otherwise detect from this message
         # (Bangla script, Romanized Bangla, or other scripts).
         lang = reply_lang
@@ -881,50 +994,58 @@ class Assistant:
                 lang = detect_user_language(text)
             except Exception:
                 lang = "en"
-        if lang == "bn":
-            system += (
-                "\n\n[Language]: The user spoke or wrote in Bangla (বাংলা script and/or Romanized Bangla "
-                "like “kemon acho”). Reply entirely in clear Bangla script (বাংলা). "
-                "If the text is a rough voice transcript with wrong spelling, still understand the intent. "
-                "Keep Markdown. Do not switch to English unless they ask."
-            )
-        elif lang == "en":
-            system += (
-                "\n\n[Language]: Reply in clear English. Keep Markdown."
-            )
+
+        if talk:
+            system = TALK_PROMPT
+            if lang == "bn":
+                system += "\n\nReply only in বাংলা, as spoken sentences."
+            elif lang == "en":
+                system += "\n\nReply only in spoken English."
+            else:
+                system += "\n\nReply in the same language they used, as spoken sentences."
+            system += talk_topic(text, history)
+            asked = text
+            budget = TALK_MAX_TOKENS
+            temp = TALK_TEMPERATURE
+            past = history.for_model(limit=4, chars=280, assistant_chars=160) if history is not None else []
         else:
-            system += (
-                "\n\n[Language]: Match the user's language exactly (whatever language or script they used). "
-                "Keep Markdown. Do not translate into English unless they ask."
-            )
-        try:
-            import memory as _mem
-            mem_block = _mem.summary_for_prompt()
-            if mem_block:
-                system += mem_block
-        except Exception:
-            pass
-        doc_ctx = self._recent_file_context(history)
-        if doc_ctx:
-            system += (
-                f"\n\n[Attached Image/Document Context]: Earlier in this conversation, the user shared an image/document "
-                f"({doc_ctx['name']}). The text extracted from it is:\n---\n{doc_ctx['text'][:3000]}\n---\n"
-                f"When the user asks questions referring to this image, document, ID card, names, numbers, or details from it, "
-                f"answer accurately using this extracted text."
-            )
+            # Language stays on the user turn. Putting it in the system prompt made
+            # every question re-read the whole prompt before the first word.
+            asked = text
+            if lang == "bn":
+                asked = text + "\n\n(Reply in বাংলা.)"
+            elif lang == "auto":
+                asked = text + "\n\n(Reply in the user's language.)"
+            # A line under the question keeps a small model on the question itself.
+            # It is not part of the cached system prompt, so the first word stays fast.
+            if _OPEN_REPLY.search(text or "") or len(text or "") > 140:
+                asked += "\n\n(Answer this directly.)"
+            system = chat_system_prompt()
+            if self._question_needs_file(text, history):
+                doc_ctx = self._recent_file_context(history)
+                if doc_ctx:
+                    excerpt = doc_ctx["text"][:1200]
+                    asked = f"[From {doc_ctx['name']}]\n{excerpt}\n\n{asked}"
+            budget = reply_max_tokens(text)
+            temp = 0.2
+            past = history.for_model(limit=4, chars=400, assistant_chars=220) if history is not None else []
+
         messages = [{"role": "system", "content": system}]
-        if history is not None:
-            past = history.for_model()
+        if past:
             # the newest user message is the one we are answering
-            if past and past[-1]["role"] == "user" and past[-1]["content"].strip() == text.strip():
+            if past[-1]["role"] == "user" and past[-1]["content"].strip() == text.strip():
                 past = past[:-1]
             messages += past
-        messages.append({"role": "user", "content": text})
+        messages.append({"role": "user", "content": asked})
+
         try:
             if on_delta is not None:
-                answer = self.model.chat(messages, on_delta=on_delta, cancel=cancel)
+                answer = self.model.chat(
+                    messages, on_delta=on_delta, cancel=cancel,
+                    max_tokens=budget, temperature=temp,
+                )
             else:
-                answer = self.model.chat(messages)
+                answer = self.model.chat(messages, max_tokens=budget, temperature=temp)
         except ModelUnavailable as exc:
             if str(exc) == MODEL_OFFLINE:
                 start_ai_service()

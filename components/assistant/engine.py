@@ -53,6 +53,19 @@ APP_PROMPT = (
     "Start with the answer. A simple question is a few sentences. A hard or personal question still gets a real answer."
 )
 
+# Spoken chat (a call, or a voice turn that is not a PC command). Short on purpose:
+# a long agent prompt and a long answer delay the first spoken word.
+TALK_PROMPT = (
+    "You are DevOS AI, a warm talking partner on this PC. The person is chatting to pass the time. "
+    "Stay on the topic they just raised. Answer in 2 to 4 short spoken sentences. "
+    "The first sentence answers them directly, in plain speech. Then one short question about that same topic. "
+    "No tool lists, no menus, no headings, no bullet lists. "
+    "Match their language. Romanized Bangla is answered in বাংলা. "
+    "A rough voice transcript still means their real question — answer that, do not correct their spelling."
+)
+TALK_MAX_TOKENS = 160
+TALK_TEMPERATURE = 0.65
+
 
 class ModelUnavailable(Exception):
     pass
@@ -546,7 +559,7 @@ class History:
         except OSError:
             pass
 
-    def for_model(self, limit: int = 6, chars: int = 700) -> List[Dict[str, str]]:
+    def for_model(self, limit: int = 6, chars: int = 700, assistant_chars: int = 220) -> List[Dict[str, str]]:
         out = []
         for m in self.messages[-limit:]:
             text = str(m.get("text", ""))
@@ -554,9 +567,9 @@ class History:
                 # Older replies saved as "me: …" made the model copy the label
                 # into every new answer; never feed it back.
                 text = _ROLE_LABEL.sub("", text, count=1)
-                # Keep long assistant answers concise in history so CPU prompt prefill stays fast
-                if len(text) > 220:
-                    text = text[:220] + "… [clipped]"
+                # Keep long assistant answers concise in history so CPU prompt prefill stays blazing fast
+                if len(text) > assistant_chars:
+                    text = text[:assistant_chars] + "… [clipped]"
             elif len(text) > chars:
                 text = text[:chars] + "…"
             out.append({"role": str(m["role"]), "content": text})
@@ -769,6 +782,26 @@ _RE_STATUS = re.compile(
 )
 
 
+def talk_topic(text: str, history: Optional[History]) -> str:
+    """One line of what this chat is already about, so a new sentence stays on it."""
+    bits: List[str] = []
+    current = " ".join((text or "").split())
+    if history is not None:
+        for m in history.messages:
+            if m.get("role") != "user":
+                continue
+            line = " ".join(str(m.get("text") or "").split())
+            if not line or line == current:
+                continue
+            if len(line) > 120:
+                line = line[:119].rstrip() + "…"
+            bits.append(line)
+    bits = bits[-2:]
+    if not bits:
+        return ""
+    return "\n\nStay on what they have been talking about: " + " · ".join(bits)
+
+
 def fast_chat_reply(text: str, history: Optional[History] = None) -> Optional[Reply]:
     """Instant (< 1ms) contextual response for common pleasantries, thanks, and acknowledgments,
     eliminating 20s cold-start model reload and heavy CPU prompt evaluation."""
@@ -780,23 +813,23 @@ def fast_chat_reply(text: str, history: Optional[History] = None) -> Optional[Re
 
     if _RE_THANKS.match(t):
         if is_bn:
-            ans = "আপনাকে অনেক ধন্যবাদ ও স্বাগতম! আপনার আর কোনো প্রশ্ন বা সহায়তা প্রয়োজন হলে নির্দ্বিধায় জানান। 😊"
+            ans = "স্বাগতম। আর কী নিয়ে গল্প করতে চান?"
         else:
-            ans = "You're very welcome! If you need any more help or have other questions, feel free to ask anytime. 😊"
+            ans = "You're very welcome. What else is on your mind?"
         return Reply(ans, source="model")
 
     if _RE_ACK.match(t):
         if is_bn:
-            ans = "ঠিক আছে! পরবর্তী কোনো নির্দেশ বা জিজ্ঞাসা থাকলে নির্দ্বিধায় বলুন।"
+            ans = "ঠিক আছে। এরপর কী নিয়ে কথা বলবেন?"
         else:
-            ans = "Got it! Let me know whenever you're ready for the next task."
+            ans = "Got it. What do you want to talk about next?"
         return Reply(ans, source="model")
 
     if _RE_STATUS.match(t):
         if is_bn:
-            ans = "আলহামদুলিল্লাহ, আমি ভালো আছি এবং আপনার কাজ সহজ করতে পুরোপুরি প্রস্তুত! আপনি কেমন আছেন?"
+            ans = "আলহামদুলিল্লাহ, আমি ভালো আছি। আপনি কেমন আছেন? আজ কী নিয়ে কথা বলবেন?"
         else:
-            ans = "I'm running smoothly and ready to assist you! How are things going with you?"
+            ans = "I'm good, and ready to talk. How has your day been?"
         return Reply(ans, source="model")
 
     return None
@@ -940,10 +973,11 @@ class Assistant:
 
     def chat(self, text: str, history: Optional[History] = None,
              on_delta: Optional[Callable[[str], None]] = None, cancel: Optional[StreamHandle] = None,
-             reply_lang: Optional[str] = None) -> Reply:
+             reply_lang: Optional[str] = None, talk: bool = False) -> Reply:
         """on_delta(piece) gets the answer as it is written (streaming); cancel.stop() ends it early.
 
         reply_lang: ``en`` / ``bn`` — answer in that language (voice turns match what the user spoke).
+        talk: a voice conversation. Short prompt, short reply, stay on their topic.
         """
         fast = fast_chat_reply(text, history)
         if fast is not None:
@@ -960,39 +994,58 @@ class Assistant:
                 lang = detect_user_language(text)
             except Exception:
                 lang = "en"
-        # Language stays on the user turn. Putting it in the system prompt made
-        # every question re-read the whole prompt before the first word.
-        asked = text
-        if lang == "bn":
-            asked = text + "\n\n(Reply in বাংলা.)"
-        elif lang == "auto":
-            asked = text + "\n\n(Reply in the user's language.)"
-        # A line under the question keeps a small model on the question itself.
-        # It is not part of the cached system prompt, so the first word stays fast.
-        if _OPEN_REPLY.search(text or "") or len(text or "") > 140:
-            asked += "\n\n(Answer this directly.)"
-        system = chat_system_prompt()
-        if self._question_needs_file(text, history):
-            doc_ctx = self._recent_file_context(history)
-            if doc_ctx:
-                excerpt = doc_ctx["text"][:1200]
-                asked = f"[From {doc_ctx['name']}]\n{excerpt}\n\n{asked}"
+
+        if talk:
+            system = TALK_PROMPT
+            if lang == "bn":
+                system += "\n\nReply only in বাংলা, as spoken sentences."
+            elif lang == "en":
+                system += "\n\nReply only in spoken English."
+            else:
+                system += "\n\nReply in the same language they used, as spoken sentences."
+            system += talk_topic(text, history)
+            asked = text
+            budget = TALK_MAX_TOKENS
+            temp = TALK_TEMPERATURE
+            past = history.for_model(limit=4, chars=280, assistant_chars=160) if history is not None else []
+        else:
+            # Language stays on the user turn. Putting it in the system prompt made
+            # every question re-read the whole prompt before the first word.
+            asked = text
+            if lang == "bn":
+                asked = text + "\n\n(Reply in বাংলা.)"
+            elif lang == "auto":
+                asked = text + "\n\n(Reply in the user's language.)"
+            # A line under the question keeps a small model on the question itself.
+            # It is not part of the cached system prompt, so the first word stays fast.
+            if _OPEN_REPLY.search(text or "") or len(text or "") > 140:
+                asked += "\n\n(Answer this directly.)"
+            system = chat_system_prompt()
+            if self._question_needs_file(text, history):
+                doc_ctx = self._recent_file_context(history)
+                if doc_ctx:
+                    excerpt = doc_ctx["text"][:1200]
+                    asked = f"[From {doc_ctx['name']}]\n{excerpt}\n\n{asked}"
+            budget = reply_max_tokens(text)
+            temp = 0.2
+            past = history.for_model(limit=4, chars=400, assistant_chars=220) if history is not None else []
+
         messages = [{"role": "system", "content": system}]
-        if history is not None:
-            # Two earlier turns are enough for a follow-up and much faster to read.
-            past = history.for_model(limit=4, chars=400)
+        if past:
             # the newest user message is the one we are answering
-            if past and past[-1]["role"] == "user" and past[-1]["content"].strip() == text.strip():
+            if past[-1]["role"] == "user" and past[-1]["content"].strip() == text.strip():
                 past = past[:-1]
             messages += past
         messages.append({"role": "user", "content": asked})
-        budget = reply_max_tokens(text)
+
         try:
             if on_delta is not None:
-                answer = self.model.chat(messages, on_delta=on_delta, cancel=cancel,
-                                         max_tokens=budget, temperature=0.2)
+                answer = self.model.chat(
+                    messages, on_delta=on_delta, cancel=cancel,
+                    max_tokens=budget, temperature=temp,
+                )
             else:
-                answer = self.model.chat(messages, max_tokens=budget, temperature=0.2)
+                answer = self.model.chat(messages, max_tokens=budget, temperature=temp)
         except ModelUnavailable as exc:
             if str(exc) == MODEL_OFFLINE:
                 start_ai_service()

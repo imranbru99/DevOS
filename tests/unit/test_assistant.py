@@ -672,6 +672,7 @@ class FakeLocalModel:
 
     def chat(self, messages, **kwargs):
         self.calls.append(messages)
+        self.kwargs = kwargs
         if not self.loaded:
             raise engine.ModelUnavailable(engine.MODEL_MISSING)
         return self.reply
@@ -692,6 +693,31 @@ class TestEngine(unittest.TestCase):
             self.assertNotIn(bad, reply.text)
         self.assertIn("DevOS AI", reply.text)
         self.assertEqual(m.calls[0][0]["role"], "system")
+        self.assertEqual(m.kwargs.get("max_tokens"), 1536)
+
+    def test_talk_mode_stays_on_topic_and_answers_short(self):
+        m = FakeLocalModel("Cricket it is. Who are you following this season?")
+        ctx = tools.ToolContext(root="/nonexistent", which=lambda n: None, launcher=lambda a: True)
+        a = engine.Assistant(model=m, ctx=ctx)
+        d = tempfile.mkdtemp()
+        try:
+            hist = engine.History(os.path.join(d, "talk.json"))
+            hist.add("user", "I want to talk about cricket")
+            hist.add("assistant", "Sure, let's talk cricket.")
+            hist.add("user", "Who should I watch this season?")
+            reply = a.chat("Who should I watch this season?", hist, talk=True, reply_lang="en")
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+        self.assertIn("Cricket", reply.text)
+        self.assertEqual(m.kwargs.get("max_tokens"), engine.TALK_MAX_TOKENS)
+        self.assertGreater(m.kwargs.get("temperature"), 0.5)
+        system = m.calls[0][0]["content"]
+        self.assertIn("talking partner", system)
+        self.assertIn("cricket", system.lower())
+        self.assertNotIn("Optimizer", system)
+        roles = [msg["role"] for msg in m.calls[0]]
+        self.assertEqual(roles[0], "system")
+        self.assertEqual(roles[-1], "user")
 
     def test_model_missing_message(self):
         a = engine.Assistant(model=FakeLocalModel(loaded=False), ctx=tools.ToolContext(root="/nonexistent"))
