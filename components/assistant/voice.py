@@ -28,10 +28,12 @@ from typing import Callable, Dict, List, Optional, Tuple
 RATE = 16000
 FRAME_MS = 100
 FRAME_BYTES = RATE * 2 * FRAME_MS // 1000      # 16-bit mono
-SILENCE_STOP_S = 0.85          # end the utterance soon after the user pauses
-MAX_SECONDS = 20
+SILENCE_STOP_S = 1.15         # a breath inside a sentence must not end it
+MAX_SECONDS = 28               # one whisper window; longer than this is cut mid-word
 NO_SPEECH_TIMEOUT_S = 5
-CALL_SILENCE_STOP_S = 0.55     # pause → auto-send (no manual Send)
+CALL_SILENCE_STOP_S = 1.45     # pause → auto-send; shorter than this is a breath
+CALL_MAX_SECONDS = 28
+LONG_UTTERANCE_S = 3.5         # at this length, compare Bangla and English
 CALL_NO_SPEECH_S = 10.0        # wait for the person to start talking
 CALL_SPEECH_HOLD_S = 0.12      # brief noise blips ignored; real words kept
 CALL_NOISE_MULT = 3.8          # speech above ambient
@@ -216,6 +218,7 @@ class Recorder:
         elif call_mode:
             self.vad = VAD(
                 silence_s=CALL_SILENCE_STOP_S,
+                max_s=CALL_MAX_SECONDS,
                 no_speech_s=CALL_NO_SPEECH_S,
                 min_threshold=CALL_MIN_THRESHOLD,
                 noise_mult=CALL_NOISE_MULT,
@@ -556,7 +559,9 @@ class Transcriber:
     def transcribe(cls, pcm: bytes, path: str = None) -> str:
         audio = pcm_to_float(pcm)
         prefer = _preferred_stt_language()
-        sticky = cls.last_language if cls.last_language in LANGUAGES else ""
+        # A long sentence mis-heard in the previous language comes back as
+        # random words ("suri Ithi-Sidab"). Compare Bangla and English then.
+        long = len(pcm) >= int(LONG_UTTERANCE_S * RATE * 2)
         with cls._lock:
             model = cls.load(path)
 
@@ -566,29 +571,35 @@ class Transcriber:
                     return ""
                 return text
 
+            def _finish(text: str, lang: str) -> str:
+                cls.last_language = lang if lang in LANGUAGES else "en"
+                return text
+
+            if long:
+                text, lang = cls._pick_bn_en(
+                    model, audio, prefer=prefer if prefer in LANGUAGES else "auto")
+                return _finish(text, lang)
+
             # Forced language from Voice settings — single pass first (dual only if empty).
             if prefer in ("bn", "en"):
                 text = _one(prefer)
                 if text:
-                    cls.last_language = prefer
-                    return text
+                    return _finish(text, prefer)
                 text, lang = cls._pick_bn_en(model, audio, prefer=prefer)
-                cls.last_language = lang
-                return text
-
-            # Call / follow-up turns: reuse last language (avoids dual bn+en every time).
-            if sticky:
-                text = _one(sticky)
-                if text:
-                    cls.last_language = sticky
-                    return text
+                return _finish(text, lang)
 
             lang = cls.detect(model, audio)
-            # Tiny models often mis-label Bangla as hi/ur/as/en — dual-pass when unsure.
-            if lang in ("bn", "hi", "as", "ur", "ne") or lang not in LANGUAGES:
+            # Short Bangla stays one pass. Hindi/Urdu/Assamese labels on this
+            # model are usually Bangla, so those still compare both.
+            if lang == "bn":
+                text = _one("bn")
+                if text:
+                    lang = "bn"
+                else:
+                    text, lang = cls._pick_bn_en(model, audio, prefer="bn")
+            elif lang in ("hi", "as", "ur", "ne") or lang not in LANGUAGES:
                 text, lang = cls._pick_bn_en(model, audio, prefer="auto")
             elif lang == "en":
-                # First English pass only; dual-pass if that came up empty.
                 text = _one("en")
                 if text:
                     lang = "en"
@@ -601,8 +612,7 @@ class Transcriber:
                 lang = guess_language(text) if text else "en"
                 if lang not in LANGUAGES:
                     text, lang = cls._pick_bn_en(model, audio, prefer="auto")
-            cls.last_language = lang if lang in LANGUAGES else "en"
-        return text
+            return _finish(text, lang)
 
 
 # Words the small speech model often splits or mishears in commands.
