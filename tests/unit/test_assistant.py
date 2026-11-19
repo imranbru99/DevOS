@@ -670,7 +670,7 @@ class FakeLocalModel:
         self.loaded = loaded
         self.calls = []
 
-    def chat(self, messages):
+    def chat(self, messages, **kwargs):
         self.calls.append(messages)
         if not self.loaded:
             raise engine.ModelUnavailable(engine.MODEL_MISSING)
@@ -2257,6 +2257,43 @@ class TestMultiStepChaining(unittest.TestCase):
         self.assertIn("ready", r_how.text.lower())
         # Non-fast path goes to normal model
         self.assertIsNone(engine.fast_chat_reply("what is docker"))
+
+    def test_chat_prompt_stays_short_and_stable(self):
+        """Thinking… is the model re-reading the prompt. Keep that prompt small and identical."""
+        class Fake:
+            def __init__(self):
+                self.calls = []
+
+            def chat(self, messages, **kwargs):
+                self.calls.append((messages, kwargs))
+                return "A compiler turns source code into a program."
+
+        fake = Fake()
+        ctx = tools.ToolContext(root="/nonexistent", which=lambda n: None, launcher=lambda a: True)
+        a = engine.Assistant(model=fake, ctx=ctx)
+        a.chat("What is a compiler?", reply_lang="en")
+        a.chat("কম্পাইলার কী?", reply_lang="bn")
+        self.assertEqual(len(fake.calls), 2)
+        en_msgs, en_kw = fake.calls[0]
+        bn_msgs, bn_kw = fake.calls[1]
+        self.assertEqual(en_msgs[0]["content"], bn_msgs[0]["content"])
+        self.assertIn("Answer the question", en_msgs[0]["content"])
+        self.assertNotIn("phrase to say", en_msgs[0]["content"])
+        self.assertNotIn("[Language]", en_msgs[0]["content"])
+        self.assertNotIn("Reply in বাংলা", en_msgs[-1]["content"])
+        self.assertIn("Reply in বাংলা", bn_msgs[-1]["content"])
+        hard = "As an individual I want to leave society. So what should I do?"
+        a.chat(hard, reply_lang="en")
+        hard_msgs, hard_kw = fake.calls[2]
+        self.assertIn("Answer this directly.", hard_msgs[-1]["content"])
+        self.assertGreaterEqual(hard_kw["max_tokens"], 360)
+        self.assertEqual(hard_msgs[0]["content"], en_msgs[0]["content"])
+        self.assertLessEqual(en_kw["max_tokens"], 240)
+        self.assertGreaterEqual(
+            engine.reply_max_tokens("what should I do about the civil rights of society"), 360)
+        self.assertGreaterEqual(
+            engine.reply_max_tokens("explain the requirements in detail"), 500)
+        self.assertLess(len(en_msgs[0]["content"]), 1200)
 
     def test_modesty_filter_routing_and_execution(self):
         ctx = tools.ToolContext(root="/nonexistent", which=lambda n: None, launcher=lambda a: True)
