@@ -104,12 +104,33 @@ def split_blocks(md: str):
     return out
 
 
+def ordered_display_number(written, nxt):
+    """Pick the number to show, and the one that follows it.
+
+    ``nxt`` is None at the start of a list. A model that repeats ``1.`` for
+    every step still displays 1, 2, 3… Qt rich text cannot be trusted to count
+    ``<ol>`` items (every row was drawing as 1).
+    """
+    try:
+        written = int(written)
+    except (TypeError, ValueError):
+        written = 1
+    if written < 1:
+        written = 1
+    if nxt is None or written >= nxt:
+        num = written
+    else:
+        num = nxt
+    return num, num + 1
+
+
 def to_html(md: str, link_color: str = LINK, line_height: int = 0, gap: int = 8) -> str:
     """line_height: percent (e.g. 155) or 0 for the default; gap: px between blocks."""
     lines = (md or "").replace("\r\n", "\n").split("\n")
     out = []
     i = 0
     list_kind = None
+    ol_next = None
     para = []
     lh = f" line-height:{line_height}%;" if line_height else ""
     end = f"margin:0 0 {gap}px 0;"
@@ -125,11 +146,24 @@ def to_html(md: str, link_color: str = LINK, line_height: int = 0, gap: int = 8)
             out.append(f"</{list_kind}>")
             list_kind = None
 
+    def reset_numbers():
+        nonlocal ol_next
+        ol_next = None
+
+    def add_numbered(num, text):
+        # Real text, not <ol>. Qt draws every <ol> item as 1 once a blank
+        # line has split the list, which is how models write steps.
+        out.append(
+            f"<p style='margin:2px 0 {max(4, gap // 2)}px 0;{lh}'>"
+            f"<b>{num}.</b>&nbsp;&nbsp;{_inline(text, link_color)}</p>"
+        )
+
     while i < len(lines):
         line = lines[i]
         if line.strip().startswith("```"):
             flush_para()
             close_list()
+            reset_numbers()
             i += 1
             block = []
             while i < len(lines) and not lines[i].strip().startswith("```"):
@@ -144,26 +178,34 @@ def to_html(md: str, link_color: str = LINK, line_height: int = 0, gap: int = 8)
         if m_h:
             flush_para()
             close_list()
+            reset_numbers()
             size = {1: 17, 2: 17, 3: 15, 4: 15}[len(m_h.group(1))]
             out.append(f"<p style='margin:{gap // 2}px 0 {max(4, gap - 2)}px 0; font-size:{size}px; font-weight:600;{lh}'>"
                        f"{_inline(m_h.group(2), link_color)}</p>")
-        elif m_ul or m_ol:
+        elif m_ol:
             flush_para()
-            kind = "ul" if m_ul else "ol"
-            if list_kind != kind:
+            close_list()
+            num, ol_next = ordered_display_number(m_ol.group(1), ol_next)
+            add_numbered(num, m_ol.group(2))
+        elif m_ul:
+            flush_para()
+            if list_kind != "ul":
                 close_list()
-                out.append(f"<{kind} style='{end} -qt-list-indent:1;'>")
-                list_kind = kind
-            item = m_ul.group(1) if m_ul else m_ol.group(2)
-            out.append(f"<li style='margin-bottom:{max(3, gap // 3)}px;'>{_inline(item, link_color)}</li>")
+                indent = "30px" if ol_next else "4px"
+                out.append(f"<ul style='margin:2px 0 {gap}px {indent}; -qt-list-indent:1;'>")
+                list_kind = "ul"
+            out.append(f"<li style='margin-bottom:{max(3, gap // 3)}px;'>{_inline(m_ul.group(1), link_color)}</li>")
         elif not line.strip():
             flush_para()
             close_list()
         else:
-            if list_kind and line.startswith("  "):
+            if list_kind == "ul" and line.startswith("  "):
                 out[-1] = out[-1][:-5] + "<br>" + _inline(line.strip(), link_color) + "</li>"
+            elif ol_next and line.startswith("  ") and out and out[-1].endswith("</p>"):
+                out[-1] = out[-1][:-4] + "<br>" + _inline(line.strip(), link_color) + "</p>"
             else:
                 close_list()
+                reset_numbers()
                 para.append(line)
         i += 1
     flush_para()
