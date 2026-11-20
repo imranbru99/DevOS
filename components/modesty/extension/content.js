@@ -121,19 +121,112 @@
     setBlurred(el, false);
   }
 
+  function getVisibleBox(el) {
+    if (!el || !el.isConnected) return null;
+    const css = window.getComputedStyle(el);
+    if (css.display === 'none' || css.visibility === 'hidden' || css.visibility === 'collapse' || parseFloat(css.opacity) === 0) {
+      return null;
+    }
+    const r = el.getBoundingClientRect();
+    if (r.width < 2 || r.height < 2) return null;
+
+    const vw = window.innerWidth || document.documentElement.clientWidth || 1000;
+    const vh = window.innerHeight || document.documentElement.clientHeight || 1000;
+
+    let left = Math.max(0, r.left);
+    let top = Math.max(0, r.top);
+    let right = Math.min(vw, r.right);
+    let bottom = Math.min(vh, r.bottom);
+
+    if (right <= left || bottom <= top) return null;
+
+    let parent = el.parentElement;
+    while (parent && parent !== document.documentElement && parent !== document.body) {
+      const ps = window.getComputedStyle(parent);
+      if (ps.display === 'none' || ps.visibility === 'hidden' || parseFloat(ps.opacity) === 0) {
+        return null;
+      }
+      const overflow = (ps.overflow || '') + (ps.overflowX || '') + (ps.overflowY || '');
+      if (/(hidden|scroll|auto|clip)/.test(overflow)) {
+        const pr = parent.getBoundingClientRect();
+        left = Math.max(left, pr.left);
+        top = Math.max(top, pr.top);
+        right = Math.min(right, pr.right);
+        bottom = Math.min(bottom, pr.bottom);
+        if (right <= left || bottom <= top) return null;
+      }
+      parent = parent.parentElement;
+    }
+
+    return { r, visible: { left, top, right, bottom } };
+  }
+
+  let repositionTimer = null;
+  function startRepositionLoop() {
+    if (repositionTimer) return;
+    repositionTimer = setInterval(() => {
+      let hasOverlays = false;
+      for (const el of tracked) {
+        if (!el.isConnected) {
+          removeRender(el);
+          tracked.delete(el);
+          videos.delete(el);
+          continue;
+        }
+        const st = info.get(el);
+        if (st && st.overlay) {
+          hasOverlays = true;
+          positionMask(el, st);
+        }
+      }
+      if (!hasOverlays) {
+        clearInterval(repositionTimer);
+        repositionTimer = null;
+      }
+    }, 250);
+  }
+
   function positionMask(el, st) {
     if (!st) return;
     if (st.overlay) {
-      const r = el.getBoundingClientRect();
       const ov = st.overlay;
-      // fixed = track the on-screen image through Google Images scroll/virtualization
+      if (!el.isConnected) {
+        ov.style.display = 'none';
+        return;
+      }
+      const box = getVisibleBox(el);
+      if (!box) {
+        ov.style.display = 'none';
+        return;
+      }
+      const { r, visible } = box;
       ov.style.position = 'fixed';
       ov.style.left = `${r.left}px`;
       ov.style.top = `${r.top}px`;
       ov.style.width = `${Math.max(1, r.width)}px`;
       ov.style.height = `${Math.max(1, r.height)}px`;
-      ov.style.display = (r.width < 2 || r.height < 2 || r.bottom < 0 || r.right < 0 ||
-        r.top > innerHeight || r.left > innerWidth) ? 'none' : 'block';
+
+      const elStyle = window.getComputedStyle(el);
+      if (elStyle.borderRadius && elStyle.borderRadius !== '0px') {
+        ov.style.borderRadius = elStyle.borderRadius;
+      }
+      if (elStyle.objectFit) {
+        ov.style.objectFit = elStyle.objectFit;
+      }
+      if (elStyle.objectPosition) {
+        ov.style.objectPosition = elStyle.objectPosition;
+      }
+
+      const insetTop = Math.max(0, Math.round(visible.top - r.top));
+      const insetRight = Math.max(0, Math.round(r.right - visible.right));
+      const insetBottom = Math.max(0, Math.round(r.bottom - visible.bottom));
+      const insetLeft = Math.max(0, Math.round(visible.left - r.left));
+      if (insetTop > 0 || insetRight > 0 || insetBottom > 0 || insetLeft > 0) {
+        ov.style.clipPath = `inset(${insetTop}px ${insetRight}px ${insetBottom}px ${insetLeft}px)`;
+      } else {
+        ov.style.clipPath = 'none';
+      }
+      ov.style.display = 'block';
       return;
     }
     if (!st.filterImage) return;
@@ -195,20 +288,24 @@
     overlay.setAttribute('data-dm-internal', '');
     overlay.setAttribute('aria-hidden', 'true');
     overlay.draggable = false;
+    const computed = window.getComputedStyle(el);
     overlay.style.cssText = [
-      'position:absolute',
+      'position:fixed',
       'margin:0',
       'padding:0',
       'border:0',
       'pointer-events:none',
       'z-index:2147483646',
-      'object-fit:fill',
+      `object-fit:${computed.objectFit || 'fill'}`,
+      `object-position:${computed.objectPosition || 'center'}`,
+      `border-radius:${computed.borderRadius || '0px'}`,
       'image-rendering:auto',
     ].join(';');
     document.documentElement.appendChild(overlay);
     st.overlay = overlay;
     positionMask(el, st);
     resize.observe(el);
+    startRepositionLoop();
     setBlurred(el, true);
   }
 
@@ -373,7 +470,9 @@
     if (!settings.enabled || document.hidden) return;
     for (const v of videos) {
       if (!v.isConnected) { videos.delete(v); continue; }
-      if (v.paused || v.ended || v.readyState < 2) continue;
+      if (v.ended || v.readyState < 2) continue;
+      const st = info.get(v);
+      if (v.paused && st && st.result) continue;
       const r = v.getBoundingClientRect();
       if (r.bottom < 0 || r.right < 0 || r.top > innerHeight || r.left > innerWidth) continue;
       sampleVideo(v);
@@ -478,6 +577,17 @@
     for (const rec of records) {
       if (rec.type === 'childList') {
         for (const node of rec.addedNodes) if (node.nodeType === 1) scanTree(node);
+        for (const node of rec.removedNodes) {
+          if (node.nodeType === 1) {
+            if (tracked.has(node)) { removeRender(node); tracked.delete(node); videos.delete(node); }
+            if (node.querySelectorAll) {
+              const nested = node.querySelectorAll('[data-dm], [data-dm-bg], video, img');
+              for (const n of nested) {
+                if (tracked.has(n)) { removeRender(n); tracked.delete(n); videos.delete(n); }
+              }
+            }
+          }
+        }
       } else if (rec.type === 'attributes') {
         const el = rec.target;
         if (el.tagName === 'IMG' && (rec.attributeName === 'src' || rec.attributeName === 'srcset')) {

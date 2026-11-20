@@ -161,10 +161,10 @@ function hasSkinTone(img, b) {
       if (lum > 245) whitePixels++;
       if (isSkinPixel(r, g, b)) skin++;
     }
-    // Real face cannot be >75% pure dark hardware/black plastic or pure white background
-    if (darkPixels / total > 0.75 || whitePixels / total > 0.75) return false;
-    // Genuine face requires meaningful skin pixel coverage (lowered for darker tones)
-    return (skin / total) >= 0.14;
+    // Real face cannot be >85% pure dark hardware/black plastic or pure white background
+    if (darkPixels / total > 0.85 || whitePixels / total > 0.85) return false;
+    // Genuine face requires meaningful skin pixel coverage (lowered for darker tones, lighting, accessories/overlays)
+    return (skin / total) >= 0.07;
   } catch (e) {
     return false;
   }
@@ -289,11 +289,11 @@ function detect(dataUrl) {
     const faces = mergeFaces(found);
 
     // 3. Fast exit for BodyPix:
-    // If no adult female face is possible (gender != female or low probability)
-    // AND the overall image skin ratio is low (<10%), no headless torso/swimwear crop
-    // can trigger the 15% skin threshold. BodyPix can be safely skipped!
+    // If no human face is detected AND the overall image skin ratio is negligible (<2%),
+    // the image is pure scenery/hardware/text/product without human figures. BodyPix can be safely skipped.
     const hasPossibleWomanFace = faces.some((f) => f.gender === 'female' && f.genderProbability >= 0.55);
-    if (!hasPossibleWomanFace && imageSkin.ratio < 0.10) {
+    const hasAnyFace = faces.length > 0;
+    if (!hasPossibleWomanFace && !hasAnyFace && imageSkin.ratio < 0.02) {
       return { ok: true, backend, width: nw, height: nh, faces, people: [] };
     }
 
