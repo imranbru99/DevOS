@@ -191,8 +191,8 @@ done
 mkdir -p /var/lib/DevOS
 printf 'ok\n' > /var/lib/DevOS/install-finalize.ok
 plasma_session=""
-for s in /usr/share/xsessions/plasma.desktop /usr/share/xsessions/plasmax11.desktop \
-         /usr/share/wayland-sessions/plasma.desktop; do
+for s in /usr/share/wayland-sessions/plasma.desktop /usr/share/wayland-sessions/plasmawayland.desktop \
+         /usr/share/xsessions/plasma.desktop /usr/share/xsessions/plasmax11.desktop; do
     if [ -f "$s" ]; then plasma_session="$s"; break; fi
 done
 if [ -n "$plasma_session" ]; then
