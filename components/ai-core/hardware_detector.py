@@ -202,9 +202,13 @@ class HardwareDetector:
         if backend in ("cuda", "rocm") and vram_gb >= 6.0:
             catalog = dict(cls.MODEL_CATALOG_GPU)
             catalog["gpu_layers"] = 33 if vram_gb < 12 else 48
+        elif backend in ("cuda", "rocm") and vram_gb >= 3.0:
+            catalog["gpu_layers"] = 28
         elif backend == "vulkan" and vram_gb >= 8.0:
             catalog = dict(cls.MODEL_CATALOG_GPU)
             catalog["gpu_layers"] = 24
+        elif backend == "vulkan" and vram_gb >= 4.0:
+            catalog["gpu_layers"] = 16
         else:
             catalog["gpu_layers"] = 0
 

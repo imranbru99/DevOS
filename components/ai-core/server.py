@@ -152,7 +152,8 @@ AGENT_ENDURANCE_IDLE_SECONDS = 14400
 def agent_endurance_active() -> bool:
     """True while DevOS Agent Endurance is keeping a long coding run alive."""
     try:
-        base = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+        uid = getattr(os, "getuid", lambda: 1000)()
+        base = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{uid}"
         marker = os.path.join(base, "devos", "agent-endurance.json")
         with open(marker, encoding="utf-8") as handle:
             data = json.load(handle)
@@ -246,12 +247,11 @@ def thread_plan(logical: int, physical: int, parallel: int) -> Tuple[int, int]:
     """
     logical = max(1, logical)
     physical = max(1, min(physical, logical))
-    slots = max(1, parallel)
-    # Leave one logical CPU available on PCs with more than two threads, and
-    # share the remaining default budget across simultaneous model slots.
-    budget = max(1, (logical - 1 if logical > 2 else logical) // slots)
-    gen = min(12, physical, budget)
-    batch = budget
+    # Generation: use all physical performance cores (up to 8, past which memory bandwidth limits scaling).
+    gen = min(8, physical)
+    # Prompt batch processing is compute-heavy GEMM: scales across all available threads.
+    # Leave 1 thread for OS desktop UI if logical > 2 so desktop stays responsive.
+    batch = max(gen, logical - 1 if logical > 2 else logical)
     gen = max(1, min(_int_env("DEVOS_AI_THREADS", gen), logical))
     batch = max(gen, min(_int_env("DEVOS_AI_BATCH_THREADS", batch), logical))
     return gen, batch
@@ -277,7 +277,7 @@ def llama_speed_kwargs(kind: str, ram_gb: float, parallel: int, gpu_layers: int,
         ctx = 2048
     else:
         ctx = 4096
-    n_batch = 2048 if batch >= 16 and ram_gb >= 16 else (1024 if batch >= 8 and ram_gb >= 8 else 512)
+    n_batch = 2048 if batch >= 16 and ram_gb >= 16 else (1024 if batch >= 6 and ram_gb >= 7.5 else 512)
     n_batch = min(n_batch, ctx)
     kwargs = {
         "n_ctx": ctx,
@@ -446,6 +446,8 @@ def sampling_kwargs(req: Optional[Dict[str, Any]]) -> Dict[str, Any]:
             opts["top_k"] = max(0, min(200, int(req["top_k"])))
         except (TypeError, ValueError):
             pass
+    else:
+        opts["top_k"] = 40
     stop = req.get("stop")
     if isinstance(stop, str) and stop:
         opts["stop"] = [stop[:200]]
@@ -486,8 +488,8 @@ class _CpuBoost:
         return found
 
     def enter(self):
-        # Respect the user's power profile unless boosting was explicitly enabled.
-        if os.environ.get("DEVOS_AI_CPU_BOOST", "0") != "1":
+        # Boost CPU frequency to performance mode during model inference for snappy replies.
+        if os.environ.get("DEVOS_AI_CPU_BOOST", "1").strip().lower() in ("0", "no", "off", "false"):
             return
         with self._lock:
             self._depth += 1
@@ -655,7 +657,7 @@ class DevOSAIEngine:
         backend = (gpu.get("backend") or "").lower()
         vram = float(gpu.get("vram_gb") or 0.0)
         # Skip iGPU vulkan with unknown/0 VRAM — offloading there slows chat.
-        if backend in ("cuda", "rocm") and vram >= 4.0:
+        if backend in ("cuda", "rocm") and vram >= 3.0:
             pass
         elif backend == "vulkan" and vram >= 8.0:
             pass
@@ -931,7 +933,9 @@ class DevOSAIEngine:
             # new question has to be read; on a 2-core PC that saved seconds.
             try:
                 from llama_cpp import LlamaRAMCache
-                slot.llm.set_cache(LlamaRAMCache(capacity_bytes=(128 if kind == "code" else 64) << 20))
+                ram_gb = float(self.tier_info.get("ram_gb") or 4)
+                cache_mb = 256 if kind == "code" else (128 if ram_gb >= 7.5 else 64)
+                slot.llm.set_cache(LlamaRAMCache(capacity_bytes=cache_mb << 20))
             except Exception as exc:
                 sys.stderr.write(f"[ai-core] prompt cache unavailable: {exc}\n")
             self._model_file = path

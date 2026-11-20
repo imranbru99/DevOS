@@ -220,7 +220,7 @@ def stream_preview(text: str) -> str:
     if cut > 0:
         return scrub(text[:cut])
     raw = (text or "").strip()
-    if len(raw) >= 3:
+    if len(raw) >= 1:
         return scrub(raw)
     return ""
 
