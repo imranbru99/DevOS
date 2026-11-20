@@ -17,7 +17,13 @@ let personModel = null;
 async function init() {
   const tf = faceapi.tf;
   let ok = false;
-  try { ok = await tf.setBackend('webgl'); } catch (e) { ok = false; }
+  try {
+    if (tf.env) {
+      try { tf.env().set('WEBGL_PACK', true); } catch (e) {}
+      try { tf.env().set('WEBGL_FORCE_F16_TEXTURES', true); } catch (e) {}
+    }
+    ok = await tf.setBackend('webgl');
+  } catch (e) { ok = false; }
   if (ok) {
     try { await tf.ready(); } catch (e) { ok = false; }
   }
@@ -97,6 +103,37 @@ function isSkinPixel(r, g, b) {
   return false;
 }
 
+let scratchCanvas = null;
+let scratchCtx = null;
+function getScratchCtx(w, h) {
+  if (!scratchCanvas) {
+    scratchCanvas = document.createElement('canvas');
+    scratchCtx = scratchCanvas.getContext('2d', { willReadFrequently: true });
+  }
+  if (scratchCanvas.width !== w || scratchCanvas.height !== h) {
+    scratchCanvas.width = w;
+    scratchCanvas.height = h;
+  }
+  return scratchCtx;
+}
+
+// Sample whole-image skin tones to allow instant early exit on images without people
+function sampleImageSkin(img) {
+  try {
+    const ctx = getScratchCtx(48, 48);
+    ctx.drawImage(img, 0, 0, 48, 48);
+    const data = ctx.getImageData(0, 0, 48, 48).data;
+    let skin = 0;
+    const total = 48 * 48;
+    for (let i = 0; i < data.length; i += 4) {
+      if (isSkinPixel(data[i], data[i + 1], data[i + 2])) skin++;
+    }
+    return { data: new Uint8ClampedArray(data), ratio: skin / total };
+  } catch (e) {
+    return { data: null, ratio: 0.1 };
+  }
+}
+
 // Check whether a detected face box contains genuine human skin tones.
 // Text, banners, hardware devices, and graphics have high contrast but almost 0% skin-tone pixels.
 function hasSkinTone(img, b) {
@@ -109,9 +146,7 @@ function hasSkinTone(img, b) {
     const ratio = bw / bh;
     if (ratio < 0.4 || ratio > 2.4) return false;
 
-    const c = document.createElement('canvas');
-    c.width = 32; c.height = 32;
-    const ctx = c.getContext('2d');
+    const ctx = getScratchCtx(32, 32);
     ctx.drawImage(img, bx, by, bw, bh, 0, 0, 32, 32);
     const data = ctx.getImageData(0, 0, 32, 32).data;
 
@@ -174,15 +209,11 @@ function hasAnatomicalBody(pose) {
   return true;
 }
 
-function segmentSkinRatio(img, segment) {
+function segmentSkinRatio(segment, preSampledData) {
   try {
     const w = segment.width, h = segment.height;
     if (w <= 0 || h <= 0) return 0;
-    const c = document.createElement('canvas');
-    c.width = 48; c.height = 48;
-    const ctx = c.getContext('2d');
-    ctx.drawImage(img, 0, 0, 48, 48);
-    const data = ctx.getImageData(0, 0, 48, 48).data;
+    if (!preSampledData) return 0.1;
 
     let skin = 0;
     let sampled = 0;
@@ -195,7 +226,7 @@ function segmentSkinRatio(img, segment) {
         if (segment.data[sy * w + sx]) {
           sampled++;
           const idx = (cy * 48 + cx) * 4;
-          const r = data[idx], g = data[idx + 1], b = data[idx + 2];
+          const r = preSampledData[idx], g = preSampledData[idx + 1], b = preSampledData[idx + 2];
           if (isSkinPixel(r, g, b)) skin++;
         }
       }
@@ -209,7 +240,8 @@ function segmentSkinRatio(img, segment) {
 
 function segmentHasSkin(img, segment) {
   // Real adult body / face / limbs: at least a little visible skin.
-  return segmentSkinRatio(img, segment) >= 0.04;
+  const { data } = sampleImageSkin(img);
+  return segmentSkinRatio(segment, data) >= 0.04;
 }
 
 let queue = Promise.resolve();
@@ -217,8 +249,23 @@ function detect(dataUrl) {
   const job = queue.then(async () => {
     await ready();
     const img = await loadImage(dataUrl);
+    const nw = img.naturalWidth || img.width || 0;
+    const nh = img.naturalHeight || img.height || 0;
+    const maxSide = Math.max(nw, nh);
+
+    // 1. Ultra-fast skin pre-check (takes ~0.1ms).
+    // If the entire image has virtually zero skin (<0.8%), no human body or face can be present.
+    const imageSkin = sampleImageSkin(img);
+    if (imageSkin.ratio < 0.008) {
+      return { ok: true, backend, width: nw, height: nh, faces: [], people: [] };
+    }
+
+    // 2. Adaptive scale face detection:
+    // 416 is the primary sweet spot for TinyFaceDetector.
+    // Smaller images (<448px) don't need 608 upscaling.
     const found = [];
-    for (const inputSize of DETECT_INPUTS) {
+    const scales = maxSide < 448 ? [224, 416] : [416, 224];
+    for (const inputSize of scales) {
       const opts = new faceapi.TinyFaceDetectorOptions({ inputSize, scoreThreshold: DETECT_MIN_SCORE });
       for (const f of await faceapi.detectAllFaces(img, opts).withAgeAndGender()) {
         if (hasSkinTone(img, f.detection.box)) {
@@ -226,14 +273,45 @@ function detect(dataUrl) {
         }
       }
     }
+
+    // Only run 608 on large images if no confident face was found on primary scales
+    if (maxSide >= 448) {
+      const hasConfidentFace = found.some((f) => f.score >= 0.65);
+      if (!hasConfidentFace) {
+        const opts608 = new faceapi.TinyFaceDetectorOptions({ inputSize: 608, scoreThreshold: DETECT_MIN_SCORE });
+        for (const f of await faceapi.detectAllFaces(img, opts608).withAgeAndGender()) {
+          if (hasSkinTone(img, f.detection.box)) {
+            found.push(toFace(f));
+          }
+        }
+      }
+    }
     const faces = mergeFaces(found);
-    // Lower BodyPix gates so real adult bodies (side/crop/partial) still segment.
-    const segments = await personModel.segmentMultiPerson(img, { internalResolution: 'medium',
-      segmentationThreshold: 0.60, maxDetections: 8, scoreThreshold: 0.40, minKeypointScore: 0.28 });
+
+    // 3. Fast exit for BodyPix:
+    // If no adult female face is possible (gender != female or low probability)
+    // AND the overall image skin ratio is low (<10%), no headless torso/swimwear crop
+    // can trigger the 15% skin threshold. BodyPix can be safely skipped!
+    const hasPossibleWomanFace = faces.some((f) => f.gender === 'female' && f.genderProbability >= 0.55);
+    if (!hasPossibleWomanFace && imageSkin.ratio < 0.10) {
+      return { ok: true, backend, width: nw, height: nh, faces, people: [] };
+    }
+
+    // 4. Person segmentation with BodyPix:
+    // Use refineSteps: 4 to dramatically accelerate pose keypoint refinement.
+    const segments = await personModel.segmentMultiPerson(img, {
+      internalResolution: 'medium',
+      segmentationThreshold: 0.60,
+      maxDetections: 6,
+      scoreThreshold: 0.40,
+      minKeypointScore: 0.28,
+      refineSteps: 4
+    });
+
     const used = new Set();
     const people = segments
       .filter((segment) => {
-        const skin = segmentSkinRatio(img, segment);
+        const skin = segmentSkinRatio(segment, imageSkin.data);
         if (skin < 0.04) return false;
         // Full / partial anatomical pose, or a skin-heavy torso crop (midriff).
         if (hasAnatomicalBody(segment.pose)) return true;
@@ -246,23 +324,37 @@ function detect(dataUrl) {
         // Geometric fallback when nose/eyes are weak but a face sits above the torso.
         if (faceIndex < 0) faceIndex = ModestyRules.matchFaceByTorso(segment.pose, faces, used);
         if (faceIndex >= 0) used.add(faceIndex);
-        const skinRatio = +segmentSkinRatio(img, segment).toFixed(3);
+        const skinRatio = +segmentSkinRatio(segment, imageSkin.data).toFixed(3);
         const shoulders = (segment.pose.keypoints || []).filter((k) => /Shoulder$/.test(k.part) && k.score >= 0.20);
         const torsoY = shoulders.length
           ? shoulders.reduce((a, p) => a + p.position.y, 0) / shoulders.length
           : null;
+
+        // Fast 32-bit pixel assignment for mask
         const mask = document.createElement('canvas');
         mask.width = segment.width; mask.height = segment.height;
         const ctx = mask.getContext('2d');
         const pixels = ctx.createImageData(mask.width, mask.height);
-        for (let i = 0; i < segment.data.length; i++) pixels.data[i * 4 + 3] = segment.data[i] ? 255 : 0;
+        const data32 = new Uint32Array(pixels.data.buffer);
+        const segData = segment.data;
+        for (let i = 0; i < segData.length; i++) {
+          if (segData[i]) data32[i] = 0xff000000;
+        }
         ctx.putImageData(pixels, 0, 0);
-        const layer = document.createElement('canvas'); layer.width = mask.width; layer.height = mask.height;
-        const lc = layer.getContext('2d'); lc.filter = 'blur(22px)'; lc.drawImage(img, 0, 0, layer.width, layer.height);
-        lc.filter = 'none'; lc.globalCompositeOperation = 'destination-in'; lc.drawImage(mask, 0, 0);
-        return { faceIndex, skinRatio, torsoY, mask: mask.toDataURL('image/png'), blurLayer: layer.toDataURL('image/png') };
+
+        const layer = document.createElement('canvas');
+        layer.width = mask.width; layer.height = mask.height;
+        const lc = layer.getContext('2d');
+        lc.filter = 'blur(22px)';
+        lc.drawImage(img, 0, 0, layer.width, layer.height);
+        lc.filter = 'none';
+        lc.globalCompositeOperation = 'destination-in';
+        lc.drawImage(mask, 0, 0);
+
+        const blurUrl = layer.toDataURL('image/png');
+        return { faceIndex, skinRatio, torsoY, mask: blurUrl, blurLayer: blurUrl };
       });
-    return { ok: true, backend, width: img.naturalWidth, height: img.naturalHeight, faces, people };
+    return { ok: true, backend, width: nw, height: nh, faces, people };
   });
   queue = job.catch(() => {});
   return job;

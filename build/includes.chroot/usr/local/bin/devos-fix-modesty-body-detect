@@ -2,7 +2,7 @@
 # Re-enable DevOS Modesty filter (v1.2.1+): blur high-skin body crops too.
 set -euo pipefail
 
-BRANCH="${1:-cursor/fix-modesty-body-detect-6cbe}"
+BRANCH="${1:-main}"
 RAW="https://raw.githubusercontent.com/imranbru99/DevOS/${BRANCH}"
 DEST_DIR=/usr/local/share/devos/components/modesty
 TMP="$(mktemp -d)"

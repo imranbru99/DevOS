@@ -258,7 +258,36 @@
   function isSvgUrl(u) { return /^data:image\/svg/i.test(u) || /\.svg(\?|#|$)/i.test(u); }
 
   // ------------------------------------------------------------ <img>
+  const nearViewportObserver = typeof IntersectionObserver !== 'undefined' ? new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (entry.isIntersecting) {
+        nearViewportObserver.unobserve(entry.target);
+        doProcessImg(entry.target);
+      }
+    }
+  }, { rootMargin: '600px 0px 600px 0px' }) : null;
+
+  function isNearViewport(el) {
+    try {
+      const r = el.getBoundingClientRect();
+      const vh = window.innerHeight || 800;
+      const vw = window.innerWidth || 1200;
+      return r.bottom >= -600 && r.top <= vh + 600 && r.right >= -600 && r.left <= vw + 600;
+    } catch (e) {
+      return true;
+    }
+  }
+
   function processImg(img) {
+    if (!settings.enabled) return;
+    if (isNearViewport(img) || !nearViewportObserver) {
+      doProcessImg(img);
+    } else {
+      nearViewportObserver.observe(img);
+    }
+  }
+
+  function doProcessImg(img) {
     if (!settings.enabled) return;
     const key = img.currentSrc || img.src || '';
     const st = info.get(img) || {};

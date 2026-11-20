@@ -129,7 +129,7 @@ async function blobToSmallDataUrl(blob) {
   ctx.fillRect(0, 0, w, h);
   ctx.drawImage(bmp, 0, 0, w, h);
   bmp.close();
-  const out = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.9 });
+  const out = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.82 });
   return { dataUrl: 'data:image/jpeg;base64,' + bytesToBase64(new Uint8Array(await out.arrayBuffer())), width: srcW, height: srcH };
 }
 
@@ -144,9 +144,9 @@ async function fetchImage(url) {
 
 function detectUrl(url) {
   if (resultCache.has(url)) return resultCache.get(url);
-  const p = withFetchSlot(async () => {
+  const p = (async () => {
     try {
-      const blob = await fetchImage(url);
+      const blob = await withFetchSlot(() => fetchImage(url));
       const small = await blobToSmallDataUrl(blob);
       const res = await detectInOffscreen(small.dataUrl);
       if (!res.ok) resultCache.delete(url);   // retry later instead of caching a failure
@@ -155,7 +155,7 @@ function detectUrl(url) {
       resultCache.delete(url);
       return { ok: false, error: String(e && e.message || e) };
     }
-  });
+  })();
   resultCache.set(url, p);
   if (resultCache.size > CACHE_LIMIT) resultCache.delete(resultCache.keys().next().value);
   return p;
