@@ -83,47 +83,54 @@
    * Returns {blur: bool, reason: string}.
    */
   function isAdultWomanFace(face, s) {
-    return face && Number(face.score) >= s.faceScore &&
-      Number.isFinite(face.age) && face.age >= s.adultAge &&
-      Math.min(Number(face.w) || 0, Number(face.h) || 0) >= s.uncertainFacePx &&
-      femaleProbability(face) >= Math.max(0.65, s.femaleThreshold);
+    if (!face || Number(face.score) < s.faceScore) return false;
+    const size = Math.min(Number(face.w) || 0, Number(face.h) || 0);
+    if (size < s.uncertainFacePx) return false;
+    if (face.bearded === true) return false;
+    const age = Number(face.age);
+    const adult = Number.isFinite(age) && age >= s.adultAge;
+    const p = femaleProbability(face);
+    if (adult && p >= Math.max(0.65, s.femaleThreshold)) return true;
+    // A hijab often makes the gender net say "male". Covered hair and neck,
+    // with no beard, is still an adult woman.
+    if (adult && face.headCovered === true) return true;
+    // On a face under ~48px the age net is not evidence of childhood: the
+    // Facebook frame that started this measured an adult woman as age 9.
+    // A long dark garment under a female-leaning score is an adult figure.
+    // A close-up child has a larger face, so that age reading still wins.
+    if (size < 48 && face.clothedAdult === true && p >= 0.52 && Number(face.score) >= 0.55) return true;
+    return false;
   }
 
+  function fullImage(result) {
+    if (!result || !result.fullBlur) return [];
+    return [{ full: true, faceIndex: -1, mask: result.fullBlur, blurLayer: result.fullBlur }];
+  }
+
+  function realFace(face, s) {
+    return face && Number(face.score) >= s.faceScore &&
+      Math.min(Number(face.w) || 0, Number(face.h) || 0) >= s.uncertainFacePx;
+  }
+
+  /*
+   * Women mode: one girl anywhere in the photo blurs that whole photo.
+   * A photo with no girl stays completely clear, including men, scenery,
+   * and skin with no female face. People mode blurs the whole photo when
+   * any real face is present.
+   */
   function decide(result, settings) {
     const s = Object.assign({}, DEFAULTS, settings || {});
     if (!s.enabled) return { blur: false, reason: 'disabled', regions: [] };
     if (!result || !result.ok) return { blur: false, reason: 'not-checked', regions: [] };
     const faces = result.faces || [];
-    const adultWomen = faces
-      .map((face, index) => ({ face, index }))
-      .filter((row) => isAdultWomanFace(row.face, s));
-    const regions = (result.people || []).filter((person) => {
-      if (!person.mask || !person.blurLayer) return false;
-      if (s.mode === 'people') return true;
-      // Preferred path: body matched to an adult woman face.
-      if (isAdultWomanFace(faces[person.faceIndex], s)) return true;
-      const skin = Number(person.skinRatio) || 0;
-      // Real photo crops often lose nose/eye anchors. If this body shows
-      // substantial skin and an adult woman face is in the same image above
-      // the torso, still blur that body (not the whole image).
-      if (skin >= s.bodySkinRatio && adultWomen.length > 0) {
-        const matched = adultWomen.some((row) => {
-          const f = row.face;
-          const faceMidY = f.y + f.h * 0.5;
-          // Face should sit in the upper portion of a standing/sitting figure.
-          return faceMidY <= (Number(person.torsoY) || Infinity) || faceMidY < (result.height || 1) * 0.55;
-        });
-        if (matched) return true;
-      }
-      // Image-search midriff / torso / lingerie crops often have no face at
-      // all. High visible-skin body masks still get blurred in women mode.
-      if (skin >= s.bodySkinOnlyRatio) return true;
-      return false;
-    });
-    const reason = regions.length
-      ? (s.mode === 'people' ? 'person' : 'adult-woman')
-      : 'no-target-body';
-    return { blur: regions.length > 0, reason, regions };
+    const girl = faces.some((face) => isAdultWomanFace(face, s));
+    if (s.mode === 'people' && faces.some((face) => realFace(face, s))) {
+      const regions = fullImage(result);
+      return { blur: regions.length > 0, reason: regions.length ? 'person' : 'no-girl', regions };
+    }
+    if (!girl) return { blur: false, reason: 'no-girl', regions: [] };
+    const regions = fullImage(result);
+    return { blur: regions.length > 0, reason: regions.length ? 'girl' : 'no-girl', regions };
   }
 
   function matchFace(pose, faces, used) {
@@ -207,5 +214,5 @@
     return false;
   }
 
-  root.ModestyRules = { MODES, DEFAULTS, effectiveSettings, decide, femaleProbability, isIconSized, stricterMode, matchFace, matchFaceByTorso, fitBox, cssLayers };
+  root.ModestyRules = { MODES, DEFAULTS, effectiveSettings, decide, isAdultWomanFace, femaleProbability, isIconSized, stricterMode, matchFace, matchFaceByTorso, fitBox, cssLayers };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

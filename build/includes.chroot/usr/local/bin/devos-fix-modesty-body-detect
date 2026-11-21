@@ -30,7 +30,11 @@ curl -fsSL "${RAW}/components/modesty/extension/background.js" -o "${TMP}/backgr
 grep -q 'bodySkinOnlyRatio' "${TMP}/rules.js"
 grep -q 'openSettings' "${TMP}/popup.html"
 grep -q 'monthlyBlurred' "${TMP}/background.js"
-grep -q '"version": "1.2.2"' "${TMP}/manifest.json" || grep -q '"1.2.2"' "${TMP}/manifest.json"
+curl -fsSL "${RAW}/components/modesty/extension/offscreen.html" -o "${TMP}/offscreen.html"
+curl -fsSL "${RAW}/components/modesty/extension/vision-host.html" -o "${TMP}/vision-host.html"
+grep -q 'PoseLandmarker' "${TMP}/vision-host.html"
+grep -q 'dm-face' "${TMP}/offscreen.html"
+grep -q '"version": "1.3.1"' "${TMP}/manifest.json"
 sudo install -m 0644 "${TMP}/manifest.json" "${DEST_DIR}/extension/manifest.json"
 sudo install -m 0644 "${TMP}/rules.js" "${DEST_DIR}/extension/rules.js"
 sudo install -m 0644 "${TMP}/content.js" "${DEST_DIR}/extension/content.js"
@@ -40,7 +44,23 @@ sudo install -m 0644 "${TMP}/popup.html" "${DEST_DIR}/extension/popup.html"
 sudo install -m 0644 "${TMP}/popup.css" "${DEST_DIR}/extension/popup.css"
 sudo install -m 0644 "${TMP}/popup.js" "${DEST_DIR}/extension/popup.js"
 sudo install -m 0644 "${TMP}/background.js" "${DEST_DIR}/extension/background.js"
-echo "  ✔ extension UI + detector (1.2.2)"
+sudo install -m 0644 "${TMP}/offscreen.html" "${DEST_DIR}/extension/offscreen.html"
+sudo install -m 0644 "${TMP}/vision-host.html" "${DEST_DIR}/extension/vision-host.html"
+echo "  ✔ extension UI + detector (1.3.1)"
+
+mkdir -p "${TMP}/vendor/mediapipe/wasm" "${TMP}/models"
+for rel in \
+  vendor/mediapipe/LICENSE \
+  vendor/mediapipe/vision_bundle.mjs \
+  vendor/mediapipe/wasm/vision_wasm_internal.js \
+  vendor/mediapipe/wasm/vision_wasm_internal.wasm \
+  models/pose_landmarker_lite.task \
+  models/blaze_face_short_range.tflite
+do
+  curl -fsSL "${RAW}/components/modesty/extension/${rel}" -o "${TMP}/${rel}"
+  sudo install -D -m 0644 "${TMP}/${rel}" "${DEST_DIR}/extension/${rel}"
+  echo "  ✔ ${rel}"
+done
 
 # Ensure CLI wrappers exist
 for wrap in /usr/local/bin/devos-modesty /usr/local/sbin/devos-modesty; do
@@ -51,9 +71,8 @@ exec /usr/bin/python3 ${DEST_DIR}/modesty.py \"\$@\"" | sudo tee "$wrap" >/dev/n
   fi
 done
 
-if [[ ! -f "${DEST_DIR}/extension/models/body-pix/model.json" ]]; then
-  echo "ERROR: Modesty ML models missing under ${DEST_DIR}/extension/models/"
-  echo "Install/turn on Modesty once from DevOS Features (Islamic/Family), then rerun."
+if [[ ! -f "${DEST_DIR}/extension/models/pose_landmarker_lite.task" ]]; then
+  echo "ERROR: pose model missing under ${DEST_DIR}/extension/models/"
   exit 1
 fi
 
@@ -84,5 +103,5 @@ echo "Toolbar should show a pinned Modesty icon. Open google.com/imghp,"
 echo "search again — midriff / body crops should blur within a few seconds."
 echo
 echo "Check: chrome://policy  → ExtensionSettings should list DevOS Modesty"
-echo "Check: chrome://extensions → DevOS Modesty Filter enabled (1.2.2)"
+echo "Check: chrome://extensions → DevOS Modesty Filter enabled (1.3.1)"
 echo "Popup: main view has no counts; Settings shows this month + history."
