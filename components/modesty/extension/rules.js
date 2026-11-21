@@ -83,10 +83,30 @@
    * Returns {blur: bool, reason: string}.
    */
   function isAdultWomanFace(face, s) {
-    return face && Number(face.score) >= s.faceScore &&
-      Number.isFinite(face.age) && face.age >= s.adultAge &&
-      Math.min(Number(face.w) || 0, Number(face.h) || 0) >= s.uncertainFacePx &&
-      femaleProbability(face) >= Math.max(0.65, s.femaleThreshold);
+    if (!face || Number(face.score) < s.faceScore) return false;
+    const size = Math.min(Number(face.w) || 0, Number(face.h) || 0);
+    if (size < s.uncertainFacePx) return false;
+    if (face.bearded === true) return false;
+    const age = Number(face.age);
+    const adult = Number.isFinite(age) && age >= s.adultAge;
+    const p = femaleProbability(face);
+    if (adult && p >= Math.max(0.65, s.femaleThreshold)) return true;
+    // A hijab often makes the gender net say "male". Covered hair and neck,
+    // with no beard, is still an adult woman.
+    if (adult && face.headCovered === true) return true;
+    // On a face under ~48px the age net is not evidence of childhood: the
+    // Facebook frame that started this measured an adult woman as age 9.
+    // A long dark garment under a female-leaning score is an adult figure.
+    // A close-up child has a larger face, so that age reading still wins.
+    if (size < 48 && face.clothedAdult === true && p >= 0.52 && Number(face.score) >= 0.55) return true;
+    return false;
+  }
+
+  function faceNearBody(face, person) {
+    if (!Number.isFinite(person.cx)) return true;
+    const faceCx = Number(face.x) + (Number(face.w) || 0) / 2;
+    const bw = Math.max(Number(person.bw) || 0, Number(face.w) || 0, 40);
+    return Math.abs(faceCx - person.cx) <= bw * 0.75;
   }
 
   function decide(result, settings) {
@@ -100,17 +120,19 @@
     const regions = (result.people || []).filter((person) => {
       if (!person.mask || !person.blurLayer) return false;
       if (s.mode === 'people') return true;
-      // Preferred path: body matched to an adult woman face.
-      if (isAdultWomanFace(faces[person.faceIndex], s)) return true;
+      const linked = faces[person.faceIndex];
+      // A body tied to a face that is not an adult woman stays clear, even
+      // when that body shows a lot of skin (a man standing beside her).
+      if (person.faceIndex >= 0 && linked) return isAdultWomanFace(linked, s);
       const skin = Number(person.skinRatio) || 0;
       // Real photo crops often lose nose/eye anchors. If this body shows
-      // substantial skin and an adult woman face is in the same image above
-      // the torso, still blur that body (not the whole image).
+      // substantial skin and an adult woman face sits on this body, still
+      // blur that body (not the whole image, and not the person beside her).
       if (skin >= s.bodySkinRatio && adultWomen.length > 0) {
         const matched = adultWomen.some((row) => {
           const f = row.face;
+          if (!faceNearBody(f, person)) return false;
           const faceMidY = f.y + f.h * 0.5;
-          // Face should sit in the upper portion of a standing/sitting figure.
           return faceMidY <= (Number(person.torsoY) || Infinity) || faceMidY < (result.height || 1) * 0.55;
         });
         if (matched) return true;

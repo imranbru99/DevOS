@@ -1,0 +1,169 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>DevOS Modesty vision</title>
+<body>
+<script type="module">
+import { FaceDetector, FilesetResolver, PoseLandmarker } from './vendor/mediapipe/vision_bundle.mjs';
+
+const task = new URLSearchParams(location.search).get('task');
+const asset = (path) => (globalThis.chrome && chrome.runtime && chrome.runtime.getURL)
+  ? chrome.runtime.getURL(path)
+  : new URL(path, location.href).href;
+
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(label + ' timeout')), ms)),
+  ]);
+}
+
+let detector = null;
+
+async function createDetector() {
+  const files = await FilesetResolver.forVisionTasks(asset('vendor/mediapipe/wasm'));
+  const model = task === 'pose'
+    ? asset('models/pose_landmarker_lite.task')
+    : asset('models/blaze_face_short_range.tflite');
+  const build = (delegate) => {
+    const baseOptions = { modelAssetPath: model, delegate };
+    if (task === 'pose') {
+      return PoseLandmarker.createFromOptions(files, {
+        baseOptions,
+        runningMode: 'IMAGE',
+        numPoses: 5,
+        minPoseDetectionConfidence: 0.35,
+        minPosePresenceConfidence: 0.35,
+        minTrackingConfidence: 0.35,
+        outputSegmentationMasks: true,
+      });
+    }
+    return FaceDetector.createFromOptions(files, {
+      baseOptions,
+      runningMode: 'IMAGE',
+      minDetectionConfidence: 0.4,
+    });
+  };
+  try {
+    detector = await withTimeout(build('GPU'), 8000, task + ' GPU');
+  } catch (e) {
+    detector = await withTimeout(build('CPU'), 30000, task + ' CPU');
+  }
+}
+
+function loadImage(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('image decode failed'));
+    img.src = dataUrl;
+  });
+}
+
+function maskUrl(mask) {
+  if (!mask || !mask.width) return null;
+  let bytes = null;
+  try { bytes = mask.getAsUint8Array(); } catch (e) { bytes = null; }
+  try { mask.close(); } catch (e) {}
+  if (!bytes || bytes.length < mask.width * mask.height) return null;
+  const canvas = document.createElement('canvas');
+  canvas.width = mask.width;
+  canvas.height = mask.height;
+  const ctx = canvas.getContext('2d');
+  const image = ctx.createImageData(canvas.width, canvas.height);
+  const px = image.data;
+  let fg = 0;
+  for (let i = 0; i < canvas.width * canvas.height; i++) {
+    const on = bytes[i] >= 128;
+    if (on) fg++;
+    px[i * 4 + 3] = on ? 255 : 0;
+  }
+  if (fg / (canvas.width * canvas.height) < 0.008) return null;
+  ctx.putImageData(image, 0, 0);
+  return canvas.toDataURL('image/png');
+}
+
+// Short-range BlazeFace matches this runtime (896 anchors). It sees faces
+// that fill a good part of the frame, so a full-body shot is also scanned
+// as a few overlapping tiles and the boxes are mapped back.
+function detectFaces(img) {
+  const found = [];
+  const take = (source, ox, oy) => {
+    let det;
+    try { det = detector.detect(source); } catch (e) { return; }
+    for (const d of (det && det.detections) || []) {
+      const b = d.boundingBox;
+      if (!b) continue;
+      found.push({
+        score: (d.categories && d.categories[0] && d.categories[0].score) || 0,
+        box: {
+          originX: b.originX + ox,
+          originY: b.originY + oy,
+          width: b.width,
+          height: b.height,
+        },
+      });
+    }
+  };
+  take(img, 0, 0);
+  const w = img.naturalWidth || img.width || 0;
+  const h = img.naturalHeight || img.height || 0;
+  const tile = 220;
+  if (w > tile * 0.9 || h > tile * 0.9) {
+    const canvas = document.createElement('canvas');
+    canvas.width = tile;
+    canvas.height = tile;
+    const ctx = canvas.getContext('2d');
+    const step = 150;
+    let tiles = 0;
+    for (let y = 0; y < h && tiles < 12; y += step) {
+      for (let x = 0; x < w && tiles < 12; x += step) {
+        ctx.fillStyle = '#808080';
+        ctx.fillRect(0, 0, tile, tile);
+        ctx.drawImage(img, x, y, tile, tile, 0, 0, tile, tile);
+        take(canvas, x, y);
+        tiles++;
+      }
+    }
+  }
+  return found;
+}
+
+const ready = createDetector().then(
+  () => ({ ok: true }),
+  (e) => ({ ok: false, error: String(e && e.message || e) }),
+);
+
+window.addEventListener('message', (ev) => {
+  const msg = ev.data;
+  if (!msg || msg.task !== task) return;
+  if (msg.type === 'ping') {
+    ready.then((state) => ev.source.postMessage(Object.assign({ task, type: 'ready', id: msg.id }, state), '*'));
+    return;
+  }
+  if (msg.type !== 'detect') return;
+  ready.then(async (state) => {
+    if (!state.ok) {
+      ev.source.postMessage({ task, type: 'result', id: msg.id, ok: false, error: state.error }, '*');
+      return;
+    }
+    try {
+      const img = await loadImage(msg.dataUrl);
+      if (task === 'pose') {
+        const posed = detector.detect(img);
+        const masks = posed.segmentationMasks || [];
+        const poses = (posed.landmarks || []).map((lm, index) => ({
+          landmarks: lm.map((p) => ({ x: p.x, y: p.y, v: p.visibility == null ? 0.5 : p.visibility })),
+          mask: maskUrl(masks[index]),
+        }));
+        for (const mask of masks) { try { mask.close(); } catch (e) {} }
+        ev.source.postMessage({ task, type: 'result', id: msg.id, ok: true, poses }, '*');
+      } else {
+        ev.source.postMessage({ task, type: 'result', id: msg.id, ok: true, faces: detectFaces(img) }, '*');
+      }
+    } catch (e) {
+      ev.source.postMessage({ task, type: 'result', id: msg.id, ok: false, error: String(e && e.message || e) }, '*');
+    }
+  });
+});
+</script>
+</body>

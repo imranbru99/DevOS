@@ -30,18 +30,23 @@ TensorFlow.js 4.22.0  (Apache-2.0) - bundled inside dist/face-api.js
 Not shipped: the test portraits used by tests/modesty-chrome/ are downloaded at
 test time from Wikimedia Commons (public domain); see tests/modesty-chrome/images.txt.
 
-TensorFlow BodyPix 2.2.1 (Apache-2.0)
-  Source: https://github.com/tensorflow/tfjs-models/tree/master/body-pix
-  npm: https://registry.npmjs.org/@tensorflow-models/body-pix/-/body-pix-2.2.1.tgz
-  npm archive SHA-512 verified against the registry integrity before extraction.
-  Shares the bundled TensorFlow.js 4.22.0 runtime; no CDN scripts are loaded.
-  Runtime: vendor/body-pix/body-pix.js (dist/body-pix.min.umd.js)
-  License: vendor/body-pix/LICENSE
-
-  BodyPix MobileNetV1 0.50, stride 16, 1-byte quantized weights:
-  https://storage.googleapis.com/tfjs-models/savedmodel/bodypix/mobilenet/quant1/050/model-stride16.json
-  Model files are bundled locally in models/body-pix/.
+@mediapipe/tasks-vision 0.10.17 (Apache-2.0)
+  jsDelivr: https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.17/
+  Source: https://github.com/google-ai-edge/mediapipe
+  Runtime stays inside the extension. The page never loads these files.
+  License: vendor/mediapipe/LICENSE
   SHA-256:
-    group1-shard1of1.bin: 839ea607edcb271ae135e7ce605a7f4a9941c1521e3831f230da473e00b4574c
-    model.json: b1afef51f5de7235a3e6644e710af8e6f698804fa3e29f55e4482675aa319f90
-    vendor/body-pix/body-pix.js: 0a69d66f872845ddc899a36951f083f2de3da08068aa2557bc1bc417b1e2d25a
+    vendor/mediapipe/vision_bundle.mjs                         139710  1ada13431ea2a8ed7ea449e6c3595122d43fea2a8a4788056ed7da271469b402
+    vendor/mediapipe/wasm/vision_wasm_internal.js              203819  33a4125f825b343d2d9773951a73692f40bee368c9b591af8ff652fd501af90b
+    vendor/mediapipe/wasm/vision_wasm_internal.wasm           9514390  c88cf472dd5cab0a3954b071e5f442102ded3701dcccc987a7a02ee8f54aae85
+
+  Pose Landmarker lite, float16:
+  https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task
+    models/pose_landmarker_lite.task                          5777746  59929e1d1ee95287735ddd833b19cf4ac46d29bc7afddbbf6753c459690d574a
+
+  BlazeFace short-range, float16 (this runtime's face graph expects its 896 anchors):
+  https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite
+    models/blaze_face_short_range.tflite                       229746  b4578f35940bf5a1a655214a1cce5cab13eba73c1297cd78e1a04c2380b0152f
+
+  The tiny-face weights above stay in the package as a fallback if MediaPipe
+  cannot start. BodyPix is no longer shipped.

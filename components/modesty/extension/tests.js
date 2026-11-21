@@ -54,6 +54,24 @@
   eq('pose matches its own face', R.matchFace(pose, faces), 1);
   eq('already assigned face is not reused', R.matchFace(pose, faces, new Set([1])), -1);
   eq('body with no face anchors stays unmatched', R.matchFace({ keypoints: [] }, faces), -1);
+  eq('covered adult counted even if the model says male',
+    R.decide(D([F('male', .8, { headCovered: true, bearded: false })]), women).blur, true);
+  eq('covered child stays clear',
+    R.decide(D([F('female', .9, { age: 14, headCovered: true })]), women).blur, false);
+  eq('bearded covered man stays clear',
+    R.decide(D([F('male', .9, { headCovered: true, bearded: true })]), women).blur, false);
+  eq('tiny face misread as a child is selected when the garment is long and dark',
+    R.decide(D([F('female', .56, { age: 9, w: 25, h: 25, score: .75, clothedAdult: true, x: 120, y: 170 })],
+      [P(0, { skinRatio: .05, cx: 130, bw: 90 })]), women).blur, true);
+  eq('close-up child stays clear even with a clothing flag',
+    R.decide(D([F('female', .95, { age: 12, w: 80, h: 80, clothedAdult: true })]), women).blur, false);
+  eq('man beside a clothed woman stays clear',
+    R.decide(D(
+      [F('female', .56, { age: 9, w: 25, h: 25, score: .75, clothedAdult: true, x: 100, y: 40 }),
+       F('male', .9, { x: 220, y: 40, w: 30, h: 30 })],
+      [P(0, { skinRatio: .05, cx: 110, bw: 80 }),
+       P(1, { skinRatio: .4, cx: 230, bw: 80, torsoY: 160 })]
+    ), women).regions.map((p) => p.faceIndex), [0]);
   eq('contain placement', R.fitBox(400, 200, 300, 300, 'contain'), { x: 0, y: 75, w: 300, h: 150 });
   eq('cover crop placement', R.fitBox(400, 200, 300, 300, 'cover'), { x: -150, y: 0, w: 600, h: 300 });
   eq('object position placement', R.fitBox(400, 200, 300, 300, 'cover', '0% 50%'), { x: 0, y: 0, w: 600, h: 300 });

@@ -7,13 +7,18 @@ detected people. Models and processing stay on this computer.
 
 ## Region selection and readable text
 
-The bundled face detector provides estimated age and gender. BodyPix provides
-separate person masks; face/pose matching selects only the corresponding body.
-The default threshold is 0.68 female probability and estimated age 18 or older.
-Unknown age, weak/small faces, and failed checks do not trigger a blanket blur.
-Bodies with substantial visible skin can still be selected when an adult woman
-face is present in the same image (covers real photo crops that miss nose/eye
-anchors). Older threshold settings cannot expand matching below 0.65.
+MediaPipe Pose Landmarker (lite) and BlazeFace full-range find people and
+faces on this PC. The age/gender net runs only on those face crops. A covered
+head with no beard still counts as an adult woman when the gender net says
+male, which is common with a hijab. A face smaller than about 48 pixels cannot
+support an age reading, so a long dark garment under a female-leaning score is
+treated as an adult woman; a close-up child, whose face is large enough for
+the age net, stays clear. The default threshold is 0.68 female probability and
+estimated age 18 or older. Unknown age, weak/small faces, and failed checks do
+not trigger a blanket blur. Bodies with substantial visible skin can still be
+selected when an adult woman face sits on that body. A man standing beside her
+is not selected with her. Older threshold settings cannot expand matching
+below 0.65.
 
 Images and video use an SVG filter that merges the unchanged pixels outside the
 mask with blurred pixels inside it. A CSS background uses masked image layers
@@ -28,9 +33,11 @@ mode also blurs **high-skin body crops with no face** (midriff / torso image
 search). Medical diagrams, icons, and drawings without a person mask stay clear.
 
 Media remains visible while being checked or when detection fails. This is
-intentional: there is no whole-image or whole-container fallback. Cross-origin
-videos without canvas access cannot be checked. Video masks are sampled rather
-than guaranteed for every frame; movement can temporarily misalign a mask.
+intentional: there is no whole-image or whole-container fallback. A cross-origin
+video that taints a canvas is checked from a capture of the on-screen region
+instead. Video masks are sampled rather than guaranteed for every frame;
+movement can temporarily misalign a mask. A paused video is checked again until
+a read succeeds.
 SVG/canvas content, later animated GIF frames, and multiple CSS backgrounds are
 not covered. Text printed inside the selected body pixels (such as a shirt)
 can still blur; HTML text and image text outside the mask remain unchanged.
@@ -43,7 +50,7 @@ sudo devos-modesty status
 sudo devos-modesty disable
 ```
 
-Re-enabling repacks version 1.2.2 and refreshes browser policy. Fully quit and
+Re-enabling repacks version 1.3.0 and refreshes browser policy. Fully quit and
 reopen Chrome so the new extension loads. A signing key is created per device in
 `/var/lib/devos-modesty/key.pem`, preserved across disable/re-enable. An existing
 local legacy key is reused so its extension ID does not change.

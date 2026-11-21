@@ -1,26 +1,30 @@
 /*
- * DevOS Modesty filter - offscreen document running the detector.
- * @vladmandic/face-api (TensorFlow.js inside): tiny face detector + age/gender
- * model, weights loaded from the extension package. Runs only on this PC.
+ * DevOS Modesty filter — on-device detector.
+ * MediaPipe Pose Landmarker (lite) + BlazeFace full-range find people and
+ * faces. face-api's age/gender net runs only on those face crops. A single
+ * tiny-face pass is the fallback if MediaPipe cannot start. Nothing is fetched
+ * at runtime.
  */
-'use strict';
-
-// The tiny face detector is scale sensitive: a face found at 0.9 at one input
-// size can drop to 0.3 at another. Run three sizes and merge (lean to blur).
-const DETECT_INPUTS = [224, 416, 608];   // multiples of 32
-const DETECT_MIN_SCORE = 0.40;           // keep confident faces; rules.js applies the real threshold
+const POSE_INDEX = {
+  nose: 0, leftEye: 2, rightEye: 5, leftEar: 7, rightEar: 8,
+  leftShoulder: 11, rightShoulder: 12, leftElbow: 13, rightElbow: 14,
+  leftWrist: 15, rightWrist: 16, leftHip: 23, rightHip: 24,
+  leftKnee: 25, rightKnee: 26, leftAnkle: 27, rightAnkle: 28,
+};
 
 let readyPromise = null;
 let backend = 'none';
-let personModel = null;
+let useTinyFace = false;
+let faceReady = false;
+let poseReady = false;
+let callSeq = 0;
 
-async function init() {
+async function initAgeGender() {
   const tf = faceapi.tf;
   let ok = false;
   try {
     if (tf.env) {
       try { tf.env().set('WEBGL_PACK', true); } catch (e) {}
-      try { tf.env().set('WEBGL_FORCE_F16_TEXTURES', true); } catch (e) {}
     }
     ok = await tf.setBackend('webgl');
   } catch (e) { ok = false; }
@@ -29,13 +33,59 @@ async function init() {
   }
   if (!ok) { await tf.setBackend('cpu'); await tf.ready(); }
   backend = tf.getBackend();
-  // Root-relative on purpose: face-api's URI helper collapses the "//" in
-  // "chrome-extension://<id>/models" and the fetch then fails.
-  const base = '/models';
-  await faceapi.nets.tinyFaceDetector.loadFromUri(base);
-  await faceapi.nets.ageGenderNet.loadFromUri(base);
-  personModel = await globalThis['body-pix'].load({ architecture: 'MobileNetV1', outputStride: 16,
-    multiplier: 0.5, quantBytes: 1, modelUrl: '/models/body-pix/model.json' });
+  await faceapi.nets.ageGenderNet.loadFromUri('/models');
+}
+
+// Face and pose each need their own wasm instance. Loading both in this
+// document deadlocks the second graph, so they live in separate iframes.
+function visionFrame(task) {
+  return document.getElementById(task === 'pose' ? 'dm-pose' : 'dm-face');
+}
+
+function callVision(task, type, extra, ms) {
+  const frame = visionFrame(task);
+  const win = frame && frame.contentWindow;
+  if (!win) return Promise.resolve({ ok: false, error: 'no frame' });
+  const id = ++callSeq;
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      window.removeEventListener('message', onMsg);
+      resolve({ ok: false, error: task + ' timeout' });
+    }, ms);
+    function onMsg(ev) {
+      const msg = ev.data;
+      if (!msg || msg.task !== task || msg.id !== id) return;
+      clearTimeout(timer);
+      window.removeEventListener('message', onMsg);
+      resolve(msg);
+    }
+    window.addEventListener('message', onMsg);
+    win.postMessage(Object.assign({ task, type, id }, extra || {}), '*');
+  });
+}
+
+async function pingVision(task) {
+  const deadline = Date.now() + 40000;
+  while (Date.now() < deadline) {
+    const res = await callVision(task, 'ping', {}, 2000);
+    if (res && res.type === 'ready') return res;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return { ok: false, error: task + ' unavailable' };
+}
+
+async function init() {
+  await initAgeGender();
+  const [face, pose] = await Promise.all([pingVision('face'), pingVision('pose')]);
+  faceReady = !!(face && face.ok);
+  poseReady = !!(pose && pose.ok);
+  if (!faceReady) {
+    await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
+    useTinyFace = true;
+    backend = poseReady ? 'pose+tiny-face' : 'tiny-face';
+  } else {
+    backend = poseReady ? 'mediapipe' : 'blazeface';
+  }
 }
 
 function ready() {
@@ -52,10 +102,98 @@ function loadImage(dataUrl) {
   });
 }
 
-function toFace(f) {
-  const b = f.detection.box;
-  const pFemale = f.gender === 'female' ? f.genderProbability : 1 - f.genderProbability;
-  return { score: f.detection.score, pFemale, age: f.age, x: b.x, y: b.y, w: b.width, h: b.height };
+function ycbcrSkin(r, g, b) {
+  const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+  if (lum < 18 || lum > 245) return false;
+  const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
+  const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
+  return cb >= 77 && cb <= 140 && cr >= 133 && cr <= 173;
+}
+
+function isSkinPixel(r, g, b) {
+  if (ycbcrSkin(r, g, b)) return true;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+  if (lum < 18 || lum > 250) return false;
+  return r > 50 && g > 25 && b > 10 && (max - min) > 8 && r >= g - 8 && r >= b - 8;
+}
+
+function lumOf(r, g, b) { return 0.299 * r + 0.587 * g + 0.114 * b; }
+
+let scratch = null;
+function pixelsOf(img) {
+  const w = img.naturalWidth || img.width;
+  const h = img.naturalHeight || img.height;
+  if (!scratch) scratch = document.createElement('canvas');
+  scratch.width = w;
+  scratch.height = h;
+  const ctx = scratch.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0, w, h);
+  return { ctx, w, h, data: ctx.getImageData(0, 0, w, h).data };
+}
+
+function sampleRegion(data, w, h, x, y, rw, rh) {
+  const x0 = Math.max(0, Math.floor(x));
+  const y0 = Math.max(0, Math.floor(y));
+  const x1 = Math.min(w, Math.ceil(x + rw));
+  const y1 = Math.min(h, Math.ceil(y + rh));
+  let n = 0, skin = 0, lum = 0, dark = 0;
+  for (let py = y0; py < y1; py += 2) {
+    for (let px = x0; px < x1; px += 2) {
+      const i = (py * w + px) * 4;
+      const r = data[i], g = data[i + 1], b = data[i + 2];
+      const L = lumOf(r, g, b);
+      n++;
+      lum += L;
+      if (ycbcrSkin(r, g, b)) skin++;
+      else if (L < 52) dark++;
+    }
+  }
+  if (!n) return null;
+  return { n, skin: skin / n, lum: lum / n, dark: dark / n };
+}
+
+function describeAppearance(data, w, h, face) {
+  const fw = Math.max(8, face.w), fh = Math.max(8, face.h);
+  const sideL = sampleRegion(data, w, h, face.x - fw * 0.95, face.y + fh * 0.1, fw * 0.7, fh * 0.75);
+  const sideR = sampleRegion(data, w, h, face.x + fw * 1.25, face.y + fh * 0.1, fw * 0.7, fh * 0.75);
+  const neck = sampleRegion(data, w, h, face.x + fw * 0.2, face.y + fh * 1.05, fw * 0.6, fh * 0.6);
+  const sides = [sideL, sideR].filter(Boolean);
+  const sideSkin = sides.length ? sides.reduce((a, s) => a + s.skin, 0) / sides.length : 1;
+  const neckSkin = neck ? neck.skin : 1;
+  const headCovered = sideSkin < 0.35 && neckSkin < 0.45;
+
+  const cheekL = sampleRegion(data, w, h, face.x + fw * 0.08, face.y + fh * 0.35, fw * 0.28, fh * 0.28);
+  const cheekR = sampleRegion(data, w, h, face.x + fw * 0.64, face.y + fh * 0.35, fw * 0.28, fh * 0.28);
+  const chin = sampleRegion(data, w, h, face.x + fw * 0.28, face.y + fh * 0.72, fw * 0.44, fh * 0.28);
+  const cheeks = [cheekL, cheekR].filter(Boolean);
+  const cheekSkin = cheeks.length ? cheeks.reduce((a, s) => a + s.skin, 0) / cheeks.length : 0;
+  const cheekLum = cheeks.length ? cheeks.reduce((a, s) => a + s.lum, 0) / cheeks.length : 0;
+  const bearded = !!(chin && cheekSkin > 0.22 && chin.skin < 0.55 && chin.lum + 12 < cheekLum);
+
+  const below = face.y + fh * 1.2;
+  const columnH = fh * 4.2;
+  const room = h - below;
+  let clothedAdult = false;
+  if (room >= fh * 3) {
+    const column = sampleRegion(data, w, h, face.x + fw / 2 - fw * 1.1, below, fw * 2.2, Math.min(columnH, room));
+    clothedAdult = !!(column && column.n >= 40 && column.dark >= 0.42);
+  }
+  return { headCovered, bearded, clothedAdult };
+}
+
+function clipBox(box, w, h) {
+  let width = box.width;
+  let height = box.height;
+  let x = box.originX;
+  let y = box.originY;
+  if (width <= 2 && height <= 2) {
+    x *= w; y *= h; width *= w; height *= h;
+  }
+  x = Math.max(0, x); y = Math.max(0, y);
+  width = Math.min(w - x, width); height = Math.min(h - y, height);
+  if (width < 8 || height < 8) return null;
+  return { x, y, w: width, h: height };
 }
 
 function iou(a, b) {
@@ -65,183 +203,259 @@ function iou(a, b) {
   return inter / (a.w * a.h + b.w * b.h - inter || 1);
 }
 
-// Same face seen at several scales -> one entry with the best detection score
-// and the highest female probability among the confident views (score >= 0.5),
-// so a disagreement between scales leans to blur but a weak, sloppy box
-// around a man's face does not.
-function mergeFaces(list) {
-  const merged = [];
-  for (const f of list.sort((a, b) => b.score - a.score)) {
-    const m = merged.find((g) => iou(g, f) > 0.4);
-    if (m) { if (f.score >= 0.5) m.pFemale = Math.max(m.pFemale, f.pFemale); m.views++; } else merged.push(Object.assign({ views: 1 }, f));
+function dedupeFaces(list) {
+  const kept = [];
+  for (const face of list.sort((a, b) => b.score - a.score)) {
+    if (kept.some((g) => iou(g, face) > 0.3)) continue;
+    kept.push(face);
   }
-  return merged.map((f) => ({
-    score: +f.score.toFixed(3),
-    gender: f.pFemale >= 0.5 ? 'female' : 'male',
-    genderProbability: +(f.pFemale >= 0.5 ? f.pFemale : 1 - f.pFemale).toFixed(3),
-    age: Math.round(f.age),
-    x: Math.round(f.x),
-    y: Math.round(f.y),
-    w: Math.round(f.w),
-    h: Math.round(f.h),
-    views: f.views,
-  }));
+  return kept;
 }
 
-// Skin across light → deep tones. Old RGB (r>95 && r>g && r>b) missed many
- // real adult women (darker complexions, warm lighting, partial shade).
-function isSkinPixel(r, g, b) {
-  const max = Math.max(r, g, b), min = Math.min(r, g, b);
-  const lum = 0.299 * r + 0.587 * g + 0.114 * b;
-  if (lum < 18 || lum > 250) return false;
-  // YCbCr skin cluster (works for a wide range of ethnicities).
-  const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
-  const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
-  if (cb >= 77 && cb <= 140 && cr >= 125 && cr <= 185) return true;
-  // Soft RGB fallback for faces under strong warm/cool light.
-  if (r > 50 && g > 25 && b > 10 && (max - min) > 8 && r >= g - 8 && r >= b - 8) return true;
-  return false;
-}
-
-let scratchCanvas = null;
-let scratchCtx = null;
-function getScratchCtx(w, h) {
-  if (!scratchCanvas) {
-    scratchCanvas = document.createElement('canvas');
-    scratchCtx = scratchCanvas.getContext('2d', { willReadFrequently: true });
-  }
-  if (scratchCanvas.width !== w || scratchCanvas.height !== h) {
-    scratchCanvas.width = w;
-    scratchCanvas.height = h;
-  }
-  return scratchCtx;
-}
-
-// Sample whole-image skin tones to allow instant early exit on images without people
-function sampleImageSkin(img) {
+async function ageGenderOf(img, face) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 160;
+  canvas.height = 160;
+  const ctx = canvas.getContext('2d');
+  const pad = 0.25;
+  const sx = Math.max(0, face.x - face.w * pad);
+  const sy = Math.max(0, face.y - face.h * pad);
+  const sw = face.w * (1 + pad * 2);
+  const sh = face.h * (1 + pad * 2);
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, 160, 160);
   try {
-    const ctx = getScratchCtx(48, 48);
-    ctx.drawImage(img, 0, 0, 48, 48);
-    const data = ctx.getImageData(0, 0, 48, 48).data;
-    let skin = 0;
-    const total = 48 * 48;
-    for (let i = 0; i < data.length; i += 4) {
-      if (isSkinPixel(data[i], data[i + 1], data[i + 2])) skin++;
-    }
-    return { data: new Uint8ClampedArray(data), ratio: skin / total };
+    const pred = await faceapi.predictAgeAndGender(canvas);
+    return {
+      age: Math.round(pred.age),
+      gender: pred.gender,
+      genderProbability: pred.genderProbability,
+    };
   } catch (e) {
-    return { data: null, ratio: 0.1 };
+    return { age: NaN, gender: 'unknown', genderProbability: 0.5 };
   }
 }
 
-// Check whether a detected face box contains genuine human skin tones.
-// Text, banners, hardware devices, and graphics have high contrast but almost 0% skin-tone pixels.
-function hasSkinTone(img, b) {
-  try {
-    const bw = Math.max(1, Math.round(b.width || b.w || 0));
-    const bh = Math.max(1, Math.round(b.height || b.h || 0));
-    const bx = Math.max(0, Math.round(b.x || 0));
-    const by = Math.max(0, Math.round(b.y || 0));
-    if (bw < 12 || bh < 12) return false;
-    const ratio = bw / bh;
-    if (ratio < 0.4 || ratio > 2.4) return false;
-
-    const ctx = getScratchCtx(32, 32);
-    ctx.drawImage(img, bx, by, bw, bh, 0, 0, 32, 32);
-    const data = ctx.getImageData(0, 0, 32, 32).data;
-
-    let skin = 0;
-    let darkPixels = 0;
-    let whitePixels = 0;
-    const total = 32 * 32;
-    for (let i = 0; i < data.length; i += 4) {
-      const r = data[i], g = data[i + 1], b = data[i + 2];
-      const lum = 0.299 * r + 0.587 * g + 0.114 * b;
-      if (lum < 28) darkPixels++;
-      if (lum > 245) whitePixels++;
-      if (isSkinPixel(r, g, b)) skin++;
-    }
-    // Real face cannot be >85% pure dark hardware/black plastic or pure white background
-    if (darkPixels / total > 0.85 || whitePixels / total > 0.85) return false;
-    // Genuine face requires meaningful skin pixel coverage (lowered for darker tones, lighting, accessories/overlays)
-    return (skin / total) >= 0.07;
-  } catch (e) {
-    return false;
-  }
+function rectFromFace(face, w, h) {
+  const bw = Math.max(face.w * 3.6, 48);
+  const bh = Math.max(face.h * 8.5, 120);
+  let x = face.x + face.w / 2 - bw / 2;
+  let y = face.y - face.h * 0.9;
+  x = Math.max(0, Math.min(w - 8, x));
+  y = Math.max(0, Math.min(h - 8, y));
+  return { x, y, w: Math.min(bw, w - x), h: Math.min(bh, h - y) };
 }
 
-function hasAnatomicalBody(pose) {
-  if (!pose || !pose.keypoints) return false;
-  let confidentKeypoints = 0;
-  let shoulderCount = 0;
-  let hipCount = 0;
-  let elbowCount = 0;
-  let shoulderY = 0;
-  let hipY = 0;
+function paintEllipse(ctx, rect) {
+  ctx.beginPath();
+  ctx.ellipse(rect.x + rect.w / 2, rect.y + rect.h / 2, rect.w / 2, rect.h / 2, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
 
-  for (const kp of pose.keypoints) {
-    // Slightly lower score so side/cropped adult bodies still count.
-    if (kp.score >= 0.28) {
-      confidentKeypoints++;
-      if (kp.part === 'leftShoulder' || kp.part === 'rightShoulder') {
-        shoulderCount++;
-        shoulderY += kp.position.y;
-      }
-      if (kp.part === 'leftHip' || kp.part === 'rightHip') {
-        hipCount++;
-        hipY += kp.position.y;
-      }
-      if (kp.part === 'leftElbow' || kp.part === 'rightElbow') elbowCount++;
+function maskBounds(maskCanvas) {
+  const ctx = maskCanvas.getContext('2d', { willReadFrequently: true });
+  const { data, width, height } = ctx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
+  let minX = width, minY = height, maxX = 0, maxY = 0, n = 0, skin = 0;
+  const src = scratch && scratch.width === width ? scratch.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, width, height).data : null;
+  for (let y = 0; y < height; y += 2) {
+    for (let x = 0; x < width; x += 2) {
+      const i = (y * width + x) * 4;
+      if (data[i + 3] < 128) continue;
+      n++;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+      if (src && isSkinPixel(src[i], src[i + 1], src[i + 2])) skin++;
     }
   }
-
-  // Accept full bodies, torso crops, or hip+shoulder partial figures.
-  const torsoOk = shoulderCount > 0 || (hipCount > 0 && elbowCount > 0);
-  if (confidentKeypoints < 4 || !torsoOk) return false;
-
-  // Anatomical check: shoulders must be above hips (Y increases downward)
-  if (shoulderCount > 0 && hipCount > 0) {
-    const avgShoulderY = shoulderY / shoulderCount;
-    const avgHipY = hipY / hipCount;
-    if (avgShoulderY >= avgHipY) return false;
-  }
-
-  return true;
+  if (!n) return null;
+  return {
+    cx: (minX + maxX) / 2,
+    bw: Math.max(8, maxX - minX),
+    torsoY: minY + (maxY - minY) * 0.35,
+    skinRatio: skin / n,
+  };
 }
 
-function segmentSkinRatio(segment, preSampledData) {
-  try {
-    const w = segment.width, h = segment.height;
-    if (w <= 0 || h <= 0) return 0;
-    if (!preSampledData) return 0.1;
+function finishPerson(img, maskCanvas, faceIndex, bounds) {
+  const layer = document.createElement('canvas');
+  layer.width = maskCanvas.width;
+  layer.height = maskCanvas.height;
+  const lc = layer.getContext('2d');
+  lc.filter = 'blur(22px)';
+  lc.drawImage(img, 0, 0, layer.width, layer.height);
+  lc.filter = 'none';
+  lc.globalCompositeOperation = 'destination-in';
+  lc.drawImage(maskCanvas, 0, 0);
+  const url = layer.toDataURL('image/png');
+  return {
+    faceIndex,
+    skinRatio: +bounds.skinRatio.toFixed(3),
+    torsoY: bounds.torsoY,
+    cx: bounds.cx,
+    bw: bounds.bw,
+    mask: url,
+    blurLayer: url,
+  };
+}
 
-    let skin = 0;
-    let sampled = 0;
-    const scaleX = w / 48;
-    const scaleY = h / 48;
-    for (let cy = 0; cy < 48; cy += 2) {
-      for (let cx = 0; cx < 48; cx += 2) {
-        const sx = Math.min(w - 1, Math.round(cx * scaleX));
-        const sy = Math.min(h - 1, Math.round(cy * scaleY));
-        if (segment.data[sy * w + sx]) {
-          sampled++;
-          const idx = (cy * 48 + cx) * 4;
-          const r = preSampledData[idx], g = preSampledData[idx + 1], b = preSampledData[idx + 2];
-          if (isSkinPixel(r, g, b)) skin++;
-        }
-      }
+function keypointsOf(landmarks, w, h) {
+  return Object.entries(POSE_INDEX).map(([part, index]) => {
+    const p = landmarks[index];
+    if (!p) return null;
+    const score = p.v != null ? Number(p.v) : (p.visibility == null ? 0.5 : Number(p.visibility));
+    return { part, score, position: { x: p.x * w, y: p.y * h } };
+  }).filter(Boolean);
+}
+
+function paintPose(ctx, landmarks, w, h, maskImage) {
+  ctx.fillStyle = '#fff';
+  if (maskImage && maskImage.width) {
+    ctx.drawImage(maskImage, 0, 0, w, h);
+    return;
+  }
+  const pts = keypointsOf(landmarks, w, h).filter((k) => k.score >= 0.25);
+  if (pts.length < 4) return;
+  ctx.beginPath();
+  pts.forEach((k, i) => (i ? ctx.lineTo(k.position.x, k.position.y) : ctx.moveTo(k.position.x, k.position.y)));
+  ctx.closePath();
+  ctx.fill();
+}
+
+function loadUrl(url) {
+  return new Promise((resolve) => {
+    if (!url) { resolve(null); return; }
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = () => resolve(null);
+    el.src = url;
+  });
+}
+
+async function facesFromTiny(img, frame) {
+  const opts = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.4 });
+  const found = await faceapi.detectAllFaces(img, opts).withAgeAndGender();
+  const faces = [];
+  for (const f of found) {
+    const b = f.detection.box;
+    const box = { x: b.x, y: b.y, w: b.width, h: b.height, score: f.detection.score };
+    const look = describeAppearance(frame.data, frame.w, frame.h, box);
+    const pFemale = f.gender === 'female' ? f.genderProbability : 1 - f.genderProbability;
+    faces.push({
+      score: +box.score.toFixed(3),
+      gender: pFemale >= 0.5 ? 'female' : 'male',
+      genderProbability: +(pFemale >= 0.5 ? pFemale : 1 - pFemale).toFixed(3),
+      age: Math.round(f.age),
+      x: Math.round(box.x), y: Math.round(box.y), w: Math.round(box.w), h: Math.round(box.h),
+      headCovered: look.headCovered,
+      bearded: look.bearded,
+      clothedAdult: look.clothedAdult,
+    });
+  }
+  return faces;
+}
+
+async function detectWithPose(img, dataUrl) {
+  const frame = pixelsOf(img);
+  const facePromise = faceReady ? callVision('face', 'detect', { dataUrl }, 8000) : Promise.resolve({ ok: false });
+  const posePromise = poseReady ? callVision('pose', 'detect', { dataUrl }, 8000) : Promise.resolve({ ok: false });
+  const faceMsg = await facePromise;
+  const rawFaces = [];
+  if (faceMsg && faceMsg.ok) {
+    for (const det of faceMsg.faces || []) {
+      const box = clipBox(det.box || {}, frame.w, frame.h);
+      if (!box || det.score < 0.4) continue;
+      rawFaces.push(Object.assign({ score: det.score }, box));
     }
-    if (sampled < 5) return 0;
-    return skin / sampled;
-  } catch (e) {
-    return 0.1;
   }
+  const boxes = dedupeFaces(rawFaces);
+  let faces = [];
+  for (const box of boxes) {
+    const look = describeAppearance(frame.data, frame.w, frame.h, box);
+    const gender = await ageGenderOf(img, box);
+    faces.push({
+      score: +box.score.toFixed(3),
+      gender: gender.gender,
+      genderProbability: +(Number(gender.genderProbability) || 0).toFixed(3),
+      age: gender.age,
+      x: Math.round(box.x), y: Math.round(box.y), w: Math.round(box.w), h: Math.round(box.h),
+      headCovered: look.headCovered,
+      bearded: look.bearded,
+      clothedAdult: look.clothedAdult,
+    });
+  }
+  if (!faces.length && useTinyFace) faces = await facesFromTiny(img, frame);
+
+  const poseMsg = await posePromise;
+  const people = [];
+  const used = new Set();
+  const poses = (poseMsg && poseMsg.ok && poseMsg.poses) || [];
+  const maskImages = await Promise.all(poses.map((p) => loadUrl(p.mask)));
+  poses.forEach((entry, index) => {
+    const landmarks = entry.landmarks || [];
+    const keypoints = keypointsOf(landmarks, frame.w, frame.h);
+    const pose = { keypoints };
+    const canvas = document.createElement('canvas');
+    canvas.width = frame.w;
+    canvas.height = frame.h;
+    const ctx = canvas.getContext('2d');
+    paintPose(ctx, landmarks, frame.w, frame.h, maskImages[index]);
+    const bounds = maskBounds(canvas);
+    if (!bounds) return;
+    let faceIndex = ModestyRules.matchFace(pose, faces, used);
+    if (faceIndex < 0) faceIndex = ModestyRules.matchFaceByTorso(pose, faces, used);
+    if (faceIndex >= 0) used.add(faceIndex);
+    people.push(finishPerson(img, canvas, faceIndex, bounds));
+  });
+  faces.forEach((face, index) => {
+    if (used.has(index)) return;
+    const rect = rectFromFace(face, frame.w, frame.h);
+    const canvas = document.createElement('canvas');
+    canvas.width = frame.w;
+    canvas.height = frame.h;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff';
+    paintEllipse(ctx, rect);
+    const bounds = maskBounds(canvas);
+    if (!bounds) return;
+    people.push(finishPerson(img, canvas, index, bounds));
+  });
+  return { ok: true, backend, width: frame.w, height: frame.h, faces, people };
 }
 
-function segmentHasSkin(img, segment) {
-  // Real adult body / face / limbs: at least a little visible skin.
-  const { data } = sampleImageSkin(img);
-  return segmentSkinRatio(segment, data) >= 0.04;
+async function detectWithTinyFace(img) {
+  const frame = pixelsOf(img);
+  const opts = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.4 });
+  const found = await faceapi.detectAllFaces(img, opts).withAgeAndGender();
+  const faces = [];
+  for (const f of found) {
+    const b = f.detection.box;
+    const box = { x: b.x, y: b.y, w: b.width, h: b.height, score: f.detection.score };
+    const look = describeAppearance(frame.data, frame.w, frame.h, box);
+    const pFemale = f.gender === 'female' ? f.genderProbability : 1 - f.genderProbability;
+    faces.push({
+      score: +box.score.toFixed(3),
+      gender: pFemale >= 0.5 ? 'female' : 'male',
+      genderProbability: +(pFemale >= 0.5 ? pFemale : 1 - pFemale).toFixed(3),
+      age: Math.round(f.age),
+      x: Math.round(box.x), y: Math.round(box.y), w: Math.round(box.w), h: Math.round(box.h),
+      headCovered: look.headCovered,
+      bearded: look.bearded,
+      clothedAdult: look.clothedAdult,
+    });
+  }
+  const people = faces.map((face, index) => {
+    const rect = rectFromFace(face, frame.w, frame.h);
+    const canvas = document.createElement('canvas');
+    canvas.width = frame.w;
+    canvas.height = frame.h;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff';
+    paintEllipse(ctx, rect);
+    const bounds = maskBounds(canvas) || { skinRatio: 0, torsoY: rect.y, cx: rect.x + rect.w / 2, bw: rect.w };
+    return finishPerson(img, canvas, index, bounds);
+  });
+  return { ok: true, backend, width: frame.w, height: frame.h, faces, people };
 }
 
 let queue = Promise.resolve();
@@ -249,112 +463,8 @@ function detect(dataUrl) {
   const job = queue.then(async () => {
     await ready();
     const img = await loadImage(dataUrl);
-    const nw = img.naturalWidth || img.width || 0;
-    const nh = img.naturalHeight || img.height || 0;
-    const maxSide = Math.max(nw, nh);
-
-    // 1. Ultra-fast skin pre-check (takes ~0.1ms).
-    // If the entire image has virtually zero skin (<0.8%), no human body or face can be present.
-    const imageSkin = sampleImageSkin(img);
-    if (imageSkin.ratio < 0.008) {
-      return { ok: true, backend, width: nw, height: nh, faces: [], people: [] };
-    }
-
-    // 2. Adaptive scale face detection:
-    // 416 is the primary sweet spot for TinyFaceDetector.
-    // Smaller images (<448px) don't need 608 upscaling.
-    const found = [];
-    const scales = maxSide < 448 ? [224, 416] : [416, 224];
-    for (const inputSize of scales) {
-      const opts = new faceapi.TinyFaceDetectorOptions({ inputSize, scoreThreshold: DETECT_MIN_SCORE });
-      for (const f of await faceapi.detectAllFaces(img, opts).withAgeAndGender()) {
-        if (hasSkinTone(img, f.detection.box)) {
-          found.push(toFace(f));
-        }
-      }
-    }
-
-    // Only run 608 on large images if no confident face was found on primary scales
-    if (maxSide >= 448) {
-      const hasConfidentFace = found.some((f) => f.score >= 0.65);
-      if (!hasConfidentFace) {
-        const opts608 = new faceapi.TinyFaceDetectorOptions({ inputSize: 608, scoreThreshold: DETECT_MIN_SCORE });
-        for (const f of await faceapi.detectAllFaces(img, opts608).withAgeAndGender()) {
-          if (hasSkinTone(img, f.detection.box)) {
-            found.push(toFace(f));
-          }
-        }
-      }
-    }
-    const faces = mergeFaces(found);
-
-    // 3. Fast exit for BodyPix:
-    // If no human face is detected AND the overall image skin ratio is negligible (<2%),
-    // the image is pure scenery/hardware/text/product without human figures. BodyPix can be safely skipped.
-    const hasPossibleWomanFace = faces.some((f) => f.gender === 'female' && f.genderProbability >= 0.55);
-    const hasAnyFace = faces.length > 0;
-    if (!hasPossibleWomanFace && !hasAnyFace && imageSkin.ratio < 0.02) {
-      return { ok: true, backend, width: nw, height: nh, faces, people: [] };
-    }
-
-    // 4. Person segmentation with BodyPix:
-    // Use refineSteps: 4 to dramatically accelerate pose keypoint refinement.
-    const segments = await personModel.segmentMultiPerson(img, {
-      internalResolution: 'medium',
-      segmentationThreshold: 0.60,
-      maxDetections: 6,
-      scoreThreshold: 0.40,
-      minKeypointScore: 0.28,
-      refineSteps: 4
-    });
-
-    const used = new Set();
-    const people = segments
-      .filter((segment) => {
-        const skin = segmentSkinRatio(segment, imageSkin.data);
-        if (skin < 0.04) return false;
-        // Full / partial anatomical pose, or a skin-heavy torso crop (midriff).
-        if (hasAnatomicalBody(segment.pose)) return true;
-        if (skin < 0.18) return false;
-        const kps = (segment.pose.keypoints || []).filter((k) => k.score >= 0.22);
-        return kps.length >= 2;
-      })
-      .map((segment) => {
-        let faceIndex = ModestyRules.matchFace(segment.pose, faces, used);
-        // Geometric fallback when nose/eyes are weak but a face sits above the torso.
-        if (faceIndex < 0) faceIndex = ModestyRules.matchFaceByTorso(segment.pose, faces, used);
-        if (faceIndex >= 0) used.add(faceIndex);
-        const skinRatio = +segmentSkinRatio(segment, imageSkin.data).toFixed(3);
-        const shoulders = (segment.pose.keypoints || []).filter((k) => /Shoulder$/.test(k.part) && k.score >= 0.20);
-        const torsoY = shoulders.length
-          ? shoulders.reduce((a, p) => a + p.position.y, 0) / shoulders.length
-          : null;
-
-        // Fast 32-bit pixel assignment for mask
-        const mask = document.createElement('canvas');
-        mask.width = segment.width; mask.height = segment.height;
-        const ctx = mask.getContext('2d');
-        const pixels = ctx.createImageData(mask.width, mask.height);
-        const data32 = new Uint32Array(pixels.data.buffer);
-        const segData = segment.data;
-        for (let i = 0; i < segData.length; i++) {
-          if (segData[i]) data32[i] = 0xff000000;
-        }
-        ctx.putImageData(pixels, 0, 0);
-
-        const layer = document.createElement('canvas');
-        layer.width = mask.width; layer.height = mask.height;
-        const lc = layer.getContext('2d');
-        lc.filter = 'blur(22px)';
-        lc.drawImage(img, 0, 0, layer.width, layer.height);
-        lc.filter = 'none';
-        lc.globalCompositeOperation = 'destination-in';
-        lc.drawImage(mask, 0, 0);
-
-        const blurUrl = layer.toDataURL('image/png');
-        return { faceIndex, skinRatio, torsoY, mask: blurUrl, blurLayer: blurUrl };
-      });
-    return { ok: true, backend, width: nw, height: nh, faces, people };
+    if (!faceReady && !poseReady) return detectWithTinyFace(img);
+    return detectWithPose(img, dataUrl);
   });
   queue = job.catch(() => {});
   return job;
@@ -366,7 +476,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     detect(msg.dataUrl).then(sendResponse, (e) => sendResponse({ ok: false, error: String(e && e.message || e) }));
     return true;
   }
-  if (msg.type === 'ping') { ready().then(() => sendResponse({ ok: true, backend }), (e) => sendResponse({ ok: false, error: String(e) })); return true; }
+  if (msg.type === 'ping') {
+    ready().then(() => sendResponse({ ok: true, backend }), (e) => sendResponse({ ok: false, error: String(e) }));
+    return true;
+  }
   return false;
 });
 

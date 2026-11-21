@@ -77,7 +77,7 @@ async function ensureOffscreen() {
     creating = chrome.offscreen.createDocument({
       url: 'offscreen.html',
       reasons: ['WORKERS'],
-      justification: 'Runs the local face/gender model (TensorFlow.js) that decides which images to blur.',
+      justification: 'Runs the local pose and face models that decide which body regions to blur.',
     }).catch((e) => { if (!String(e).includes('single offscreen')) throw e; })
       .finally(() => { creating = null; });
   }
@@ -86,9 +86,9 @@ async function ensureOffscreen() {
 
 async function detectInOffscreen(dataUrl) {
   await ensureOffscreen();
-  // The offscreen page needs a moment to parse the 1.3 MB detector bundle
-  // before its message listener exists; keep trying for ~20 s.
-  for (let attempt = 0; attempt < 40; attempt++) {
+  // Pose + face models can take a few seconds (GPU, then CPU) before the
+  // offscreen listener exists. Wait long enough for that first start.
+  for (let attempt = 0; attempt < 90; attempt++) {
     try {
       const res = await chrome.runtime.sendMessage({ target: 'offscreen', type: 'detect', dataUrl });
       if (res) return res;
@@ -186,6 +186,38 @@ chrome.tabs.onUpdated.addListener((tabId, info) => {
   if (info.status === 'loading') { tabFrames.delete(tabId); updateBadge(tabId); }
 });
 
+// A cross-origin video taints a canvas. Capture the on-screen rectangle
+// instead, then crop it to the element. One capture at a time.
+let captureChain = Promise.resolve();
+function captureRegion(sender, rect) {
+  const job = captureChain.then(() => cropVisibleTab(sender, rect));
+  captureChain = job.catch(() => {});
+  return job;
+}
+
+async function cropVisibleTab(sender, rect) {
+  const windowId = sender.tab && sender.tab.windowId;
+  if (windowId === undefined || !rect) throw new Error('no tab');
+  const shot = await chrome.tabs.captureVisibleTab(windowId, { format: 'jpeg', quality: 72 });
+  const bmp = await createImageBitmap(await (await fetch(shot)).blob());
+  const scaleX = bmp.width / Math.max(1, Number(rect.viewportW) || bmp.width);
+  const scaleY = bmp.height / Math.max(1, Number(rect.viewportH) || bmp.height);
+  let sx = Math.max(0, Math.round(Number(rect.x) * scaleX));
+  let sy = Math.max(0, Math.round(Number(rect.y) * scaleY));
+  let sw = Math.max(1, Math.round(Number(rect.w) * scaleX));
+  let sh = Math.max(1, Math.round(Number(rect.h) * scaleY));
+  sw = Math.min(sw, bmp.width - sx);
+  sh = Math.min(sh, bmp.height - sy);
+  const scale = Math.min(1, MAX_SIDE / Math.max(sw, sh));
+  const w = Math.max(1, Math.round(sw * scale));
+  const h = Math.max(1, Math.round(sh * scale));
+  const canvas = new OffscreenCanvas(w, h);
+  canvas.getContext('2d').drawImage(bmp, sx, sy, sw, sh, 0, 0, w, h);
+  bmp.close();
+  const out = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.82 });
+  return { ok: true, dataUrl: 'data:image/jpeg;base64,' + bytesToBase64(new Uint8Array(await out.arrayBuffer())) };
+}
+
 // ---------------------------------------------------------------- messages
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || msg.target === 'offscreen') return false;
@@ -195,6 +227,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       return true;
     case 'detect-pixels':
       detectInOffscreen(msg.dataUrl).then(sendResponse, (e) => sendResponse({ ok: false, error: String(e) }));
+      return true;
+    case 'capture-region':
+      captureRegion(sender, msg.rect).then(sendResponse, (e) => sendResponse({ ok: false, error: String(e && e.message || e) }));
       return true;
     case 'get-settings':
       currentSettings().then((s) => sendResponse(s.effective));

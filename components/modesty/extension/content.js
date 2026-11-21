@@ -210,11 +210,15 @@
       if (elStyle.borderRadius && elStyle.borderRadius !== '0px') {
         ov.style.borderRadius = elStyle.borderRadius;
       }
-      if (elStyle.objectFit) {
-        ov.style.objectFit = elStyle.objectFit;
-      }
-      if (elStyle.objectPosition) {
-        ov.style.objectPosition = elStyle.objectPosition;
+      // A screen capture is already the pixels on screen, including letterbox
+      // bars. Stretching that bitmap with the video's object-fit would slide
+      // the blur off her body.
+      if (st.result && st.result.presented) {
+        ov.style.objectFit = 'fill';
+        ov.style.objectPosition = 'center';
+      } else {
+        if (elStyle.objectFit) ov.style.objectFit = elStyle.objectFit;
+        if (elStyle.objectPosition) ov.style.objectPosition = elStyle.objectPosition;
       }
 
       const insetTop = Math.max(0, Math.round(visible.top - r.top));
@@ -449,6 +453,44 @@
     });
   }
 
+  function topGeometry(el) {
+    const r = el.getBoundingClientRect();
+    let x = r.left, y = r.top, view = window;
+    try {
+      while (view.frameElement) {
+        const fr = view.frameElement.getBoundingClientRect();
+        x += fr.left;
+        y += fr.top;
+        view = view.parent;
+      }
+    } catch (e) {
+      return null;
+    }
+    return {
+      x, y, w: r.width, h: r.height,
+      viewportW: view.innerWidth || r.width,
+      viewportH: view.innerHeight || r.height,
+    };
+  }
+
+  async function captureElement(el) {
+    const rect = topGeometry(el);
+    if (!rect || rect.w < 8 || rect.h < 8) return null;
+    const hidden = [];
+    document.querySelectorAll('[data-dm-internal]').forEach((node) => {
+      hidden.push([node, node.style.visibility]);
+      node.style.visibility = 'hidden';
+    });
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    let res = null;
+    try {
+      res = await send({ type: 'capture-region', rect });
+    } finally {
+      for (const [node, visibility] of hidden) node.style.visibility = visibility;
+    }
+    return res && res.dataUrl ? res.dataUrl : null;
+  }
+
   function sampleVideo(v) {
     if (!settings.enabled || !v.isConnected) return;
     const st = info.get(v);
@@ -459,8 +501,15 @@
     st.sampling = true;
     const generation = st.generation || 0;
     const dataUrl = pixelsFrom(v, v.videoWidth, v.videoHeight);  // null if cross-origin without CORS
-    detectPixels(dataUrl).then((result) => {
+    const job = dataUrl
+      ? detectPixels(dataUrl).then((result) => result)
+      : captureElement(v).then((shot) => detectPixels(shot).then((result) => {
+        if (result && shot) result.presented = true;
+        return result;
+      }));
+    job.then((result) => {
       st.sampling = false;
+      if (v.paused) st.pauseTries = (st.pauseTries || 0) + 1;
       if ((st.generation || 0) !== generation) return;
       applyResult(v, result);
     });
@@ -472,7 +521,9 @@
       if (!v.isConnected) { videos.delete(v); continue; }
       if (v.ended || v.readyState < 2) continue;
       const st = info.get(v);
-      if (v.paused && st && st.result) continue;
+      // A paused Facebook video is what the user is looking at. Keep trying
+      // until a check succeeds, including the screen-capture fallback.
+      if (v.paused && st && st.result && st.result.ok && (st.blurred || (st.pauseTries || 0) >= 4)) continue;
       const r = v.getBoundingClientRect();
       if (r.bottom < 0 || r.right < 0 || r.top > innerHeight || r.left > innerWidth) continue;
       sampleVideo(v);

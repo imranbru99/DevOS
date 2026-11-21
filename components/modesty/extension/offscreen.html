@@ -1,8 +1,10 @@
 <!doctype html>
 <meta charset="utf-8">
 <title>DevOS Modesty detector</title>
+<body>
+<iframe id="dm-face" src="vision-host.html?task=face" hidden></iframe>
+<iframe id="dm-pose" src="vision-host.html?task=pose" hidden></iframe>
 <script src="vendor/face-api/face-api.js"></script>
-<script src="tf-bridge.js"></script>
-<script src="vendor/body-pix/body-pix.js"></script>
 <script src="rules.js"></script>
-<script src="offscreen.js"></script>
+<script type="module" src="offscreen.js"></script>
+</body>
