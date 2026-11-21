@@ -102,50 +102,35 @@
     return false;
   }
 
-  function faceNearBody(face, person) {
-    if (!Number.isFinite(person.cx)) return true;
-    const faceCx = Number(face.x) + (Number(face.w) || 0) / 2;
-    const bw = Math.max(Number(person.bw) || 0, Number(face.w) || 0, 40);
-    return Math.abs(faceCx - person.cx) <= bw * 0.75;
+  function fullImage(result) {
+    if (!result || !result.fullBlur) return [];
+    return [{ full: true, faceIndex: -1, mask: result.fullBlur, blurLayer: result.fullBlur }];
   }
 
+  function realFace(face, s) {
+    return face && Number(face.score) >= s.faceScore &&
+      Math.min(Number(face.w) || 0, Number(face.h) || 0) >= s.uncertainFacePx;
+  }
+
+  /*
+   * Women mode: one girl anywhere in the photo blurs that whole photo.
+   * A photo with no girl stays completely clear, including men, scenery,
+   * and skin with no female face. People mode blurs the whole photo when
+   * any real face is present.
+   */
   function decide(result, settings) {
     const s = Object.assign({}, DEFAULTS, settings || {});
     if (!s.enabled) return { blur: false, reason: 'disabled', regions: [] };
     if (!result || !result.ok) return { blur: false, reason: 'not-checked', regions: [] };
     const faces = result.faces || [];
-    const adultWomen = faces
-      .map((face, index) => ({ face, index }))
-      .filter((row) => isAdultWomanFace(row.face, s));
-    const regions = (result.people || []).filter((person) => {
-      if (!person.mask || !person.blurLayer) return false;
-      if (s.mode === 'people') return true;
-      const linked = faces[person.faceIndex];
-      // A body tied to a face that is not an adult woman stays clear, even
-      // when that body shows a lot of skin (a man standing beside her).
-      if (person.faceIndex >= 0 && linked) return isAdultWomanFace(linked, s);
-      const skin = Number(person.skinRatio) || 0;
-      // Real photo crops often lose nose/eye anchors. If this body shows
-      // substantial skin and an adult woman face sits on this body, still
-      // blur that body (not the whole image, and not the person beside her).
-      if (skin >= s.bodySkinRatio && adultWomen.length > 0) {
-        const matched = adultWomen.some((row) => {
-          const f = row.face;
-          if (!faceNearBody(f, person)) return false;
-          const faceMidY = f.y + f.h * 0.5;
-          return faceMidY <= (Number(person.torsoY) || Infinity) || faceMidY < (result.height || 1) * 0.55;
-        });
-        if (matched) return true;
-      }
-      // Image-search midriff / torso / lingerie crops often have no face at
-      // all. High visible-skin body masks still get blurred in women mode.
-      if (skin >= s.bodySkinOnlyRatio) return true;
-      return false;
-    });
-    const reason = regions.length
-      ? (s.mode === 'people' ? 'person' : 'adult-woman')
-      : 'no-target-body';
-    return { blur: regions.length > 0, reason, regions };
+    const girl = faces.some((face) => isAdultWomanFace(face, s));
+    if (s.mode === 'people' && faces.some((face) => realFace(face, s))) {
+      const regions = fullImage(result);
+      return { blur: regions.length > 0, reason: regions.length ? 'person' : 'no-girl', regions };
+    }
+    if (!girl) return { blur: false, reason: 'no-girl', regions: [] };
+    const regions = fullImage(result);
+    return { blur: regions.length > 0, reason: regions.length ? 'girl' : 'no-girl', regions };
   }
 
   function matchFace(pose, faces, used) {
@@ -229,5 +214,5 @@
     return false;
   }
 
-  root.ModestyRules = { MODES, DEFAULTS, effectiveSettings, decide, femaleProbability, isIconSized, stricterMode, matchFace, matchFaceByTorso, fitBox, cssLayers };
+  root.ModestyRules = { MODES, DEFAULTS, effectiveSettings, decide, isAdultWomanFace, femaleProbability, isIconSized, stricterMode, matchFace, matchFaceByTorso, fitBox, cssLayers };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

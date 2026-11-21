@@ -1,5 +1,5 @@
-/* DevOS Modesty filter: local body masks on media pixels.
- * Never apply a blur to HTML containers or use a whole-image fallback. */
+/* DevOS Modesty filter: if a photo contains a girl, blur that whole photo.
+ * Photos with no girl stay clear. The blur stays on the photo itself. */
 (() => {
   'use strict';
   if (window.__devosModestyLoaded) return;

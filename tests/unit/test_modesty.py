@@ -25,7 +25,7 @@ class ModestyPackageTests(unittest.TestCase):
             first = modesty.enable(temp, mode="women")
             key = root / modesty.DEVICE_KEY
             self.assertEqual(key.stat().st_mode & 0o777, 0o600)
-            self.assertEqual(first["version"], "1.3.0")
+            self.assertEqual(first["version"], "1.3.1")
             parsed = crx3.parse_crx3((root / modesty.INSTALL_DIR / modesty.CRX_NAME).read_bytes())
             with zipfile.ZipFile(io.BytesIO(parsed["zip"])) as archive:
                 names = archive.namelist()
@@ -35,7 +35,7 @@ class ModestyPackageTests(unittest.TestCase):
                 self.assertIn("vision-host.html", names)
                 self.assertIn("vendor/mediapipe/wasm/vision_wasm_internal.wasm", names)
                 self.assertNotIn("vendor/body-pix/body-pix.js", names)
-                self.assertEqual(json.loads(archive.read("manifest.json"))["version"], "1.3.0")
+                self.assertEqual(json.loads(archive.read("manifest.json"))["version"], "1.3.1")
                 rules = archive.read("rules.js").decode("utf-8")
                 self.assertIn("bodySkinOnlyRatio", rules)
                 self.assertIn("headCovered", rules)

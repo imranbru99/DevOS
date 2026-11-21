@@ -9,7 +9,7 @@
   const S = (m, l) => R.effectiveSettings(m, l);
   const F = (gender, p, extra) => Object.assign({ score: .95, gender, genderProbability: p, age: 30, x: 10, y: 10, w: 80, h: 80 }, extra || {});
   const P = (faceIndex, extra) => Object.assign({ faceIndex, mask: 'mask', blurLayer: 'layer' }, extra || {});
-  const D = (faces, people) => ({ ok: true, height: 400, faces, people: people || faces.map((_, i) => P(i)) });
+  const D = (faces, people) => ({ ok: true, width: 300, height: 400, fullBlur: 'full', faces, people: people || [] });
   const women = S({}, {}), people = S({}, { mode: 'people' });
   eq('default adult women threshold', women.femaleThreshold, .68);
   eq('adult woman body selected', R.decide(D([F('female', .95)]), women).blur, true);
@@ -20,21 +20,23 @@
   eq('adult boundary', R.decide(D([F('female', .95, { age: 18 })]), women).blur, true);
   eq('weak face ignored', R.decide(D([F('female', .99, { score: .2 })]), women).blur, false);
   eq('small uncertain face ignored', R.decide(D([F('female', .99, { w: 12 })]), women).blur, false);
-  eq('face without body mask is never whole-image blur', R.decide(D([F('female', .99)], []), women).blur, false);
+  eq('a girl face blurs the whole image', R.decide(D([F('female', .99)]), women).regions.map((r) => r.full), [true]);
+  eq('a girl face without a blur layer is not invented', R.decide({ ok: true, faces: [F('female', .99)] }, women).blur, false);
   eq('unmatched body stays clear in women mode', R.decide(D([], [P(-1)]), women).blur, false);
   eq('low-skin unmatched body stays clear', R.decide(D([], [P(-1, { skinRatio: .08 })]), women).blur, false);
-  eq('high-skin body crop without face is selected',
-    R.decide(D([], [P(-1, { skinRatio: .25 })]), women).blur, true);
-  eq('modest skin-only threshold selects midriff crops',
-    R.decide(D([], [P(-1, { skinRatio: .16 })]), women).blur, true);
-  eq('skin-heavy body with adult woman face is selected',
-    R.decide(D([F('female', .95, { y: 20 })], [P(-1, { skinRatio: .25, torsoY: 160 })]), women).blur, true);
-  eq('strict people mode selects unmatched body', R.decide(D([], [P(-1)]), people).blur, true);
+  eq('skin with no girl stays clear',
+    R.decide(D([], [P(-1, { skinRatio: .25 })]), women).blur, false);
+  eq('skin crop without a girl stays clear',
+    R.decide(D([], [P(-1, { skinRatio: .16 })]), women).blur, false);
+  eq('a photo that contains a girl blurs as a whole',
+    R.decide(D([F('female', .95, { y: 20 })], [P(-1, { skinRatio: .25, torsoY: 160 })]), women).regions[0].full, true);
+  eq('people mode does not blur a photo with no face', R.decide(D([], [P(-1)]), people).blur, false);
   eq('failed detection leaves text readable', R.decide({ ok: false }, women).blur, false);
   eq('missing detection has no whole-image fallback', R.decide(null, women).regions, []);
   const group = D([F('male', .99), F('female', .95), F('female', .99, { age: 12 })]);
-  eq('mixed group only adult woman selected', R.decide(group, women).regions.map(p => p.faceIndex), [1]);
-  eq('strict people mode selects each detected body', R.decide(group, people).regions.length, 3);
+  eq('a photo with a girl blurs once, as the whole image', R.decide(group, women).regions.length, 1);
+  eq('a man-only photo stays clear', R.decide(D([F('male', .99)]), women).blur, false);
+  eq('people mode blurs the whole photo when any face is real', R.decide(group, people).regions.length, 1);
   eq('disabled has no masks', R.decide(group, S({}, { enabled: false })).regions, []);
   const locked = S({ locked: true }, { enabled: false, mode: 'people', femaleThreshold: .9 });
   eq('lock stays enabled', locked.enabled, true);
@@ -65,13 +67,11 @@
       [P(0, { skinRatio: .05, cx: 130, bw: 90 })]), women).blur, true);
   eq('close-up child stays clear even with a clothing flag',
     R.decide(D([F('female', .95, { age: 12, w: 80, h: 80, clothedAdult: true })]), women).blur, false);
-  eq('man beside a clothed woman stays clear',
-    R.decide(D(
-      [F('female', .56, { age: 9, w: 25, h: 25, score: .75, clothedAdult: true, x: 100, y: 40 }),
-       F('male', .9, { x: 220, y: 40, w: 30, h: 30 })],
-      [P(0, { skinRatio: .05, cx: 110, bw: 80 }),
-       P(1, { skinRatio: .4, cx: 230, bw: 80, torsoY: 160 })]
-    ), women).regions.map((p) => p.faceIndex), [0]);
+  eq('a photo with a girl and a man blurs the whole image',
+    R.decide(D([
+      F('female', .56, { age: 9, w: 25, h: 25, score: .75, clothedAdult: true, x: 100, y: 40 }),
+      F('male', .9, { x: 220, y: 40, w: 30, h: 30 }),
+    ]), women).regions.map((p) => p.full), [true]);
   eq('contain placement', R.fitBox(400, 200, 300, 300, 'contain'), { x: 0, y: 75, w: 300, h: 150 });
   eq('cover crop placement', R.fitBox(400, 200, 300, 300, 'cover'), { x: -150, y: 0, w: 600, h: 300 });
   eq('object position placement', R.fitBox(400, 200, 300, 300, 'cover', '0% 50%'), { x: 0, y: 0, w: 600, h: 300 });

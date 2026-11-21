@@ -76,15 +76,16 @@ async function pingVision(task) {
 
 async function init() {
   await initAgeGender();
-  const [face, pose] = await Promise.all([pingVision('face'), pingVision('pose')]);
+  // Pose is not on the hot path. A girl decision only needs the face pass,
+  // then one blur of the whole photo.
+  const face = await pingVision('face');
   faceReady = !!(face && face.ok);
-  poseReady = !!(pose && pose.ok);
   if (!faceReady) {
     await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
     useTinyFace = true;
-    backend = poseReady ? 'pose+tiny-face' : 'tiny-face';
+    backend = 'tiny-face';
   } else {
-    backend = poseReady ? 'mediapipe' : 'blazeface';
+    backend = 'blazeface';
   }
 }
 
@@ -161,7 +162,9 @@ function describeAppearance(data, w, h, face) {
   const sides = [sideL, sideR].filter(Boolean);
   const sideSkin = sides.length ? sides.reduce((a, s) => a + s.skin, 0) / sides.length : 1;
   const neckSkin = neck ? neck.skin : 1;
-  const headCovered = sideSkin < 0.35 && neckSkin < 0.45;
+  // Hair or a hijab on both sides of the head still counts when the neck
+  // band is a light dress the skin test mistakes for skin.
+  const headCovered = (sideSkin < 0.35 && neckSkin < 0.45) || sideSkin < 0.12;
 
   const cheekL = sampleRegion(data, w, h, face.x + fw * 0.08, face.y + fh * 0.35, fw * 0.28, fh * 0.28);
   const cheekR = sampleRegion(data, w, h, face.x + fw * 0.64, face.y + fh * 0.35, fw * 0.28, fh * 0.28);
@@ -458,13 +461,69 @@ async function detectWithTinyFace(img) {
   return { ok: true, backend, width: frame.w, height: frame.h, faces, people };
 }
 
+function blurEntire(img, w, h) {
+  const layer = document.createElement('canvas');
+  layer.width = w;
+  layer.height = h;
+  const ctx = layer.getContext('2d');
+  ctx.filter = 'blur(18px)';
+  ctx.drawImage(img, -12, -12, w + 24, h + 24);
+  return layer.toDataURL('image/jpeg', 0.72);
+}
+
+async function detectFast(img, dataUrl) {
+  const frame = pixelsOf(img);
+  const raw = [];
+  if (faceReady) {
+    const faceMsg = await callVision('face', 'detect', { dataUrl }, 8000);
+    if (faceMsg && faceMsg.ok) {
+      for (const det of faceMsg.faces || []) {
+        const box = clipBox(det.box || {}, frame.w, frame.h);
+        if (!box || det.score < 0.4) continue;
+        raw.push(Object.assign({ score: det.score }, box));
+      }
+    }
+  }
+  const faces = [];
+  for (const box of dedupeFaces(raw)) {
+    const look = describeAppearance(frame.data, frame.w, frame.h, box);
+    const gender = await ageGenderOf(img, box);
+    faces.push({
+      score: +box.score.toFixed(3),
+      gender: gender.gender,
+      genderProbability: +(Number(gender.genderProbability) || 0).toFixed(3),
+      age: gender.age,
+      x: Math.round(box.x), y: Math.round(box.y), w: Math.round(box.w), h: Math.round(box.h),
+      headCovered: look.headCovered,
+      bearded: look.bearded,
+      clothedAdult: look.clothedAdult,
+    });
+  }
+  if (!faces.length && useTinyFace) {
+    const tiny = await facesFromTiny(img, frame);
+    faces.push(...tiny);
+  }
+  const girl = faces.some((face) => {
+    try { return ModestyRules.isAdultWomanFace(face, ModestyRules.DEFAULTS); } catch (e) { return false; }
+  });
+  return {
+    ok: true,
+    backend,
+    width: frame.w,
+    height: frame.h,
+    faces,
+    fullBlur: girl ? blurEntire(img, frame.w, frame.h) : null,
+    people: [],
+  };
+}
+
 let queue = Promise.resolve();
 function detect(dataUrl) {
   const job = queue.then(async () => {
     await ready();
     const img = await loadImage(dataUrl);
-    if (!faceReady && !poseReady) return detectWithTinyFace(img);
-    return detectWithPose(img, dataUrl);
+    if (!faceReady && !useTinyFace) return detectWithTinyFace(img);
+    return detectFast(img, dataUrl);
   });
   queue = job.catch(() => {});
   return job;
