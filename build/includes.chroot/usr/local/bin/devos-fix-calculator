@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# The Calculator menu was still opening KCalc. Install DevOS Calculator and
+# point the kcalc command at it. Safe to re-run.
+set -uo pipefail
+
+BRANCH="${DEVOS_BRANCH:-cursor/modern-calculator-6081}"
+RAW="https://raw.githubusercontent.com/imranbru99/DevOS/${BRANCH}"
+BIN="/usr/local/bin/devos-calculator"
+
+as_root() {
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+  else
+    sudo "$@"
+  fi
+}
+
+echo "== Install Calculator =="
+tmp="$(mktemp)"
+if curl -fsSL "${RAW}/build/includes.chroot/usr/local/bin/devos-calculator" -o "$tmp"; then
+  as_root install -m 0755 "$tmp" "$BIN"
+fi
+rm -f "$tmp"
+if [ ! -x "$BIN" ] || ! grep -q 'modern-calculator' "$BIN" 2>/dev/null; then
+  echo "  Calculator program is missing."
+  exit 1
+fi
+echo "  $BIN"
+
+python3 - << 'PY'
+import importlib.machinery
+mod = importlib.machinery.SourceFileLoader("devos_calculator", "/usr/local/bin/devos-calculator").load_module()
+engine = mod.Engine()
+engine.digit("8")
+engine.digit("8")
+engine.operator("+")
+engine.digit("2")
+engine.digit("0")
+engine.digit("0")
+engine.equals()
+if engine.entry != "288":
+    raise SystemExit(f"Calculator math failed: {engine.entry}")
+print("  Calculator math: ok")
+PY
+
+echo "== Point the kcalc command at Calculator =="
+if [ -e /usr/bin/kcalc ] && ! grep -aq 'devos-calculator' /usr/bin/kcalc 2>/dev/null; then
+  as_root mkdir -p /usr/lib/devos
+  as_root dpkg-divert --local --rename --divert /usr/lib/devos/kcalc.real --add /usr/bin/kcalc || true
+fi
+if [ ! -e /usr/bin/kcalc ] || grep -aq 'devos-calculator' /usr/bin/kcalc 2>/dev/null; then
+  as_root tee /usr/bin/kcalc >/dev/null << 'EOF'
+#!/bin/bash
+export QT_WAYLAND_APP_ID=devos-calculator
+exec -a devos-calculator /usr/local/bin/devos-calculator "$@"
+EOF
+  as_root chmod 755 /usr/bin/kcalc
+fi
+
+DESK='[Desktop Entry]
+Type=Application
+Name=Calculator
+GenericName=Calculator
+Comment=Do math quickly
+Exec=/usr/local/bin/devos-calculator
+TryExec=/usr/local/bin/devos-calculator
+Icon=devos-calculator
+Terminal=false
+Categories=Qt;Utility;Calculator;
+Keywords=calculator;calc;math;kcalc;
+StartupNotify=true
+StartupWMClass=devos-calculator
+'
+mkdir -p "${HOME}/.local/share/applications"
+printf '%s\n' "$DESK" > "${HOME}/.local/share/applications/devos-calculator.desktop"
+as_root mkdir -p /usr/share/applications /usr/local/share/applications
+printf '%s\n' "$DESK" | as_root tee /usr/share/applications/devos-calculator.desktop >/dev/null
+printf '%s\n' "$DESK" | as_root tee /usr/local/share/applications/devos-calculator.desktop >/dev/null
+update-desktop-database "${HOME}/.local/share/applications" 2>/dev/null || true
+as_root update-desktop-database /usr/share/applications 2>/dev/null || true
+
+# The open KCalc window is the old program. Close it so the next open is Calculator.
+killall kcalc 2>/dev/null || true
+
+echo
+echo "Open Calculator again. The window title should say Calculator."
