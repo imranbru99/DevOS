@@ -30,7 +30,7 @@ import tempfile
 import threading
 from pathlib import Path
 from typing import Optional
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 try:
     from PyQt5.QtCore import (
@@ -858,9 +858,17 @@ QMenu::separator {
 def make_menu(parent=None):
     """Right-click and toolbar menus. Own sheet so the popup is not the same color as the folder."""
     menu = QMenu(parent)
+    return polish_menu(menu)
+
+
+def polish_menu(menu):
+    """Style a menu that already exists. Toolbar buttons pass their menu here."""
+    if menu is None:
+        return menu
     menu.setObjectName("explorerMenu")
     menu.setAttribute(Qt.WA_StyledBackground, True)
-    menu.setMinimumWidth(220)
+    if menu.minimumWidth() < 180:
+        menu.setMinimumWidth(220)
     menu.setStyleSheet(EXPLORER_MENU_STYLE)
     return menu
 
@@ -3577,6 +3585,89 @@ QPushButton:pressed { background: #1e3a8a; }
 """
 
 
+# Painted on the picker itself. The window sheet was not enough: KDE still
+# drew Select Folder and Cancel as plain system buttons.
+# modern-folder-picker
+_PICKER_BAR_STYLE = """
+QWidget#pickerBottomBar {
+    background: #f8fafc;
+    border-top: 1px solid #e2e8f0;
+}
+QLabel#pickerLabel {
+    color: #334155;
+    background: transparent;
+    font-size: 13px;
+    font-weight: 600;
+}
+QLineEdit#pickerEdit, QComboBox#pickerCombo {
+    background: #ffffff;
+    color: #0f172a;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    padding: 0 12px;
+    min-height: 36px;
+    font-size: 13px;
+}
+QLineEdit#pickerEdit:focus, QComboBox#pickerCombo:focus {
+    border: 1px solid #2563eb;
+}
+QComboBox#pickerCombo::drop-down { border: none; width: 24px; }
+QComboBox#pickerCombo QAbstractItemView {
+    background: #ffffff;
+    color: #0f172a;
+    selection-background-color: #1d4ed8;
+    selection-color: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+}
+"""
+_PICKER_BTN_PRIMARY = """
+QPushButton {
+    background: #1d4ed8;
+    color: #ffffff;
+    border: none;
+    border-radius: 10px;
+    min-height: 38px;
+    padding: 0 20px;
+    font-size: 13px;
+    font-weight: 700;
+}
+QPushButton:hover { background: #1e40af; }
+QPushButton:pressed { background: #1e3a8a; }
+"""
+_PICKER_BTN_SECONDARY = """
+QPushButton {
+    background: #ffffff;
+    color: #0f172a;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    min-height: 38px;
+    padding: 0 18px;
+    font-size: 13px;
+    font-weight: 600;
+}
+QPushButton:hover { background: #f1f5f9; border-color: #94a3b8; }
+QPushButton:pressed { background: #e2e8f0; }
+"""
+
+
+def polish_picker_bar(bar, action, cancel):
+    bar.setObjectName("pickerBottomBar")
+    bar.setAttribute(Qt.WA_StyledBackground, True)
+    bar.setStyleSheet(_PICKER_BAR_STYLE)
+    action.setStyleSheet(_PICKER_BTN_PRIMARY)
+    action.setCursor(Qt.PointingHandCursor)
+    action.setMinimumHeight(38)
+    action.setMinimumWidth(140)
+    action.setDefault(True)
+    action.setAutoDefault(True)
+    cancel.setStyleSheet(_PICKER_BTN_SECONDARY)
+    cancel.setCursor(Qt.PointingHandCursor)
+    cancel.setMinimumHeight(38)
+    cancel.setMinimumWidth(96)
+    cancel.setAutoDefault(False)
+
+
 # Painted on the command bar itself. The window sheet still had a taller
 # chip rule, and that is the row that stayed on screen.
 _CMD_BAR_STYLE = """
@@ -5135,6 +5226,7 @@ class WindowsFileExplorer(QMainWindow):
         self.btn_sort.setFixedHeight(28)
         self.btn_sort.setCursor(Qt.PointingHandCursor)
         sort_menu = make_menu(self.btn_sort)
+        sort_icons = ("file", "calendar", "type", "size")
         for col_idx, col_name in enumerate(["Name", "Date modified", "Type", "Size"]):
             sort_menu.addAction(get_win_icon(sort_icons[col_idx], 16), col_name, lambda c=col_idx: self.table_view.sortItems(c, self.table_view.horizontalHeader().sortIndicatorOrder()))
         sort_menu.addSeparator()
@@ -5544,20 +5636,22 @@ class WindowsFileExplorer(QMainWindow):
 
         # 4. Picker Bottom Bar (if in file chooser/picker mode)
         if self._picker_mode:
+            # modern-folder-picker
             picker_bar = QWidget()
             picker_bar.setObjectName("pickerBottomBar")
             picker_layout = QVBoxLayout(picker_bar)
-            picker_layout.setContentsMargins(14, 10, 14, 10)
-            picker_layout.setSpacing(8)
+            picker_layout.setContentsMargins(16, 14, 16, 14)
+            picker_layout.setSpacing(10)
 
             is_dir = bool(self._picker_options.get("directory"))
             is_save = bool(self._picker_options.get("save"))
-            lbl_name_text = "Folder:" if is_dir else ("Save as:" if is_save else "File name:")
+            lbl_name_text = "Folder" if is_dir else ("Save as" if is_save else "File name")
             lbl_name = QLabel(lbl_name_text)
-            lbl_name.setFixedWidth(85)
+            lbl_name.setFixedWidth(88)
             lbl_name.setObjectName("pickerLabel")
             self.picker_name_edit = QLineEdit()
             self.picker_name_edit.setObjectName("pickerEdit")
+            self.picker_name_edit.setFixedHeight(38)
             initial_name = clean_glob_pattern(self._picker_options.get("name", ""))
             if initial_name:
                 self.picker_name_edit.setText(initial_name)
@@ -5565,54 +5659,53 @@ class WindowsFileExplorer(QMainWindow):
                 self.picker_name_edit.setText(os.path.basename(self._current_path))
             self.picker_name_edit.returnPressed.connect(self._on_picker_accept)
 
-            action_text = "Save" if is_save else ("Select Folder" if is_dir else "Open")
-            self.btn_picker_action = QPushButton(action_text)
-            self.btn_picker_action.setObjectName("pickerPrimaryBtn")
-            self.btn_picker_action.setCursor(Qt.PointingHandCursor)
-            self.btn_picker_action.clicked.connect(self._on_picker_accept)
-
-            self.btn_picker_cancel = QPushButton("Cancel")
-            self.btn_picker_cancel.setObjectName("pickerCancelBtn")
-            self.btn_picker_cancel.setCursor(Qt.PointingHandCursor)
-            self.btn_picker_cancel.clicked.connect(self._on_picker_cancel)
-
-            # Auto-calculate comfortable button width to prevent truncation of 'Select Folder'
-            fm = QFontMetrics(self.font())
-            btn_w = max(130, fm.horizontalAdvance(action_text) + 36, fm.horizontalAdvance("Cancel") + 36)
-            self.btn_picker_action.setFixedWidth(btn_w)
-            self.btn_picker_cancel.setFixedWidth(btn_w)
-
-            row1 = QHBoxLayout()
-            row1.setSpacing(10)
-            row1.addWidget(lbl_name)
-            row1.addWidget(self.picker_name_edit, 1)
-            row1.addWidget(self.btn_picker_action)
-            picker_layout.addLayout(row1)
-
-            row2 = QHBoxLayout()
-            row2.setSpacing(10)
-            lbl_type = QLabel("Files of type:")
-            lbl_type.setFixedWidth(85)
-            lbl_type.setObjectName("pickerLabel")
+            name_row = QHBoxLayout()
+            name_row.setSpacing(12)
+            name_row.addWidget(lbl_name)
+            name_row.addWidget(self.picker_name_edit, 1)
+            picker_layout.addLayout(name_row)
 
             self.picker_filter_combo = QComboBox()
             self.picker_filter_combo.setObjectName("pickerCombo")
+            self.picker_filter_combo.setFixedHeight(38)
             self.picker_filter_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
             self.picker_filter_combo.setMinimumContentsLength(18)
-            self.picker_filter_combo.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+            self.picker_filter_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             raw_filters = self._picker_options.get("filters", [])
             if not raw_filters:
                 raw_filters = [("Folder", ["*"])] if is_dir else [("All Files (*.*)", ["*.*"])]
             for label, pats in raw_filters:
                 self.picker_filter_combo.addItem(label, pats)
-
             self.picker_filter_combo.currentIndexChanged.connect(self._on_picker_filter_changed)
             self._current_filter_patterns = self.picker_filter_combo.currentData() or []
 
-            row2.addWidget(lbl_type)
-            row2.addWidget(self.picker_filter_combo, 1)
-            row2.addWidget(self.btn_picker_cancel)
-            picker_layout.addLayout(row2)
+            # A folder choice has no file type. The extra row looked like an old dialog.
+            if not is_dir:
+                type_row = QHBoxLayout()
+                type_row.setSpacing(12)
+                lbl_type = QLabel("File type")
+                lbl_type.setFixedWidth(88)
+                lbl_type.setObjectName("pickerLabel")
+                type_row.addWidget(lbl_type)
+                type_row.addWidget(self.picker_filter_combo, 1)
+                picker_layout.addLayout(type_row)
+
+            action_text = "Save" if is_save else ("Select Folder" if is_dir else "Open")
+            self.btn_picker_action = QPushButton(action_text)
+            self.btn_picker_action.setObjectName("pickerPrimaryBtn")
+            self.btn_picker_action.clicked.connect(self._on_picker_accept)
+
+            self.btn_picker_cancel = QPushButton("Cancel")
+            self.btn_picker_cancel.setObjectName("pickerCancelBtn")
+            self.btn_picker_cancel.clicked.connect(self._on_picker_cancel)
+
+            action_row = QHBoxLayout()
+            action_row.setSpacing(10)
+            action_row.addStretch(1)
+            action_row.addWidget(self.btn_picker_cancel)
+            action_row.addWidget(self.btn_picker_action)
+            picker_layout.addLayout(action_row)
+            polish_picker_bar(picker_bar, self.btn_picker_action, self.btn_picker_cancel)
 
             main_layout.addWidget(picker_bar)
 
@@ -6065,6 +6158,8 @@ class WindowsFileExplorer(QMainWindow):
                     mgr.style(self)
                 except Exception:
                     pass
+            self.table_view.verticalHeader().setDefaultSectionSize(28 if self._settings.get("compact", False) else 40)
+            self.status.setVisible(self._settings.get("status_bar", True))
             return
         self._appearance_locked = True
         self._sync_icon_name_colors()
@@ -6893,6 +6988,39 @@ class WindowsFileExplorer(QMainWindow):
         for path in selection:
             self._select_path(path)
         self.table_view.verticalScrollBar().setValue(scroll)
+
+    def _folder_rows(self, path, in_trash):
+        """Folders first, then files. None means the folder could not be read."""
+        try:
+            entries = os.listdir(path)
+        except OSError as err:
+            self.status_items_count.setText(f"Unable to access: {err.strerror}")
+            self._loading_folder = False
+            return None
+        dirs = []
+        files = []
+        for entry in entries:
+            if entry in (".", ".."):
+                continue
+            full_path = os.path.join(path, entry)
+            if not self._show_hidden and (entry.startswith(".") or is_volume_recovery_folder(full_path)):
+                continue
+            if os.path.isdir(full_path):
+                dirs.append((entry, full_path))
+                continue
+            if self._picker_mode:
+                if self._picker_options.get("directory"):
+                    continue
+                patterns = self._current_filter_patterns or []
+                if patterns and not any(
+                    pat in ("*", "*.*", "") or fnmatch.fnmatch(entry.lower(), str(pat).lower())
+                    for pat in patterns
+                ):
+                    continue
+            files.append((entry, full_path))
+        dirs.sort(key=lambda item: item[0].lower())
+        files.sort(key=lambda item: item[0].lower())
+        return dirs + files
 
     def _load_folder_contents(self, path):
         """Populate table and list view with items in directory."""

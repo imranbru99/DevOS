@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Replace the folder picker buttons with the DevOS File Explorer style.
+# Safe to re-run. Close the open folder window, then choose the folder again.
+set -euo pipefail
+
+BRANCH="${DEVOS_BRANCH:-cursor/modern-folder-picker-6081}"
+RAW="https://raw.githubusercontent.com/imranbru99/DevOS/${BRANCH}"
+
+as_root() {
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+  else
+    sudo "$@"
+  fi
+}
+
+echo "== Install File Explorer folder picker =="
+tmp="$(mktemp)"
+curl -fsSL "${RAW}/build/includes.chroot/usr/local/bin/devos-files" -o "$tmp"
+if ! grep -q 'modern-folder-picker' "$tmp"; then
+  echo "  The download is not the new folder picker."
+  rm -f "$tmp"
+  exit 1
+fi
+as_root install -m 0755 "$tmp" /usr/local/bin/devos-files
+rm -f "$tmp"
+
+echo
+echo "Close the folder window, then choose the folder again."
+echo "Select Folder is the blue button at the bottom right."

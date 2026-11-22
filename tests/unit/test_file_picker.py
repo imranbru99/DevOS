@@ -111,6 +111,19 @@ class TestFilePicker(unittest.TestCase):
         f2 = parse_filter_string("")
         self.assertEqual(f2, [("All Files (*.*)", ["*.*"])])
 
+    def test_folder_picker_paints_its_own_buttons(self):
+        text = FILES_BIN.read_text(encoding="utf-8", errors="replace")
+        self.assertIn("modern-folder-picker", text)
+        self.assertIn("def polish_picker_bar", text)
+        self.assertIn("def polish_menu", text)
+        self.assertIn("def _folder_rows", text)
+        self.assertIn("action.setStyleSheet(_PICKER_BTN_PRIMARY)", text)
+        self.assertIn("cancel.setStyleSheet(_PICKER_BTN_SECONDARY)", text)
+        self.assertIn('action_text = "Save" if is_save else ("Select Folder" if is_dir else "Open")', text)
+        # Folder choice no longer shows the old "Files of type" row.
+        self.assertIn("if not is_dir:", text)
+        self.assertNotIn('QLabel("Files of type:")', text)
+
     def test_chrome_download_uri_becomes_a_local_path(self):
         portal_path = os.path.join(
             ROOT, "build", "includes.chroot", "usr", "local", "bin", "devos-portal-filechooser"
