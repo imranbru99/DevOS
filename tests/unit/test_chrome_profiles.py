@@ -353,5 +353,109 @@ class TestChromeProfiles(unittest.TestCase):
         self.assertEqual(by_title.get("Guest"), "chrome-guest-w3.desktop")
 
 
+def _save_portrait(path, center):
+    from PIL import Image as PILImage
+
+    img = PILImage.new("RGB", (96, 96), (248, 248, 248))
+    px = img.load()
+    for y in range(96):
+        for x in range(96):
+            px[x, y] = ((x * 7) % 256, (y * 5 + 20) % 256, (x + y * 3) % 256)
+    for y in range(40, 56):
+        for x in range(40, 56):
+            px[x, y] = center
+    img.save(path)
+
+
+class TestChromeProfilePhoto(unittest.TestCase):
+    def test_account_photo_is_used_even_with_a_theme_avatar_id(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            folder = os.path.join(tmpdir, "Default")
+            os.makedirs(folder)
+            photo = os.path.join(folder, "Google Profile Picture.png")
+            _save_portrait(photo, (210, 48, 150))
+            with open(os.path.join(tmpdir, "Local State"), "w", encoding="utf-8") as handle:
+                json.dump(
+                    {
+                        "profile": {
+                            "info_cache": {
+                                "Default": {
+                                    "name": "IMRAN",
+                                    "avatar_icon": "chrome://theme/IDR_PROFILE_AVATAR_26",
+                                }
+                            }
+                        }
+                    },
+                    handle,
+                )
+            found = chrome_profiles.get_profile_avatar_path(tmpdir, "Default")
+            self.assertEqual(found, photo)
+
+    def test_preferences_picture_is_found_when_local_state_has_no_filename(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            folder = os.path.join(tmpdir, "Profile 1")
+            os.makedirs(folder)
+            photo = os.path.join(folder, "Google Profile Picture.png")
+            _save_portrait(photo, (40, 90, 200))
+            with open(os.path.join(tmpdir, "Local State"), "w", encoding="utf-8") as handle:
+                json.dump({"profile": {"info_cache": {"Profile 1": {"name": "Mirza"}}}}, handle)
+            with open(os.path.join(folder, "Preferences"), "w", encoding="utf-8") as handle:
+                json.dump(
+                    {"profile": {"gaia_picture_file_name": "Google Profile Picture.png", "use_gaia_picture": True}},
+                    handle,
+                )
+            self.assertEqual(
+                chrome_profiles.get_profile_avatar_path(tmpdir, "Profile 1"),
+                photo,
+            )
+
+    def test_flat_saved_picture_is_not_a_photo(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            folder = os.path.join(tmpdir, "Default")
+            os.makedirs(folder)
+            flat = os.path.join(folder, "Google Profile Picture.png")
+            from PIL import Image as PILImage
+
+            PILImage.new("RGB", (96, 96), (20, 120, 220)).save(flat)
+            self.assertIsNone(
+                chrome_profiles.get_profile_avatar_path(
+                    tmpdir,
+                    "Default",
+                    {"gaia_picture_file_name": "Google Profile Picture.png", "use_gaia_picture": True},
+                )
+            )
+
+    def test_taskbar_icon_updates_when_the_account_photo_changes(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            photo = os.path.join(tmpdir, "Google Profile Picture.png")
+            _save_portrait(photo, (220, 30, 140))
+            icons = os.path.join(tmpdir, "icons")
+            os.makedirs(icons)
+            first = chrome_profiles.profile_icon_fingerprint("IMRAN", photo)
+            path_48, _short = chrome_profiles.profile_icon_file(icons, "chrome-imran", first)
+            path_128, _short = chrome_profiles.profile_icon_file(
+                os.path.join(tmpdir, "icons128"), "chrome-imran", first
+            )
+            self.assertTrue(chrome_profiles.ensure_badged_icon("IMRAN", path_48, path_128, photo, first))
+            self.assertFalse(chrome_profiles.ensure_badged_icon("IMRAN", path_48, path_128, photo, first))
+            self.assertTrue(chrome_profiles.icon_matches_photo(path_48, first))
+            _save_portrait(photo, (20, 40, 230))
+            second = chrome_profiles.profile_icon_fingerprint("IMRAN", photo)
+            self.assertNotEqual(first, second)
+            self.assertFalse(chrome_profiles.icon_matches_photo(path_48, second))
+            new_48, _short = chrome_profiles.profile_icon_file(icons, "chrome-imran", second)
+            new_128, _short = chrome_profiles.profile_icon_file(
+                os.path.join(tmpdir, "icons128"), "chrome-imran", second
+            )
+            self.assertNotEqual(path_48, new_48)
+            self.assertTrue(chrome_profiles.ensure_badged_icon("IMRAN", new_48, new_128, photo, second))
+            from PIL import Image as PILImage
+
+            img = PILImage.open(new_48).convert("RGB")
+            corner = list(img.crop((30, 30, 47, 47)).getdata())
+            blues = sum(1 for px in corner if px[2] > 150 and px[0] < 80)
+            self.assertGreater(blues, 4)
+
+
 if __name__ == "__main__":
     unittest.main()
