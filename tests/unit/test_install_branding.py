@@ -764,6 +764,8 @@ class TestDevOSIdentity(unittest.TestCase):
         self.assertIn('exec_prefix="/usr/local/bin/devos-files %U"', debrand)
         self.assertIn("dpkg-divert --local --rename --divert /usr/lib/devos/dolphin.real", debrand)
         self.assertIn("exec /usr/local/bin/devos-files", debrand)
+        self.assertIn("/usr/local/bin/devos-calculator", debrand)
+        self.assertIn("/usr/lib/devos/kcalc.real", debrand)
         self.assertIn('"org.kde.konsole": (', debrand)
         self.assertIn('"org.kde.kcalc": (', debrand)
         self.assertIn("Calculator", debrand)

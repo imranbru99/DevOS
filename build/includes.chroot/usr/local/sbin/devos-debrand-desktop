@@ -395,13 +395,14 @@ Type=Application
 Name=Calculator
 GenericName=Calculator
 Comment=Do math quickly
-Exec=kcalc
+Exec=/usr/local/bin/devos-calculator
+TryExec=/usr/local/bin/devos-calculator
 Icon=devos-calculator
 Terminal=false
 Categories=Qt;Utility;Calculator;
 Keywords=calculator;calc;math;kcalc;
 StartupNotify=true
-StartupWMClass=kcalc
+StartupWMClass=devos-calculator
 X-KDE-StartupNotify=true
 """,
     "devos-pdf.desktop": """[Desktop Entry]
@@ -628,11 +629,11 @@ def rewrite(app_id, name=None, generic=None, keywords=None, icon=None, hide=Fals
                 saw_keywords = True
             elif main and icon and stripped.startswith("Icon="):
                 line = f"Icon={icon}\n"
-            elif exec_prefix and re.match(r"Exec=dolphin(\s|$)", stripped):
-                # A renamed menu entry still started the Dolphin window.
+            elif exec_prefix and re.match(r"Exec=(?:dolphin|kcalc)(?:\s|$)", stripped):
+                # A renamed menu entry still started Dolphin or KCalc.
                 line = f"Exec={exec_prefix}\n"
-            elif exec_prefix and stripped.startswith("TryExec=dolphin"):
-                line = "TryExec=/usr/local/bin/devos-files\n"
+            elif exec_prefix and re.match(r"TryExec=(?:dolphin|kcalc)$", stripped):
+                line = f"TryExec={exec_prefix.split()[0]}\n"
             out.append(line)
             if main and stripped == "[Desktop Entry]" and (hide or feature_hide):
                 out.append("NoDisplay=true\n")
@@ -671,7 +672,9 @@ for app_id, (name, generic, keywords, icon) in RENAME.items():
         icon=icon,
         hide=app_id in HIDE,
         feature_hide=app_id in OPTIONAL_APPS_HIDDEN,
-        exec_prefix="/usr/local/bin/devos-files %U" if app_id == "org.kde.dolphin" else None,
+        exec_prefix="/usr/local/bin/devos-files %U" if app_id == "org.kde.dolphin" else (
+            "/usr/local/bin/devos-calculator" if app_id == "org.kde.kcalc" else None
+        ),
     )
 
 for app_id in sorted(HIDE):
@@ -758,6 +761,24 @@ EOF
         chmod 755 /usr/bin/dolphin
     fi
     install -m 0755 /usr/bin/dolphin /usr/local/bin/dolphin
+fi
+
+# The Calculator menu ran kcalc, so the window title stayed "KCalc".
+if [ -x /usr/local/bin/devos-calculator ]; then
+    if [ -e /usr/bin/kcalc ] && ! grep -aq 'devos-calculator' /usr/bin/kcalc 2>/dev/null; then
+        mkdir -p /usr/lib/devos
+        dpkg-divert --local --rename --divert /usr/lib/devos/kcalc.real --add /usr/bin/kcalc || true
+    fi
+    if [ ! -e /usr/bin/kcalc ] || grep -aq 'devos-calculator' /usr/bin/kcalc 2>/dev/null; then
+        cat > /usr/bin/kcalc << 'EOF'
+#!/bin/bash
+export QT_WAYLAND_APP_ID=devos-calculator
+exec -a devos-calculator /usr/local/bin/devos-calculator "$@"
+EOF
+        chmod 755 /usr/bin/kcalc
+    fi
+fi
+if [ -x /usr/local/bin/devos-files ]; then
     python3 - << 'PY'
 from pathlib import Path
 homes = [Path("/etc/skel"), Path("/root")]
