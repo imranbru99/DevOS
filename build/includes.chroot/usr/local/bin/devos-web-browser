@@ -1,49 +1,7 @@
 #!/bin/bash
-# DevOS Browser. A current Chrome or Chromium draws the page, so modern CSS
-# and JavaScript run. The older built-in window is only used when neither is installed.
+# DevOS Browser opens its own window. It never opens the Chrome window.
 set -u
 
-find_engine() {
-    for bin in \
-        /usr/bin/google-chrome-stable \
-        /usr/bin/google-chrome \
-        /opt/google/chrome/google-chrome \
-        /usr/bin/chromium \
-        /usr/bin/chromium-browser
-    do
-        if [ -x "$bin" ]; then
-            printf '%s\n' "$bin"
-            return 0
-        fi
-    done
-    return 1
-}
-
-engine="$(find_engine || true)"
-if [ -n "$engine" ]; then
-    profile="${XDG_CONFIG_HOME:-$HOME/.config}/devos-browser/chrome"
-    mkdir -p "$profile"
-    args=(
-        --user-data-dir="$profile"
-        --class=devos-browser
-        --no-first-run
-        --no-default-browser-check
-        --disable-default-apps
-        --password-store=basic
-    )
-    for arg in "$@"; do
-        if [ "$arg" = "--private" ]; then
-            args+=(--incognito)
-        else
-            args+=("$arg")
-        fi
-    done
-    # Taskbar name and icon come from the DevOS Browser desktop entry.
-    export CHROME_DESKTOP=devos-browser.desktop
-    exec "$engine" "${args[@]}"
-fi
-
-# No current engine on this PC. Open the built-in window.
 if ! ls /dev/dri/renderD* >/dev/null 2>&1 ||
     grep -qsE 'DRIVER=(virtio_gpu|bochs|qxl|vmwgfx)$' /sys/class/drm/card*/device/uevent; then
     export QT_QUICK_BACKEND="${QT_QUICK_BACKEND:-software}"

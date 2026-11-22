@@ -10,15 +10,68 @@ import time
 from pathlib import Path
 from urllib.parse import urlencode
 
-from PyQt5 import sip
-from PyQt5.QtCore import QEvent, QStandardPaths, Qt, QUrl, QSize, QTimer
-from PyQt5.QtGui import QDesktopServices, QFont, QKeySequence
-from PyQt5.QtWebEngineWidgets import QWebEnginePage, QWebEngineProfile, QWebEngineSettings, QWebEngineView
-from PyQt5.QtWidgets import (
-    QAction, QApplication, QFrame, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
-    QMainWindow, QMenu, QMessageBox, QProgressBar, QPushButton, QShortcut,
-    QSizePolicy, QStatusBar, QTabWidget, QToolBar, QToolButton, QVBoxLayout, QWidget,
-)
+# Prefer Qt 6 WebEngine. Its page engine understands current CSS, including
+# @layer stylesheets that the older Qt 5 engine drops. The window stays DevOS.
+try:
+    from PyQt6 import sip
+    from PyQt6.QtCore import QEvent, QSize, QStandardPaths, Qt, QTimer, QUrl
+    from PyQt6.QtGui import QAction, QDesktopServices, QFont, QKeySequence, QShortcut
+    from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings
+    from PyQt6.QtWebEngineWidgets import QWebEngineView
+    from PyQt6.QtWidgets import (
+        QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
+        QMainWindow, QMenu, QMessageBox, QProgressBar, QPushButton,
+        QSizePolicy, QStatusBar, QTabWidget, QToolBar, QToolButton, QVBoxLayout, QWidget,
+    )
+    QT_MAJOR = 6
+except ImportError:
+    from PyQt5 import sip
+    from PyQt5.QtCore import QEvent, QSize, QStandardPaths, Qt, QTimer, QUrl
+    from PyQt5.QtGui import QDesktopServices, QFont, QKeySequence
+    from PyQt5.QtWebEngineWidgets import QWebEnginePage, QWebEngineProfile, QWebEngineSettings, QWebEngineView
+    from PyQt5.QtWidgets import (
+        QAction, QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
+        QMainWindow, QMenu, QMessageBox, QProgressBar, QPushButton, QShortcut,
+        QSizePolicy, QStatusBar, QTabWidget, QToolBar, QToolButton, QVBoxLayout, QWidget,
+    )
+    QT_MAJOR = 5
+
+if QT_MAJOR == 6:
+    Qt.ElideRight = Qt.TextElideMode.ElideRight
+    Qt.ALT = Qt.KeyboardModifier.AltModifier
+    Qt.Key_Left = Qt.Key.Key_Left
+    Qt.Key_Right = Qt.Key.Key_Right
+    Qt.ToolButtonTextOnly = Qt.ToolButtonStyle.ToolButtonTextOnly
+    QSizePolicy.Expanding = QSizePolicy.Policy.Expanding
+    QSizePolicy.Preferred = QSizePolicy.Policy.Preferred
+    QEvent.FocusIn = QEvent.Type.FocusIn
+    QEvent.FocusOut = QEvent.Type.FocusOut
+    QToolButton.InstantPopup = QToolButton.ToolButtonPopupMode.InstantPopup
+    QWebEngineProfile.AllowPersistentCookies = (
+        QWebEngineProfile.PersistentCookiesPolicy.AllowPersistentCookies
+    )
+    QKeySequence.Refresh = QKeySequence.StandardKey.Refresh
+    QKeySequence.AddTab = QKeySequence.StandardKey.AddTab
+    QMessageBox.Yes = QMessageBox.StandardButton.Yes
+    QStandardPaths.AppDataLocation = QStandardPaths.StandardLocation.AppDataLocation
+    QStandardPaths.CacheLocation = QStandardPaths.StandardLocation.CacheLocation
+    QStandardPaths.DownloadLocation = QStandardPaths.StandardLocation.DownloadLocation
+
+
+def run_dialog(dialog):
+    if QT_MAJOR == 6:
+        return dialog.exec()
+    return dialog.exec_()
+
+
+def web_attr(name):
+    found = getattr(QWebEngineSettings, name, None)
+    if found is not None:
+        return found
+    group = getattr(QWebEngineSettings, "WebAttribute", None)
+    if group is None:
+        return None
+    return getattr(group, name, None)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app_identity import apply, prepare, show_window
@@ -301,6 +354,10 @@ QToolBar#nav {
   border: 0; border-bottom: 1px solid rgba(15,23,42,0.08);
   padding: 8px 10px; spacing: 5px;
 }
+QLabel#brandMark {
+  color: #04202c; background: #22d3ee; border-radius: 9px;
+  padding: 3px 9px; font-weight: 800; letter-spacing: 0.8px;
+}
 QToolBar#bookmarks {
   background: #f3f7fb; border: 0; border-bottom: 1px solid rgba(15,23,42,0.06);
   padding: 4px 10px; spacing: 4px;
@@ -371,6 +428,10 @@ QToolBar#nav {
   background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #121a2b, stop:1 #0e1624);
   border: 0; border-bottom: 1px solid rgba(255,255,255,0.07);
   padding: 8px 10px; spacing: 5px;
+}
+QLabel#brandMark {
+  color: #04202c; background: #22d3ee; border-radius: 9px;
+  padding: 3px 9px; font-weight: 800; letter-spacing: 0.8px;
 }
 QToolBar#bookmarks {
   background: #0c1422; border: 0; border-bottom: 1px solid rgba(255,255,255,0.05);
@@ -491,7 +552,7 @@ def enable_modern_web(settings):
     )
     disabled = ("PluginsEnabled", "XSSAuditingEnabled")
     for name, value in tuple((item, True) for item in enabled) + tuple((item, False) for item in disabled):
-        attr = getattr(QWebEngineSettings, name, None)
+        attr = web_attr(name)
         if attr is None:
             continue
         try:
@@ -655,6 +716,11 @@ class BrowserWindow(QMainWindow):
         nav.setMovable(False)
         nav.setIconSize(QSize(18, 18))
         self.addToolBar(nav)
+
+        brand = QLabel("DevOS")
+        brand.setObjectName("brandMark")
+        brand.setToolTip("DevOS Browser")
+        nav.addWidget(brand)
 
         self.act_back = nav.addAction("←", lambda: self.current_view() and self.current_view().back())
         self.act_back.setToolTip("Back (Alt+Left)")
@@ -1023,9 +1089,12 @@ class BrowserWindow(QMainWindow):
         if not view:
             return
         text = self.find_input.text() if text is None else text
-        flags = QWebEnginePage.FindFlags(0)
-        if not forward:
-            flags |= QWebEnginePage.FindBackward
+        if QT_MAJOR == 6:
+            flags = QWebEnginePage.FindFlag(0) if forward else QWebEnginePage.FindFlag.FindBackward
+        else:
+            flags = QWebEnginePage.FindFlags(0)
+            if not forward:
+                flags |= QWebEnginePage.FindBackward
         view.findText(text, flags)
 
     def adjust_zoom(self, delta: float):
@@ -1049,10 +1118,17 @@ class BrowserWindow(QMainWindow):
         if not view:
             return
         try:
-            from PyQt5.QtPrintSupport import QPrintDialog, QPrinter
-            printer = QPrinter(QPrinter.HighResolution)
-            dlg = QPrintDialog(printer, self)
-            if dlg.exec_() == QPrintDialog.Accepted:
+            if QT_MAJOR == 6:
+                from PyQt6.QtPrintSupport import QPrintDialog, QPrinter
+                printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+                dlg = QPrintDialog(printer, self)
+                accepted = run_dialog(dlg) == QPrintDialog.DialogCode.Accepted
+            else:
+                from PyQt5.QtPrintSupport import QPrintDialog, QPrinter
+                printer = QPrinter(QPrinter.HighResolution)
+                dlg = QPrintDialog(printer, self)
+                accepted = run_dialog(dlg) == QPrintDialog.Accepted
+            if accepted:
                 view.page().print(printer, lambda _ok: None)
         except Exception:
             QMessageBox.information(self, "Print", "Printing is not available on this PC.")
@@ -1132,9 +1208,15 @@ def main():
     parser.add_argument("--private", action="store_true")
     parser.add_argument("urls", nargs="*")
     args = parser.parse_args()
-    prepare("devos-browser")
+    if QT_MAJOR == 5:
+        prepare("devos-browser")
     app = QApplication([sys.argv[0]])
-    apply(app, "devos-browser")
+    if QT_MAJOR == 5:
+        apply(app, "devos-browser")
+    else:
+        app.setApplicationName("DevOS Browser")
+        app.setApplicationDisplayName("DevOS Browser")
+        app.setDesktopFileName("devos-browser")
     font = QFont("Noto Sans")
     if not font.exactMatch():
         font = QFont("Segoe UI")
@@ -1143,8 +1225,11 @@ def main():
     window = BrowserWindow(args.private)
     for url in args.urls or [None]:
         window.new_tab(url)
-    show_window(window, "devos-browser")
-    result = app.exec_()
+    if QT_MAJOR == 5:
+        show_window(window, "devos-browser")
+    else:
+        window.show()
+    result = run_dialog(app)
     if not sip.isdeleted(window):
         sip.delete(window)
     return result
