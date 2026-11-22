@@ -42,6 +42,7 @@ if QT_MAJOR == 6:
     Qt.Key_Left = Qt.Key.Key_Left
     Qt.Key_Right = Qt.Key.Key_Right
     Qt.ToolButtonTextOnly = Qt.ToolButtonStyle.ToolButtonTextOnly
+    Qt.PointingHandCursor = Qt.CursorShape.PointingHandCursor
     QSizePolicy.Expanding = QSizePolicy.Policy.Expanding
     QSizePolicy.Preferred = QSizePolicy.Policy.Preferred
     QEvent.FocusIn = QEvent.Type.FocusIn
@@ -351,18 +352,20 @@ def chrome_style(light: bool) -> str:
 QMainWindow { background: #e8eef5; }
 QToolBar#nav {
   background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #f7fafc, stop:1 #eef3f8);
-  border: 0; border-bottom: 1px solid rgba(15,23,42,0.08);
-  padding: 8px 10px; spacing: 5px;
+  border: none;
+  padding: 8px 10px 4px; spacing: 5px;
 }
 QLabel#brandMark {
   color: #04202c; background: #22d3ee; border-radius: 9px;
   padding: 3px 9px; font-weight: 800; letter-spacing: 0.8px;
 }
-QMainWindow::separator { width: 0; height: 0; border: none; background: transparent; }
-QToolBar#bookmarks {
-  background: #e8eef5; border: none;
-  padding: 4px 10px 0; spacing: 4px;
+QMainWindow::separator { width: 0px; height: 0px; border: none; background: #e8eef5; }
+QWidget#bookmarks { background: transparent; border: none; }
+QWidget#bookmarks QToolButton {
+  color: #1e293b; background: transparent; border: none; border-radius: 8px;
+  padding: 4px 8px; font-weight: 600;
 }
+QWidget#bookmarks QToolButton:hover { background: rgba(14,165,233,0.12); }
 QToolBar QToolButton {
   color: #1e293b; background: transparent; border: 0; border-radius: 11px;
   padding: 7px 11px; font-weight: 600; min-width: 34px;
@@ -392,8 +395,8 @@ QLineEdit#address {
   padding: 9px 12px 9px 4px; selection-background-color: #bae6fd;
   font-size: 13px; font-weight: 500;
 }
-QTabWidget::pane { border: 0; background: #e8eef5; top: -1px; }
-QTabBar { qproperty-drawBase: 0; background: #e8eef5; }
+QTabWidget::pane { border: none; background: #e8eef5; top: 0px; }
+QTabBar { qproperty-drawBase: 0; background: transparent; border: none; }
 QTabBar::tab {
   background: transparent; color: #64748b; border: 0;
   border-top-left-radius: 12px; border-top-right-radius: 12px;
@@ -427,18 +430,20 @@ QLineEdit#findInput {
 QMainWindow { background: #070b14; }
 QToolBar#nav {
   background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #121a2b, stop:1 #0e1624);
-  border: 0; border-bottom: 1px solid rgba(255,255,255,0.07);
-  padding: 8px 10px; spacing: 5px;
+  border: none;
+  padding: 8px 10px 4px; spacing: 5px;
 }
 QLabel#brandMark {
   color: #04202c; background: #22d3ee; border-radius: 9px;
   padding: 3px 9px; font-weight: 800; letter-spacing: 0.8px;
 }
-QMainWindow::separator { width: 0; height: 0; border: none; background: transparent; }
-QToolBar#bookmarks {
-  background: #0c1422; border: none;
-  padding: 4px 10px 0; spacing: 4px;
+QMainWindow::separator { width: 0px; height: 0px; border: none; background: #070b14; }
+QWidget#bookmarks { background: transparent; border: none; }
+QWidget#bookmarks QToolButton {
+  color: #e8eef8; background: transparent; border: none; border-radius: 8px;
+  padding: 4px 8px; font-weight: 600;
 }
+QWidget#bookmarks QToolButton:hover { background: rgba(34,211,238,0.12); }
 QToolBar QToolButton {
   color: #e8eef8; background: transparent; border: 0; border-radius: 11px;
   padding: 7px 11px; font-weight: 600; min-width: 34px;
@@ -468,8 +473,8 @@ QLineEdit#address {
   padding: 9px 12px 9px 4px; selection-background-color: #0284c7;
   font-size: 13px; font-weight: 500;
 }
-QTabWidget::pane { border: 0; background: #070b14; top: -1px; }
-QTabBar { qproperty-drawBase: 0; background: #0c1422; }
+QTabWidget::pane { border: none; background: #070b14; top: 0px; }
+QTabBar { qproperty-drawBase: 0; background: transparent; border: none; }
 QTabBar::tab {
   background: transparent; color: #7f91a8; border: 0;
   border-top-left-radius: 12px; border-top-right-radius: 12px;
@@ -669,6 +674,7 @@ class BrowserWindow(QMainWindow):
         self.tabs.setElideMode(Qt.ElideRight)
         self.tabs.setUsesScrollButtons(True)
         self.tabs.tabBar().setExpanding(False)
+        self.tabs.tabBar().setDrawBase(False)
         self.tabs.tabCloseRequested.connect(self.close_tab)
         self.tabs.currentChanged.connect(self.update_chrome)
 
@@ -716,7 +722,9 @@ class BrowserWindow(QMainWindow):
         nav = QToolBar("Navigation", self)
         nav.setObjectName("nav")
         nav.setMovable(False)
+        nav.setFloatable(False)
         nav.setIconSize(QSize(18, 18))
+        nav.setStyleSheet("QToolBar#nav { border: none; }")
         self.addToolBar(nav)
 
         brand = QLabel("DevOS")
@@ -813,12 +821,13 @@ class BrowserWindow(QMainWindow):
         return menu
 
     def _build_bookmarks(self):
-        self.bookmark_bar = QToolBar("Bookmarks", self)
+        # A toolbar draws its own edge under the bookmarks. Keep them in the page.
+        self.bookmark_bar = QWidget()
         self.bookmark_bar.setObjectName("bookmarks")
-        self.bookmark_bar.setMovable(False)
-        self.bookmark_bar.setFloatable(False)
-        self.addToolBarBreak()
-        self.addToolBar(self.bookmark_bar)
+        self.bookmark_row = QHBoxLayout(self.bookmark_bar)
+        self.bookmark_row.setContentsMargins(8, 0, 8, 0)
+        self.bookmark_row.setSpacing(2)
+        self.centralWidget().layout().insertWidget(0, self.bookmark_bar)
         self.reload_bookmarks()
 
     def _build_shortcuts(self):
@@ -890,14 +899,26 @@ class BrowserWindow(QMainWindow):
             pass
 
     def reload_bookmarks(self):
-        self.bookmark_bar.clear()
+        while self.bookmark_row.count():
+            item = self.bookmark_row.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
         for item in self.bookmarks()[:14]:
             title = str(item.get("title") or item.get("url") or "Link")[:28]
             url = str(item.get("url") or "")
             if not url:
                 continue
-            act = self.bookmark_bar.addAction(title, lambda _=False, u=url: self.open_url(u))
-            act.setToolTip(url)
+            button = QToolButton(self.bookmark_bar)
+            button.setObjectName("bookmarkBtn")
+            button.setText(title)
+            button.setToolTip(url)
+            button.setToolButtonStyle(Qt.ToolButtonTextOnly)
+            button.setAutoRaise(True)
+            button.setCursor(Qt.PointingHandCursor)
+            button.clicked.connect(lambda _=False, u=url: self.open_url(u))
+            self.bookmark_row.addWidget(button)
+        self.bookmark_row.addStretch(1)
 
     # -- tabs ---------------------------------------------------------------
 
