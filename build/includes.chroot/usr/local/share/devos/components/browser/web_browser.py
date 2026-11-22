@@ -358,9 +358,10 @@ QLabel#brandMark {
   color: #04202c; background: #22d3ee; border-radius: 9px;
   padding: 3px 9px; font-weight: 800; letter-spacing: 0.8px;
 }
+QMainWindow::separator { width: 0; height: 0; border: none; background: transparent; }
 QToolBar#bookmarks {
-  background: #f3f7fb; border: 0; border-bottom: 1px solid rgba(15,23,42,0.06);
-  padding: 4px 10px; spacing: 4px;
+  background: #e8eef5; border: none;
+  padding: 4px 10px 0; spacing: 4px;
 }
 QToolBar QToolButton {
   color: #1e293b; background: transparent; border: 0; border-radius: 11px;
@@ -433,9 +434,10 @@ QLabel#brandMark {
   color: #04202c; background: #22d3ee; border-radius: 9px;
   padding: 3px 9px; font-weight: 800; letter-spacing: 0.8px;
 }
+QMainWindow::separator { width: 0; height: 0; border: none; background: transparent; }
 QToolBar#bookmarks {
-  background: #0c1422; border: 0; border-bottom: 1px solid rgba(255,255,255,0.05);
-  padding: 4px 10px; spacing: 4px;
+  background: #0c1422; border: none;
+  padding: 4px 10px 0; spacing: 4px;
 }
 QToolBar QToolButton {
   color: #e8eef8; background: transparent; border: 0; border-radius: 11px;
@@ -814,6 +816,7 @@ class BrowserWindow(QMainWindow):
         self.bookmark_bar = QToolBar("Bookmarks", self)
         self.bookmark_bar.setObjectName("bookmarks")
         self.bookmark_bar.setMovable(False)
+        self.bookmark_bar.setFloatable(False)
         self.addToolBarBreak()
         self.addToolBar(self.bookmark_bar)
         self.reload_bookmarks()
