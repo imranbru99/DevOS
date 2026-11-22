@@ -1,0 +1,15 @@
+[Unit]
+Description=DevOS silent keyring
+After=dbus.socket
+Before=plasma-plasmashell.service
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/devos-kwallet-compat
+Restart=on-failure
+RestartSec=1
+
+[Install]
+WantedBy=graphical-session.target
+WantedBy=default.target
