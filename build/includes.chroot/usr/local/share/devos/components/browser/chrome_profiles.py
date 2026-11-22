@@ -1890,7 +1890,7 @@ def _wm_class_profile(wm_class, profiles):
     return None
 
 
-def detect_window_profile(w, profiles, home_dir=None, assigned_profiles=None, prof_session_data=None):
+def detect_window_profile(w, profiles, home_dir=None, assigned_profiles=None, prof_session_data=None, shared_pids=None, allow_fallback=True, trust_class=True):
     """
     Determine profile name from window attributes and session activity:
     - Real Guest (--guest cmdline / chrome-guest class) before any avatar profile
@@ -1927,10 +1927,12 @@ def detect_window_profile(w, profiles, home_dir=None, assigned_profiles=None, pr
             WINDOW_PROFILE_CACHE[wid] = "Guest"
         return "Guest"
 
-    # The process flag is the profile Chrome actually opened. A previous pass
-    # can leave the wrong chrome-<slug> class on the window (both icons then
-    # show Mirza's M). The directory wins over that sticky class.
-    if pid:
+    # One Chrome process serves every profile. Its --profile-directory is only
+    # the profile that started the browser, so using it for every window paints
+    # the first account photo on every taskbar icon. A private PID can still
+    # correct a sticky class. A shared PID cannot.
+    shared = bool(pid and shared_pids and pid in shared_pids)
+    if pid and not shared:
         keyed = profile_name_for_key(_cmdline_profile_key(pid), profiles)
         if keyed:
             if wid:
@@ -1938,10 +1940,10 @@ def detect_window_profile(w, profiles, home_dir=None, assigned_profiles=None, pr
             return keyed
 
     # Trust chrome-<slug> only if that profile is among Chrome's open browser
-    # profiles. A shared Chrome PID previously got Work windows rewritten to
-    # chrome-tony; without this check the wrong face sticks forever.
+    # profiles. On a shared process the class may already be the first profile
+    # stamped onto every window, so session matching has to run instead.
     class_prof = _wm_class_profile(wm_class, profiles)
-    if class_prof and class_prof != "Guest":
+    if class_prof and class_prof != "Guest" and not shared:
         if not open_names or class_prof in open_names:
             if wid:
                 WINDOW_PROFILE_CACHE[wid] = class_prof
@@ -2024,10 +2026,23 @@ def detect_window_profile(w, profiles, home_dir=None, assigned_profiles=None, pr
             WINDOW_PROFILE_CACHE[wid] = best_prof
         return best_prof
 
-    if wid and wid in WINDOW_PROFILE_CACHE:
+    # Session missed. A shared process may already carry a per-window class
+    # from the last good match. Ignore that class when every window still
+    # wears the same profile and more than one profile is open — that is the
+    # first photo painted onto every icon.
+    if shared and trust_class and class_prof and class_prof != "Guest":
+        if not open_names or class_prof in open_names:
+            if wid:
+                WINDOW_PROFILE_CACHE[wid] = class_prof
+            return class_prof
+
+    if wid and wid in WINDOW_PROFILE_CACHE and not shared:
         cached = WINDOW_PROFILE_CACHE[wid]
         if not open_names or cached in open_names:
             return cached
+
+    if not allow_fallback:
+        return None
 
     # Unassigned fallback: open browser profiles first (never invent Guest → Work)
     ranked_keys = open_keys or get_ranked_active_profiles(chrome_dir, profiles)
@@ -2123,12 +2138,46 @@ def apply_window_profiles(home_dir=None):
     # Ensure profile avatar icons + pin desktops exist first.
     sync_all_profiles(home_dir)
 
+    pid_counts = {}
     for w in chrome_wins:
-        # Do NOT mark profiles "assigned" across windows — two Work windows are
-        # both Work; forcing the second onto Guest/Mirza made grouping worse.
+        pid = _window_pid(w["id"])
+        if pid:
+            pid_counts[pid] = pid_counts.get(pid, 0) + 1
+    shared_pids = {pid for pid, count in pid_counts.items() if count > 1}
+    open_names = [profiles[key] for key in get_open_browser_profile_keys(chrome_dir, profiles) if key in profiles]
+    class_names = {_wm_class_profile(w.get("wm_class"), profiles) for w in chrome_wins}
+    class_names.discard(None)
+    # Every window of one Chrome process was labeled with the profile that
+    # launched it. When those labels are all the same and another profile is
+    # open, do not keep that first photo.
+    trust_class = not (bool(shared_pids) and len(class_names) <= 1 and len(open_names) > 1)
+
+    named = {}
+    for w in chrome_wins:
         prof_name = detect_window_profile(
-            w, profiles, home_dir, None, prof_session_data
+            w, profiles, home_dir, None, prof_session_data,
+            shared_pids=shared_pids, allow_fallback=False, trust_class=trust_class,
         )
+        if prof_name:
+            named[w["id"]] = prof_name
+    unused = [name for name in open_names if name not in named.values()]
+    for w in chrome_wins:
+        if w["id"] in named:
+            continue
+        if unused:
+            named[w["id"]] = unused.pop(0)
+            continue
+        prof_name = detect_window_profile(
+            w, profiles, home_dir, None, prof_session_data,
+            shared_pids=shared_pids, allow_fallback=True, trust_class=trust_class,
+        )
+        named[w["id"]] = prof_name
+
+    for w in chrome_wins:
+        # Two windows of one profile keep that profile. Only a window we could
+        # not match is given a still-unused open profile, so it does not wear
+        # the first account's photo.
+        prof_name = named.get(w["id"]) or "Chrome"
         slug = slugify(prof_name)
         if slug not in active_slugs:
             active_slugs.append(slug)

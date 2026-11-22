@@ -323,6 +323,49 @@ class TestChromeProfiles(unittest.TestCase):
             chrome_profiles._cmdline_profile_key = original_key
             chrome_profiles.WINDOW_PROFILE_CACHE.pop(9091, None)
 
+    def test_shared_browser_pid_uses_each_windows_own_profile(self):
+        profiles = {"Default": "IMRAN", "Profile 1": "Mirza"}
+        session = {
+            "Default": {"titles": {"inbox"}, "domains": {"gmail"}, "mtime": 10},
+            "Profile 1": {
+                "titles": {"blogcutter dashboard"},
+                "domains": {"blogcutter"},
+                "mtime": 20,
+            },
+        }
+        windows = [
+            {"id": 9101, "title": "Inbox - Google Chrome", "wm_class": "chrome-imran-w1"},
+            {
+                "id": 9102,
+                "title": "BlogCutter Dashboard - Google Chrome",
+                "wm_class": "chrome-imran-w2",
+            },
+        ]
+        original_pid = chrome_profiles._window_pid
+        original_key = chrome_profiles._cmdline_profile_key
+        chrome_profiles._window_pid = lambda wid: 7
+        chrome_profiles._cmdline_profile_key = lambda pid: "Default"
+        try:
+            with tempfile.TemporaryDirectory() as home:
+                for window in windows:
+                    chrome_profiles.WINDOW_PROFILE_CACHE.pop(window["id"], None)
+                first = chrome_profiles.detect_window_profile(
+                    windows[0], profiles, home_dir=home, prof_session_data=session,
+                    shared_pids={7},
+                )
+                second = chrome_profiles.detect_window_profile(
+                    windows[1], profiles, home_dir=home, prof_session_data=session,
+                    shared_pids={7}, trust_class=False,
+                )
+            self.assertEqual(first, "IMRAN")
+            self.assertEqual(second, "Mirza")
+            self.assertNotEqual(first, second)
+        finally:
+            chrome_profiles._window_pid = original_pid
+            chrome_profiles._cmdline_profile_key = original_key
+            for window in windows:
+                chrome_profiles.WINDOW_PROFILE_CACHE.pop(window["id"], None)
+
     def test_kwin_script_gives_each_window_its_own_desktop(self):
         rows = [
             {"id": 0x12A0, "pid": 40, "title": "Inbox - Google Chrome", "desktop": "chrome-imran-w12a0.desktop"},
