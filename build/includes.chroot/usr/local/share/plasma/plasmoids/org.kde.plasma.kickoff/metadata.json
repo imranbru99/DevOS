@@ -1,0 +1,20 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Id": "org.kde.plasma.kickoff",
+        "Name": "Application Launcher",
+        "Description": "Launcher to start applications",
+        "Icon": "start-here-kde",
+        "Category": "Application Launchers",
+        "EnabledByDefault": true,
+        "License": "GPL-2.0+",
+        "ServiceTypes": [
+            "Plasma/Applet"
+        ]
+    },
+    "X-Plasma-API-Minimum-Version": "6.0",
+    "X-Plasma-MainScript": "ui/main.qml",
+    "X-Plasma-Provides": [
+        "org.kde.plasma.launchermenu"
+    ]
+}

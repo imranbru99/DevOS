@@ -47,6 +47,7 @@ function configureKickoff(menu) {
     menu.writeConfig("icon", "devos-logo");
     menu.writeConfig("favorites", KICKOFF_FAVORITES);
     menu.writeConfig("favoritesDisplay", 0);
+    menu.writeConfig("applicationsDisplay", 0);
     menu.writeConfig("favoritesPortedToKAstats", false);
     menu.writeConfig("systemFavorites", "hibernate,reboot,shutdown");
     // Hovering or scrolling must not replace All Applications with Favorites.

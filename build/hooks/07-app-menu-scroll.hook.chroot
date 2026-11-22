@@ -1,11 +1,31 @@
 #!/bin/bash
-# Keep All Applications in place while its list is scrolled.
+# Install the DevOS Start Menu and stop Plasma from loading the built-in one.
 set -euo pipefail
 
-patcher=/usr/local/share/devos/components/kickoff/patch_kickoff_scroll.py
-kickoff=/usr/share/plasma/plasmoids/org.kde.plasma.kickoff
-if [ ! -f "$patcher" ] || [ ! -d "$kickoff" ]; then
-    echo "Kickoff scroll fix skipped (menu files are not in this root yet)."
+src=/usr/local/share/plasma/plasmoids/org.kde.plasma.kickoff
+if [ ! -f "$src/contents/ui/main.qml" ]; then
+    echo "Kickoff menu package is not in this root yet."
     exit 0
 fi
-python3 "$patcher" "$kickoff"
+if ! grep -q "devos-keep-category-while-scrolling" "$src/contents/ui/ApplicationsPage.qml"; then
+    echo "Kickoff menu package is incomplete."
+    exit 1
+fi
+
+mkdir -p /usr/share/plasma/plasmoids
+rm -rf /usr/share/plasma/plasmoids/org.kde.plasma.kickoff
+cp -a "$src" /usr/share/plasma/plasmoids/org.kde.plasma.kickoff
+
+found=0
+while IFS= read -r so; do
+    [ -n "$so" ] || continue
+    found=1
+    if [ -e "${so}.devos-real" ]; then
+        continue
+    fi
+    dpkg-divert --local --rename --divert "${so}.devos-real" --add "$so"
+done < <(find /usr/lib /usr/lib64 -name 'org.kde.plasma.kickoff.so' 2>/dev/null || true)
+
+if [ "$found" -eq 0 ]; then
+    echo "Kickoff plugin was not in this root. The replacement menu is ready for when it is installed."
+fi

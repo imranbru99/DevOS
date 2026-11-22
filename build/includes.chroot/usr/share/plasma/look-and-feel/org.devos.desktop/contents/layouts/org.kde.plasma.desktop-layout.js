@@ -25,6 +25,7 @@ menu.currentConfigGroup = ["General"]
 menu.writeConfig("icon", "devos-logo")
 menu.writeConfig("favorites", "applications:devos-browser.desktop,applications:devos-thispc.desktop,applications:devos-notepad.desktop,applications:devos-code.desktop,applications:devos-chat.desktop,applications:devos-dashboard.desktop,applications:devos-apps.desktop,applications:devos-settings.desktop")
 menu.writeConfig("favoritesDisplay", 0)
+menu.writeConfig("applicationsDisplay", 0)
 menu.writeConfig("favoritesPortedToKAstats", false)
 menu.writeConfig("systemFavorites", "hibernate,reboot,shutdown")
 menu.writeConfig("switchCategoryOnHover", false)

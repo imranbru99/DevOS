@@ -1,104 +1,25 @@
-"""Scrolling All Applications must not replace that list with Favorites."""
+"""All Applications stays put, with small Favorite icons and large app icons."""
 
 import os
 import sys
-import tempfile
 import textwrap
 import unittest
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "components"))
 
-from kickoff.patch_kickoff_scroll import (  # noqa: E402
-    MARKER,
-    patch_appletsrc,
-    patch_applications_page,
-    patch_delegate,
-    patch_kickoff_tree,
-    patch_list_view,
+from kickoff.patch_kickoff_scroll import MARKER, patch_appletsrc  # noqa: E402
+
+PKG = os.path.join(
+    ROOT,
+    "build/includes.chroot/usr/local/share/plasma/plasmoids/org.kde.plasma.kickoff",
 )
 
 
-LIST_VIEW = textwrap.dedent(
-    """\
-    EmptyPage {
-        id: root
-        property bool mainContentView: false
-        property bool hasSectionView: false
-        header: MouseArea {
-            hoverEnabled: HOVER
-            onEntered: {}
-        }
-        footer: MouseArea {
-            hoverEnabled: HOVER
-            onEntered: {}
-        }
-        contentItem: ListView {
-            id: view
-            currentIndex: count > 0 ? 0 : -1
-            Connections {
-                target: TARGET
-                function onExpandedChanged() {
-                    if (CONDITION) {
-                        view.currentIndex = 0
-                        view.positionViewAtBeginning()
-                    }
-                }
-            }
-            Keys.onPressed: OPENER
-                currentIndex = 0
-            }
-        }
-    }
-    """
-)
+def read(relative):
+    with open(os.path.join(PKG, relative), encoding="utf-8") as handle:
+        return handle.read()
 
-DELEGATE_ENTERED = textwrap.dedent(
-    """\
-    MouseArea {
-        onEntered: {
-            root.view.currentIndex = index
-        }
-        onPressed: mouse => {
-            // Select and focus on press to improve responsiveness and touch feedback
-            view.currentIndex = index
-        }
-        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad | PointerDevice.Stylus
-    }
-    """
-)
-
-DELEGATE_POSITION = textwrap.dedent(
-    """\
-    MouseArea {
-        onPositionChanged: {
-            root.view.currentIndex = index
-        }
-        onPressed: {
-            // Select and focus on press to improve responsiveness and touch feedback
-            view.currentIndex = index
-        }
-    }
-    """
-)
-
-APPLICATIONS = textwrap.dedent(
-    """\
-    BasePage {
-        id: root
-        sideBarComponent: KickoffListView {}
-        Connections {
-            target: root.sideBarItem
-            function onCurrentIndexChanged() {
-                // Only update row index if the condition is met.
-                if (root.sideBarItem.currentIndex === 0) {
-                    stackView.replace(stackView.preferredFavoritesViewComponent)
-                }
-            }
-        }
-    }
-    """
-)
 
 APPLETS = textwrap.dedent(
     """\
@@ -111,99 +32,75 @@ APPLETS = textwrap.dedent(
     [Containments][1][Applets][4][Configuration][General]
     icon=devos-logo
     switchCategoryOnHover=true
+    favoritesDisplay=1
+    applicationsDisplay=1
     """
 )
 
 
 class TestKickoffScroll(unittest.TestCase):
-    def test_plasma6_list_keeps_the_category_while_the_model_reloads(self):
-        text = LIST_VIEW.replace(
-            "HOVER",
-            "mainContentView || Plasmoid.configuration.switchCategoryOnHover",
-        ).replace("TARGET", "kickoff").replace("CONDITION", "!kickoff.expanded").replace(
-            "OPENER",
-            "event => {",
-        )
-        patched = patch_list_view(text)
-        self.assertIn(MARKER, patched)
-        self.assertNotIn("currentIndex: count > 0 ? 0 : -1", patched)
-        self.assertNotIn("view.currentIndex = 0", patched)
-        self.assertNotIn("switchCategoryOnHover", patched)
-        self.assertEqual(patched.count("hoverEnabled: root.mainContentView"), 2)
-        self.assertIn("devosHeldIndex", patched)
-        self.assertIn("root.devosNoteUserPick(currentIndex)", patched)
-        self.assertEqual(patch_list_view(patched), patched)
+    def test_model_reload_does_not_jump_to_favorites(self):
+        text = read("contents/ui/KickoffListView.qml")
+        self.assertIn(MARKER, text)
+        self.assertNotIn("currentIndex: count > 0 ? 0 : -1", text)
+        self.assertNotIn("if (!activeFocus)", text)
+        self.assertNotIn("view.currentIndex = 0", text)
+        self.assertIn("root.isSidebar", text)
+        self.assertEqual(text.count("hoverEnabled: root.mainContentView"), 2)
+        self.assertIn("function devosNoteUserPick", text)
 
-    def test_plasma5_list_uses_the_same_guard(self):
-        text = LIST_VIEW.replace("HOVER", "true").replace("TARGET", "plasmoid").replace(
-            "CONDITION",
-            "plasmoid.expanded",
-        ).replace("OPENER", "{")
-        patched = patch_list_view(text)
-        self.assertIn(MARKER, patched)
-        self.assertNotIn("hoverEnabled: true", patched)
-        self.assertIn("root.devosNoteUserPick(currentIndex)", patched)
-
-    def test_hover_cannot_select_a_category(self):
-        entered = patch_delegate(DELEGATE_ENTERED)
-        self.assertIn("if (root.isCategoryListItem)", entered)
-        self.assertNotIn("TouchPad", entered)
+    def test_resting_on_a_category_does_not_select_it(self):
+        text = read("contents/ui/AbstractKickoffItemDelegate.qml")
+        entered = text.split("onEntered:", 1)[1].split("onPressed:", 1)[0]
+        self.assertLess(entered.index("if (root.isCategoryListItem)"), entered.index("return"))
+        pressed = text.split("onPressed:", 1)[1]
         self.assertLess(
-            entered.index("if (root.isCategoryListItem)"),
-            entered.index("root.view.currentIndex = index"),
+            pressed.index("devosNoteUserPick(root.index)"),
+            pressed.index("root.view.currentIndex = root.index"),
         )
-        self.assertIn("devosNoteUserPick(index)", entered)
-        position = patch_delegate(DELEGATE_POSITION)
-        self.assertIn("onPositionChanged:", position)
-        self.assertIn("if (root.isCategoryListItem)", position)
-        self.assertEqual(patch_delegate(entered), entered)
 
     def test_unsolicited_favorites_selection_is_restored_before_the_page_swap(self):
-        patched = patch_applications_page(APPLICATIONS)
-        self.assertIn("property int devosStickCategory: 0", patched)
+        text = read("contents/ui/ApplicationsPage.qml")
+        self.assertIn("property int devosHeldCategory: 0", text)
+        restore_at = text.index("root.sideBarItem.currentIndex = stackView.devosHeldCategory")
+        after = text[restore_at:]
         self.assertLess(
-            patched.index("devosBar.currentIndex = devosKeep"),
-            patched.index("preferredFavoritesViewComponent"),
+            after.index("return"),
+            after.index("stackView.replace(stackView.preferredFavoritesViewComponent)"),
         )
-        self.assertLess(
-            patched.index("return"),
-            patched.index("preferredFavoritesViewComponent"),
-        )
-        self.assertEqual(patch_applications_page(patched), patched)
+        self.assertIn("devosCompact: true", text)
 
-    def test_installed_tree_and_config(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            ui = os.path.join(tmp, "contents", "ui")
-            os.makedirs(ui)
-            list_text = LIST_VIEW.replace(
-                "HOVER",
-                "mainContentView || Plasmoid.configuration.switchCategoryOnHover",
-            ).replace("TARGET", "kickoff").replace("CONDITION", "!kickoff.expanded").replace(
-                "OPENER",
-                "event => {",
-            )
-            with open(os.path.join(ui, "KickoffListView.qml"), "w", encoding="utf-8") as handle:
-                handle.write(list_text)
-            with open(os.path.join(ui, "AbstractKickoffItemDelegate.qml"), "w", encoding="utf-8") as handle:
-                handle.write(DELEGATE_ENTERED)
-            with open(os.path.join(ui, "ApplicationsPage.qml"), "w", encoding="utf-8") as handle:
-                handle.write(APPLICATIONS)
-            from pathlib import Path
+    def test_favorites_are_small_and_applications_are_large(self):
+        delegate = read("contents/ui/KickoffGridDelegate.qml")
+        self.assertIn("Kirigami.Units.iconSizes.smallMedium", delegate)
+        self.assertIn("Kirigami.Units.iconSizes.huge", delegate)
+        grid = read("contents/ui/KickoffGridView.qml")
+        self.assertIn("property bool devosCompact: false", grid)
+        self.assertIn("root.devosCompact", grid)
+        config = read("contents/config/main.xml")
+        self.assertIn("<entry name=\"applicationsDisplay\"", config)
+        apps = config.split("<entry name=\"applicationsDisplay\"", 1)[1].split("</entry>", 1)[0]
+        self.assertIn("<default>0</default>", apps)
 
-            changed = patch_kickoff_tree(Path(tmp))
-            self.assertEqual(len(changed), 3)
-            self.assertEqual(patch_kickoff_tree(Path(tmp)), [])
+    def test_installed_config(self):
         config = patch_appletsrc(APPLETS)
         self.assertIn("switchCategoryOnHover=false", config)
         self.assertNotIn("switchCategoryOnHover=true", config)
+        self.assertIn("favoritesDisplay=0", config)
+        self.assertIn("applicationsDisplay=0", config)
+        self.assertNotIn("applicationsDisplay=1", config)
         self.assertIn("plugin=org.kde.plasma.icontasks", config)
         self.assertEqual(patch_appletsrc(config), config)
-        self.assertEqual(patch_appletsrc("plugin=org.kde.plasma.icontasks\n"), "plugin=org.kde.plasma.icontasks\n")
+        self.assertEqual(
+            patch_appletsrc("plugin=org.kde.plasma.icontasks\n"),
+            "plugin=org.kde.plasma.icontasks\n",
+        )
         added = patch_appletsrc("[Containments][2][Applets][9]\nplugin=org.kde.plasma.kickoff\n")
         self.assertIn("[Containments][2][Applets][9][Configuration][General]", added)
         self.assertIn("switchCategoryOnHover=false", added)
+        self.assertIn("applicationsDisplay=0", added)
 
-    def test_menu_config_disables_hover_switching(self):
+    def test_menu_package_and_installer(self):
         apply_ui = os.path.join(ROOT, "build/includes.chroot/usr/local/share/devos/apply-ui.js")
         layout = os.path.join(
             ROOT,
@@ -212,13 +109,33 @@ class TestKickoffScroll(unittest.TestCase):
         hook = os.path.join(ROOT, "build/hooks/07-app-menu-scroll.hook.chroot")
         fixer = os.path.join(ROOT, "build/includes.chroot/usr/local/bin/devos-fix-app-menu-scroll")
         with open(apply_ui, encoding="utf-8") as handle:
-            self.assertIn('writeConfig("switchCategoryOnHover", false)', handle.read())
+            apply_text = handle.read()
+        self.assertIn('writeConfig("switchCategoryOnHover", false)', apply_text)
+        self.assertIn('writeConfig("applicationsDisplay", 0)', apply_text)
         with open(layout, encoding="utf-8") as handle:
-            self.assertIn('writeConfig("switchCategoryOnHover", false)', handle.read())
+            layout_text = handle.read()
+        self.assertIn('writeConfig("switchCategoryOnHover", false)', layout_text)
+        self.assertIn('writeConfig("applicationsDisplay", 0)', layout_text)
         self.assertTrue(os.access(hook, os.X_OK))
         self.assertTrue(os.access(fixer, os.X_OK))
         with open(fixer, encoding="utf-8") as handle:
-            self.assertIn("patch_kickoff_scroll.py", handle.read())
+            fixer_text = handle.read()
+        self.assertNotIn("/usr/share/plasma/plasmoids/org.kde.plasma.kickoff/contents/ui/ApplicationsPage.qml", fixer_text)
+        self.assertIn("org.kde.plasma.kickoff.so", fixer_text)
+        self.assertIn("dpkg-divert", fixer_text)
+        self.assertIn(MARKER, fixer_text)
+        with open(os.path.join(PKG, "metadata.json"), encoding="utf-8") as handle:
+            metadata = handle.read()
+        self.assertIn("org.kde.plasma.kickoff", metadata)
+        self.assertIn("Plasma/Applet", metadata)
+        for relative in (
+            "contents/ui/main.qml",
+            "contents/ui/KickoffListView.qml",
+            "contents/ui/code/tools.js",
+            "contents/ui/qmldir",
+        ):
+            self.assertTrue(os.path.isfile(os.path.join(PKG, relative)), relative)
+        self.assertIn(MARKER, read("contents/ui/ApplicationsPage.qml"))
 
 
 if __name__ == "__main__":
