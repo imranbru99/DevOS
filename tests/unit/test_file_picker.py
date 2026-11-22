@@ -137,6 +137,7 @@ class TestFilePicker(unittest.TestCase):
         fix = Path(ROOT) / "build/includes.chroot/usr/local/bin/devos-fix-file-portal"
         fix_text = fix.read_text(encoding="utf-8")
         self.assertIn("FileChooser=devos;kde;gtk;", fix_text)
+        self.assertIn("PassEnvironment=DISPLAY", fix_text)
         self.assertNotIn("systemctl --user mask devos-portal-filechooser.service", fix_text)
 
 

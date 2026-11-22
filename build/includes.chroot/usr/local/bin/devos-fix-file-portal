@@ -29,6 +29,24 @@ else
 fi
 
 echo "== Start the File Explorer dialog service =="
+mkdir -p "${HOME}/.config/systemd/user"
+cat > "${HOME}/.config/systemd/user/devos-portal-filechooser.service" << 'EOF'
+[Unit]
+Description=DevOS file dialogs and folder opens
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/devos-portal-filechooser
+Restart=on-failure
+RestartSec=2
+PassEnvironment=DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS XAUTHORITY
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=graphical-session.target
+EOF
 systemctl --user unmask devos-portal-filechooser.service 2>/dev/null || true
 systemctl --user daemon-reload 2>/dev/null || true
 systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS XAUTHORITY 2>/dev/null || true
