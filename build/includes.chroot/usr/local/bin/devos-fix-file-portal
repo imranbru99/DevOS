@@ -16,7 +16,7 @@ as_root() {
 }
 
 echo "== Install the File Explorer dialog program =="
-if [ ! -x "$BIN" ] || ! grep -q 'def OpenFolder' "$BIN" 2>/dev/null; then
+if [ ! -x "$BIN" ] || ! grep -q 'session-env-launch' "$BIN" 2>/dev/null; then
   tmp="$(mktemp)"
   if curl -fsSL "${RAW}/build/includes.chroot/usr/local/bin/devos-portal-filechooser" -o "$tmp"; then
     as_root install -m 0755 "$tmp" "$BIN"
