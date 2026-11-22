@@ -1,0 +1,747 @@
+#!/usr/bin/env python3
+"""DevOS Calculator. modern-calculator
+
+A standard calculator with a Windows-style window. The menu name is
+Calculator; this program is what opens, including when something runs kcalc.
+"""
+
+import os
+import sys
+from decimal import Decimal, InvalidOperation
+
+# modern-calculator: the installer replaces an older copy when this marker is missing.
+
+_ERRORS = ("Cannot divide by zero", "Invalid input", "Overflow")
+_SYMBOLS = {"+": "+", "-": "−", "*": "×", "/": "÷"}
+
+
+def store_number(value):
+    """Turn a Decimal into the text the calculator keeps internally."""
+    value = Decimal(value)
+    if not value.is_finite():
+        return None
+    if value == 0:
+        return "0"
+    text = format(value, ".12g")
+    try:
+        plain = format(Decimal(text), "f")
+    except InvalidOperation:
+        return None
+    if "." in plain:
+        plain = plain.rstrip("0").rstrip(".")
+    if plain in ("", "-0"):
+        return "0"
+    digits = plain.replace("-", "").replace(".", "")
+    if len(digits) > 16:
+        return None
+    return plain
+
+
+def format_number(entry):
+    """Show thousands separators without changing a trailing decimal point."""
+    if not entry or entry in _ERRORS:
+        return entry or ""
+    negative = entry.startswith("-")
+    body = entry[1:] if negative else entry
+    trailing_dot = body.endswith(".")
+    if trailing_dot:
+        body = body[:-1]
+    if "." in body:
+        whole, frac = body.split(".", 1)
+        frac = "." + frac
+    else:
+        whole, frac = body, ""
+    whole = whole or "0"
+    try:
+        grouped = f"{int(whole):,}"
+    except ValueError:
+        return entry
+    shown = ("-" if negative else "") + grouped + frac
+    if trailing_dot:
+        shown += "."
+    return shown
+
+
+class Engine:
+    """Standard calculator. Operators run left to right, the way the Windows one does."""
+
+    def __init__(self):
+        self.entry = "0"
+        self.left = None
+        self.op = None
+        self.replace = True
+        self.expr = ""
+        self.error = None
+        self.memory = Decimal(0)
+        self.has_memory = False
+        self.repeat = None
+        self.history = []
+
+    def display(self):
+        if self.error:
+            return self.error
+        return format_number(self.entry)
+
+    def expression(self):
+        return "" if self.error else self.expr
+
+    def _value(self):
+        try:
+            return Decimal(self.entry)
+        except InvalidOperation:
+            return Decimal(0)
+
+    def _remember(self, value):
+        stored = store_number(value)
+        if stored is None:
+            self.error = "Overflow"
+            self.entry = "0"
+            self.expr = ""
+            self.op = None
+            self.left = None
+            self.repeat = None
+            return False
+        self.entry = stored
+        self.replace = True
+        return True
+
+    def digit(self, ch):
+        if self.error:
+            self.clear_all()
+        if self.replace:
+            self.entry = ch
+            self.replace = False
+            return
+        digits = self.entry.replace("-", "").replace(".", "")
+        if len(digits) >= 16:
+            return
+        if self.entry in ("0", "-0"):
+            self.entry = ("-" if self.entry.startswith("-") else "") + ch
+            return
+        self.entry += ch
+
+    def dot(self):
+        if self.error:
+            self.clear_all()
+        if self.replace:
+            self.entry = "0."
+            self.replace = False
+            return
+        if "." not in self.entry:
+            self.entry += "."
+
+    def clear_entry(self):
+        self.entry = "0"
+        self.replace = True
+        self.error = None
+
+    def clear_all(self):
+        self.entry = "0"
+        self.left = None
+        self.op = None
+        self.expr = ""
+        self.replace = True
+        self.error = None
+        self.repeat = None
+
+    def backspace(self):
+        if self.error or self.replace:
+            return
+        self.entry = self.entry[:-1]
+        if self.entry in ("", "-", "-0"):
+            self.entry = "0"
+            self.replace = True
+
+    def negate(self):
+        if self.error:
+            return
+        if self.entry.startswith("-"):
+            self.entry = self.entry[1:] or "0"
+        elif self.entry not in ("0", "0."):
+            self.entry = "-" + self.entry
+
+    def _apply(self, left, op, right):
+        if op == "+":
+            return left + right
+        if op == "-":
+            return left - right
+        if op == "*":
+            return left * right
+        if op == "/":
+            if right == 0:
+                raise ZeroDivisionError
+            return left / right
+        raise ValueError(op)
+
+    def operator(self, op):
+        if self.error:
+            return
+        current = self._value()
+        if self.op and self.left is not None and not self.replace:
+            try:
+                current = self._apply(self.left, self.op, current)
+            except ZeroDivisionError:
+                self.error = "Cannot divide by zero"
+                self.expr = ""
+                self.op = None
+                self.left = None
+                return
+            if not self._remember(current):
+                return
+            current = self._value()
+        self.left = current
+        self.op = op
+        self.expr = f"{format_number(self.entry)} {_SYMBOLS[op]}"
+        self.replace = True
+        self.repeat = None
+
+    def equals(self):
+        if self.error:
+            return
+        if self.op and self.left is not None:
+            right = self._value()
+            left = self.left
+            op = self.op
+            self.repeat = (op, right)
+        elif self.repeat:
+            op, right = self.repeat
+            left = self._value()
+        else:
+            self.expr = f"{format_number(self.entry)} ="
+            return
+        try:
+            result = self._apply(left, op, right)
+        except ZeroDivisionError:
+            self.error = "Cannot divide by zero"
+            self.expr = ""
+            self.op = None
+            self.left = None
+            self.repeat = None
+            return
+        shown = f"{format_number(store_number(left))} {_SYMBOLS[op]} {format_number(store_number(right))} ="
+        if not self._remember(result):
+            return
+        self.expr = shown
+        self.history.insert(0, (shown, self.entry))
+        del self.history[20:]
+        self.op = None
+        self.left = None
+        self.replace = True
+
+    def percent(self):
+        if self.error:
+            return
+        typed = self.entry
+        current = self._value()
+        if self.left is not None and self.op:
+            if self.op in ("+", "-"):
+                current = self.left * current / Decimal(100)
+            else:
+                current = current / Decimal(100)
+            self.expr = (
+                f"{format_number(store_number(self.left))} {_SYMBOLS[self.op]} "
+                f"{format_number(typed)}%"
+            )
+        else:
+            current = Decimal(0)
+        if not self._remember(current):
+            return
+
+    def unary(self, kind):
+        if self.error:
+            return
+        value = self._value()
+        label = format_number(self.entry)
+        try:
+            if kind == "inv":
+                if value == 0:
+                    raise ZeroDivisionError
+                result = Decimal(1) / value
+                shown = f"1/({label})"
+            elif kind == "sqr":
+                result = value * value
+                shown = f"sqr({label})"
+            elif kind == "sqrt":
+                if value < 0:
+                    self.error = "Invalid input"
+                    return
+                result = value.sqrt()
+                shown = f"√({label})"
+            else:
+                return
+        except (ZeroDivisionError, InvalidOperation):
+            self.error = "Cannot divide by zero"
+            return
+        self.expr = shown
+        self.op = None
+        self.left = None
+        self.repeat = None
+        self._remember(result)
+
+    def memory_clear(self):
+        self.memory = Decimal(0)
+        self.has_memory = False
+
+    def memory_recall(self):
+        if not self.has_memory or self.error:
+            return
+        stored = store_number(self.memory)
+        if stored is None:
+            return
+        self.entry = stored
+        self.replace = True
+
+    def memory_add(self, sign=1):
+        if self.error:
+            return
+        self.memory += self._value() * sign
+        self.has_memory = self.memory != 0
+        self.replace = True
+
+    def memory_store(self):
+        if self.error:
+            return
+        self.memory = self._value()
+        self.has_memory = self.memory != 0
+        self.replace = True
+
+    def paste(self, text):
+        cleaned = (text or "").strip().replace(",", "").replace(" ", "")
+        if cleaned.startswith("+"):
+            cleaned = cleaned[1:]
+        try:
+            value = Decimal(cleaned)
+        except InvalidOperation:
+            return False
+        stored = store_number(value)
+        if stored is None:
+            return False
+        self.entry = stored
+        self.replace = True
+        self.error = None
+        return True
+
+
+def main():
+    try:
+        from PyQt5.QtCore import Qt, QTimer
+        from PyQt5.QtGui import QColor, QFont, QIcon, QKeySequence
+        from PyQt5.QtWidgets import (
+            QApplication,
+            QFrame,
+            QGridLayout,
+            QHBoxLayout,
+            QLabel,
+            QListWidget,
+            QListWidgetItem,
+            QPushButton,
+            QSizePolicy,
+            QVBoxLayout,
+            QWidget,
+        )
+    except ImportError as err:
+        sys.stderr.write(f"Calculator needs PyQt5 ({err}).\n")
+        return 1
+
+    def palette_dark(app):
+        color = app.palette().color(app.palette().Window)
+        return color.lightness() < 128
+
+    def colors(dark):
+        if dark:
+            return {
+                "bg": "#202020",
+                "text": "#f3f3f3",
+                "muted": "#c6c6c6",
+                "num": "#3b3b3b",
+                "num_hover": "#4a4a4a",
+                "num_press": "#2e2e2e",
+                "op": "#323232",
+                "op_hover": "#3f3f3f",
+                "op_on": "#4cc2ff",
+                "op_on_text": "#06283a",
+                "eq": "#4cc2ff",
+                "eq_hover": "#6dceff",
+                "eq_text": "#06283a",
+                "mem": "#c6c6c6",
+                "mem_off": "#6d6d6d",
+                "line": "#3a3a3a",
+                "error": "#ff99a4",
+                "history": "#2b2b2b",
+            }
+        return {
+            "bg": "#f3f3f3",
+            "text": "#1a1a1a",
+            "muted": "#5c5c5c",
+            "num": "#ffffff",
+            "num_hover": "#f6f6f6",
+            "num_press": "#eaeaea",
+            "op": "#f9f9f9",
+            "op_hover": "#f0f0f0",
+            "op_on": "#cde6f7",
+            "op_on_text": "#003e6b",
+            "eq": "#0067c0",
+            "eq_hover": "#1975c5",
+            "eq_text": "#ffffff",
+            "mem": "#5c5c5c",
+            "mem_off": "#b4b4b4",
+            "line": "#e5e5e5",
+            "error": "#c42b1c",
+            "history": "#ffffff",
+        }
+
+    def stylesheet(theme):
+        return f"""
+        QWidget#calculator {{
+            background: {theme['bg']};
+            color: {theme['text']};
+        }}
+        QLabel#expression {{
+            color: {theme['muted']};
+            background: transparent;
+        }}
+        QLabel#display {{
+            color: {theme['text']};
+            background: transparent;
+        }}
+        QFrame#line {{
+            background: {theme['line']};
+            max-height: 1px;
+        }}
+        QPushButton {{
+            border: none;
+            border-radius: 6px;
+            background: {theme['num']};
+            color: {theme['text']};
+            font-size: 18px;
+        }}
+        QPushButton:hover {{ background: {theme['num_hover']}; }}
+        QPushButton:pressed {{ background: {theme['num_press']}; }}
+        QPushButton[kind="op"] {{ background: {theme['op']}; }}
+        QPushButton[kind="op"]:hover {{ background: {theme['op_hover']}; }}
+        QPushButton[kind="op"][active="true"] {{
+            background: {theme['op_on']};
+            color: {theme['op_on_text']};
+        }}
+        QPushButton[kind="eq"] {{
+            background: {theme['eq']};
+            color: {theme['eq_text']};
+            font-size: 22px;
+        }}
+        QPushButton[kind="eq"]:hover {{ background: {theme['eq_hover']}; }}
+        QPushButton[kind="mem"] {{
+            background: transparent;
+            color: {theme['mem']};
+            font-size: 13px;
+            border-radius: 4px;
+        }}
+        QPushButton[kind="mem"]:hover {{ background: {theme['num_hover']}; }}
+        QPushButton[kind="mem"]:disabled {{ color: {theme['mem_off']}; background: transparent; }}
+        QPushButton#historyToggle {{
+            background: transparent;
+            color: {theme['muted']};
+            font-size: 13px;
+            text-align: left;
+            padding-left: 2px;
+        }}
+        QListWidget {{
+            background: {theme['history']};
+            color: {theme['text']};
+            border: none;
+            font-size: 13px;
+            outline: none;
+        }}
+        QListWidget::item {{ padding: 6px 4px; }}
+        QListWidget::item:selected {{ background: {theme['op_on']}; color: {theme['op_on_text']}; }}
+        """
+
+    class CalculatorWindow(QWidget):
+        def __init__(self, theme):
+            super().__init__()
+            self.setObjectName("calculator")
+            self.setWindowTitle("Calculator")
+            self.engine = Engine()
+            self._op_buttons = {}
+            self._memory_buttons = {}
+            self.setMinimumSize(320, 540)
+            self.resize(360, 640)
+            self._build(theme)
+            self._load_icon()
+            self.refresh()
+
+        def _build(self, theme):
+            root = QVBoxLayout(self)
+            root.setContentsMargins(16, 12, 16, 16)
+            root.setSpacing(8)
+
+            top = QHBoxLayout()
+            self.history_toggle = QPushButton("History")
+            self.history_toggle.setObjectName("historyToggle")
+            self.history_toggle.setCursor(Qt.PointingHandCursor)
+            self.history_toggle.setFixedHeight(28)
+            self.history_toggle.clicked.connect(self._toggle_history)
+            top.addWidget(self.history_toggle)
+            self.expression = QLabel("")
+            self.expression.setObjectName("expression")
+            self.expression.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            expr_font = QFont()
+            expr_font.setPixelSize(15)
+            self.expression.setFont(expr_font)
+            top.addWidget(self.expression, 1)
+            root.addLayout(top)
+
+            self.display = QLabel("0")
+            self.display.setObjectName("display")
+            self.display.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            self.display.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            self.display.setMinimumHeight(72)
+            root.addWidget(self.display)
+
+            self.history = QListWidget()
+            self.history.setVisible(False)
+            self.history.setFixedHeight(132)
+            self.history.itemClicked.connect(self._use_history)
+            root.addWidget(self.history)
+
+            line = QFrame()
+            line.setObjectName("line")
+            line.setFrameShape(QFrame.HLine)
+            line.setFixedHeight(1)
+            root.addWidget(line)
+
+            memory = QHBoxLayout()
+            memory.setSpacing(4)
+            for label, action in (
+                ("MC", "mc"),
+                ("MR", "mr"),
+                ("M+", "m+"),
+                ("M−", "m-"),
+                ("MS", "ms"),
+            ):
+                button = self._button(label, "mem", action)
+                button.setFixedHeight(32)
+                memory.addWidget(button)
+                self._memory_buttons[action] = button
+            root.addLayout(memory)
+
+            grid = QGridLayout()
+            grid.setSpacing(6)
+            rows = [
+                [("%", "fn", "pct"), ("CE", "fn", "ce"), ("C", "fn", "c"), ("←", "fn", "bs")],
+                [("1/x", "fn", "inv"), ("x²", "fn", "sqr"), ("√x", "fn", "sqrt"), ("÷", "op", "/")],
+                [("7", "num", "7"), ("8", "num", "8"), ("9", "num", "9"), ("×", "op", "*")],
+                [("4", "num", "4"), ("5", "num", "5"), ("6", "num", "6"), ("−", "op", "-")],
+                [("1", "num", "1"), ("2", "num", "2"), ("3", "num", "3"), ("+", "op", "+")],
+                [("±", "num", "neg"), ("0", "num", "0"), (".", "num", "."), ("=", "eq", "=")],
+            ]
+            for row_index, row in enumerate(rows):
+                for col_index, (label, kind, action) in enumerate(row):
+                    button = self._button(label, kind, action)
+                    button.setMinimumHeight(54)
+                    grid.addWidget(button, row_index, col_index)
+                    if kind == "op":
+                        self._op_buttons[action] = button
+            root.addLayout(grid)
+            self.setStyleSheet(stylesheet(theme))
+
+        def _button(self, label, kind, action):
+            button = QPushButton(label)
+            button.setProperty("kind", kind)
+            button.setProperty("active", False)
+            button.setCursor(Qt.PointingHandCursor)
+            button.setFocusPolicy(Qt.NoFocus)
+            button.clicked.connect(lambda _checked=False, name=action: self._press(name))
+            return button
+
+        def _load_icon(self):
+            for path in (
+                "/usr/share/icons/hicolor/scalable/apps/devos-calculator.svg",
+                "/usr/local/share/icons/hicolor/scalable/apps/devos-calculator.svg",
+            ):
+                if os.path.isfile(path):
+                    self.setWindowIcon(QIcon(path))
+                    return
+            icon = QIcon.fromTheme("devos-calculator")
+            if not icon.isNull():
+                self.setWindowIcon(icon)
+
+        def _press(self, action):
+            engine = self.engine
+            if action in "0123456789":
+                engine.digit(action)
+            elif action == ".":
+                engine.dot()
+            elif action in ("+", "-", "*", "/"):
+                engine.operator(action)
+            elif action == "=":
+                engine.equals()
+            elif action == "pct":
+                engine.percent()
+            elif action == "ce":
+                engine.clear_entry()
+            elif action == "c":
+                engine.clear_all()
+            elif action == "bs":
+                engine.backspace()
+            elif action == "neg":
+                engine.negate()
+            elif action in ("inv", "sqr", "sqrt"):
+                engine.unary(action)
+            elif action == "mc":
+                engine.memory_clear()
+            elif action == "mr":
+                engine.memory_recall()
+            elif action == "m+":
+                engine.memory_add(1)
+            elif action == "m-":
+                engine.memory_add(-1)
+            elif action == "ms":
+                engine.memory_store()
+            self.refresh()
+
+        def _toggle_history(self):
+            self.history.setVisible(not self.history.isVisible())
+            self.refresh()
+
+        def _use_history(self, item):
+            result = item.data(Qt.UserRole)
+            expr = item.data(Qt.UserRole + 1) or ""
+            if not result:
+                return
+            self.engine.entry = result
+            self.engine.expr = expr
+            self.engine.op = None
+            self.engine.left = None
+            self.engine.replace = True
+            self.engine.error = None
+            self.engine.repeat = None
+            self.refresh()
+
+        def refresh(self):
+            engine = self.engine
+            text = engine.display()
+            self.display.setText(text)
+            self.expression.setText(engine.expression())
+            size = 48
+            if len(text) > 10:
+                size = 34
+            if len(text) > 15 or engine.error:
+                size = 24
+            font = QFont()
+            font.setPixelSize(size)
+            font.setWeight(QFont.DemiBold)
+            self.display.setFont(font)
+            if engine.error:
+                self.display.setStyleSheet("color: #c42b1c; background: transparent;")
+            else:
+                self.display.setStyleSheet("")
+            for op, button in self._op_buttons.items():
+                active = engine.op == op
+                if button.property("active") != active:
+                    button.setProperty("active", active)
+                    button.style().unpolish(button)
+                    button.style().polish(button)
+            has_memory = engine.has_memory
+            self._memory_buttons["mc"].setEnabled(has_memory)
+            self._memory_buttons["mr"].setEnabled(has_memory)
+            if self.history.isVisible():
+                self.history.clear()
+                for expr, result in engine.history:
+                    item = QListWidgetItem(f"{expr}    {format_number(result)}")
+                    item.setData(Qt.UserRole, result)
+                    item.setData(Qt.UserRole + 1, expr)
+                    item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                    self.history.addItem(item)
+
+        def keyPressEvent(self, event):
+            if event.matches(QKeySequence.Copy):
+                QApplication.clipboard().setText(self.engine.entry if not self.engine.error else "")
+                return
+            if event.matches(QKeySequence.Paste):
+                if self.engine.paste(QApplication.clipboard().text()):
+                    self.refresh()
+                return
+            text = event.text()
+            if text in "0123456789":
+                self.engine.digit(text)
+            elif text in ".":
+                self.engine.dot()
+            elif text == "+":
+                self.engine.operator("+")
+            elif text == "-":
+                self.engine.operator("-")
+            elif text in "*xX":
+                self.engine.operator("*")
+            elif text == "/":
+                self.engine.operator("/")
+            elif text in ("=", "\r"):
+                self.engine.equals()
+            elif text == "%":
+                self.engine.percent()
+            elif event.key() in (Qt.Key_Return, Qt.Key_Enter):
+                self.engine.equals()
+            elif event.key() == Qt.Key_Backspace:
+                self.engine.backspace()
+            elif event.key() == Qt.Key_Escape:
+                self.engine.clear_all()
+            elif event.key() == Qt.Key_Delete:
+                self.engine.clear_entry()
+            else:
+                super().keyPressEvent(event)
+                return
+            self.refresh()
+
+    os.environ.setdefault("QT_WAYLAND_APP_ID", "devos-calculator")
+    app = QApplication(sys.argv)
+    app.setApplicationName("devos-calculator")
+    app.setApplicationDisplayName("Calculator")
+    app.setDesktopFileName("devos-calculator")
+    app.setStyle("Fusion")
+    theme = colors(palette_dark(app))
+    # Fusion keeps the native KDE button chrome from painting over the layout.
+    pal = app.palette()
+    pal.setColor(pal.Window, QColor(theme["bg"]))
+    pal.setColor(pal.WindowText, QColor(theme["text"]))
+    pal.setColor(pal.Base, QColor(theme["num"]))
+    pal.setColor(pal.Text, QColor(theme["text"]))
+    pal.setColor(pal.Button, QColor(theme["num"]))
+    pal.setColor(pal.ButtonText, QColor(theme["text"]))
+    app.setPalette(pal)
+    window = CalculatorWindow(theme)
+    for folder in (
+        "/usr/local/share/devos/components",
+        os.path.expanduser("~/.local/share/devos/components"),
+    ):
+        if os.path.isfile(os.path.join(folder, "app_identity.py")):
+            sys.path.insert(0, folder)
+            try:
+                from app_identity import show_window
+                show_window(window, "devos-calculator")
+                break
+            except Exception:
+                window.show()
+                break
+    else:
+        window.show()
+    if "--screenshot" in sys.argv:
+        target = sys.argv[sys.argv.index("--screenshot") + 1]
+        for key in ("8", "8", "+", "2", "0", "0", "="):
+            if key in "0123456789":
+                window.engine.digit(key)
+            elif key in "+-*/":
+                window.engine.operator(key)
+            elif key == "=":
+                window.engine.equals()
+        window.refresh()
+        window.repaint()
+
+        def save_shot():
+            window.grab().save(target)
+            app.quit()
+
+        QTimer.singleShot(60, save_shot)
+    return app.exec_()
+
+
+if __name__ == "__main__":
+    sys.exit(main() or 0)
