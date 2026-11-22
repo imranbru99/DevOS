@@ -1,5 +1,6 @@
-/* DevOS Modesty filter: if a photo contains a girl, blur that whole photo.
- * Photos with no girl stay clear. The blur stays on the photo itself. */
+/* DevOS Modesty filter: if a photo or video contains a girl, blur that whole
+ * photo or video. A video stays blurred once she has been seen in it.
+ * Photos and videos with no girl stay clear. The blur stays on the media. */
 (() => {
   'use strict';
   if (window.__devosModestyLoaded) return;
@@ -9,7 +10,8 @@
   const VIDEO_SAMPLE_MS = 750;
   const PIXEL_MAX_SIDE = 640;
   const BG_BATCH_BUDGET_MS = 8;
-  const BLUR_CSS = 'img[data-dm-girl="1"],video[data-dm-girl="1"]{filter:blur(18px) !important}';
+  const BLUR_CSS = 'img[data-dm-girl="1"],video[data-dm-girl="1"]{filter:blur(24px) !important}';
+  const FULL_BLUR = 'blur(24px)';
 
   let settings = R.effectiveSettings({}, {});
   const results = new Map();           // media key (URL) -> Promise<result>
@@ -110,8 +112,26 @@
     const st = info.get(el) || {};
     el.setAttribute(attrFor(el), blurred ? 'regional' : 'ok');
     if (el.tagName === 'IMG' || el.tagName === 'VIDEO') {
-      if (blurred) el.setAttribute('data-dm-girl', '1');
-      else el.removeAttribute('data-dm-girl');
+      if (blurred) {
+        el.setAttribute('data-dm-girl', '1');
+        // Inline !important wins when the page restyles the photo or video.
+        // The whole element blurs, not a patch of it.
+        if (!st.filterLock) {
+          st.originalFilter = el.style.getPropertyValue('filter');
+          st.filterPriority = el.style.getPropertyPriority('filter');
+          st.filterLock = true;
+        }
+        if (el.style.getPropertyValue('filter') !== FULL_BLUR) {
+          el.style.setProperty('filter', FULL_BLUR, 'important');
+        }
+      } else {
+        el.removeAttribute('data-dm-girl');
+        if (st.filterLock) {
+          if (st.originalFilter) el.style.setProperty('filter', st.originalFilter, st.filterPriority || '');
+          else el.style.removeProperty('filter');
+          st.filterLock = false;
+        }
+      }
     }
     if (blurred && !st.blurred) newlyBlurred++;
     if (!blurred) removeRender(el);
@@ -121,7 +141,10 @@
 
   function resetToPending(el) {
     const st = info.get(el);
-    if (st) { st.key = null; st.result = null; st.pending = false; st.generation = (st.generation || 0) + 1; }
+    if (st) {
+      st.key = null; st.result = null; st.pending = false; st.lockedBlur = false; st.pauseTries = 0;
+      st.generation = (st.generation || 0) + 1;
+    }
     setBlurred(el, false);
   }
 
@@ -319,7 +342,14 @@
 
   function applyResult(el, result) {
     const st = info.get(el) || {};
-    st.result = result; info.set(el, st);
+    info.set(el, st);
+    // A girl already found in this video keeps the whole video blurred when
+    // a later frame is missed or still loading. Keep the hit that locked it.
+    if (el.tagName === 'VIDEO' && st.lockedBlur && settings.enabled) {
+      setBlurred(el, true);
+      return;
+    }
+    st.result = result;
     if (!result || !result.ok) {
       st.generation = (st.generation || 0) + 1;
       setBlurred(el, false);
@@ -336,10 +366,11 @@
     }
     const verdict = R.decide(result, settings);
     if (!verdict.blur) { st.generation = (st.generation || 0) + 1; setBlurred(el, false); return; }
-    // Blur the photo element immediately. The overlay is extra; a failed
-    // overlay must not put the girl back in view.
-    if (el.tagName === 'IMG' || el.tagName === 'VIDEO') el.setAttribute('data-dm-girl', '1');
-    renderRegions(el, verdict).catch(() => {});
+    if (el.tagName === 'VIDEO') st.lockedBlur = true;
+    // Blur the photo or video itself, edge to edge. The overlay is extra;
+    // a failed overlay must not put her back in view.
+    setBlurred(el, true);
+    if (verdict.regions && verdict.regions.length) renderRegions(el, verdict).catch(() => {});
   }
 
   // ------------------------------------------------------------ detection
@@ -490,8 +521,12 @@
   }
 
   function topGeometry(el) {
-    const r = el.getBoundingClientRect();
-    let x = r.left, y = r.top, view = window;
+    const raw = el.getBoundingClientRect();
+    const box = getVisibleBox(el);
+    const vis = box ? box.visible : { left: raw.left, top: raw.top, right: raw.right, bottom: raw.bottom };
+    let x = vis.left, y = vis.top, view = window;
+    const w = vis.right - vis.left, h = vis.bottom - vis.top;
+    if (w < 8 || h < 8) return null;
     try {
       while (view.frameElement) {
         const fr = view.frameElement.getBoundingClientRect();
@@ -503,9 +538,9 @@
       return null;
     }
     return {
-      x, y, w: r.width, h: r.height,
-      viewportW: view.innerWidth || r.width,
-      viewportH: view.innerHeight || r.height,
+      x, y, w, h,
+      viewportW: view.innerWidth || w,
+      viewportH: view.innerHeight || h,
     };
   }
 
@@ -530,37 +565,53 @@
   function sampleVideo(v) {
     if (!settings.enabled || !v.isConnected) return;
     const st = info.get(v);
-    if (!st || st.sampling || v.readyState < 2 || !v.videoWidth) return;
+    if (!st || st.sampling || st.lockedBlur || v.readyState < 2) return;
     const now = performance.now();
     if (st.lastSample && now - st.lastSample < 400) return;
     st.lastSample = now;
     st.sampling = true;
     const generation = st.generation || 0;
-    const dataUrl = pixelsFrom(v, v.videoWidth, v.videoHeight);  // null if cross-origin without CORS
-    const job = dataUrl
-      ? detectPixels(dataUrl).then((result) => result)
-      : captureElement(v).then((shot) => detectPixels(shot).then((result) => {
-        if (result && shot) result.presented = true;
-        return result;
-      }));
+    let job;
+    try {
+      // A cross-origin video taints the canvas. videoWidth can also stay 0
+      // on a reel that is already painted, so the screen capture is the frame.
+      const dataUrl = v.videoWidth ? pixelsFrom(v, v.videoWidth, v.videoHeight) : null;
+      job = dataUrl
+        ? detectPixels(dataUrl)
+        : captureElement(v).then((shot) => detectPixels(shot).then((result) => {
+          if (result && shot) result.presented = true;
+          return result;
+        }));
+    } catch (e) {
+      st.sampling = false;
+      return;
+    }
     job.then((result) => {
       st.sampling = false;
       if (v.paused) st.pauseTries = (st.pauseTries || 0) + 1;
       if ((st.generation || 0) !== generation) return;
       applyResult(v, result);
-    });
+    }).catch(() => { st.sampling = false; });
   }
 
   setInterval(() => {
     if (!settings.enabled || document.hidden) return;
+    document.querySelectorAll('video').forEach((v) => { if (!videos.has(v)) trackVideo(v); });
     for (const v of videos) {
       if (!v.isConnected) { videos.delete(v); continue; }
       if (v.ended || v.readyState < 2) continue;
       const st = info.get(v);
-      // A paused Facebook video is what the user is looking at. Keep trying
-      // until a check succeeds, including the screen-capture fallback.
-      if (v.paused && st && st.result && st.result.ok && (st.blurred || (st.pauseTries || 0) >= 4)) continue;
+      if (st && st.lockedBlur) continue;
+      // A paused reel is what the user is looking at. An empty result is a
+      // miss, so keep reading it. A frame that already showed faces and no
+      // girl can rest.
+      if (v.paused && st && st.result && st.result.ok) {
+        const seen = (st.result.faces || []).length;
+        if (seen > 0 && (st.pauseTries || 0) >= 3) continue;
+        if (!seen && (st.pauseTries || 0) >= 10) continue;
+      }
       const r = v.getBoundingClientRect();
+      if (r.width < 8 || r.height < 8) continue;
       if (r.bottom < 0 || r.right < 0 || r.top > innerHeight || r.left > innerWidth) continue;
       sampleVideo(v);
     }
@@ -685,7 +736,10 @@
           checkPoster(el);
         } else if (rec.attributeName === 'style' || rec.attributeName === 'class') {
           const st = info.get(el);
-          if (st && st.blurred && (el.tagName === 'IMG' || el.tagName === 'VIDEO')) el.setAttribute('data-dm-girl', '1');
+          if (st && st.blurred && (el.tagName === 'IMG' || el.tagName === 'VIDEO')) {
+            el.setAttribute('data-dm-girl', '1');
+            if (el.style.getPropertyValue('filter') !== FULL_BLUR) el.style.setProperty('filter', FULL_BLUR, 'important');
+          }
           if (st && st.bgApplied && (rec.attributeName === 'class' || el.style.backgroundImage !== st.bgApplied)) removeRender(el);
           queueBg(el);
         }

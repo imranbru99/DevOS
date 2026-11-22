@@ -227,7 +227,7 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
     en = sub.add_parser("enable", help="turn the filter on for all users")
     en.add_argument("--mode", choices=MODES, default="women",
-                    help="women: blur detected adult women body regions (default); people: blur detected person regions")
+                    help="women: blur the whole photo or video when an adult woman is detected (default); people: blur it when any face is detected")
     en.add_argument("--keep-incognito", action="store_true",
                     help="do not disable Incognito and Guest windows (they would not be filtered)")
     en.add_argument("--locked", action="store_true",

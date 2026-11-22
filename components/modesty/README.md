@@ -20,9 +20,12 @@ female probability and estimated age 18 or older. A photo of a man, a group of
 men, scenery, or text stays clear. Older threshold settings cannot expand
 matching below 0.65.
 
-The blur is on that image or video itself. Names, buttons, and other HTML
-stay sharp. A parent card is never blurred. Original page filters are
-restored when disabled.
+The blur is on that image or video itself, edge to edge. Names, buttons, and
+other HTML stay sharp. A parent card is never blurred. Original page filters
+are restored when disabled. Once a girl is found in a video, that whole video
+stays blurred while it keeps playing. A full-body frame is scanned in
+overlapping tiles, because the on-device face model only sees faces that fill
+the crop.
 
 ## Limits
 
@@ -46,7 +49,7 @@ sudo devos-modesty status
 sudo devos-modesty disable
 ```
 
-Re-enabling repacks version 1.3.2 and refreshes browser policy. Fully quit and
+Re-enabling repacks version 1.3.3 and refreshes browser policy. Fully quit and
 reopen Chrome so the new extension loads. A signing key is created per device in
 `/var/lib/devos-modesty/key.pem`, preserved across disable/re-enable. An existing
 local legacy key is reused so its extension ID does not change.
