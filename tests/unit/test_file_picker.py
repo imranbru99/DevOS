@@ -138,6 +138,8 @@ class TestFilePicker(unittest.TestCase):
         fix_text = fix.read_text(encoding="utf-8")
         self.assertIn("FileChooser=devos;kde;gtk;", fix_text)
         self.assertIn("PassEnvironment=DISPLAY", fix_text)
+        self.assertIn("org.freedesktop.FileManager1", fix_text)
+        self.assertIn("devos.portal", fix_text)
         self.assertNotIn("systemctl --user mask devos-portal-filechooser.service", fix_text)
 
 

@@ -1,7 +1,35 @@
 #!/usr/bin/env bash
-# Upload, download, Open, and Open Folder dialogs use File Explorer.
+# Upload, Open, Open Folder, and Chrome "show in folder" use File Explorer.
 # Safe to re-run. Does not need a reboot.
-set -euo pipefail
+set -uo pipefail
+
+BRANCH="${DEVOS_BRANCH:-cursor/fix-devos-archive-menu-6081}"
+RAW="https://raw.githubusercontent.com/imranbru99/DevOS/${BRANCH}"
+BIN="/usr/local/bin/devos-portal-filechooser"
+
+as_root() {
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+  else
+    sudo "$@"
+  fi
+}
+
+echo "== Install the File Explorer dialog program =="
+if [ ! -x "$BIN" ] || ! grep -q 'def OpenFolder' "$BIN" 2>/dev/null; then
+  tmp="$(mktemp)"
+  if curl -fsSL "${RAW}/build/includes.chroot/usr/local/bin/devos-portal-filechooser" -o "$tmp"; then
+    as_root install -m 0755 "$tmp" "$BIN"
+  fi
+  rm -f "$tmp"
+fi
+if [ ! -x "$BIN" ]; then
+  echo "  Missing $BIN"
+  exit 1
+fi
+echo "  $BIN"
+
+python3 -c "import dbus, gi" 2>/dev/null || as_root apt-get install -y python3-dbus python3-gi gir1.2-glib-2.0 || true
 
 CONF='[preferred]
 # Secret stays empty: default=kde would otherwise load KWallet and exit 255.
@@ -10,25 +38,54 @@ org.freedesktop.impl.portal.FileChooser=devos;kde;gtk;
 org.freedesktop.impl.portal.Settings=kde;gtk;
 org.freedesktop.impl.portal.Secret=
 '
+PORTAL_DESC='[portal]
+DBusName=org.freedesktop.impl.portal.desktop.devos
+Interfaces=org.freedesktop.impl.portal.FileChooser;
+UseIn=KDE;plasma;DevOS;
+'
+DBUS_PORTAL='[D-BUS Service]
+Name=org.freedesktop.impl.portal.desktop.devos
+Exec=/usr/local/bin/devos-portal-filechooser
+SystemdService=devos-portal-filechooser.service
+'
+DBUS_FM='[D-BUS Service]
+Name=org.freedesktop.FileManager1
+Exec=/usr/local/bin/devos-portal-filechooser
+SystemdService=devos-portal-filechooser.service
+'
 
-echo "== File dialogs use File Explorer =="
-mkdir -p "${HOME}/.config/xdg-desktop-portal"
+echo "== Tell every app to use File Explorer for open and upload =="
+mkdir -p "${HOME}/.config/xdg-desktop-portal" \
+  "${HOME}/.local/share/xdg-desktop-portal/portals" \
+  "${HOME}/.local/share/dbus-1/services"
 printf '%s\n' "$CONF" > "${HOME}/.config/xdg-desktop-portal/portals.conf"
 printf '%s\n' "$CONF" > "${HOME}/.config/xdg-desktop-portal/kde-portals.conf"
-cp -f "${HOME}/.config/xdg-desktop-portal/portals.conf" \
-  "${HOME}/.config/xdg-desktop-portal.conf" 2>/dev/null || true
+printf '%s\n' "$PORTAL_DESC" > "${HOME}/.local/share/xdg-desktop-portal/portals/devos.portal"
+printf '%s\n' "$DBUS_PORTAL" > "${HOME}/.local/share/dbus-1/services/org.freedesktop.impl.portal.desktop.devos.service"
+# This file is what Chrome uses for "show in folder". It must not start Dolphin.
+printf '%s\n' "$DBUS_FM" > "${HOME}/.local/share/dbus-1/services/org.freedesktop.FileManager1.service"
 
-if [ "$(id -u)" -eq 0 ]; then
-  mkdir -p /etc/xdg/xdg-desktop-portal
-  printf '%s\n' "$CONF" > /etc/xdg/xdg-desktop-portal/portals.conf
-  printf '%s\n' "$CONF" > /etc/xdg/xdg-desktop-portal/kde-portals.conf
-else
-  sudo mkdir -p /etc/xdg/xdg-desktop-portal
-  printf '%s\n' "$CONF" | sudo tee /etc/xdg/xdg-desktop-portal/portals.conf >/dev/null
-  printf '%s\n' "$CONF" | sudo tee /etc/xdg/xdg-desktop-portal/kde-portals.conf >/dev/null
+as_root mkdir -p /etc/xdg/xdg-desktop-portal /usr/share/xdg-desktop-portal/portals /usr/share/dbus-1/services
+printf '%s\n' "$CONF" | as_root tee /etc/xdg/xdg-desktop-portal/portals.conf >/dev/null
+printf '%s\n' "$CONF" | as_root tee /etc/xdg/xdg-desktop-portal/kde-portals.conf >/dev/null
+printf '%s\n' "$PORTAL_DESC" | as_root tee /usr/share/xdg-desktop-portal/portals/devos.portal >/dev/null
+printf '%s\n' "$DBUS_PORTAL" | as_root tee /usr/share/dbus-1/services/org.freedesktop.impl.portal.desktop.devos.service >/dev/null
+printf '%s\n' "$DBUS_FM" | as_root tee /usr/share/dbus-1/services/org.freedesktop.FileManager1.service >/dev/null
+
+echo "== Point the dolphin command at File Explorer =="
+if [ -e /usr/bin/dolphin ] && ! grep -q 'devos-files' /usr/bin/dolphin 2>/dev/null; then
+  as_root mkdir -p /usr/lib/devos
+  as_root dpkg-divert --local --rename --divert /usr/lib/devos/dolphin.real --add /usr/bin/dolphin || true
+fi
+if [ ! -e /usr/bin/dolphin ] || ! grep -q 'devos-files' /usr/bin/dolphin 2>/dev/null; then
+  printf '%s\n' '#!/bin/bash' 'exec /usr/local/bin/devos-files "$@"' | as_root tee /usr/bin/dolphin >/dev/null
+  as_root chmod 755 /usr/bin/dolphin
+fi
+if [ -x /usr/local/bin/devos-files ]; then
+  as_root install -m 0755 /usr/bin/dolphin /usr/local/bin/dolphin
 fi
 
-echo "== Start the File Explorer dialog service =="
+echo "== Start the dialog service and take folder opens away from Dolphin =="
 mkdir -p "${HOME}/.config/systemd/user"
 cat > "${HOME}/.config/systemd/user/devos-portal-filechooser.service" << 'EOF'
 [Unit]
@@ -47,6 +104,8 @@ Environment=PATH=/usr/local/bin:/usr/bin:/bin
 [Install]
 WantedBy=graphical-session.target
 EOF
+# Dolphin holds the "show in folder" name until it exits.
+killall dolphin 2>/dev/null || true
 systemctl --user unmask devos-portal-filechooser.service 2>/dev/null || true
 systemctl --user daemon-reload 2>/dev/null || true
 systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS XAUTHORITY 2>/dev/null || true
@@ -55,17 +114,13 @@ systemctl --user restart devos-portal-filechooser.service 2>/dev/null || true
 systemctl --user restart xdg-desktop-portal.service 2>/dev/null || true
 sleep 1
 
-if [ -x /usr/local/bin/devos-files ]; then
-  echo "  File Explorer: /usr/local/bin/devos-files"
-else
-  echo "  File Explorer program is missing at /usr/local/bin/devos-files"
-fi
 if systemctl --user is-active --quiet devos-portal-filechooser.service; then
   echo "  Dialog service: running"
 else
-  echo "  Dialog service did not stay running. Check: journalctl --user -u devos-portal-filechooser -n 30 --no-pager"
+  echo "  Dialog service did not stay running."
+  journalctl --user -u devos-portal-filechooser -n 20 --no-pager 2>/dev/null || true
 fi
 
 echo
-echo "Close the app that showed the old Open window, then try Upload or Open Folder again."
-echo "The window should be File Explorer, with This PC in the address bar."
+echo "Quit Chrome and Cursor completely, then open them again."
+echo "Upload, Open Folder, and Show in folder should be File Explorer."
