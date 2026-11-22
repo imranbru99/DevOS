@@ -2,6 +2,7 @@
 
 import importlib.machinery
 import os
+import re
 import subprocess
 import unittest
 from pathlib import Path
@@ -58,7 +59,7 @@ class TestFilePicker(unittest.TestCase):
     def test_portals_conf_does_not_force_kwallet_secret(self):
         for path in (PORTALS_CONF, KDE_PORTALS_CONF):
             text = path.read_text(encoding="utf-8")
-            self.assertIn("FileChooser=kde;gtk;devos;", text)
+            self.assertIn("FileChooser=devos;kde;gtk;", text)
             prefs = [
                 ln.strip()
                 for ln in text.splitlines()
@@ -131,6 +132,12 @@ class TestFilePicker(unittest.TestCase):
             text = handle.read()
         self.assertIn("Name=org.freedesktop.FileManager1", text)
         self.assertIn("devos-portal-filechooser", text)
+        portal_text = Path(portal_path).read_text(encoding="utf-8")
+        self.assertIn("def OpenFolder", portal_text)
+        fix = Path(ROOT) / "build/includes.chroot/usr/local/bin/devos-fix-file-portal"
+        fix_text = fix.read_text(encoding="utf-8")
+        self.assertIn("FileChooser=devos;kde;gtk;", fix_text)
+        self.assertNotIn("systemctl --user mask devos-portal-filechooser.service", fix_text)
 
 
 if __name__ == "__main__":

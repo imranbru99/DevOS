@@ -44,11 +44,15 @@ def uri_to_path(uri):
 
 
 def devos_files_bin():
-    return (
-        shutil.which("devos-files")
-        or os.path.expanduser("~/.local/bin/devos-files")
-        or "/usr/local/bin/devos-files"
-    )
+    candidates = [
+        "/usr/local/bin/devos-files",
+        shutil.which("devos-files") or "",
+        os.path.expanduser("~/.local/bin/devos-files"),
+    ]
+    for c in candidates:
+        if c and os.path.isfile(c) and os.access(c, os.X_OK):
+            return c
+    return "/usr/local/bin/devos-files"
 
 
 def open_in_explorer(paths, select=False):
@@ -185,21 +189,41 @@ class DevOSFileChooserPortal(dbus.service.Object):
             err_cb=err_cb
         )
 
-    def _launch_picker(self, handle, app_id, parent_window, title, options, save_mode, ok_cb, err_cb):
+    @dbus.service.method(
+        "org.freedesktop.impl.portal.FileChooser",
+        in_signature="osssa{sv}",
+        out_signature="ua{sv}",
+        async_callbacks=("ok_cb", "err_cb")
+    )
+    def OpenFolder(self, handle, app_id, parent_window, title, options, ok_cb, err_cb):
+        """Folder pickers (Cursor Open Folder, upload folders) use this method."""
+        self._launch_picker(
+            handle=handle,
+            app_id=app_id,
+            parent_window=parent_window,
+            title=title or "Select Folder",
+            options=options,
+            save_mode=False,
+            force_directory=True,
+            ok_cb=ok_cb,
+            err_cb=err_cb
+        )
+
+    def _launch_picker(self, handle, app_id, parent_window, title, options, save_mode, ok_cb, err_cb, force_directory=False):
         t = threading.Thread(
             target=self._run_picker_worker,
-            args=(handle, app_id, parent_window, title, options, save_mode, ok_cb, err_cb),
+            args=(handle, app_id, parent_window, title, options, save_mode, ok_cb, err_cb, force_directory),
             daemon=True
         )
         t.start()
 
-    def _run_picker_worker(self, handle, app_id, parent_window, title, options, save_mode, ok_cb, err_cb):
+    def _run_picker_worker(self, handle, app_id, parent_window, title, options, save_mode, ok_cb, err_cb, force_directory=False):
         tmp_id = uuid.uuid4().hex
         tmp_out = f"/tmp/devos_picker_{tmp_id}.json"
 
         dialog_title = str(title) if title else ("Save As" if save_mode else "Open File")
-        multiple = bool(options.get("multiple", False))
-        directory = bool(options.get("directory", False))
+        multiple = False if force_directory else bool(options.get("multiple", False))
+        directory = True if force_directory else bool(options.get("directory", False))
         current_name = clean_glob_pattern(str(options.get("current_name", "")))
         current_folder = parse_portal_folder(options.get("current_folder"))
         current_file = parse_portal_folder(options.get("current_file"))
