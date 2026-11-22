@@ -10,15 +10,70 @@ import time
 from pathlib import Path
 from urllib.parse import urlencode
 
-from PyQt5 import sip
-from PyQt5.QtCore import QEvent, QStandardPaths, Qt, QUrl, QSize, QTimer
-from PyQt5.QtGui import QDesktopServices, QFont, QKeySequence
-from PyQt5.QtWebEngineWidgets import QWebEnginePage, QWebEngineProfile, QWebEngineSettings, QWebEngineView
-from PyQt5.QtWidgets import (
-    QAction, QApplication, QFrame, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
-    QMainWindow, QMenu, QMessageBox, QProgressBar, QPushButton, QShortcut,
-    QSizePolicy, QStatusBar, QTabWidget, QToolBar, QToolButton, QVBoxLayout, QWidget,
-)
+# Prefer Qt 6 WebEngine. Its page engine understands current CSS, including
+# @layer stylesheets that the older Qt 5 engine drops. The window stays DevOS.
+try:
+    from PyQt6 import sip
+    from PyQt6.QtCore import QEvent, QSize, QStandardPaths, Qt, QTimer, QUrl
+    from PyQt6.QtGui import QAction, QDesktopServices, QFont, QKeySequence, QShortcut
+    from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings
+    from PyQt6.QtWebEngineWidgets import QWebEngineView
+    from PyQt6.QtWidgets import (
+        QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
+        QMainWindow, QMenu, QMessageBox, QProgressBar, QPushButton,
+        QSizePolicy, QStatusBar, QTabWidget, QToolBar, QToolButton, QVBoxLayout, QWidget,
+    )
+    QT_MAJOR = 6
+except ImportError:
+    from PyQt5 import sip
+    from PyQt5.QtCore import QEvent, QSize, QStandardPaths, Qt, QTimer, QUrl
+    from PyQt5.QtGui import QDesktopServices, QFont, QKeySequence
+    from PyQt5.QtWebEngineWidgets import QWebEnginePage, QWebEngineProfile, QWebEngineSettings, QWebEngineView
+    from PyQt5.QtWidgets import (
+        QAction, QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
+        QMainWindow, QMenu, QMessageBox, QProgressBar, QPushButton, QShortcut,
+        QSizePolicy, QStatusBar, QTabWidget, QToolBar, QToolButton, QVBoxLayout, QWidget,
+    )
+    QT_MAJOR = 5
+
+if QT_MAJOR == 6:
+    Qt.ElideRight = Qt.TextElideMode.ElideRight
+    Qt.ALT = Qt.KeyboardModifier.AltModifier
+    Qt.Key_Left = Qt.Key.Key_Left
+    Qt.Key_Right = Qt.Key.Key_Right
+    Qt.ToolButtonTextOnly = Qt.ToolButtonStyle.ToolButtonTextOnly
+    Qt.PointingHandCursor = Qt.CursorShape.PointingHandCursor
+    Qt.WA_StyledBackground = Qt.WidgetAttribute.WA_StyledBackground
+    QSizePolicy.Expanding = QSizePolicy.Policy.Expanding
+    QSizePolicy.Preferred = QSizePolicy.Policy.Preferred
+    QEvent.FocusIn = QEvent.Type.FocusIn
+    QEvent.FocusOut = QEvent.Type.FocusOut
+    QToolButton.InstantPopup = QToolButton.ToolButtonPopupMode.InstantPopup
+    QWebEngineProfile.AllowPersistentCookies = (
+        QWebEngineProfile.PersistentCookiesPolicy.AllowPersistentCookies
+    )
+    QKeySequence.Refresh = QKeySequence.StandardKey.Refresh
+    QKeySequence.AddTab = QKeySequence.StandardKey.AddTab
+    QMessageBox.Yes = QMessageBox.StandardButton.Yes
+    QStandardPaths.AppDataLocation = QStandardPaths.StandardLocation.AppDataLocation
+    QStandardPaths.CacheLocation = QStandardPaths.StandardLocation.CacheLocation
+    QStandardPaths.DownloadLocation = QStandardPaths.StandardLocation.DownloadLocation
+
+
+def run_dialog(dialog):
+    if QT_MAJOR == 6:
+        return dialog.exec()
+    return dialog.exec_()
+
+
+def web_attr(name):
+    found = getattr(QWebEngineSettings, name, None)
+    if found is not None:
+        return found
+    group = getattr(QWebEngineSettings, "WebAttribute", None)
+    if group is None:
+        return None
+    return getattr(group, name, None)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app_identity import apply, prepare, show_window
@@ -298,13 +353,20 @@ def chrome_style(light: bool) -> str:
 QMainWindow { background: #e8eef5; }
 QToolBar#nav {
   background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #f7fafc, stop:1 #eef3f8);
-  border: 0; border-bottom: 1px solid rgba(15,23,42,0.08);
-  padding: 8px 10px; spacing: 5px;
+  border: none;
+  padding: 8px 10px 4px; spacing: 5px;
 }
-QToolBar#bookmarks {
-  background: #f3f7fb; border: 0; border-bottom: 1px solid rgba(15,23,42,0.06);
-  padding: 4px 10px; spacing: 4px;
+QLabel#brandMark {
+  color: #04202c; background: #22d3ee; border-radius: 9px;
+  padding: 3px 9px; font-weight: 800; letter-spacing: 0.8px;
 }
+QMainWindow::separator { width: 0px; height: 0px; border: none; background: #e8eef5; }
+QWidget#bookmarks { background: transparent; border: none; }
+QWidget#bookmarks QToolButton {
+  color: #1e293b; background: transparent; border: none; border-radius: 8px;
+  padding: 4px 8px; font-weight: 600;
+}
+QWidget#bookmarks QToolButton:hover { background: rgba(14,165,233,0.12); }
 QToolBar QToolButton {
   color: #1e293b; background: transparent; border: 0; border-radius: 11px;
   padding: 7px 11px; font-weight: 600; min-width: 34px;
@@ -334,8 +396,8 @@ QLineEdit#address {
   padding: 9px 12px 9px 4px; selection-background-color: #bae6fd;
   font-size: 13px; font-weight: 500;
 }
-QTabWidget::pane { border: 0; background: #e8eef5; top: -1px; }
-QTabBar { qproperty-drawBase: 0; background: #e8eef5; }
+QTabWidget::pane { border: none; background: #e8eef5; top: 0px; }
+QTabBar { qproperty-drawBase: 0; background: transparent; border: none; }
 QTabBar::tab {
   background: transparent; color: #64748b; border: 0;
   border-top-left-radius: 12px; border-top-right-radius: 12px;
@@ -369,13 +431,20 @@ QLineEdit#findInput {
 QMainWindow { background: #070b14; }
 QToolBar#nav {
   background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #121a2b, stop:1 #0e1624);
-  border: 0; border-bottom: 1px solid rgba(255,255,255,0.07);
-  padding: 8px 10px; spacing: 5px;
+  border: none;
+  padding: 8px 10px 4px; spacing: 5px;
 }
-QToolBar#bookmarks {
-  background: #0c1422; border: 0; border-bottom: 1px solid rgba(255,255,255,0.05);
-  padding: 4px 10px; spacing: 4px;
+QLabel#brandMark {
+  color: #04202c; background: #22d3ee; border-radius: 9px;
+  padding: 3px 9px; font-weight: 800; letter-spacing: 0.8px;
 }
+QMainWindow::separator { width: 0px; height: 0px; border: none; background: #070b14; }
+QWidget#bookmarks { background: transparent; border: none; }
+QWidget#bookmarks QToolButton {
+  color: #e8eef8; background: transparent; border: none; border-radius: 8px;
+  padding: 4px 8px; font-weight: 600;
+}
+QWidget#bookmarks QToolButton:hover { background: rgba(34,211,238,0.12); }
 QToolBar QToolButton {
   color: #e8eef8; background: transparent; border: 0; border-radius: 11px;
   padding: 7px 11px; font-weight: 600; min-width: 34px;
@@ -405,8 +474,8 @@ QLineEdit#address {
   padding: 9px 12px 9px 4px; selection-background-color: #0284c7;
   font-size: 13px; font-weight: 500;
 }
-QTabWidget::pane { border: 0; background: #070b14; top: -1px; }
-QTabBar { qproperty-drawBase: 0; background: #0c1422; }
+QTabWidget::pane { border: none; background: #070b14; top: 0px; }
+QTabBar { qproperty-drawBase: 0; background: transparent; border: none; }
 QTabBar::tab {
   background: transparent; color: #7f91a8; border: 0;
   border-top-left-radius: 12px; border-top-right-radius: 12px;
@@ -467,6 +536,39 @@ def recent_path():
     return data_dir() / "recent.json"
 
 
+def enable_modern_web(settings):
+    """Turn on the web features a current site needs. Unknown names are skipped."""
+    enabled = (
+        "JavascriptEnabled",
+        "LocalStorageEnabled",
+        "LocalContentCanAccessRemoteUrls",
+        "JavascriptCanOpenWindows",
+        "JavascriptCanAccessClipboard",
+        "AllowWindowActivationFromJavaScript",
+        "FullScreenSupportEnabled",
+        "FocusOnNavigationEnabled",
+        "ScrollAnimatorEnabled",
+        "DnsPrefetchEnabled",
+        "PdfViewerEnabled",
+        "WebGLEnabled",
+        "Accelerated2dCanvasEnabled",
+        "AutoLoadImages",
+        "ErrorPageEnabled",
+        "ScreenCaptureEnabled",
+        "HyperlinkAuditingEnabled",
+        "ShowScrollBars",
+    )
+    disabled = ("PluginsEnabled", "XSSAuditingEnabled")
+    for name, value in tuple((item, True) for item in enabled) + tuple((item, False) for item in disabled):
+        attr = web_attr(name)
+        if attr is None:
+            continue
+        try:
+            settings.setAttribute(attr, value)
+        except Exception:
+            pass
+
+
 DEFAULT_BOOKMARKS = [
     {"title": "DuckDuckGo", "url": "https://duckduckgo.com/"},
     {"title": "Wikipedia", "url": "https://www.wikipedia.org/"},
@@ -516,7 +618,7 @@ class Omnibox(QFrame):
 
     def set_secure(self, secure: bool, tip: str = ""):
         self.secure.setProperty("insecure", not secure)
-        self.secure.setText("Sec" if secure else "·")
+        self.secure.setText("✓" if secure else "!")
         self.secure.setToolTip(tip or ("Secure connection" if secure else "Not secure"))
         self.secure.style().unpolish(self.secure)
         self.secure.style().polish(self.secure)
@@ -528,17 +630,7 @@ class BrowserView(QWebEngineView):
         self.window = window
         page = QWebEnginePage(window.profile, self)
         self.setPage(page)
-        settings = self.settings()
-        settings.setAttribute(QWebEngineSettings.PluginsEnabled, False)
-        settings.setAttribute(QWebEngineSettings.JavascriptCanOpenWindows, True)
-        settings.setAttribute(QWebEngineSettings.LocalStorageEnabled, True)
-        settings.setAttribute(QWebEngineSettings.ScrollAnimatorEnabled, True)
-        settings.setAttribute(QWebEngineSettings.FullScreenSupportEnabled, True)
-        settings.setAttribute(QWebEngineSettings.FocusOnNavigationEnabled, True)
-        try:
-            settings.setAttribute(QWebEngineSettings.DnsPrefetchEnabled, True)
-        except Exception:
-            pass
+        enable_modern_web(self.settings())
 
     def createWindow(self, _window_type):
         return self.window.new_tab(load_home=False)
@@ -566,7 +658,10 @@ class BrowserWindow(QMainWindow):
             self.profile.setCachePath(cache + "/browser")
             self.profile.setPersistentCookiesPolicy(QWebEngineProfile.AllowPersistentCookies)
         self.profile.downloadRequested.connect(self.download)
-        self.profile.setHttpUserAgent(self.profile.httpUserAgent() + " DevOSBrowser/2.0")
+        try:
+            enable_modern_web(self.profile.settings())
+        except Exception:
+            pass
 
         shell = QWidget(self)
         shell_lay = QVBoxLayout(shell)
@@ -580,6 +675,7 @@ class BrowserWindow(QMainWindow):
         self.tabs.setElideMode(Qt.ElideRight)
         self.tabs.setUsesScrollButtons(True)
         self.tabs.tabBar().setExpanding(False)
+        self.tabs.tabBar().setDrawBase(False)
         self.tabs.tabCloseRequested.connect(self.close_tab)
         self.tabs.currentChanged.connect(self.update_chrome)
 
@@ -627,8 +723,17 @@ class BrowserWindow(QMainWindow):
         nav = QToolBar("Navigation", self)
         nav.setObjectName("nav")
         nav.setMovable(False)
+        nav.setFloatable(False)
         nav.setIconSize(QSize(18, 18))
-        self.addToolBar(nav)
+        # Not a window toolbar. QMainWindow draws a line under those.
+        nav.setStyleSheet("QToolBar#nav { border: none; background: transparent; }")
+        nav.setAttribute(Qt.WA_StyledBackground, True)
+        self.centralWidget().layout().insertWidget(0, nav)
+
+        brand = QLabel("DevOS")
+        brand.setObjectName("brandMark")
+        brand.setToolTip("DevOS Browser")
+        nav.addWidget(brand)
 
         self.act_back = nav.addAction("←", lambda: self.current_view() and self.current_view().back())
         self.act_back.setToolTip("Back (Alt+Left)")
@@ -719,12 +824,13 @@ class BrowserWindow(QMainWindow):
         return menu
 
     def _build_bookmarks(self):
-        self.bookmark_bar = QToolBar("Bookmarks", self)
+        # The DuckDuckGo, Wikipedia, and News labels stay off the window.
+        self.bookmark_bar = QWidget()
         self.bookmark_bar.setObjectName("bookmarks")
-        self.bookmark_bar.setMovable(False)
-        self.addToolBarBreak()
-        self.addToolBar(self.bookmark_bar)
-        self.reload_bookmarks()
+        self.bookmark_bar.hide()
+        self.bookmark_row = QHBoxLayout(self.bookmark_bar)
+        self.bookmark_row.setContentsMargins(0, 0, 0, 0)
+        self.bookmark_row.setSpacing(0)
 
     def _build_shortcuts(self):
         QShortcut(QKeySequence("Escape"), self, activated=self.hide_find)
@@ -795,14 +901,26 @@ class BrowserWindow(QMainWindow):
             pass
 
     def reload_bookmarks(self):
-        self.bookmark_bar.clear()
+        while self.bookmark_row.count():
+            item = self.bookmark_row.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
         for item in self.bookmarks()[:14]:
             title = str(item.get("title") or item.get("url") or "Link")[:28]
             url = str(item.get("url") or "")
             if not url:
                 continue
-            act = self.bookmark_bar.addAction(title, lambda _=False, u=url: self.open_url(u))
-            act.setToolTip(url)
+            button = QToolButton(self.bookmark_bar)
+            button.setObjectName("bookmarkBtn")
+            button.setText(title)
+            button.setToolTip(url)
+            button.setToolButtonStyle(Qt.ToolButtonTextOnly)
+            button.setAutoRaise(True)
+            button.setCursor(Qt.PointingHandCursor)
+            button.clicked.connect(lambda _=False, u=url: self.open_url(u))
+            self.bookmark_row.addWidget(button)
+        self.bookmark_row.addStretch(1)
 
     # -- tabs ---------------------------------------------------------------
 
@@ -997,9 +1115,12 @@ class BrowserWindow(QMainWindow):
         if not view:
             return
         text = self.find_input.text() if text is None else text
-        flags = QWebEnginePage.FindFlags(0)
-        if not forward:
-            flags |= QWebEnginePage.FindBackward
+        if QT_MAJOR == 6:
+            flags = QWebEnginePage.FindFlag(0) if forward else QWebEnginePage.FindFlag.FindBackward
+        else:
+            flags = QWebEnginePage.FindFlags(0)
+            if not forward:
+                flags |= QWebEnginePage.FindBackward
         view.findText(text, flags)
 
     def adjust_zoom(self, delta: float):
@@ -1023,10 +1144,17 @@ class BrowserWindow(QMainWindow):
         if not view:
             return
         try:
-            from PyQt5.QtPrintSupport import QPrintDialog, QPrinter
-            printer = QPrinter(QPrinter.HighResolution)
-            dlg = QPrintDialog(printer, self)
-            if dlg.exec_() == QPrintDialog.Accepted:
+            if QT_MAJOR == 6:
+                from PyQt6.QtPrintSupport import QPrintDialog, QPrinter
+                printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+                dlg = QPrintDialog(printer, self)
+                accepted = run_dialog(dlg) == QPrintDialog.DialogCode.Accepted
+            else:
+                from PyQt5.QtPrintSupport import QPrintDialog, QPrinter
+                printer = QPrinter(QPrinter.HighResolution)
+                dlg = QPrintDialog(printer, self)
+                accepted = run_dialog(dlg) == QPrintDialog.Accepted
+            if accepted:
                 view.page().print(printer, lambda _ok: None)
         except Exception:
             QMessageBox.information(self, "Print", "Printing is not available on this PC.")
@@ -1106,9 +1234,15 @@ def main():
     parser.add_argument("--private", action="store_true")
     parser.add_argument("urls", nargs="*")
     args = parser.parse_args()
-    prepare("devos-browser")
+    if QT_MAJOR == 5:
+        prepare("devos-browser")
     app = QApplication([sys.argv[0]])
-    apply(app, "devos-browser")
+    if QT_MAJOR == 5:
+        apply(app, "devos-browser")
+    else:
+        app.setApplicationName("DevOS Browser")
+        app.setApplicationDisplayName("DevOS Browser")
+        app.setDesktopFileName("devos-browser")
     font = QFont("Noto Sans")
     if not font.exactMatch():
         font = QFont("Segoe UI")
@@ -1117,8 +1251,11 @@ def main():
     window = BrowserWindow(args.private)
     for url in args.urls or [None]:
         window.new_tab(url)
-    show_window(window, "devos-browser")
-    result = app.exec_()
+    if QT_MAJOR == 5:
+        show_window(window, "devos-browser")
+    else:
+        window.show()
+    result = run_dialog(app)
     if not sip.isdeleted(window):
         sip.delete(window)
     return result

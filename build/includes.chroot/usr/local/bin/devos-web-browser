@@ -1,6 +1,7 @@
-#!/bin/sh
-# Qt WebEngine needs a compositor even when Chromium renders in software.
-# Use Qt's software backend on virtual GPUs and systems without a render device.
+#!/bin/bash
+# DevOS Browser opens its own window. It never opens the Chrome window.
+set -u
+
 if ! ls /dev/dri/renderD* >/dev/null 2>&1 ||
     grep -qsE 'DRIVER=(virtio_gpu|bochs|qxl|vmwgfx)$' /sys/class/drm/card*/device/uevent; then
     export QT_QUICK_BACKEND="${QT_QUICK_BACKEND:-software}"

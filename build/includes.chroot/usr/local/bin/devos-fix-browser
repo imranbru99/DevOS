@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# DevOS Browser keeps its own window and uses a current page engine inside it.
+set -uo pipefail
+
+BRANCH="${DEVOS_BRANCH:-cursor/premium-devos-browser-6081}"
+RAW="https://raw.githubusercontent.com/imranbru99/DevOS/${BRANCH}"
+
+as_root() {
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+  else
+    sudo "$@"
+  fi
+}
+
+echo "== Install DevOS Browser =="
+export DEBIAN_FRONTEND=noninteractive
+as_root apt-get update -qq || true
+as_root apt-get install -y python3-pyqt6 python3-pyqt6.qtwebengine || true
+
+tmp="$(mktemp)"
+if curl -fsSL "${RAW}/build/includes.chroot/usr/local/bin/devos-web-browser" -o "$tmp"; then
+  as_root install -m 0755 "$tmp" /usr/local/bin/devos-web-browser
+fi
+rm -f "$tmp"
+page="$(mktemp)"
+if curl -fsSL "${RAW}/components/browser/web_browser.py" -o "$page"; then
+  as_root mkdir -p /usr/local/share/devos/components/browser
+  as_root install -m 0644 "$page" /usr/local/share/devos/components/browser/web_browser.py
+fi
+rm -f "$page"
+
+if grep -q 'google-chrome' /usr/local/bin/devos-web-browser 2>/dev/null; then
+  echo "  Browser launcher still opens Chrome."
+  exit 1
+fi
+if ! grep -q 'web_browser.py' /usr/local/bin/devos-web-browser 2>/dev/null; then
+  echo "  Browser launcher was not updated."
+  exit 1
+fi
+if ! grep -q 'QT_MAJOR' /usr/local/share/devos/components/browser/web_browser.py 2>/dev/null; then
+  echo "  Browser window was not updated."
+  exit 1
+fi
+
+python3 -c 'import importlib.util; print("  Page engine: Qt 6" if importlib.util.find_spec("PyQt6.QtWebEngineWidgets") else "  Page engine: Qt 5")'
+
+echo
+echo "Close DevOS Browser, then open it again and reload the site."
