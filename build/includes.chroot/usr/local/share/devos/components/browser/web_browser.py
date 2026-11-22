@@ -824,14 +824,13 @@ class BrowserWindow(QMainWindow):
         return menu
 
     def _build_bookmarks(self):
-        # A toolbar draws its own edge under the bookmarks. Keep them in the page.
+        # The DuckDuckGo, Wikipedia, and News labels stay off the window.
         self.bookmark_bar = QWidget()
         self.bookmark_bar.setObjectName("bookmarks")
+        self.bookmark_bar.hide()
         self.bookmark_row = QHBoxLayout(self.bookmark_bar)
-        self.bookmark_row.setContentsMargins(8, 0, 8, 0)
-        self.bookmark_row.setSpacing(2)
-        self.centralWidget().layout().insertWidget(1, self.bookmark_bar)
-        self.reload_bookmarks()
+        self.bookmark_row.setContentsMargins(0, 0, 0, 0)
+        self.bookmark_row.setSpacing(0)
 
     def _build_shortcuts(self):
         QShortcut(QKeySequence("Escape"), self, activated=self.hide_find)
