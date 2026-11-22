@@ -45,6 +45,9 @@ class TestKickoffScroll(unittest.TestCase):
         self.assertNotIn("currentIndex: count > 0 ? 0 : -1", text)
         self.assertNotIn("if (!activeFocus)", text)
         self.assertNotIn("view.currentIndex = 0", text)
+        self.assertNotIn("positionViewAtBeginning", text)
+        self.assertNotIn("positionViewAtIndex(currentIndex", text)
+        self.assertIn("devosHeldY", text)
         self.assertIn("root.isSidebar", text)
         self.assertEqual(text.count("hoverEnabled: root.mainContentView"), 2)
         self.assertIn("function devosNoteUserPick", text)
@@ -77,6 +80,7 @@ class TestKickoffScroll(unittest.TestCase):
         grid = read("contents/ui/KickoffGridView.qml")
         self.assertIn("property bool devosCompact: false", grid)
         self.assertIn("root.devosCompact", grid)
+        self.assertNotIn("positionViewAtBeginning", grid)
         config = read("contents/config/main.xml")
         self.assertIn("<entry name=\"applicationsDisplay\"", config)
         apps = config.split("<entry name=\"applicationsDisplay\"", 1)[1].split("</entry>", 1)[0]

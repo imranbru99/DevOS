@@ -40,6 +40,8 @@ EmptyPage {
     // Remembers a click so a later model refresh can be told apart from
     // the user choosing Favorites.
     property int devosUserPick: -1
+    // Scroll position of the application list. A reload must not send it home.
+    property real devosHeldY: 0
 
     Timer {
         id: devosUserPickClear
@@ -156,18 +158,37 @@ EmptyPage {
                     && kickoff.searchField.activeFocus)
         }
 
+        onContentYChanged: {
+            // devos-keep-category-while-scrolling
+            // A reload or a tooltip drops the list to the first letter in one
+            // step. A real scroll moves there gradually, so leave that alone.
+            if (moving || dragging || flicking) {
+                if (contentY > 0)
+                    root.devosHeldY = contentY
+                return
+            }
+            if (contentY > 0) {
+                root.devosHeldY = contentY
+                return
+            }
+            const held = root.devosHeldY
+            if (!root.isSidebar && held > height * 0.5) {
+                Qt.callLater(() => {
+                    if (!view.moving && !view.dragging && !view.flicking && view.contentY < 1)
+                        view.contentY = held
+                })
+            }
+        }
+
         onCountChanged: {
             // devos-keep-category-while-scrolling
-            // The pointer resting on an application row means this category
-            // list does not have focus. A reload a few seconds later must not
-            // treat that as "go back to Favorites".
-            if (currentIndex < 0 && count > 0) {
+            // Do not scroll to the current row here. The current row stays on
+            // the first letter while the list is scrolled, and following it
+            // was sending All Applications home a few seconds later.
+            if (root.isSidebar && currentIndex < 0 && count > 0)
                 currentIndex = 0
-            } else if (currentIndex >= count) {
+            else if (currentIndex >= count)
                 currentIndex = count > 0 ? count - 1 : -1
-            } else if (count > 0 && currentIndex >= 0) {
-                positionViewAtIndex(currentIndex, ListView.Contain)
-            }
         }
 
         delegate: KickoffListDelegate {
@@ -235,12 +256,8 @@ EmptyPage {
             target: kickoff
             function onExpandedChanged() {
                 // devos-keep-category-while-scrolling
-                // A tooltip or a short focus loss used to mark the menu closed
-                // and snap the category list to Favorites while the pointer
-                // was still on an application row.
-                if (!kickoff.expanded && !root.isSidebar) {
-                    view.positionViewAtBeginning()
-                }
+                // Leave the scroll position alone. A tooltip was marking the
+                // menu closed and sending All Applications back to the top.
             }
         }
 

@@ -195,10 +195,9 @@ EmptyPage {
         Connections {
             target: kickoff
             function onExpandedChanged() {
-                if (!kickoff.expanded) {
-                    view.currentIndex = 0
-                    view.positionViewAtBeginning()
-                }
+                // devos-keep-category-while-scrolling
+                // Do not jump this grid back to its first icon when the menu
+                // loses focus for a moment.
             }
         }
 
