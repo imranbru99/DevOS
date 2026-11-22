@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# Keep Start Menu scrolling on All Applications instead of jumping to Favorites.
+set -uo pipefail
+
+BRANCH="${DEVOS_BRANCH:-cursor/fix-app-menu-scroll-6081}"
+RAW="https://raw.githubusercontent.com/imranbru99/DevOS/${BRANCH}"
+LOCAL="/usr/local/share/devos/components/kickoff/patch_kickoff_scroll.py"
+
+as_root() {
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+  else
+    sudo "$@"
+  fi
+}
+
+echo "== Keep All Applications scrolling =="
+tmp="$(mktemp)"
+if curl -fsSL "${RAW}/components/kickoff/patch_kickoff_scroll.py" -o "$tmp"; then
+  as_root mkdir -p "$(dirname "$LOCAL")"
+  as_root install -m 0644 "$tmp" "$LOCAL"
+else
+  echo "  Could not download the menu update."
+  rm -f "$tmp"
+  exit 1
+fi
+rm -f "$tmp"
+
+if ! as_root python3 "$LOCAL" /usr/share/plasma/plasmoids/org.kde.plasma.kickoff; then
+  echo "  The Start Menu files could not be updated."
+  exit 1
+fi
+if ! grep -q "devos-keep-category-while-scrolling" \
+    /usr/share/plasma/plasmoids/org.kde.plasma.kickoff/contents/ui/ApplicationsPage.qml; then
+  echo "  All Applications can still fall back to Favorites."
+  exit 1
+fi
+
+user_name="${SUDO_USER:-$USER}"
+user_id="$(id -u "$user_name" 2>/dev/null || echo "")"
+if [ -n "$user_id" ] && [ -S "/run/user/${user_id}/bus" ]; then
+  sudo -u "$user_name" \
+    XDG_RUNTIME_DIR="/run/user/${user_id}" \
+    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${user_id}/bus" \
+    systemctl --user restart plasma-plasmashell.service || true
+  echo
+  echo "The taskbar blinks once. Open the menu, choose All Applications, and scroll the full list."
+else
+  echo
+  echo "Log out and back in, then scroll All Applications."
+fi

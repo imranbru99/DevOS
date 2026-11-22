@@ -1,0 +1,11 @@
+#!/bin/bash
+# Keep All Applications in place while its list is scrolled.
+set -euo pipefail
+
+patcher=/usr/local/share/devos/components/kickoff/patch_kickoff_scroll.py
+kickoff=/usr/share/plasma/plasmoids/org.kde.plasma.kickoff
+if [ ! -f "$patcher" ] || [ ! -d "$kickoff" ]; then
+    echo "Kickoff scroll fix skipped (menu files are not in this root yet)."
+    exit 0
+fi
+python3 "$patcher" "$kickoff"

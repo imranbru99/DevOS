@@ -27,6 +27,7 @@ menu.writeConfig("favorites", "applications:devos-browser.desktop,applications:d
 menu.writeConfig("favoritesDisplay", 0)
 menu.writeConfig("favoritesPortedToKAstats", false)
 menu.writeConfig("systemFavorites", "hibernate,reboot,shutdown")
+menu.writeConfig("switchCategoryOnHover", false)
 
 var tasks = panel.addWidget("org.kde.plasma.icontasks")
 tasks.currentConfigGroup = ["General"]
