@@ -8,6 +8,10 @@ Type=simple
 ExecStart=/usr/local/bin/devos-portal-filechooser
 Restart=on-failure
 RestartSec=2
+PassEnvironment=DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS XAUTHORITY
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+PassEnvironment=DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS XAUTHORITY
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
 
 [Install]
 WantedBy=graphical-session.target

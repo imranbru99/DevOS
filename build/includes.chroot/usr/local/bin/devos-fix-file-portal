@@ -1,67 +1,126 @@
 #!/usr/bin/env bash
-# Repair Upload/Download/Open file dialogs on a running DevOS session.
+# Upload, Open, Open Folder, and Chrome "show in folder" use File Explorer.
 # Safe to re-run. Does not need a reboot.
-set -euo pipefail
+set -uo pipefail
 
-echo "== Display =="
-echo "DISPLAY=${DISPLAY:-unset}  WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-unset}"
+BRANCH="${DEVOS_BRANCH:-cursor/fix-devos-archive-menu-6081}"
+RAW="https://raw.githubusercontent.com/imranbru99/DevOS/${BRANCH}"
+BIN="/usr/local/bin/devos-portal-filechooser"
 
-echo "== Write user portal prefs (KDE FileChooser; Secret explicitly empty) =="
-mkdir -p "${HOME}/.config/xdg-desktop-portal"
-# Empty Secret= is required: with only default=kde, portal still tries KWallet
-# and that backend exits 255 on DevOS (KWallet disabled).
-cat > "${HOME}/.config/xdg-desktop-portal/portals.conf" <<'EOF'
-[preferred]
+as_root() {
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+  else
+    sudo "$@"
+  fi
+}
+
+echo "== Install the File Explorer dialog program =="
+if [ ! -x "$BIN" ] || ! grep -q 'session-env-launch' "$BIN" 2>/dev/null; then
+  tmp="$(mktemp)"
+  if curl -fsSL "${RAW}/build/includes.chroot/usr/local/bin/devos-portal-filechooser" -o "$tmp"; then
+    as_root install -m 0755 "$tmp" "$BIN"
+  fi
+  rm -f "$tmp"
+fi
+if [ ! -x "$BIN" ]; then
+  echo "  Missing $BIN"
+  exit 1
+fi
+echo "  $BIN"
+
+python3 -c "import dbus, gi" 2>/dev/null || as_root apt-get install -y python3-dbus python3-gi gir1.2-glib-2.0 || true
+
+CONF='[preferred]
+# Secret stays empty: default=kde would otherwise load KWallet and exit 255.
 default=kde
-org.freedesktop.impl.portal.FileChooser=kde;gtk;devos;
+org.freedesktop.impl.portal.FileChooser=devos;kde;gtk;
 org.freedesktop.impl.portal.Settings=kde;gtk;
 org.freedesktop.impl.portal.Secret=
+'
+PORTAL_DESC='[portal]
+DBusName=org.freedesktop.impl.portal.desktop.devos
+Interfaces=org.freedesktop.impl.portal.FileChooser;
+UseIn=KDE;plasma;DevOS;
+'
+DBUS_PORTAL='[D-BUS Service]
+Name=org.freedesktop.impl.portal.desktop.devos
+Exec=/usr/local/bin/devos-portal-filechooser
+SystemdService=devos-portal-filechooser.service
+'
+DBUS_FM='[D-BUS Service]
+Name=org.freedesktop.FileManager1
+Exec=/usr/local/bin/devos-portal-filechooser
+SystemdService=devos-portal-filechooser.service
+'
+
+echo "== Tell every app to use File Explorer for open and upload =="
+mkdir -p "${HOME}/.config/xdg-desktop-portal" \
+  "${HOME}/.local/share/xdg-desktop-portal/portals" \
+  "${HOME}/.local/share/dbus-1/services"
+printf '%s\n' "$CONF" > "${HOME}/.config/xdg-desktop-portal/portals.conf"
+printf '%s\n' "$CONF" > "${HOME}/.config/xdg-desktop-portal/kde-portals.conf"
+printf '%s\n' "$PORTAL_DESC" > "${HOME}/.local/share/xdg-desktop-portal/portals/devos.portal"
+printf '%s\n' "$DBUS_PORTAL" > "${HOME}/.local/share/dbus-1/services/org.freedesktop.impl.portal.desktop.devos.service"
+# This file is what Chrome uses for "show in folder". It must not start Dolphin.
+printf '%s\n' "$DBUS_FM" > "${HOME}/.local/share/dbus-1/services/org.freedesktop.FileManager1.service"
+
+as_root mkdir -p /etc/xdg/xdg-desktop-portal /usr/share/xdg-desktop-portal/portals /usr/share/dbus-1/services
+printf '%s\n' "$CONF" | as_root tee /etc/xdg/xdg-desktop-portal/portals.conf >/dev/null
+printf '%s\n' "$CONF" | as_root tee /etc/xdg/xdg-desktop-portal/kde-portals.conf >/dev/null
+printf '%s\n' "$PORTAL_DESC" | as_root tee /usr/share/xdg-desktop-portal/portals/devos.portal >/dev/null
+printf '%s\n' "$DBUS_PORTAL" | as_root tee /usr/share/dbus-1/services/org.freedesktop.impl.portal.desktop.devos.service >/dev/null
+printf '%s\n' "$DBUS_FM" | as_root tee /usr/share/dbus-1/services/org.freedesktop.FileManager1.service >/dev/null
+
+echo "== Point the dolphin command at File Explorer =="
+if [ -e /usr/bin/dolphin ] && ! grep -q 'devos-files' /usr/bin/dolphin 2>/dev/null; then
+  as_root mkdir -p /usr/lib/devos
+  as_root dpkg-divert --local --rename --divert /usr/lib/devos/dolphin.real --add /usr/bin/dolphin || true
+fi
+if [ ! -e /usr/bin/dolphin ] || ! grep -q 'devos-files' /usr/bin/dolphin 2>/dev/null; then
+  printf '%s\n' '#!/bin/bash' 'exec /usr/local/bin/devos-files "$@"' | as_root tee /usr/bin/dolphin >/dev/null
+  as_root chmod 755 /usr/bin/dolphin
+fi
+if [ -x /usr/local/bin/devos-files ]; then
+  as_root install -m 0755 /usr/bin/dolphin /usr/local/bin/dolphin
+fi
+
+echo "== Start the dialog service and take folder opens away from Dolphin =="
+mkdir -p "${HOME}/.config/systemd/user"
+cat > "${HOME}/.config/systemd/user/devos-portal-filechooser.service" << 'EOF'
+[Unit]
+Description=DevOS file dialogs and folder opens
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/devos-portal-filechooser
+Restart=on-failure
+RestartSec=2
+PassEnvironment=DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS XAUTHORITY
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=graphical-session.target
 EOF
-# Also cover older XDG lookup paths some portal builds still read.
-mkdir -p "${HOME}/.config"
-cp -f "${HOME}/.config/xdg-desktop-portal/portals.conf" \
-  "${HOME}/.config/xdg-desktop-portal.conf" 2>/dev/null || true
-
-
-echo "== Stop broken DevOS FileChooser unit (hardcoded DISPLAY was killing pickers) =="
-systemctl --user stop devos-portal-filechooser.service 2>/dev/null || true
-systemctl --user disable devos-portal-filechooser.service 2>/dev/null || true
-systemctl --user mask devos-portal-filechooser.service 2>/dev/null || true
-pkill -f '/usr/local/bin/devos-portal-filechooser' 2>/dev/null || true
-pkill -f 'org.freedesktop.impl.portal.desktop.devos' 2>/dev/null || true
-
-echo "== Disable broken KWallet Secret portal activation if present =="
-for f in \
-  /usr/share/dbus-1/services/org.freedesktop.impl.portal.desktop.kwallet.service \
-  /usr/share/xdg-desktop-portal/portals/kwallet.portal
-do
-  if [ -f "$f" ]; then
-    echo "  found $f (system file — not removed; preference override avoids it)"
-  fi
-done
-
-echo "== Restart portals =="
-systemctl --user restart xdg-desktop-portal.service || true
-systemctl --user restart xdg-desktop-portal-kde.service 2>/dev/null || true
+# Dolphin holds the "show in folder" name until it exits.
+killall dolphin 2>/dev/null || true
+systemctl --user unmask devos-portal-filechooser.service 2>/dev/null || true
+systemctl --user daemon-reload 2>/dev/null || true
+systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS XAUTHORITY 2>/dev/null || true
+systemctl --user enable devos-portal-filechooser.service 2>/dev/null || true
+systemctl --user restart devos-portal-filechooser.service 2>/dev/null || true
+systemctl --user restart xdg-desktop-portal.service 2>/dev/null || true
 sleep 1
 
-echo "== Portal status =="
-systemctl --user is-active xdg-desktop-portal.service || true
-systemctl --user is-active xdg-desktop-portal-kde.service 2>/dev/null || true
-busctl --user status org.freedesktop.portal.Desktop 2>/dev/null | head -5 || true
-
-echo "== Recent portal errors =="
-journalctl --user -u xdg-desktop-portal -n 15 --no-pager 2>/dev/null | tail -15 || true
-
-echo "== Direct picker test (should open a window; close Cancel) =="
-if [ -x /usr/local/bin/devos-files ]; then
-  /usr/local/bin/devos-files --picker --output /tmp/devos-picker-test.json --title "DevOS portal test" \
-    && echo "devos-files picker exit: $?" \
-    || echo "devos-files picker exit: $?"
+if systemctl --user is-active --quiet devos-portal-filechooser.service; then
+  echo "  Dialog service: running"
 else
-  echo "devos-files missing"
+  echo "  Dialog service did not stay running."
+  journalctl --user -u devos-portal-filechooser -n 20 --no-pager 2>/dev/null || true
 fi
 
 echo
-echo "Done. Now try Upload/Download in Chrome or Antigravity."
-echo "If still broken, paste: journalctl --user -u xdg-desktop-portal -n 40 --no-pager"
+echo "Quit Chrome and Cursor completely, then open them again."
+echo "Upload, Open Folder, and Show in folder should be File Explorer."

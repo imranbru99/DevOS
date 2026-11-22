@@ -9,4 +9,4 @@ X-KDE-Priority=TopLevel
 Name=Refresh
 Name[bn]=রিফ্রেশ
 Icon=view-refresh
-Exec=devos-refresh
+Exec=/usr/local/bin/devos-refresh

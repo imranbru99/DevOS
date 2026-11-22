@@ -599,7 +599,7 @@ CHOSEN_DESKTOPS = chosen_desktop_ids()
 
 
 def rewrite(app_id, name=None, generic=None, keywords=None, icon=None, hide=False,
-            feature_hide=False):
+            feature_hide=False, exec_prefix=None):
     src = os.path.join(SRC, app_id + ".desktop")
     if not os.path.isfile(src):
         return
@@ -628,6 +628,11 @@ def rewrite(app_id, name=None, generic=None, keywords=None, icon=None, hide=Fals
                 saw_keywords = True
             elif main and icon and stripped.startswith("Icon="):
                 line = f"Icon={icon}\n"
+            elif exec_prefix and re.match(r"Exec=dolphin(\s|$)", stripped):
+                # A renamed menu entry still started the Dolphin window.
+                line = f"Exec={exec_prefix}\n"
+            elif exec_prefix and stripped.startswith("TryExec=dolphin"):
+                line = "TryExec=/usr/local/bin/devos-files\n"
             out.append(line)
             if main and stripped == "[Desktop Entry]" and (hide or feature_hide):
                 out.append("NoDisplay=true\n")
@@ -666,6 +671,7 @@ for app_id, (name, generic, keywords, icon) in RENAME.items():
         icon=icon,
         hide=app_id in HIDE,
         feature_hide=app_id in OPTIONAL_APPS_HIDDEN,
+        exec_prefix="/usr/local/bin/devos-files %U" if app_id == "org.kde.dolphin" else None,
     )
 
 for app_id in sorted(HIDE):
@@ -735,6 +741,39 @@ for filename, body in WRAPPERS.items():
         except OSError:
             pass
 PY
+
+# Shortcuts and folder opens call /usr/bin/dolphin by path. That binary is
+# the Dolphin window. Point it at File Explorer and keep the real program
+# aside so a package update cannot put the window back.
+if [ -x /usr/local/bin/devos-files ]; then
+    if [ -e /usr/bin/dolphin ] && ! grep -q 'devos-files' /usr/bin/dolphin 2>/dev/null; then
+        mkdir -p /usr/lib/devos
+        dpkg-divert --local --rename --divert /usr/lib/devos/dolphin.real --add /usr/bin/dolphin || true
+    fi
+    if [ ! -e /usr/bin/dolphin ] || ! grep -q 'devos-files' /usr/bin/dolphin 2>/dev/null; then
+        cat > /usr/bin/dolphin << 'EOF'
+#!/bin/bash
+exec /usr/local/bin/devos-files "$@"
+EOF
+        chmod 755 /usr/bin/dolphin
+    fi
+    install -m 0755 /usr/bin/dolphin /usr/local/bin/dolphin
+    python3 - << 'PY'
+from pathlib import Path
+homes = [Path("/etc/skel"), Path("/root")]
+home_root = Path("/home")
+if home_root.is_dir():
+    homes.extend(home_root.glob("*"))
+for home in homes:
+    path = home / ".config" / "mimeapps.list"
+    if not path.is_file():
+        continue
+    text = path.read_text(encoding="utf-8", errors="replace")
+    updated = text.replace("org.kde.dolphin.desktop", "devos-thispc.desktop")
+    if updated != text:
+        path.write_text(updated, encoding="utf-8")
+PY
+fi
 
 # Also drop stock wrappers into the image tree for builds that copy applications/.
 python3 - << 'PY'

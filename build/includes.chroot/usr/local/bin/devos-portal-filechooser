@@ -15,9 +15,13 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import uuid
 from collections import defaultdict
 from urllib.parse import unquote, urlparse
+
+# session-env-launch: Chrome's download button must open a real window.
+# The installer looks for this marker before it replaces an older copy.
 
 try:
     import dbus
@@ -44,32 +48,172 @@ def uri_to_path(uri):
 
 
 def devos_files_bin():
-    return (
-        shutil.which("devos-files")
-        or os.path.expanduser("~/.local/bin/devos-files")
-        or "/usr/local/bin/devos-files"
-    )
+    candidates = [
+        "/usr/local/bin/devos-files",
+        shutil.which("devos-files") or "",
+        os.path.expanduser("~/.local/bin/devos-files"),
+    ]
+    for c in candidates:
+        if c and os.path.isfile(c) and os.access(c, os.X_OK):
+            return c
+    return "/usr/local/bin/devos-files"
 
 
-def open_in_explorer(paths, select=False):
-    """Open File Explorer on these paths. Chrome's download and upload actions land here."""
-    binary = devos_files_bin()
-    if not os.path.isfile(binary):
-        sys.stderr.write(f"[devos-portal-filechooser] devos-files not found at {binary}\n")
+# A systemd user service often has no screen. Copy the screen from the desktop
+# that is already showing windows, and never copy the rest of that process.
+_DISPLAY_KEYS = (
+    "DISPLAY",
+    "WAYLAND_DISPLAY",
+    "XAUTHORITY",
+    "XDG_RUNTIME_DIR",
+    "DBUS_SESSION_BUS_ADDRESS",
+    "XDG_CURRENT_DESKTOP",
+    "XDG_SESSION_TYPE",
+    "QT_QPA_PLATFORM",
+    "HOME",
+    "USER",
+    "LANG",
+    "XDG_DATA_DIRS",
+    "XDG_CONFIG_HOME",
+)
+_PREFERRED_COMMS = {
+    "plasmashell",
+    "kwin_wayland",
+    "kwin_x11",
+    "Xorg",
+    "Xwayland",
+    "gnome-shell",
+}
+
+
+def decode_environ(raw):
+    env = {}
+    for item in raw.split(b"\0"):
+        if not item or b"=" not in item:
+            continue
+        key, value = item.split(b"=", 1)
+        try:
+            env[key.decode("utf-8")] = value.decode("utf-8")
+        except UnicodeError:
+            continue
+    return env
+
+
+def iter_process_environments():
+    try:
+        names = os.listdir("/proc")
+    except OSError:
         return
+    for name in names:
+        if not name.isdigit():
+            continue
+        base = os.path.join("/proc", name)
+        try:
+            with open(os.path.join(base, "comm"), "rb") as handle:
+                comm = handle.read().split(b"\0", 1)[0].decode("utf-8", "replace").strip()
+            with open(os.path.join(base, "environ"), "rb") as handle:
+                env = decode_environ(handle.read())
+        except OSError:
+            continue
+        yield comm, env
+
+
+def session_environment(base=None, processes=None):
+    """Environment that can put a window on the screen the user is looking at."""
+    env = dict(os.environ if base is None else base)
+    if processes is None:
+        processes = iter_process_environments()
+    chosen = None
+    for comm, penv in processes:
+        if not (penv.get("DISPLAY") or penv.get("WAYLAND_DISPLAY")):
+            continue
+        chosen = penv
+        if comm in _PREFERRED_COMMS:
+            break
+    if chosen:
+        for key in _DISPLAY_KEYS:
+            if not env.get(key) and chosen.get(key):
+                env[key] = chosen[key]
+    if not env.get("DISPLAY") and not env.get("WAYLAND_DISPLAY"):
+        runtime = env.get("XDG_RUNTIME_DIR") or ""
+        if runtime and os.path.exists(os.path.join(runtime, "wayland-0")):
+            env["WAYLAND_DISPLAY"] = "wayland-0"
+        else:
+            env["DISPLAY"] = ":0"
+    env["PATH"] = "/usr/local/bin:/usr/bin:/bin:" + env.get("PATH", "")
+    return env
+
+
+def launch_explorer(paths, select=False, env=None, popen=None, wait=0.4, sleeper=None, binary=None, log_path=None):
+    """Open File Explorer. False means the window process died before it could show."""
+    binary = binary or devos_files_bin()
     paths = [p for p in paths if p]
-    if not paths:
-        return
+    if not paths or not binary or not os.path.isfile(binary):
+        return False
     if select:
         cmd = [binary]
         for path in paths:
             cmd.extend(["--select", path])
     else:
         cmd = [binary, paths[0]]
+    env = session_environment() if env is None else env
+    if log_path is None:
+        log_path = os.path.expanduser("~/.cache/devos/file-explorer-launch.log")
     try:
-        subprocess.Popen(cmd, env=os.environ.copy(), start_new_session=True)
-    except OSError as err:
-        sys.stderr.write(f"[devos-portal-filechooser] Could not open File Explorer: {err}\n")
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        log_handle = open(log_path, "ab", buffering=0)
+    except OSError:
+        log_handle = open(os.devnull, "ab")
+    popen = popen or subprocess.Popen
+    sleeper = sleeper or time.sleep
+
+    def once(argv):
+        try:
+            proc = popen(
+                argv,
+                env=env,
+                stdout=log_handle,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+        except OSError as err:
+            try:
+                log_handle.write(f"[devos-portal-filechooser] launch failed: {err}\n".encode())
+            except Exception:
+                pass
+            return None
+        if wait:
+            sleeper(wait)
+        if proc.poll() is not None:
+            try:
+                log_handle.write(
+                    f"[devos-portal-filechooser] exited {proc.poll()}: {argv!r}\n".encode()
+                )
+            except Exception:
+                pass
+            return None
+        try:
+            log_handle.write(f"[devos-portal-filechooser] opened: {argv!r}\n".encode())
+        except Exception:
+            pass
+        return proc
+
+    try:
+        # A scope is a normal desktop app. A window started inside this service
+        # often never appears, and Chrome treats a plain success as "already open".
+        if once(["systemd-run", "--user", "--scope", "--quiet", "--collect", "--"] + cmd):
+            return True
+        return once(cmd) is not None
+    finally:
+        try:
+            log_handle.close()
+        except Exception:
+            pass
+
+
+def open_in_explorer(paths, select=False):
+    """Open File Explorer on these paths. Chrome's download button lands here."""
+    return launch_explorer(paths, select=select)
 
 
 def prefer_devos_for_folders():
@@ -185,21 +329,41 @@ class DevOSFileChooserPortal(dbus.service.Object):
             err_cb=err_cb
         )
 
-    def _launch_picker(self, handle, app_id, parent_window, title, options, save_mode, ok_cb, err_cb):
+    @dbus.service.method(
+        "org.freedesktop.impl.portal.FileChooser",
+        in_signature="osssa{sv}",
+        out_signature="ua{sv}",
+        async_callbacks=("ok_cb", "err_cb")
+    )
+    def OpenFolder(self, handle, app_id, parent_window, title, options, ok_cb, err_cb):
+        """Folder pickers (Cursor Open Folder, upload folders) use this method."""
+        self._launch_picker(
+            handle=handle,
+            app_id=app_id,
+            parent_window=parent_window,
+            title=title or "Select Folder",
+            options=options,
+            save_mode=False,
+            force_directory=True,
+            ok_cb=ok_cb,
+            err_cb=err_cb
+        )
+
+    def _launch_picker(self, handle, app_id, parent_window, title, options, save_mode, ok_cb, err_cb, force_directory=False):
         t = threading.Thread(
             target=self._run_picker_worker,
-            args=(handle, app_id, parent_window, title, options, save_mode, ok_cb, err_cb),
+            args=(handle, app_id, parent_window, title, options, save_mode, ok_cb, err_cb, force_directory),
             daemon=True
         )
         t.start()
 
-    def _run_picker_worker(self, handle, app_id, parent_window, title, options, save_mode, ok_cb, err_cb):
+    def _run_picker_worker(self, handle, app_id, parent_window, title, options, save_mode, ok_cb, err_cb, force_directory=False):
         tmp_id = uuid.uuid4().hex
         tmp_out = f"/tmp/devos_picker_{tmp_id}.json"
 
         dialog_title = str(title) if title else ("Save As" if save_mode else "Open File")
-        multiple = bool(options.get("multiple", False))
-        directory = bool(options.get("directory", False))
+        multiple = False if force_directory else bool(options.get("multiple", False))
+        directory = True if force_directory else bool(options.get("directory", False))
         current_name = clean_glob_pattern(str(options.get("current_name", "")))
         current_folder = parse_portal_folder(options.get("current_folder"))
         current_file = parse_portal_folder(options.get("current_file"))
@@ -231,12 +395,7 @@ class DevOSFileChooserPortal(dbus.service.Object):
         if target_folder:
             cmd.append(target_folder)
 
-        env = os.environ.copy()
-        # Portal may start with a minimal PATH (systemd user service).
-        env["PATH"] = "/usr/local/bin:/usr/bin:/bin:" + env.get("PATH", "")
-        if not env.get("DISPLAY") and not env.get("WAYLAND_DISPLAY"):
-            # Last-resort for broken activation env; prefer real session values.
-            env.setdefault("DISPLAY", ":0")
+        env = session_environment()
         try:
             proc = subprocess.Popen(cmd, env=env)
             with self._lock:
@@ -282,12 +441,22 @@ class DevOSFileManager(dbus.service.Object):
     def __init__(self, bus):
         super().__init__(bus, "/org/freedesktop/FileManager1")
 
+    def _open_or_fail(self, paths, select):
+        # Chrome keeps the click if this method returns success. A dead window
+        # must be an error so Chrome can open the folder itself.
+        if not open_in_explorer(paths, select=select):
+            raise dbus.exceptions.DBusException("File Explorer did not open")
+
     @dbus.service.method("org.freedesktop.FileManager1", in_signature="ass", out_signature="")
     def ShowFolders(self, uris, startup_id):
+        opened = False
         for uri in uris:
             path = uri_to_path(uri)
             if path:
-                open_in_explorer([path], select=False)
+                self._open_or_fail([path], select=False)
+                opened = True
+        if not opened:
+            raise dbus.exceptions.DBusException("File Explorer did not open")
 
     @dbus.service.method("org.freedesktop.FileManager1", in_signature="ass", out_signature="")
     def ShowItems(self, uris, startup_id):
@@ -300,11 +469,13 @@ class DevOSFileManager(dbus.service.Object):
                 groups[path]
             else:
                 groups[os.path.dirname(path) or "/"].append(path)
+        if not groups:
+            raise dbus.exceptions.DBusException("File Explorer did not open")
         for folder, files in groups.items():
             if files:
-                open_in_explorer(files, select=True)
+                self._open_or_fail(files, select=True)
             else:
-                open_in_explorer([folder], select=False)
+                self._open_or_fail([folder], select=False)
 
     @dbus.service.method("org.freedesktop.FileManager1", in_signature="ass", out_signature="")
     def ShowItemProperties(self, uris, startup_id):
@@ -321,40 +492,48 @@ def main():
 
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
     bus = dbus.SessionBus()
-    held = {"portal_name": None, "portal": None, "manager_name": None, "manager": None}
-    try:
-        held["portal_name"] = dbus.service.BusName(
-            "org.freedesktop.impl.portal.desktop.devos",
-            bus,
-            do_not_queue=True,
-        )
-    except dbus.exceptions.NameExistsException:
-        # Another copy is already the portal. Leave it in charge.
-        return
-    held["portal"] = DevOSFileChooserPortal(bus)
-    prefer_devos_for_folders()
+    held = {"portal_name": None, "manager_name": None}
+
+    def claim_bus_name(name):
+        try:
+            return dbus.service.BusName(name, bus, do_not_queue=True)
+        except dbus.exceptions.NameExistsException:
+            return None
+
+    def claim_portal():
+        if held["portal_name"] is not None:
+            return False
+        name = claim_bus_name("org.freedesktop.impl.portal.desktop.devos")
+        if name is None:
+            return True
+        held["portal_name"] = name
+        DevOSFileChooserPortal(bus)
+        prefer_devos_for_folders()
+        sys.stdout.write("[devos-portal-filechooser] Backend active on org.freedesktop.impl.portal.desktop.devos\n")
+        sys.stdout.flush()
+        return False
 
     def claim_file_manager():
         if held["manager_name"] is not None:
             return False
-        try:
-            held["manager_name"] = dbus.service.BusName(
-                "org.freedesktop.FileManager1",
-                bus,
-                do_not_queue=True,
-            )
-        except dbus.exceptions.NameExistsException:
+        name = claim_bus_name("org.freedesktop.FileManager1")
+        if name is None:
             # Dolphin still owns folder opens. Try again after it quits.
             return True
-        held["manager"] = DevOSFileManager(bus)
+        held["manager_name"] = name
+        DevOSFileManager(bus)
         sys.stdout.write("[devos-portal-filechooser] File Explorer answers folder opens from Chrome\n")
         sys.stdout.flush()
         return False
 
+    claim_portal()
     claim_file_manager()
+    if held["portal_name"] is None and held["manager_name"] is None:
+        # The running copy already answers both. Exiting here used to drop
+        # the download-button call when only the dialog name was taken.
+        return
+    GLib.timeout_add_seconds(2, claim_portal)
     GLib.timeout_add_seconds(2, claim_file_manager)
-    sys.stdout.write("[devos-portal-filechooser] Backend active on org.freedesktop.impl.portal.desktop.devos\n")
-    sys.stdout.flush()
 
     loop = GLib.MainLoop()
     try:

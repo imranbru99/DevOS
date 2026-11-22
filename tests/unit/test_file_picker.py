@@ -2,7 +2,9 @@
 
 import importlib.machinery
 import os
+import re
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -58,7 +60,7 @@ class TestFilePicker(unittest.TestCase):
     def test_portals_conf_does_not_force_kwallet_secret(self):
         for path in (PORTALS_CONF, KDE_PORTALS_CONF):
             text = path.read_text(encoding="utf-8")
-            self.assertIn("FileChooser=kde;gtk;devos;", text)
+            self.assertIn("FileChooser=devos;kde;gtk;", text)
             prefs = [
                 ln.strip()
                 for ln in text.splitlines()
@@ -131,6 +133,81 @@ class TestFilePicker(unittest.TestCase):
             text = handle.read()
         self.assertIn("Name=org.freedesktop.FileManager1", text)
         self.assertIn("devos-portal-filechooser", text)
+        portal_text = Path(portal_path).read_text(encoding="utf-8")
+        self.assertIn("def OpenFolder", portal_text)
+        fix = Path(ROOT) / "build/includes.chroot/usr/local/bin/devos-fix-file-portal"
+        fix_text = fix.read_text(encoding="utf-8")
+        self.assertIn("FileChooser=devos;kde;gtk;", fix_text)
+        self.assertIn("PassEnvironment=DISPLAY", fix_text)
+        self.assertIn("org.freedesktop.FileManager1", fix_text)
+        self.assertIn("devos.portal", fix_text)
+        self.assertIn("session-env-launch", fix_text)
+        self.assertNotIn("systemctl --user mask devos-portal-filechooser.service", fix_text)
+
+    def test_download_button_borrows_the_desktop_screen(self):
+        loader = importlib.machinery.SourceFileLoader("devos_portal_filechooser", str(PORTAL))
+        portal = loader.load_module()
+        env = portal.session_environment(
+            base={"PATH": "/usr/bin", "HOME": "/home/dev"},
+            processes=[
+                ("chrome", {"SECRET_TOKEN": "hide-me"}),
+                ("plasmashell", {
+                    "WAYLAND_DISPLAY": "wayland-0",
+                    "DISPLAY": ":1",
+                    "XDG_RUNTIME_DIR": "/run/user/1000",
+                    "SECRET_TOKEN": "hide-me",
+                }),
+            ],
+        )
+        self.assertEqual(env["WAYLAND_DISPLAY"], "wayland-0")
+        self.assertEqual(env["DISPLAY"], ":1")
+        self.assertEqual(env["XDG_RUNTIME_DIR"], "/run/user/1000")
+        self.assertNotIn("SECRET_TOKEN", env)
+        self.assertTrue(env["PATH"].startswith("/usr/local/bin:"))
+
+        calls = []
+
+        class Proc:
+            def __init__(self, alive):
+                self._alive = alive
+
+            def poll(self):
+                return None if self._alive else 1
+
+        def fake_popen(argv, **_kwargs):
+            calls.append(list(argv))
+            return Proc("systemd-run" in argv)
+
+        binary = str(FILES_BIN)
+        self.assertTrue(portal.launch_explorer(
+            ["/home/dev/Downloads/report.xls"],
+            select=True,
+            env=env,
+            popen=fake_popen,
+            wait=0,
+            sleeper=lambda _seconds: None,
+            binary=binary,
+            log_path=os.path.join(tempfile.mkdtemp(), "launch.log"),
+        ))
+        self.assertEqual(calls[0][:5], ["systemd-run", "--user", "--scope", "--quiet", "--collect"])
+        self.assertEqual(calls[0][-2:], ["--select", "/home/dev/Downloads/report.xls"])
+
+        def dead_popen(argv, **_kwargs):
+            return Proc(False)
+
+        self.assertFalse(portal.launch_explorer(
+            ["/home/dev/Downloads/report.xls"],
+            select=True,
+            env=env,
+            popen=dead_popen,
+            wait=0,
+            sleeper=lambda _seconds: None,
+            binary=binary,
+            log_path=os.path.join(tempfile.mkdtemp(), "dead.log"),
+        ))
+        text = Path(PORTAL).read_text(encoding="utf-8")
+        self.assertIn("File Explorer did not open", text)
+        self.assertIn("session-env-launch", text)
 
 
 if __name__ == "__main__":
