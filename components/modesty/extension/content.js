@@ -9,7 +9,7 @@
   const VIDEO_SAMPLE_MS = 750;
   const PIXEL_MAX_SIDE = 640;
   const BG_BATCH_BUDGET_MS = 8;
-  const BLUR_CSS = ''; // Regional SVG filters never blur a page container.
+  const BLUR_CSS = 'img[data-dm-girl="1"],video[data-dm-girl="1"]{filter:blur(18px) !important}';
 
   let settings = R.effectiveSettings({}, {});
   const results = new Map();           // media key (URL) -> Promise<result>
@@ -109,6 +109,10 @@
   function setBlurred(el, blurred) {
     const st = info.get(el) || {};
     el.setAttribute(attrFor(el), blurred ? 'regional' : 'ok');
+    if (el.tagName === 'IMG' || el.tagName === 'VIDEO') {
+      if (blurred) el.setAttribute('data-dm-girl', '1');
+      else el.removeAttribute('data-dm-girl');
+    }
     if (blurred && !st.blurred) newlyBlurred++;
     if (!blurred) removeRender(el);
     st.blurred = blurred;
@@ -316,6 +320,11 @@
   function applyResult(el, result) {
     const st = info.get(el) || {};
     st.result = result; info.set(el, st);
+    if (!result || !result.ok) {
+      st.generation = (st.generation || 0) + 1;
+      setBlurred(el, false);
+      return;
+    }
     // Devices and hardware must not be blurred by noise; require high confidence genuine face
     if (st.isTechDevice) {
       const confidentFace = (result.faces || []).some((f) => Number(f.score) >= 0.70 && Number(f.genderProbability) >= 0.80);
@@ -327,7 +336,10 @@
     }
     const verdict = R.decide(result, settings);
     if (!verdict.blur) { st.generation = (st.generation || 0) + 1; setBlurred(el, false); return; }
-    renderRegions(el, verdict).catch(() => setBlurred(el, false));
+    // Blur the photo element immediately. The overlay is extra; a failed
+    // overlay must not put the girl back in view.
+    if (el.tagName === 'IMG' || el.tagName === 'VIDEO') el.setAttribute('data-dm-girl', '1');
+    renderRegions(el, verdict).catch(() => {});
   }
 
   // ------------------------------------------------------------ detection
@@ -409,22 +421,46 @@
     st.pending = true;
     let p;
     if (/^(data|blob):/i.test(key)) {
-      const cacheKey = key.length > 2048 ? null : key;
-      p = cacheKey && results.has(cacheKey) ? results.get(cacheKey)
-        : detectPixels(pixelsFrom(img, img.naturalWidth, img.naturalHeight));
-      if (cacheKey) results.set(cacheKey, p);
+      const shot = pixelsFrom(img, img.naturalWidth, img.naturalHeight);
+      p = shot
+        ? detectPixels(shot)
+        : captureElement(img).then((cap) => detectPixels(cap).then((result) => {
+          if (result && cap) result.presented = true;
+          return result;
+        }));
     } else {
       p = detectUrl(key);
     }
-    p.then((result) => {
+    p.then(async (result) => {
       st.pending = false;
       if (st.key !== key) return;                       // src changed meanwhile
-      applyResult(img, result);
-      if (!result.ok && result.error !== 'tainted' && (st.retries || 0) < 2) {
-        // Retry transient failures without applying a whole-image blur.
-        st.retries = (st.retries || 0) + 1;
-        setTimeout(() => { if (st.key === key) { st.result = null; processImg(img); } }, 5000 * st.retries);
+      let safe = result && typeof result === 'object' ? result : { ok: false, error: 'no response' };
+      // A blocked photo URL still shows on screen. Read those pixels once.
+      const startup = !safe.ok && (safe.error === 'detector unavailable' || safe.error === 'no response');
+      if (!safe.ok && !startup && safe.error !== 'tainted' && !st.captured) {
+        st.captured = true;
+        const cap = await captureElement(img);
+        if (st.key !== key) return;
+        if (cap) {
+          const again = await detectPixels(cap);
+          if (again && again.ok) { again.presented = true; safe = again; }
+        }
       }
+      if (st.key !== key) return;
+      applyResult(img, safe);
+      // The face model can take a while to start. Keep this photo in the
+      // queue until a real check finishes, instead of leaving it sharp.
+      const transient = !safe.ok && safe.error !== 'tainted';
+      if (transient && (st.retries || 0) < 12) {
+        st.retries = (st.retries || 0) + 1;
+        const wait = Math.min(20000, 1500 * st.retries);
+        setTimeout(() => { if (st.key === key) { st.result = null; st.captured = false; processImg(img); } }, wait);
+      }
+    }).catch(() => {
+      st.pending = false;
+      if (st.key !== key || (st.retries || 0) >= 12) return;
+      st.retries = (st.retries || 0) + 1;
+      setTimeout(() => { if (st.key === key) { st.result = null; processImg(img); } }, 2000);
     });
   }
 
@@ -649,6 +685,7 @@
           checkPoster(el);
         } else if (rec.attributeName === 'style' || rec.attributeName === 'class') {
           const st = info.get(el);
+          if (st && st.blurred && (el.tagName === 'IMG' || el.tagName === 'VIDEO')) el.setAttribute('data-dm-girl', '1');
           if (st && st.bgApplied && (rec.attributeName === 'class' || el.style.backgroundImage !== st.bgApplied)) removeRender(el);
           queueBg(el);
         }

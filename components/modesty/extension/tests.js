@@ -19,6 +19,8 @@
   eq('missing age stays clear', R.decide(D([F('female', .95, { age: undefined })]), women).blur, false);
   eq('adult boundary', R.decide(D([F('female', .95, { age: 18 })]), women).blur, true);
   eq('weak face ignored', R.decide(D([F('female', .99, { score: .2 })]), women).blur, false);
+  eq('covered head just under the open-face score still blurs', R.decide(D([F('male', .9, { score: .47, headCovered: true })]), women).blur, true);
+  eq('open face just under the score stays clear', R.decide(D([F('female', .99, { score: .47 })]), women).blur, false);
   eq('small uncertain face ignored', R.decide(D([F('female', .99, { w: 12 })]), women).blur, false);
   eq('a girl face blurs the whole image', R.decide(D([F('female', .99)]), women).regions.map((r) => r.full), [true]);
   eq('a girl face without a blur layer is not invented', R.decide({ ok: true, faces: [F('female', .99)] }, women).blur, false);

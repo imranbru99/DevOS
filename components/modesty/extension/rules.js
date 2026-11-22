@@ -83,7 +83,12 @@
    * Returns {blur: bool, reason: string}.
    */
   function isAdultWomanFace(face, s) {
-    if (!face || Number(face.score) < s.faceScore) return false;
+    if (!face) return false;
+    // A covered head (hijab or hair from behind) is a weaker box. Keep it
+    // when it is still a real detection; an open face must clear faceScore.
+    const covered = face.headCovered === true;
+    const score = Number(face.score);
+    if (score < (covered ? Math.min(0.45, s.faceScore) : s.faceScore)) return false;
     const size = Math.min(Number(face.w) || 0, Number(face.h) || 0);
     if (size < s.uncertainFacePx) return false;
     if (face.bearded === true) return false;

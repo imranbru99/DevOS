@@ -43,6 +43,13 @@ async function createDetector() {
       minDetectionConfidence: 0.4,
     });
   };
+  // Face must be created once, on CPU. A GPU attempt that is still running
+  // deadlocks a second create in this same page, so the detector never
+  // becomes ready and every photo stays sharp.
+  if (task === 'face') {
+    detector = await withTimeout(build('CPU'), 30000, 'face CPU');
+    return;
+  }
   try {
     detector = await withTimeout(build('GPU'), 8000, task + ' GPU');
   } catch (e) {
