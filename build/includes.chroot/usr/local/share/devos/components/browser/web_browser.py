@@ -467,6 +467,39 @@ def recent_path():
     return data_dir() / "recent.json"
 
 
+def enable_modern_web(settings):
+    """Turn on the web features a current site needs. Unknown names are skipped."""
+    enabled = (
+        "JavascriptEnabled",
+        "LocalStorageEnabled",
+        "LocalContentCanAccessRemoteUrls",
+        "JavascriptCanOpenWindows",
+        "JavascriptCanAccessClipboard",
+        "AllowWindowActivationFromJavaScript",
+        "FullScreenSupportEnabled",
+        "FocusOnNavigationEnabled",
+        "ScrollAnimatorEnabled",
+        "DnsPrefetchEnabled",
+        "PdfViewerEnabled",
+        "WebGLEnabled",
+        "Accelerated2dCanvasEnabled",
+        "AutoLoadImages",
+        "ErrorPageEnabled",
+        "ScreenCaptureEnabled",
+        "HyperlinkAuditingEnabled",
+        "ShowScrollBars",
+    )
+    disabled = ("PluginsEnabled", "XSSAuditingEnabled")
+    for name, value in tuple((item, True) for item in enabled) + tuple((item, False) for item in disabled):
+        attr = getattr(QWebEngineSettings, name, None)
+        if attr is None:
+            continue
+        try:
+            settings.setAttribute(attr, value)
+        except Exception:
+            pass
+
+
 DEFAULT_BOOKMARKS = [
     {"title": "DuckDuckGo", "url": "https://duckduckgo.com/"},
     {"title": "Wikipedia", "url": "https://www.wikipedia.org/"},
@@ -516,7 +549,7 @@ class Omnibox(QFrame):
 
     def set_secure(self, secure: bool, tip: str = ""):
         self.secure.setProperty("insecure", not secure)
-        self.secure.setText("Sec" if secure else "·")
+        self.secure.setText("✓" if secure else "!")
         self.secure.setToolTip(tip or ("Secure connection" if secure else "Not secure"))
         self.secure.style().unpolish(self.secure)
         self.secure.style().polish(self.secure)
@@ -528,17 +561,7 @@ class BrowserView(QWebEngineView):
         self.window = window
         page = QWebEnginePage(window.profile, self)
         self.setPage(page)
-        settings = self.settings()
-        settings.setAttribute(QWebEngineSettings.PluginsEnabled, False)
-        settings.setAttribute(QWebEngineSettings.JavascriptCanOpenWindows, True)
-        settings.setAttribute(QWebEngineSettings.LocalStorageEnabled, True)
-        settings.setAttribute(QWebEngineSettings.ScrollAnimatorEnabled, True)
-        settings.setAttribute(QWebEngineSettings.FullScreenSupportEnabled, True)
-        settings.setAttribute(QWebEngineSettings.FocusOnNavigationEnabled, True)
-        try:
-            settings.setAttribute(QWebEngineSettings.DnsPrefetchEnabled, True)
-        except Exception:
-            pass
+        enable_modern_web(self.settings())
 
     def createWindow(self, _window_type):
         return self.window.new_tab(load_home=False)
@@ -566,7 +589,10 @@ class BrowserWindow(QMainWindow):
             self.profile.setCachePath(cache + "/browser")
             self.profile.setPersistentCookiesPolicy(QWebEngineProfile.AllowPersistentCookies)
         self.profile.downloadRequested.connect(self.download)
-        self.profile.setHttpUserAgent(self.profile.httpUserAgent() + " DevOSBrowser/2.0")
+        try:
+            enable_modern_web(self.profile.settings())
+        except Exception:
+            pass
 
         shell = QWidget(self)
         shell_lay = QVBoxLayout(shell)

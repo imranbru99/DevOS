@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Websites were opening as plain text because DevOS Browser used an old page engine.
+# Install the launcher that uses Chrome or Chromium for the page.
+set -uo pipefail
+
+BRANCH="${DEVOS_BRANCH:-cursor/premium-devos-browser-6081}"
+RAW="https://raw.githubusercontent.com/imranbru99/DevOS/${BRANCH}"
+
+as_root() {
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+  else
+    sudo "$@"
+  fi
+}
+
+echo "== Install DevOS Browser =="
+tmp="$(mktemp)"
+if curl -fsSL "${RAW}/build/includes.chroot/usr/local/bin/devos-web-browser" -o "$tmp"; then
+  as_root install -m 0755 "$tmp" /usr/local/bin/devos-web-browser
+fi
+rm -f "$tmp"
+page="$(mktemp)"
+if curl -fsSL "${RAW}/components/browser/web_browser.py" -o "$page"; then
+  as_root mkdir -p /usr/local/share/devos/components/browser
+  as_root install -m 0644 "$page" /usr/local/share/devos/components/browser/web_browser.py
+fi
+rm -f "$page"
+
+if ! grep -q 'google-chrome-stable' /usr/local/bin/devos-web-browser 2>/dev/null; then
+  echo "  Browser launcher was not updated."
+  exit 1
+fi
+
+if [ -x /usr/bin/google-chrome-stable ] || [ -x /usr/bin/google-chrome ] || [ -x /usr/bin/chromium ]; then
+  echo "  Pages will use the current Chrome engine."
+else
+  echo "  Chrome is not installed. DevOS Browser will use the built-in window."
+fi
+
+echo
+echo "Close DevOS Browser, then open it again and reload the site."
