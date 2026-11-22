@@ -27,13 +27,15 @@ class TestArchiveFeatures(unittest.TestCase):
             content = f.read()
             self.assertIn("Compress to ZIP file", content)
             self.assertIn("Add to .7z archive", content)
-            self.assertIn("devos-archive", content)
+            self.assertIn("Exec=/usr/local/bin/devos-archive ", content)
+            self.assertNotIn("Exec=devos-archive ", content)
 
         with open(extract_desktop, "r", encoding="utf-8") as f:
             content = f.read()
             self.assertIn("Extract All…", content)
             self.assertIn("Extract Here", content)
-            self.assertIn("devos-archive", content)
+            self.assertIn("Exec=/usr/local/bin/devos-archive ", content)
+            self.assertNotIn("Exec=devos-archive ", content)
 
     def test_compression_and_extraction(self):
         from importlib.machinery import SourceFileLoader
