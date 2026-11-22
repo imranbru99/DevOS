@@ -43,6 +43,7 @@ if QT_MAJOR == 6:
     Qt.Key_Right = Qt.Key.Key_Right
     Qt.ToolButtonTextOnly = Qt.ToolButtonStyle.ToolButtonTextOnly
     Qt.PointingHandCursor = Qt.CursorShape.PointingHandCursor
+    Qt.WA_StyledBackground = Qt.WidgetAttribute.WA_StyledBackground
     QSizePolicy.Expanding = QSizePolicy.Policy.Expanding
     QSizePolicy.Preferred = QSizePolicy.Policy.Preferred
     QEvent.FocusIn = QEvent.Type.FocusIn
@@ -724,8 +725,10 @@ class BrowserWindow(QMainWindow):
         nav.setMovable(False)
         nav.setFloatable(False)
         nav.setIconSize(QSize(18, 18))
-        nav.setStyleSheet("QToolBar#nav { border: none; }")
-        self.addToolBar(nav)
+        # Not a window toolbar. QMainWindow draws a line under those.
+        nav.setStyleSheet("QToolBar#nav { border: none; background: transparent; }")
+        nav.setAttribute(Qt.WA_StyledBackground, True)
+        self.centralWidget().layout().insertWidget(0, nav)
 
         brand = QLabel("DevOS")
         brand.setObjectName("brandMark")
@@ -827,7 +830,7 @@ class BrowserWindow(QMainWindow):
         self.bookmark_row = QHBoxLayout(self.bookmark_bar)
         self.bookmark_row.setContentsMargins(8, 0, 8, 0)
         self.bookmark_row.setSpacing(2)
-        self.centralWidget().layout().insertWidget(0, self.bookmark_bar)
+        self.centralWidget().layout().insertWidget(1, self.bookmark_bar)
         self.reload_bookmarks()
 
     def _build_shortcuts(self):
