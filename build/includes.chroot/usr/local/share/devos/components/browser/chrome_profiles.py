@@ -1697,6 +1697,189 @@ def get_open_browser_profile_keys(chrome_dir, profiles):
     return out
 
 
+def get_last_used_profile_key(chrome_dir):
+    """Directory of the profile Chrome is showing in the focused window."""
+    local_state = os.path.join(chrome_dir, "Local State")
+    if not os.path.isfile(local_state):
+        return ""
+    try:
+        with open(local_state, "r", encoding="utf-8") as handle:
+            return str((json.load(handle).get("profile") or {}).get("last_used") or "")
+    except Exception:
+        return ""
+
+
+_GENERIC_WINDOW_TITLES = {
+    "",
+    "new tab",
+    "new incognito tab",
+    "new private tab",
+    "google",
+    "google chrome",
+    "chrome",
+    "about:blank",
+    "settings",
+    "history",
+    "downloads",
+    "extensions",
+}
+
+
+def window_title_key(title):
+    """Tab title without the browser suffix Chrome appends."""
+    text = (title or "").strip()
+    text = re.sub(r"\s+-\s+Google Chrome$", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s+-\s+Chromium$", "", text, flags=re.IGNORECASE)
+    return text.strip().lower()
+
+
+def title_is_generic(title):
+    """True for titles every profile shows, such as New Tab."""
+    key = window_title_key(title)
+    if key in _GENERIC_WINDOW_TITLES:
+        return True
+    return key.startswith("new tab")
+
+
+def _window_is_guest(window):
+    title = (window or {}).get("title") or ""
+    wm_class = ((window or {}).get("wm_class") or "").lower()
+    if "chrome-guest" in wm_class:
+        return True
+    return bool(re.search(
+        r"(\(Guest\)| - Guest( - |$)|browsing as a Guest|You.?re browsing as a Guest)",
+        title,
+        re.IGNORECASE,
+    ))
+
+
+def _effective_open_keys(windows, open_keys, profiles, prof_session_data):
+    """Profiles that have a window open.
+
+    last_active_profiles is the list Chrome writes. When that list is missing
+    and more than one window is open, a profile whose session file was written
+    in the last few minutes is open too.
+    """
+    keys = [key for key in (open_keys or []) if key in (profiles or {})]
+    if len(windows or []) < 2 or len(keys) >= 2:
+        return keys
+    now = time.time()
+    for key, data in (prof_session_data or {}).items():
+        if key in keys or key not in profiles:
+            continue
+        mtime = (data or {}).get("mtime") or 0
+        if mtime and now - mtime <= 180:
+            keys.append(key)
+    return keys
+
+
+def unique_profile_for_title(title, profiles, prof_session_data, open_keys=None):
+    """Profile whose open tabs contain this title, when only one profile does."""
+    key = window_title_key(title)
+    if title_is_generic(title) or len(key) < 4:
+        return None
+    keys = [k for k in (open_keys or list((profiles or {}).keys())) if k in (profiles or {})]
+    hits = []
+    for profile_key in keys:
+        data = (prof_session_data or {}).get(profile_key) or {}
+        matched = False
+        for tab in data.get("titles") or ():
+            if tab == key or (len(tab) >= 5 and (tab in key or key in tab)):
+                matched = True
+                break
+        if not matched:
+            for domain in data.get("domains") or ():
+                if len(domain) >= 4 and domain in key:
+                    matched = True
+                    break
+        if matched:
+            name = profiles.get(profile_key)
+            if name and name not in hits:
+                hits.append(name)
+    if len(hits) == 1:
+        return hits[0]
+    return None
+
+
+def _root_active_window():
+    """X id of the window the user is looking at, or 0."""
+    try:
+        import subprocess
+        out = subprocess.check_output(
+            ["xprop", "-root", "_NET_ACTIVE_WINDOW"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        return 0
+    match = re.search(r"0x[0-9a-fA-F]+", out or "")
+    if not match:
+        return 0
+    try:
+        return int(match.group(0), 16)
+    except ValueError:
+        return 0
+
+
+def assign_chrome_window_profiles(chrome_wins, profiles, open_keys, prof_session_data, last_used_key="", active_wid=0):
+    """
+    Map each Chrome window id to the profile name whose photo it should wear.
+
+    Chrome keeps every profile in one process, and a New Tab title is in every
+    profile, so the process flag and the tab title both paint the first photo
+    on every icon. The focused window is the profile Chrome saved as last_used
+    (the account shown at the top of that window). Each other window takes an
+    open profile that does not already have an icon.
+    """
+    profiles = profiles or {}
+    names = {}
+    for window in chrome_wins or []:
+        if _window_is_guest(window):
+            names[window["id"]] = "Guest"
+    rest = [window for window in (chrome_wins or []) if window["id"] not in names]
+    open_keys = _effective_open_keys(rest, open_keys, profiles, prof_session_data)
+    open_names = []
+    for key in open_keys:
+        name = profiles.get(key)
+        if name and name not in open_names:
+            open_names.append(name)
+
+    if len(open_names) == 1:
+        for window in rest:
+            names[window["id"]] = open_names[0]
+        return names
+
+    last_used_name = profile_name_for_key(last_used_key, profiles) if last_used_key else None
+    if active_wid and last_used_name:
+        for window in rest:
+            if window["id"] == active_wid:
+                names[window["id"]] = last_used_name
+                break
+
+    for window in rest:
+        if window["id"] in names:
+            continue
+        unique = unique_profile_for_title(
+            window.get("title"), profiles, prof_session_data, open_keys or None,
+        )
+        if unique:
+            names[window["id"]] = unique
+
+    used = set(names.values())
+    unused = [name for name in open_names if name not in used]
+    left = [window for window in rest if window["id"] not in names]
+    if left and len(unused) == 1:
+        names[left[0]["id"]] = unused[0]
+        extra = last_used_name or (open_names[0] if open_names else None)
+        for window in left[1:]:
+            if extra:
+                names[window["id"]] = extra
+    elif left and len(left) == len(unused):
+        for window, name in zip(left, unused):
+            names[window["id"]] = name
+    return names
+
+
 def get_ranked_active_profiles(chrome_dir, profiles):
     """
     Return profile keys ordered by recent active browser usage,
@@ -1977,8 +2160,9 @@ def detect_window_profile(w, profiles, home_dir=None, assigned_profiles=None, pr
     if prof_session_data is None:
         prof_session_data = get_profile_session_data(chrome_dir)
 
-    # Clean title for comparison
-    title_clean = title.replace(" - Google Chrome", "").strip().lower()
+    # Clean title for comparison. "New Tab" is open in every profile, so it
+    # must not award the first profile to every window.
+    title_clean = "" if title_is_generic(title) else window_title_key(title)
 
     # Prefer open browser profiles when scoring session/title matches.
     score_keys = open_keys or list(profiles.keys())
@@ -1997,15 +2181,16 @@ def detect_window_profile(w, profiles, home_dir=None, assigned_profiles=None, pr
         p_name = profiles[p_key]
         score = 0
 
-        for t in sdata.get("titles", []):
-            if t == title_clean:
-                score += 150
-            elif len(t) >= 5 and (t in title_clean or title_clean in t):
-                score += 100
+        if title_clean:
+            for t in sdata.get("titles", []):
+                if t == title_clean:
+                    score += 150
+                elif len(t) >= 5 and (t in title_clean or title_clean in t):
+                    score += 100
 
-        for d in sdata.get("domains", []):
-            if len(d) >= 4 and d in title_clean:
-                score += 40
+            for d in sdata.get("domains", []):
+                if len(d) >= 4 and d in title_clean:
+                    score += 40
 
         if score > 0:
             mtime = sdata.get("mtime", 0)
@@ -2144,7 +2329,8 @@ def apply_window_profiles(home_dir=None):
         if pid:
             pid_counts[pid] = pid_counts.get(pid, 0) + 1
     shared_pids = {pid for pid, count in pid_counts.items() if count > 1}
-    open_names = [profiles[key] for key in get_open_browser_profile_keys(chrome_dir, profiles) if key in profiles]
+    open_keys = get_open_browser_profile_keys(chrome_dir, profiles)
+    open_names = [profiles[key] for key in open_keys if key in profiles]
     class_names = {_wm_class_profile(w.get("wm_class"), profiles) for w in chrome_wins}
     class_names.discard(None)
     # Every window of one Chrome process was labeled with the profile that
@@ -2152,26 +2338,22 @@ def apply_window_profiles(home_dir=None):
     # open, do not keep that first photo.
     trust_class = not (bool(shared_pids) and len(class_names) <= 1 and len(open_names) > 1)
 
-    named = {}
+    named = assign_chrome_window_profiles(
+        chrome_wins,
+        profiles,
+        open_keys,
+        prof_session_data,
+        get_last_used_profile_key(chrome_dir),
+        _root_active_window(),
+    )
     for w in chrome_wins:
-        prof_name = detect_window_profile(
-            w, profiles, home_dir, None, prof_session_data,
-            shared_pids=shared_pids, allow_fallback=False, trust_class=trust_class,
-        )
-        if prof_name:
-            named[w["id"]] = prof_name
-    unused = [name for name in open_names if name not in named.values()]
-    for w in chrome_wins:
-        if w["id"] in named:
-            continue
-        if unused:
-            named[w["id"]] = unused.pop(0)
+        if named.get(w["id"]):
             continue
         prof_name = detect_window_profile(
             w, profiles, home_dir, None, prof_session_data,
             shared_pids=shared_pids, allow_fallback=True, trust_class=trust_class,
         )
-        named[w["id"]] = prof_name
+        named[w["id"]] = prof_name or "Chrome"
 
     for w in chrome_wins:
         # Two windows of one profile keep that profile. Only a window we could

@@ -323,6 +323,54 @@ class TestChromeProfiles(unittest.TestCase):
             chrome_profiles._cmdline_profile_key = original_key
             chrome_profiles.WINDOW_PROFILE_CACHE.pop(9091, None)
 
+    def test_focused_new_tab_uses_the_profile_chrome_has_open(self):
+        profiles = {"Default": "IMRAN", "Profile 1": "Mirza"}
+        windows = [
+            {"id": 1, "title": "New Tab - Google Chrome", "wm_class": "google-chrome"},
+            {"id": 2, "title": "New Tab - Google Chrome", "wm_class": "google-chrome"},
+        ]
+        session = {
+            "Default": {"titles": {"new tab"}, "domains": {"google"}, "mtime": 10},
+            "Profile 1": {"titles": {"new tab"}, "domains": {"google"}, "mtime": 20},
+        }
+        names = chrome_profiles.assign_chrome_window_profiles(
+            windows, profiles, ["Default", "Profile 1"], session,
+            last_used_key="Profile 1", active_wid=2,
+        )
+        self.assertEqual(names[2], "Mirza")
+        self.assertEqual(names[1], "IMRAN")
+        self.assertNotEqual(names[1], names[2])
+
+    def test_one_open_profile_uses_its_photo_on_every_window(self):
+        profiles = {"Default": "IMRAN", "Profile 1": "Mirza"}
+        windows = [
+            {"id": 1, "title": "New Tab - Google Chrome", "wm_class": "google-chrome"},
+            {"id": 2, "title": "Inbox - Google Chrome", "wm_class": "google-chrome"},
+        ]
+        names = chrome_profiles.assign_chrome_window_profiles(
+            windows, profiles, ["Default"], {},
+            last_used_key="Default", active_wid=1,
+        )
+        self.assertEqual(names[1], "IMRAN")
+        self.assertEqual(names[2], "IMRAN")
+
+    def test_unique_page_keeps_its_own_profile(self):
+        profiles = {"Default": "IMRAN", "Profile 1": "Mirza"}
+        windows = [
+            {"id": 1, "title": "New Tab - Google Chrome", "wm_class": "google-chrome"},
+            {"id": 2, "title": "BlogCutter Dashboard - Google Chrome", "wm_class": "google-chrome"},
+        ]
+        session = {
+            "Default": {"titles": {"new tab", "inbox"}, "domains": {"gmail"}, "mtime": 10},
+            "Profile 1": {"titles": {"blogcutter dashboard"}, "domains": {"blogcutter"}, "mtime": 30},
+        }
+        names = chrome_profiles.assign_chrome_window_profiles(
+            windows, profiles, ["Default", "Profile 1"], session,
+            last_used_key="Default", active_wid=1,
+        )
+        self.assertEqual(names[1], "IMRAN")
+        self.assertEqual(names[2], "Mirza")
+
     def test_shared_browser_pid_uses_each_windows_own_profile(self):
         profiles = {"Default": "IMRAN", "Profile 1": "Mirza"}
         session = {
