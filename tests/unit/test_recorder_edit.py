@@ -9,7 +9,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "components/recorder"))
 from media_edit import Clip, export_command, export_video, probe, finalize_capture
-from audio_meter import pcm_peak, level_fraction
+from audio_meter import level_status, meter_command, pcm_peak, level_fraction
 
 
 class RecorderTests(unittest.TestCase):
@@ -19,6 +19,19 @@ class RecorderTests(unittest.TestCase):
         self.assertEqual(level_fraction(0), 0)
         self.assertAlmostEqual(level_fraction(.0316227766), .5)
         self.assertEqual(level_fraction(1), 1)
+
+    def test_meter_uses_the_same_capture_as_voice_recording(self):
+        cmd = meter_command("alsa_input.usb-mic", which=lambda name: "/usr/bin/parecord" if name == "parecord" else None)
+        self.assertEqual(cmd[0], "parecord")
+        self.assertIn("--rate=48000", cmd)
+        self.assertIn("--format=s16le", cmd)
+        self.assertIn("--device=alsa_input.usb-mic", cmd)
+        self.assertNotIn("--rate=16000", cmd)
+
+    def test_silent_open_mic_is_not_called_a_dead_capture(self):
+        self.assertEqual(level_status(0, 0, 2), "No audio from this microphone • click Fix Mic")
+        self.assertEqual(level_status(0, 4800, 2), "No signal")
+        self.assertTrue(level_status(0.1, 4800, 2).startswith("Listening"))
 
     def test_invalid_ranges_are_rejected(self):
         for clip in (Clip(-1, 2), Clip(2, 2), Clip(3, 2), Clip(0, 11), Clip(math.nan, 2)):
