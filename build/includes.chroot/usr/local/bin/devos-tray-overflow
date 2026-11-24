@@ -3,14 +3,18 @@
 
 Open windows stay on the center taskbar. This only manages the system tray.
 
-Do not use plasmashell writeConfig() for hiddenItems — it breaks KConfig
-StringList matching so icons stay on the panel. Write appletsrc only, and
-restart plasmashell only when the hide-set actually gains new Ids.
+Plasma 6 reads hiddenItems from the private system-tray containment
+(SystrayContainmentId), not from the panel applet's Configuration group.
+A comma-separated string passed to writeConfig is stored as one entry, so
+the icon never matches. Pass a real list, and do not restart plasmashell:
+that restart is what removes the footer for a second or two.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -38,13 +42,15 @@ ALWAYS_HIDE = (
     "org.kde.plasma.printmanager",
     "org.kde.plasma.cameraindicator",
     "org.kde.plasma.volume",
-    # PulseAudio draws this while any app is recording. Status is Active, so
-    # it sticks beside the clock unless it is listed here. Voice and voice
-    # typing should only show it under Status & Notifications (^).
+    # The volume applet draws a plain microphone while any app is recording
+    # and pins it beside the clock unless this id is hidden too.
     "microphone",
     "Microphone",
+    "audio-input-microphone",
     # Hands-free listener. Qt's tray icon reports Active, which pins it too.
     "devos-voice",
+    "Voice Command",
+    "DevOS AI",
     "DevOS Optimizer",
     "devos-optimizer",
     "DevOS Sound",
@@ -73,6 +79,9 @@ EXTRA_ITEMS = (
     "org.kde.plasma.cameraindicator",
     "org.kde.plasma.volume",
 )
+
+# Applet-only keys. The private tray containment does not use these.
+_APPLET_ONLY = ("pin",)
 
 
 def _run(cmd: list[str], timeout: float = 5.0) -> str:
@@ -140,18 +149,42 @@ def find_tray_applet_headers(lines: list[str]) -> list[str]:
     return found
 
 
-def find_tray_general_locs(lines: list[str]) -> list[tuple[int, int]]:
-    """All systemtray General sections (legacy + Plasma Configuration/General)."""
-    locs: list[tuple[int, int]] = []
-    candidates: list[str] = []
-    for applet_hdr in find_tray_applet_headers(lines):
-        # Prefer live Plasma path; keep legacy [Applets][N][General] too.
-        candidates.append(applet_hdr + "[Configuration][General]")
-        candidates.append(applet_hdr + "[General]")
+def systray_containment_ids(lines: list[str]) -> list[str]:
+    """Ids Plasma 6 actually reads: private tray containment + SystrayContainmentId."""
+    found: list[str] = []
     for hdr, start, end in _sections(lines):
-        if hdr in candidates:
-            locs.append((start, end))
-    return locs
+        body = "".join(lines[start:end])
+        if (
+            re.fullmatch(r"\[Containments\]\[\d+\]", hdr)
+            and "plugin=org.kde.plasma.private.systemtray" in body
+        ):
+            match = re.search(r"\[(\d+)\]$", hdr)
+            if match:
+                found.append(match.group(1))
+        for match in re.finditer(r"(?m)^SystrayContainmentId=(\d+)\s*$", body):
+            found.append(match.group(1))
+    out: list[str] = []
+    for item in found:
+        if item not in out:
+            out.append(item)
+    return out
+
+
+def policy_headers(lines: list[str]) -> list[str]:
+    """Every General group that can keep an icon on the panel."""
+    headers: list[str] = []
+    for applet_hdr in find_tray_applet_headers(lines):
+        headers.append(applet_hdr + "[Configuration][General]")
+        headers.append(applet_hdr + "[General]")
+    for cid in systray_containment_ids(lines):
+        headers.append(f"[Containments][{cid}][General]")
+    return headers
+
+
+def find_tray_general_locs(lines: list[str]) -> list[tuple[int, int]]:
+    """All systemtray General sections (applet, legacy, and private containment)."""
+    wanted = set(policy_headers(lines))
+    return [(start, end) for hdr, start, end in _sections(lines) if hdr in wanted]
 
 
 def find_tray_general(lines: list[str]) -> tuple[int, int] | None:
@@ -187,72 +220,213 @@ def read_policy(lines: list[str]) -> tuple[set[str], bool, str]:
     return hidden, show_all, shown
 
 
-def _policy_body(hidden: set[str]) -> list[str]:
+def _policy_map(hidden: set[str], *, include_pin: bool) -> dict[str, str]:
     hidden_csv = ",".join(sorted(hidden))
     extra = ",".join(EXTRA_ITEMS)
-    return [
-        "showAllItems=false\n",
-        f"extraItems={extra}\n",
-        f"hiddenItems={hidden_csv}\n",
-        f"knownItems={extra}\n",
-        "pin=false\n",
-        "shownItems=\n",
-    ]
+    values = {
+        "showAllItems": "false",
+        "extraItems": extra,
+        "hiddenItems": hidden_csv,
+        "knownItems": extra,
+        "shownItems": "",
+    }
+    if include_pin:
+        values["pin"] = "false"
+    return values
+
+
+def _section_index(lines: list[str]) -> dict[str, tuple[int, int]]:
+    return {hdr: (start, end) for hdr, start, end in _sections(lines)}
+
+
+def _rewrite_section(lines: list[str], header: str, values: dict[str, str]) -> list[str]:
+    """Update policy keys in one group. Leave every other key in that group."""
+    indexed = _section_index(lines)
+    if header in indexed:
+        start, end = indexed[header]
+        seen: set[str] = set()
+        body: list[str] = []
+        for line in lines[start + 1 : end]:
+            key = line.split("=", 1)[0].strip() if "=" in line and not line.startswith("[") else ""
+            if key in values:
+                if key not in seen:
+                    body.append(f"{key}={values[key]}\n")
+                    seen.add(key)
+            else:
+                body.append(line if line.endswith("\n") else line + "\n")
+        for key, value in values.items():
+            if key not in seen:
+                body.append(f"{key}={value}\n")
+        hline = lines[start] if lines[start].endswith("\n") else lines[start] + "\n"
+        return lines[:start] + [hline] + body + lines[end:]
+    block = [header + "\n"] + [f"{key}={value}\n" for key, value in values.items()]
+    parent = header[: -len("[General]")] if header.endswith("[General]") else ""
+    if parent:
+        for hdr, _start, end in _sections(lines):
+            if hdr == parent:
+                return lines[:end] + block + lines[end:]
+    tail = list(lines)
+    if tail and not tail[-1].endswith("\n"):
+        tail[-1] = tail[-1] + "\n"
+    if tail and tail[-1].strip():
+        tail.append("\n")
+    return tail + block
+
+
+def _general_hides(lines: list[str], header: str, want: set[str]) -> bool:
+    indexed = _section_index(lines)
+    if header not in indexed:
+        return False
+    start, end = indexed[header]
+    hidden: set[str] = set()
+    shown: set[str] = set()
+    show_all = False
+    for line in lines[start + 1 : end]:
+        if line.startswith("hiddenItems="):
+            hidden |= parse_list(line.split("=", 1)[1])
+        elif line.startswith("shownItems="):
+            shown |= parse_list(line.split("=", 1)[1])
+        elif line.startswith("showAllItems="):
+            if line.split("=", 1)[1].strip().lower() in ("true", "1", "yes"):
+                show_all = True
+    return (not show_all) and want.issubset(hidden) and not (shown & want)
+
+
+def policy_is_complete(lines: list[str], want: set[str]) -> bool:
+    """True only when every group Plasma may read already hides `want`."""
+    applets = find_tray_applet_headers(lines)
+    containments = systray_containment_ids(lines)
+    if not applets and not containments:
+        return False
+    for applet in applets:
+        conf = applet + "[Configuration][General]"
+        legacy = applet + "[General]"
+        if conf in _section_index(lines):
+            if not _general_hides(lines, conf, want):
+                return False
+        elif legacy in _section_index(lines):
+            if not _general_hides(lines, legacy, want):
+                return False
+        else:
+            return False
+    for cid in containments:
+        if not _general_hides(lines, f"[Containments][{cid}][General]", want):
+            return False
+    return True
 
 
 def write_policy(lines: list[str], hidden: set[str]) -> list[str]:
-    body = _policy_body(hidden)
-    locs = find_tray_general_locs(lines)
-    if locs:
-        # Rewrite every matching General section (live + legacy) so Plasma
-        # cannot keep volume/brightness Always Shown from a second copy.
-        for start, end in sorted(locs, reverse=True):
-            header = lines[start]
-            lines = (
-                lines[:start]
-                + [header if header.endswith("\n") else header + "\n"]
-                + body
-                + lines[end:]
-            )
+    """Write the hide list to the applet group and to Plasma 6's tray containment."""
+    applets = find_tray_applet_headers(lines)
+    if not applets and not systray_containment_ids(lines):
         return lines
-
-    # Insert Configuration/General after systemtray applet section
-    for hdr, start, end in _sections(lines):
-        chunk = "".join(lines[start:end])
-        if "plugin=org.kde.plasma.systemtray" in chunk and re.fullmatch(
-            r"\[Containments\]\[\d+\]\[Applets\]\[\d+\]", hdr
-        ):
-            general = hdr + "[Configuration][General]\n"
-            return lines[:end] + [general] + body + lines[end:]
+    indexed = _section_index(lines)
+    for applet in applets:
+        conf = applet + "[Configuration][General]"
+        legacy = applet + "[General]"
+        if conf in indexed or legacy not in indexed:
+            lines = _rewrite_section(lines, conf, _policy_map(hidden, include_pin=True))
+            indexed = _section_index(lines)
+        if legacy in indexed:
+            lines = _rewrite_section(lines, legacy, _policy_map(hidden, include_pin=True))
+            indexed = _section_index(lines)
+    for cid in systray_containment_ids(lines):
+        lines = _rewrite_section(
+            lines,
+            f"[Containments][{cid}][General]",
+            _policy_map(hidden, include_pin=False),
+        )
     return lines
 
 
-def plasmashell_up() -> bool:
-    return "up" in _run(
-        [
-            "qdbus6",
-            "org.kde.plasmashell",
-            "/PlasmaShell",
-            "org.kde.PlasmaShell.evaluateScript",
-            'print("up")',
-        ]
-    )
+def live_hide_script(hidden: set[str]) -> str:
+    """Plasma script: hide these ids in the running tray. Do not reload the panel."""
+    add = json.dumps(sorted(hidden))
+    extra = json.dumps(list(EXTRA_ITEMS))
+    return f"""var add = {add};
+var extra = {extra};
+function asList(value) {{
+  if (!value) return [];
+  if (typeof value === "string") return value.split(",");
+  var out = [];
+  try {{
+    var n = value.length;
+    for (var i = 0; i < n; i++) out.push(String(value[i]));
+    if (out.length) return out;
+  }} catch (e) {{}}
+  return String(value).split(",");
+}}
+function cleaned(parts) {{
+  var seen = {{}};
+  var out = [];
+  for (var i = 0; i < parts.length; i++) {{
+    var id = String(parts[i] || "").replace(/^\\s+|\\s+$/g, "");
+    if (!id || seen[id]) continue;
+    seen[id] = true;
+    out.push(id);
+  }}
+  return out;
+}}
+var panels = panels();
+for (var p = 0; p < panels.length; p++) {{
+  var widgets = panels[p].widgets();
+  for (var w = 0; w < widgets.length; w++) {{
+    if (widgets[w].type !== "org.kde.plasma.systemtray") continue;
+    var sid = "";
+    try {{ sid = String(widgets[w].readConfig("SystrayContainmentId") || ""); }} catch (e1) {{ sid = ""; }}
+    var target = null;
+    if (sid) {{
+      try {{ target = desktopById(sid); }} catch (e2) {{ target = null; }}
+    }}
+    if (!target) target = widgets[w];
+    target.currentConfigGroup = ["General"];
+    var have = [];
+    var shown = [];
+    try {{ have = asList(target.readConfig("hiddenItems")); }} catch (e3) {{ have = []; }}
+    try {{ shown = asList(target.readConfig("shownItems")); }} catch (e4) {{ shown = []; }}
+    var hidden = cleaned(have.concat(shown).concat(add));
+    var hideSet = {{}};
+    for (var h = 0; h < hidden.length; h++) hideSet[hidden[h]] = true;
+    var keep = [];
+    for (var s = 0; s < shown.length; s++) {{
+      var shownId = String(shown[s] || "").replace(/^\\s+|\\s+$/g, "");
+      if (shownId && !hideSet[shownId]) keep.push(shownId);
+    }}
+    target.writeConfig("showAllItems", false);
+    target.writeConfig("extraItems", extra);
+    target.writeConfig("knownItems", extra);
+    target.writeConfig("hiddenItems", hidden);
+    target.writeConfig("shownItems", keep);
+  }}
+}}
+"""
 
 
-def restart_plasmashell() -> None:
-    subprocess.run(
-        ["systemctl", "--user", "restart", "plasma-plasmashell.service"],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    for _ in range(25):
-        if plasmashell_up():
-            return
-        time.sleep(0.4)
+_live_done = False
+
+
+def apply_live(hidden: set[str]) -> bool:
+    """Move icons under ^ in the running shell. Never restarts plasmashell."""
+    script = live_hide_script(hidden)
+    for bus in ("qdbus6", "qdbus", "qdbus-qt6"):
+        if not shutil.which(bus):
+            continue
+        try:
+            out = subprocess.run(
+                [bus, "org.kde.plasmashell", "/PlasmaShell", "org.kde.PlasmaShell.evaluateScript", script],
+                capture_output=True,
+                text=True,
+                timeout=8,
+            )
+            if out.returncode == 0:
+                return True
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            continue
+    return False
 
 
 def once(restart_if_changed: bool = True) -> int:
+    global _live_done
     try:
         if not APPLETRC.is_file():
             print("DevOS: no plasma appletsrc yet.")
@@ -260,19 +434,25 @@ def once(restart_if_changed: bool = True) -> int:
         raw = APPLETRC.read_text(encoding="utf-8", errors="replace")
         lines = raw.splitlines(keepends=True)
         want = desired_hidden_set()
-        have, show_all, shown = read_policy(lines)
-        if want.issubset(have) and not show_all and not shown:
-            print("DevOS: tray overflow policy already applied.")
-            return 0
-        new_lines = write_policy(lines, have | want)
-        new_raw = "".join(new_lines)
-        if new_raw != raw:
-            APPLETRC.write_text(new_raw, encoding="utf-8")
-        # Do not restart plasmashell. Chrome registers a new status icon when
-        # you switch windows, this watch saw it, and the restart removed the
-        # footer for a second or two. The hide list applies on next sign-in.
+        have, _show_all, _shown = read_policy(lines)
+        hidden = have | want
+        complete = policy_is_complete(lines, hidden)
+        if not complete:
+            new_lines = write_policy(lines, hidden)
+            new_raw = "".join(new_lines)
+            if new_raw != raw:
+                APPLETRC.write_text(new_raw, encoding="utf-8")
+        # The file can already list the microphone while Plasma is still
+        # reading the other group. Push the list into the running tray once.
+        # Do not restart plasmashell: that removes the footer for a second.
         del restart_if_changed
-        print("DevOS: tray overflow config updated (footer left on screen).")
+        if not _live_done or not complete:
+            if apply_live(hidden):
+                _live_done = True
+        if complete:
+            print("DevOS: tray overflow policy already applied.")
+        else:
+            print("DevOS: tray overflow config updated (footer left on screen).")
     except Exception as exc:
         print(f"DevOS: tray overflow update skipped: {exc}", file=sys.stderr)
         return 1
@@ -285,7 +465,9 @@ def watch(interval: float = 25.0) -> int:
     while True:
         try:
             ids = set(registered_tray_ids())
-            if ids - seen:
+            # Retry until the running tray accepts the list. A new icon, such
+            # as the microphone drawn while voice is listening, is hidden too.
+            if ids - seen or not _live_done:
                 once(restart_if_changed=True)
                 seen |= ids
         except Exception as exc:

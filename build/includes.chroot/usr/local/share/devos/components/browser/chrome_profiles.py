@@ -2158,27 +2158,12 @@ def keep_footer_visible(home_dir=None) -> bool:
                 changed = True
         out.append(part)
     if not changed:
-        # Already always-visible. A script call here still makes plasmashell
-        # repaint the bar, which is the one-to-two second blank.
+        # Already always-visible. Asking plasmashell to set it again repaints
+        # the bar and the footer disappears for a second or two.
         return False
     cfg.write_text("".join(out), encoding="utf-8")
-    script = (
-        'var panels = panels();'
-        'for (var i = 0; i < panels.length; i++) { panels[i].hiding = "none"; }'
-    )
-    for bus in ("qdbus6", "qdbus", "qdbus-qt6"):
-        if not shutil.which(bus):
-            continue
-        try:
-            import subprocess
-            subprocess.run(
-                [bus, "org.kde.plasmashell", "/PlasmaShell",
-                 "org.kde.PlasmaShell.evaluateScript", script],
-                check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=4,
-            )
-        except Exception:
-            pass
-        break
+    # The file is corrected for the next sign-in. Do not push it into the
+    # running shell: that call removes the footer, then draws it again.
     return changed
 
 

@@ -111,43 +111,16 @@ cfg.write_text("".join(out), encoding="utf-8")
 print("Wrote groupingStrategy=0 groupPopups=false")
 PY
 
-qdbus_bin=""
-for candidate in qdbus6 qdbus qdbus-qt6; do
-    if command -v "$candidate" >/dev/null 2>&1; then
-        qdbus_bin="$candidate"
-        break
-    fi
-done
-if [ -n "$qdbus_bin" ]; then
-    "$qdbus_bin" org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript "
-var panels = panels();
-for (var i = 0; i < panels.length; i++) {
-  var widgets = panels[i].widgets();
-  for (var j = 0; j < widgets.length; j++) {
-    if (widgets[j].type !== 'org.kde.plasma.icontasks' && widgets[j].type !== 'org.kde.plasma.taskmanager') continue;
-    widgets[j].currentConfigGroup = ['General'];
-    widgets[j].writeConfig('groupingStrategy', '0');
-    widgets[j].writeConfig('groupPopups', 'false');
-    widgets[j].writeConfig('separateLaunchers', 'true');
-    widgets[j].reloadConfig();
-  }
-}
-" >/dev/null 2>&1 || true
-fi
-
 systemctl --user enable --now devos-browser-profiles.service 2>/dev/null || true
 systemctl --user restart devos-browser-profiles.service 2>/dev/null \
     || (pkill -f 'chrome_profiles.py watch' 2>/dev/null || true
         nohup /usr/local/bin/devos-browser-profiles-daemon >/dev/null 2>&1 &)
 
-echo "== Restart the taskbar (it disappears for a few seconds) =="
-systemctl --user reset-failed plasma-plasmashell.service 2>/dev/null || true
-systemctl --user restart plasma-plasmashell.service 2>/dev/null \
-    || (kquitapp6 plasmashell 2>/dev/null || kquitapp5 plasmashell 2>/dev/null || true
-        sleep 2
-        plasmashell --replace >/dev/null 2>&1 &)
-sleep 4
-/usr/bin/python3 "$PROFILES" apply || true
+# Do not restart plasmashell and do not reload Icon Tasks. Both remove the
+# footer for a second or two. The profile photos are painted on the windows.
+if [ -x /usr/local/bin/devos-tray-overflow ]; then
+    /usr/local/bin/devos-tray-overflow --write-only >/dev/null 2>&1 || true
+fi
 
 echo
 echo "== Chrome windows =="
