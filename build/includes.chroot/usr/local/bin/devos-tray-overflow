@@ -133,6 +133,90 @@ def registered_tray_ids() -> list[str]:
     return ids
 
 
+def is_recording_microphone(item_id: str, title: str = "", icon: str = "") -> bool:
+    """Plasma's recording indicator, not the DevOS voice icon in the status menu."""
+    ident = (item_id or "").strip()
+    if ident.lower() == "devos-voice":
+        return False
+    if ident in {"microphone", "Microphone"}:
+        return True
+    # plasma-pa titles this item "Microphone". The voice icon does not.
+    return (title or "").strip() == "Microphone" and "devos" not in ident.lower()
+
+
+def recording_microphone_services() -> list[str]:
+    """Session-bus services that are the recording microphone on the footer."""
+    found: list[str] = []
+    bus = _run(["busctl", "--user", "list"])
+    if not bus:
+        return found
+    for ln in bus.splitlines():
+        if "StatusNotifierItem" not in ln or "Watcher" in ln:
+            continue
+        service = ln.split()[0]
+        for iface in ("org.kde.StatusNotifierItem", "org.freedesktop.StatusNotifierItem"):
+            item_id = _dbus_string(service, iface, "Id")
+            if not item_id:
+                continue
+            title = _dbus_string(service, iface, "Title")
+            icon = _dbus_string(service, iface, "IconName")
+            if is_recording_microphone(item_id, title, icon) and service not in found:
+                found.append(service)
+            break
+    return found
+
+
+def _unregister_sni(service: str) -> bool:
+    """Drop one tray icon. The panel stays up; this is not a shell restart."""
+    attempts: list[list[str]] = []
+    if shutil.which("busctl"):
+        attempts.append(
+            [
+                "busctl",
+                "--user",
+                "call",
+                "org.kde.StatusNotifierWatcher",
+                "/StatusNotifierWatcher",
+                "org.kde.StatusNotifierWatcher",
+                "UnregisterStatusNotifierItem",
+                "s",
+                service,
+            ]
+        )
+    if shutil.which("gdbus"):
+        attempts.append(
+            [
+                "gdbus",
+                "call",
+                "--session",
+                "--dest",
+                "org.kde.StatusNotifierWatcher",
+                "--object-path",
+                "/StatusNotifierWatcher",
+                "--method",
+                "org.kde.StatusNotifierWatcher.UnregisterStatusNotifierItem",
+                service,
+            ]
+        )
+    for cmd in attempts:
+        try:
+            out = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            continue
+        if out.returncode == 0:
+            return True
+    return False
+
+
+def drop_recording_microphone() -> int:
+    """Take the recording microphone off the footer without redrawing the panel."""
+    removed = 0
+    for service in recording_microphone_services():
+        if _unregister_sni(service):
+            removed += 1
+    return removed
+
+
 def desired_hidden_set() -> set[str]:
     return set(ALWAYS_HIDE) | set(registered_tray_ids())
 
@@ -636,7 +720,7 @@ def pin_footer() -> bool:
 def _announce(ok: bool, detail: str) -> None:
     """Say the result on the terminal and as a notification the user can see."""
     line = (
-        "DevOS: microphone moved under the status menu."
+        "DevOS: microphone removed from the footer."
         if ok
         else f"DevOS: the microphone is still on the footer ({detail})."
     )
@@ -665,8 +749,17 @@ def _announce(ok: bool, detail: str) -> None:
 def once(restart_if_changed: bool = True, announce: bool = False) -> int:
     global _live_done, _notified_for
     try:
+        # The icon beside the clock is plasma-pa's recording item. The settings
+        # file can already name it while the bar still draws it. Unregistering
+        # that one item removes it. This does not rewrite the panel, so sign-in
+        # and the login screen are left alone.
+        removed = drop_recording_microphone()
+        gone = not recording_microphone_services()
         if not APPLETRC.is_file():
-            print("DevOS: no plasma appletsrc yet.")
+            if announce:
+                _announce(bool(removed and gone), "no plasma appletsrc yet")
+            else:
+                print("DevOS: no plasma appletsrc yet.")
             return 0
         raw = APPLETRC.read_text(encoding="utf-8", errors="replace")
         lines = raw.splitlines(keepends=True)
@@ -676,11 +769,6 @@ def once(restart_if_changed: bool = True, announce: bool = False) -> int:
         complete = policy_is_complete(lines, hidden)
         del restart_if_changed
         signature = frozenset(hidden)
-        # The saved list can already name the microphone while the running
-        # tray still draws it. A click on that icon is the "Microphone Muted"
-        # notice. Only a command the person runs pushes the running tray.
-        # The sign-in watcher leaves a finished file alone, so the menus
-        # are not redrawn on every login.
         if announce:
             if not complete or not _microphone_disabled(lines):
                 new_lines = write_policy(lines, hidden)
@@ -699,8 +787,16 @@ def once(restart_if_changed: bool = True, announce: bool = False) -> int:
             _notified_for = signature
             _live_done = True
         if announce:
-            detail = (_last_eval or "plasmashell did not answer").replace("\n", " ")
-            _announce(_live_done, detail)
+            if removed and gone:
+                detail = "removed"
+                ok = True
+            elif recording_microphone_services():
+                detail = "the recording microphone is still registered"
+                ok = False
+            else:
+                detail = "Plasma did not list a recording microphone to remove"
+                ok = False
+            _announce(ok, detail)
     except Exception as exc:
         print(f"DevOS: tray overflow update skipped: {exc}", file=sys.stderr)
         return 1
@@ -709,18 +805,27 @@ def once(restart_if_changed: bool = True, announce: bool = False) -> int:
 
 def watch(interval: float = 25.0) -> int:
     once(restart_if_changed=True)
-    seen = set(registered_tray_ids())
+    drop_recording_microphone()
+    seen: set[str] = set()
+    try:
+        seen = set(registered_tray_ids())
+    except Exception:
+        seen = set()
+    next_full = time.monotonic() + interval
     while True:
         try:
-            ids = set(registered_tray_ids())
-            # Retry until the running tray accepts the list. A new icon, such
-            # as the microphone drawn while voice is listening, is hidden too.
-            if ids - seen or not _live_done:
-                once(restart_if_changed=True)
-                seen |= ids
+            # The recording icon comes back when an app opens the mic.
+            # Drop that one item. Do not rewrite the panel on this tick.
+            drop_recording_microphone()
+            if time.monotonic() >= next_full:
+                ids = set(registered_tray_ids())
+                if ids - seen or not _live_done:
+                    once(restart_if_changed=True)
+                    seen |= ids
+                next_full = time.monotonic() + interval
         except Exception as exc:
             print(f"DevOS: tray overflow watch tick failed: {exc}", file=sys.stderr)
-        time.sleep(interval)
+        time.sleep(2)
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -98,7 +98,11 @@ class TrayOverflowTests(unittest.TestCase):
         self.assertNotIn("var panelList = panels()", script)
         self.assertIn("devos-tray-ok", script)
         self.assertIn("busctl", SCRIPT.read_text(encoding="utf-8"))
-        self.assertIn("microphone moved under the status menu", SCRIPT.read_text(encoding="utf-8"))
+        self.assertIn("microphone removed from the footer", SCRIPT.read_text(encoding="utf-8"))
+        self.assertIn("UnregisterStatusNotifierItem", SCRIPT.read_text(encoding="utf-8"))
+        self.assertFalse(mod.is_recording_microphone("devos-voice", "devos-voice", "audio-input-microphone"))
+        self.assertTrue(mod.is_recording_microphone("microphone", "Microphone", "microphone-sensitivity-high"))
+        self.assertTrue(mod.is_recording_microphone("plasma-pa", "Microphone", "audio-input-microphone"))
         self.assertNotIn("reloadConfig", script)
         self.assertNotIn("icontasks", script)
         self.assertNotIn("restart", script)
@@ -121,6 +125,10 @@ class TrayOverflowTests(unittest.TestCase):
         self.assertIn("apply_live", once)
         self.assertIn("pin_footer", once)
         self.assertIn("notify_running_shell", once)
+        self.assertIn("drop_recording_microphone", once)
+        watch = SCRIPT.read_text(encoding="utf-8").split("def watch", 1)[1].split("def main", 1)[0]
+        self.assertIn("drop_recording_microphone", watch)
+        self.assertNotIn("restart_plasmashell", watch)
 
     def test_notify_pokes_the_running_tray_without_restarting_it(self):
         mod = load()
