@@ -214,9 +214,54 @@ class TestChromeProfiles(unittest.TestCase):
     def test_window_switch_does_not_restart_the_footer(self):
         apply_src = inspect.getsource(chrome_profiles.apply_window_profiles)
         watch_src = inspect.getsource(chrome_profiles.watch_chrome_windows)
+        kwin_src = inspect.getsource(chrome_profiles.apply_kwin_window_desktops)
         self.assertNotIn("reload_plasmashell", apply_src)
         self.assertNotIn("reload_plasmashell", watch_src)
-        self.assertIn("_reassert_window_icons", watch_src)
+        self.assertIn("_chrome_switch_identity", watch_src)
+        self.assertNotIn('"org.kde.kwin.Scripting.start"', kwin_src)
+        ident_src = inspect.getsource(chrome_profiles._chrome_switch_identity)
+        self.assertNotIn('["title"]', ident_src)
+        self.assertNotIn('.get("title")', ident_src)
+
+    def test_unchanged_kwin_map_does_not_reload(self):
+        rows = [{"id": 5, "pid": 1, "title": "Inbox - Google Chrome", "desktop": "chrome-a-w5.desktop"}]
+        with tempfile.TemporaryDirectory() as home, patch("subprocess.run") as run:
+            chrome_profiles.apply_kwin_window_desktops(rows, home)
+            run.reset_mock()
+            self.assertTrue(chrome_profiles.apply_kwin_window_desktops(rows, home))
+            run.assert_not_called()
+
+    def test_title_change_is_not_a_profile_switch(self):
+        wins = [{
+            "id": 7,
+            "title": "WhatsApp - Google Chrome",
+            "wm_class": "chrome-work-w7.chrome-work-w7",
+        }]
+        with patch.object(chrome_profiles, "_window_pid", return_value=3), \
+                patch.object(chrome_profiles, "_cmdline_is_guest", return_value=False), \
+                patch.object(chrome_profiles, "_cmdline_profile_directory", return_value="Default"):
+            first = chrome_profiles._chrome_switch_identity(wins)
+            wins[0]["title"] = "nebula - WhatsApp"
+            second = chrome_profiles._chrome_switch_identity(wins)
+        self.assertEqual(first, second)
+
+    def test_dodge_windows_is_turned_off(self):
+        with tempfile.TemporaryDirectory() as home:
+            cfg = os.path.join(home, ".config")
+            os.makedirs(cfg, exist_ok=True)
+            path = os.path.join(cfg, "plasma-org.kde.plasma.desktop-appletsrc")
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "[Containments][3]\n"
+                    "plugin=org.kde.panel\n"
+                    "hiding=2\n"
+                    "location=4\n"
+                )
+            with patch("subprocess.run"), patch("shutil.which", return_value=None):
+                self.assertTrue(chrome_profiles.keep_footer_visible(home))
+            text = open(path, encoding="utf-8").read()
+            self.assertIn("hiding=0", text)
+            self.assertNotIn("hiding=2", text)
 
     def test_class_for_profile_uses_display_name(self):
         with tempfile.TemporaryDirectory() as tmp_home:

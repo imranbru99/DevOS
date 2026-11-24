@@ -743,6 +743,7 @@ MimeType=application/pdf;application/rdf+xml;application/rss+xml;application/xht
 
 WINDOW_PROFILE_CACHE = {}
 _LAST_PLASMA_LAUNCHERS = None
+_APPLIED_CLASS = {}
 
 
 _ICON_PIXEL_CACHE = {}
@@ -1049,6 +1050,14 @@ def apply_kwin_window_desktops(rows, home_dir=None) -> bool:
     try:
         os.makedirs(folder, exist_ok=True)
         path = os.path.join(folder, "kwin-chrome-taskbar.js")
+        previous = ""
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                previous = handle.read()
+        # Same map as last time. Reloading KWin here is what blanks the footer
+        # when a Chrome title changes (a chat click, or switching apps).
+        if previous == script:
+            return True
         with open(path, "w", encoding="utf-8") as handle:
             handle.write(script)
     except OSError:
@@ -1099,13 +1108,8 @@ def apply_kwin_window_desktops(rows, home_dir=None) -> bool:
                 stderr=subprocess.DEVNULL,
                 timeout=4,
             )
-        subprocess.run(
-            [bus, "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting.start"],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=4,
-        )
+        # Do not call Scripting.start. That restarts every KWin script and
+        # the footer disappears while the desktop reloads.
         return True
     except Exception:
         return False
@@ -2058,8 +2062,16 @@ def apply_window_profiles(home_dir=None):
         desktop_name = ensure_window_task_desktop(
             home_dir, prof_name, slug, class_name, class_name
         )
-        set_window_wm_class(w["id"], class_name, class_name)
-        set_window_desktop_file(w["id"], desktop_name, home_dir=home_dir)
+        # Rewriting WM_CLASS on a window that already has it makes KWin drop
+        # the task and the footer flashes. Set it once per profile.
+        already = (w.get("wm_class") or "").lower()
+        if class_name.lower() not in already and _APPLIED_CLASS.get(w["id"]) != class_name:
+            set_window_wm_class(w["id"], class_name, class_name)
+            set_window_desktop_file(w["id"], desktop_name, home_dir=home_dir)
+            _APPLIED_CLASS[w["id"]] = class_name
+        elif _APPLIED_CLASS.get(w["id"]) != class_name:
+            set_window_desktop_file(w["id"], desktop_name, home_dir=home_dir)
+            _APPLIED_CLASS[w["id"]] = class_name
         window_classes.append(class_name)
         kwin_rows.append({
             "id": w["id"],
@@ -2089,6 +2101,68 @@ def apply_window_profiles(home_dir=None):
     return processed
 
 
+def _chrome_switch_identity(chrome_wins):
+    """What actually changed: which windows, and which profile each one is.
+
+    The window title is not part of this. Clicking a WhatsApp chat or moving
+    to another app changes the title and must not rebuild the footer.
+    """
+    ident = []
+    for w in chrome_wins:
+        pid = _window_pid(w["id"])
+        if _cmdline_is_guest(pid):
+            key = "guest"
+        else:
+            key = _cmdline_profile_directory(pid) or ""
+        tagged = "chrome-" in (w.get("wm_class") or "").lower()
+        ident.append((w["id"], key, tagged))
+    return tuple(ident)
+
+
+def keep_footer_visible(home_dir=None) -> bool:
+    """Keep the bottom panel on screen. Dodge-windows hides it under a maximized app."""
+    home = home_dir or os.path.expanduser("~")
+    cfg = Path(home) / ".config" / "plasma-org.kde.plasma.desktop-appletsrc"
+    if not cfg.is_file():
+        return False
+    text = cfg.read_text(encoding="utf-8", errors="replace")
+    parts = re.split(r"(?m)(?=^\[)", text)
+    changed = False
+    out = []
+    for part in parts:
+        header = part.split("\n", 1)[0].strip()
+        own = part.split("\n[", 1)[0]
+        if re.fullmatch(r"\[Containments\]\[\d+\]", header) and "plugin=org.kde.panel" in own:
+            if re.search(r"(?m)^hiding=(?!0\s*$)", own):
+                part = re.sub(r"(?m)^hiding=.*$", "hiding=0", part, count=1)
+                changed = True
+            elif not re.search(r"(?m)^hiding=", own):
+                part = part if part.endswith("\n") else part + "\n"
+                part += "hiding=0\n"
+                changed = True
+        out.append(part)
+    if changed:
+        cfg.write_text("".join(out), encoding="utf-8")
+    script = (
+        'var panels = panels();'
+        'for (var i = 0; i < panels.length; i++) { panels[i].hiding = "none"; }'
+    )
+    for bus in ("qdbus6", "qdbus", "qdbus-qt6"):
+        if not shutil.which(bus):
+            continue
+        try:
+            import subprocess
+            subprocess.run(
+                [bus, "org.kde.plasmashell", "/PlasmaShell",
+                 "org.kde.PlasmaShell.evaluateScript", script],
+                check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=4,
+            )
+        except Exception:
+            pass
+        break
+    return changed
+
+
 def watch_chrome_windows(home_dir=None, poll_interval=None):
     """Monitor Chrome windows and refresh taskbar profile icons.
 
@@ -2105,14 +2179,19 @@ def watch_chrome_windows(home_dir=None, poll_interval=None):
     poll_interval = max(2.0, float(poll_interval))
 
     # Initial sync + immediate apply so existing windows ungroup without waiting
-    # for the first poll cycle.
+    # for the first poll cycle. Pin the footer so a maximized window cannot cover it.
+    try:
+        keep_footer_visible(home_dir)
+    except Exception:
+        pass
     sync_all_profiles(home_dir)
     try:
         apply_window_profiles(home_dir)
     except Exception:
         pass
 
-    last_win_state = None
+    last_ident = None
+    last_icon = 0.0
     while True:
         try:
             wins = get_x11_windows()
@@ -2123,22 +2202,18 @@ def watch_chrome_windows(home_dir=None, poll_interval=None):
                 and "windows app" not in w["title"].lower()
                 and "setting up" not in w["title"].lower()
             ]
-            # Include WM class so we keep retagging until every window leaves
-            # google-chrome and gets chrome-<profile> (separate footer icons).
-            cur_state = [(w["id"], w["title"], w["wm_class"].lower()) for w in chrome_wins]
-            untagged = any(
-                not (w.get("wm_class") or "").lower().startswith("chrome-")
-                and "chrome-" not in (w.get("wm_class") or "").lower()
-                for w in chrome_wins
-            )
+            ident = _chrome_switch_identity(chrome_wins)
+            now = time.time()
 
-            # Full pass only when a window, title, or profile class changed.
-            # A steady Chrome just gets its photo put back. The footer stays up.
-            if chrome_wins and (cur_state != last_win_state or untagged):
+            # A new window or a real profile change updates the photo once.
+            # A title change (switching chats or apps) leaves the footer alone.
+            if chrome_wins and ident != last_ident:
                 apply_window_profiles(home_dir)
-                last_win_state = cur_state
-            elif chrome_wins:
+                last_ident = ident
+                last_icon = now
+            elif chrome_wins and now - last_icon >= 15:
                 _reassert_window_icons(home_dir, chrome_wins)
+                last_icon = now
             sleep_for = 2.0 if chrome_wins else max(poll_interval, 15.0)
 
         except Exception:
