@@ -590,7 +590,8 @@ Exec={devos_bin} --guest --class=chrome-guest
         icon_file_128 = os.path.join(icons_dir_128, f"{icon_name}.png")
         avatar = None if key == "guest" else (details.get(key) or {}).get("avatar")
 
-        generate_badged_icon(name, icon_file_48, icon_file_128, avatar_path=avatar)
+        if not (_badge_is_current(icon_file_48, avatar) and _badge_is_current(icon_file_128, avatar)):
+            generate_badged_icon(name, icon_file_48, icon_file_128, avatar_path=avatar)
 
         desktop_file = os.path.join(apps_dir, f"{icon_name}.desktop")
         wm_class = icon_name
@@ -618,8 +619,16 @@ NoDisplay=true
 Hidden=false
 X-DevOS-ChromeProfile=true
 {common_actions}"""
-        with open(desktop_file, "w", encoding="utf-8") as f:
-            f.write(content)
+        try:
+            same = False
+            if os.path.isfile(desktop_file):
+                with open(desktop_file, encoding="utf-8") as existing:
+                    same = existing.read() == content
+            if not same:
+                with open(desktop_file, "w", encoding="utf-8") as f:
+                    f.write(content)
+        except OSError:
+            pass
         created_desktops.append(desktop_file)
 
     # Hide any leftover profile launchers that older DevOS builds left visible.
@@ -736,6 +745,29 @@ WINDOW_PROFILE_CACHE = {}
 _LAST_PLASMA_LAUNCHERS = None
 
 
+_ICON_PIXEL_CACHE = {}
+
+
+def _png_cardinals(path):
+    """ARGB words for _NET_WM_ICON. Decode each PNG once until the file changes."""
+    st = os.stat(path)
+    key = (st.st_mtime_ns, st.st_size)
+    cached = _ICON_PIXEL_CACHE.get(path)
+    if cached and cached[0] == key:
+        return cached[1]
+    img = Image.open(path).convert("RGBA")
+    w, h = img.size
+    raw = img.tobytes()
+    pixels = [w, h]
+    for i in range(0, len(raw), 4):
+        r, g, b, a = raw[i], raw[i + 1], raw[i + 2], raw[i + 3]
+        pixels.append((a << 24) | (r << 16) | (g << 8) | b)
+    if len(_ICON_PIXEL_CACHE) > 48:
+        _ICON_PIXEL_CACHE.clear()
+    _ICON_PIXEL_CACHE[path] = (key, pixels)
+    return pixels
+
+
 def set_window_icon(wid, icon_path_48, icon_path_128=None):
     """Set _NET_WM_ICON on an X11 window using libX11.so.6."""
     paths = [p for p in [icon_path_48, icon_path_128] if p and os.path.isfile(p)]
@@ -759,15 +791,7 @@ def set_window_icon(wid, icon_path_48, icon_path_128=None):
 
         pixels = []
         for p in paths:
-            img = Image.open(p).convert("RGBA")
-            w, h = img.size
-            pixels.append(w)
-            pixels.append(h)
-            for y in range(h):
-                for x in range(w):
-                    r, g, b, a = img.getpixel((x, y))
-                    argb = (a << 24) | (r << 16) | (g << 8) | b
-                    pixels.append(argb)
+            pixels.extend(_png_cardinals(p))
 
         c_data = (ctypes.c_ulong * len(pixels))(*pixels)
         x11.XChangeProperty(
@@ -851,26 +875,8 @@ def _install_icon_name(home_dir, icon_name: str, src_48: str, src_128: str = Non
                 shutil.copyfile(src, dest)
         except OSError:
             pass
-    # Nudge Plasma/icon theme to notice new files without a full desktop restart.
-    try:
-        cache = os.path.join(home, ".local/share/icons/hicolor/icon-theme.cache")
-        if os.path.isfile(cache):
-            os.utime(cache, None)
-        else:
-            open(cache, "a", encoding="utf-8").close()
-    except OSError:
-        pass
-    try:
-        import subprocess
-        subprocess.run(
-            ["gtk-update-icon-cache", "-f", os.path.join(home, ".local/share/icons/hicolor")],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=5,
-        )
-    except Exception:
-        pass
+    # A copied file is enough. Rebuilding the icon cache here used to run on
+    # every window switch and made the desktop feel like it was loading hard.
 
 
 def ensure_window_task_desktop(home_dir, prof_name: str, slug: str, wm_class: str, icon_name: str) -> str:
@@ -922,6 +928,10 @@ X-DevOS-ChromeWindowTask=true
 X-DevOS-ChromeProfileSlug={slug}
 """
     try:
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as fh:
+                if fh.read() == content:
+                    return desktop
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(content)
     except OSError:
@@ -1403,8 +1413,12 @@ def sync_plasma_profile_launchers(home_dir=None, active_slugs=None, window_deskt
         out.append(part)
     if not found:
         out.append(section + "\n" + "\n".join(f"{k}={v}" for k, v in updates.items()) + "\n")
-    cfg.write_text("".join(out), encoding="utf-8")
-    # Prefer live qdbus update — full plasmashell restart is slow and rate-limited.
+    new_text = "".join(out)
+    if new_text == text:
+        # Same pins. Rewriting appletsrc or restarting the panel hides the footer.
+        return True
+    cfg.write_text(new_text, encoding="utf-8")
+    # Live update only. Restarting plasmashell hides the whole footer.
     apply_plasma_launchers_live(launcher_csv, updates["groupingStrategy"])
     return True
 
@@ -1901,6 +1915,37 @@ def detect_window_profile(w, profiles, home_dir=None, assigned_profiles=None, pr
     return default_name
 
 
+def _badge_is_current(png_path, avatar_path):
+    """True when the taskbar PNG already shows this profile photo."""
+    if not png_path or not os.path.isfile(png_path):
+        return False
+    if avatar_path and os.path.isfile(avatar_path) and _is_usable_profile_photo(avatar_path):
+        try:
+            return os.path.getmtime(png_path) >= os.path.getmtime(avatar_path)
+        except OSError:
+            return False
+    return True
+
+
+def _reassert_window_icons(home_dir, chrome_wins):
+    """Put the profile photo back on the window. Does not touch the footer."""
+    icons_48 = os.path.join(home_dir, ".local/share/icons/hicolor/48x48/apps")
+    icons_128 = os.path.join(home_dir, ".local/share/icons/hicolor/128x128/apps")
+    for w in chrome_wins:
+        name = ""
+        for part in (w.get("wm_class") or "").replace(".", " ").split():
+            if part.lower().startswith("chrome-"):
+                name = part
+                break
+        if not name:
+            continue
+        set_window_icon(
+            w["id"],
+            os.path.join(icons_48, name + ".png"),
+            os.path.join(icons_128, name + ".png"),
+        )
+
+
 def apply_window_profiles(home_dir=None):
     """
     Windows-like Chrome taskbar: one avatar icon per open profile, never grouped.
@@ -1952,10 +1997,9 @@ def apply_window_profiles(home_dir=None):
 
     if not chrome_wins:
         apply_kwin_window_desktops([], home_dir)
-        if sync_plasma_profile_launchers(home_dir, []):
-            if _LAST_PLASMA_LAUNCHERS != ():
-                _LAST_PLASMA_LAUNCHERS = ()
-                reload_plasmashell()
+        # Restore the idle pin in place. Restarting the panel hides the footer.
+        sync_plasma_profile_launchers(home_dir, [])
+        _LAST_PLASMA_LAUNCHERS = ()
         return 0
 
     icons_dir_48 = os.path.join(home_dir, ".local/share/icons/hicolor/48x48/apps")
@@ -1968,14 +2012,17 @@ def apply_window_profiles(home_dir=None):
     active_slugs = []
     window_classes = []
     kwin_rows = []
-    prof_session_data = get_profile_session_data(chrome_dir)
+    prof_session_data = None
 
-    # Ensure profile avatar icons + pin desktops exist first.
+    # Profile icons and pin files. Skips work when the photo on disk is already current.
     sync_all_profiles(home_dir)
 
     for w in chrome_wins:
         # Do NOT mark profiles "assigned" across windows — two Work windows are
         # both Work; forcing the second onto Guest/Mirza made grouping worse.
+        # Bookmark scan is the slow path. The process flag already names the profile.
+        if prof_session_data is None and not _cmdline_profile_directory(_window_pid(w["id"])):
+            prof_session_data = get_profile_session_data(chrome_dir)
         prof_name = detect_window_profile(
             w, profiles, home_dir, None, prof_session_data
         )
@@ -1989,15 +2036,18 @@ def apply_window_profiles(home_dir=None):
         icon_name = f"chrome-{slug}"
         prof_icon_48 = os.path.join(icons_dir_48, f"{icon_name}.png")
         prof_icon_128 = os.path.join(icons_dir_128, f"{icon_name}.png")
-        generate_badged_icon(prof_name, prof_icon_48, prof_icon_128, avatar_path=avatar)
+        if not (_badge_is_current(prof_icon_48, avatar) and _badge_is_current(prof_icon_128, avatar)):
+            generate_badged_icon(prof_name, prof_icon_48, prof_icon_128, avatar_path=avatar)
 
         # Unique class+desktop+icon per WINDOW so tiles never share one graphic.
         class_name = window_task_class(slug, w["id"])
         win_icon_48 = os.path.join(icons_dir_48, f"{class_name}.png")
         win_icon_128 = os.path.join(icons_dir_128, f"{class_name}.png")
         try:
-            shutil.copyfile(prof_icon_48, win_icon_48)
-            shutil.copyfile(prof_icon_128, win_icon_128)
+            if not _badge_is_current(win_icon_48, avatar):
+                shutil.copyfile(prof_icon_48, win_icon_48)
+            if not _badge_is_current(win_icon_128, avatar):
+                shutil.copyfile(prof_icon_128, win_icon_128)
         except OSError:
             win_icon_48, win_icon_128 = prof_icon_48, prof_icon_128
         _install_icon_name(home_dir, class_name, win_icon_48, win_icon_128)
@@ -2027,15 +2077,14 @@ def apply_window_profiles(home_dir=None):
     # Pin each open window's .desktop on Icon Tasks so Plasma shows OUR badge
     # (matching StartupWMClass), not Chrome's gray person window icon.
     launcher_key = tuple(sorted(window_classes))
+    # Update the pins in the running panel. Never restart plasmashell:
+    # a restart is what hides the footer when you change window or profile.
     sync_plasma_profile_launchers(
         home_dir,
         active_slugs,
         window_desktops=[f"{c}.desktop" for c in window_classes],
     )
-    if launcher_key != _LAST_PLASMA_LAUNCHERS:
-        _LAST_PLASMA_LAUNCHERS = launcher_key
-        os.environ["DEVOS_FORCE_PLASMA_RELOAD"] = "1"
-        reload_plasmashell()
+    _LAST_PLASMA_LAUNCHERS = launcher_key
 
     return processed
 
@@ -2077,14 +2126,20 @@ def watch_chrome_windows(home_dir=None, poll_interval=None):
             # Include WM class so we keep retagging until every window leaves
             # google-chrome and gets chrome-<profile> (separate footer icons).
             cur_state = [(w["id"], w["title"], w["wm_class"].lower()) for w in chrome_wins]
+            untagged = any(
+                not (w.get("wm_class") or "").lower().startswith("chrome-")
+                and "chrome-" not in (w.get("wm_class") or "").lower()
+                for w in chrome_wins
+            )
 
-            # Always re-apply while Chrome is open: Chrome resets _NET_WM_ICON
-            # back to the gray person badge a few seconds after we badge it.
-            if chrome_wins:
+            # Full pass only when a window, title, or profile class changed.
+            # A steady Chrome just gets its photo put back. The footer stays up.
+            if chrome_wins and (cur_state != last_win_state or untagged):
                 apply_window_profiles(home_dir)
                 last_win_state = cur_state
-            # Idle longer when Chrome is not open.
-            sleep_for = min(poll_interval, 3.0) if chrome_wins else max(poll_interval, 15.0)
+            elif chrome_wins:
+                _reassert_window_icons(home_dir, chrome_wins)
+            sleep_for = 2.0 if chrome_wins else max(poll_interval, 15.0)
 
         except Exception:
             sleep_for = poll_interval

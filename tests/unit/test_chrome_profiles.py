@@ -1,7 +1,9 @@
+import inspect
 import json
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys_path = os.path.join(ROOT, "components", "browser")
@@ -185,6 +187,36 @@ class TestChromeProfiles(unittest.TestCase):
             text = open(appletsrc, encoding="utf-8").read()
             self.assertIn("applications:devos-browser.desktop", text)
             self.assertNotIn("chrome-work-w1a2.desktop", text)
+
+    def test_same_pins_do_not_rewrite_the_panel(self):
+        with tempfile.TemporaryDirectory() as tmp_home:
+            cfg_dir = os.path.join(tmp_home, ".config")
+            apps = os.path.join(tmp_home, ".local/share/applications")
+            os.makedirs(cfg_dir, exist_ok=True)
+            os.makedirs(apps, exist_ok=True)
+            open(os.path.join(apps, "chrome-work.desktop"), "w", encoding="utf-8").write("[Desktop Entry]\n")
+            appletsrc = os.path.join(cfg_dir, "plasma-org.kde.plasma.desktop-appletsrc")
+            with open(appletsrc, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "[Containments][3][Applets][6]\n"
+                    "plugin=org.kde.plasma.icontasks\n"
+                    "\n"
+                    "[Containments][3][Applets][6][Configuration][General]\n"
+                    "launchers=applications:devos-browser.desktop\n"
+                )
+            with patch.object(chrome_profiles, "apply_plasma_launchers_live", return_value=True) as live:
+                chrome_profiles.sync_plasma_profile_launchers(tmp_home, ["work"])
+                self.assertEqual(live.call_count, 1)
+                live.reset_mock()
+                chrome_profiles.sync_plasma_profile_launchers(tmp_home, ["work"])
+                live.assert_not_called()
+
+    def test_window_switch_does_not_restart_the_footer(self):
+        apply_src = inspect.getsource(chrome_profiles.apply_window_profiles)
+        watch_src = inspect.getsource(chrome_profiles.watch_chrome_windows)
+        self.assertNotIn("reload_plasmashell", apply_src)
+        self.assertNotIn("reload_plasmashell", watch_src)
+        self.assertIn("_reassert_window_icons", watch_src)
 
     def test_class_for_profile_uses_display_name(self):
         with tempfile.TemporaryDirectory() as tmp_home:
