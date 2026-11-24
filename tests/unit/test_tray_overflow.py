@@ -85,6 +85,7 @@ class TrayOverflowTests(unittest.TestCase):
         self.assertIn('"microphone"', script)
         self.assertIn('"org.kde.plasma.cameraindicator"', script)
         self.assertIn('writeConfig("hiddenItems"', script)
+        self.assertIn('writeConfig("disabledStatusNotifiers"', script)
         self.assertIn('writeConfig("showAllItems", false)', script)
         self.assertIn('writeConfig("shownItems"', script)
         self.assertIn("desktopById", script)

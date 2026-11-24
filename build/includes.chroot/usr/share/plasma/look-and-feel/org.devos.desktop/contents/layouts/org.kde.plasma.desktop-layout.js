@@ -98,6 +98,7 @@ for (var t = 0; t < trayTargets.length; t++) {
     trayTargets[t].writeConfig("showAllItems", false)
     trayTargets[t].writeConfig("shownItems", [])
     trayTargets[t].writeConfig("hiddenItems", trayHidden)
+    trayTargets[t].writeConfig("disabledStatusNotifiers", ["microphone", "Microphone"])
 }
 var clock = panel.addWidget("org.kde.plasma.digitalclock")
 clock.currentConfigGroup = ["Appearance"]

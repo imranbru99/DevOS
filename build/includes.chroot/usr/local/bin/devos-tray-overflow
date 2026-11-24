@@ -246,6 +246,9 @@ def _policy_map(hidden: set[str], *, include_pin: bool) -> dict[str, str]:
         "hiddenItems": hidden_csv,
         "knownItems": extra,
         "shownItems": "",
+        # Clicking this icon pops the "Microphone Muted" notice. Disabled means
+        # it is not drawn on the footer at all.
+        "disabledStatusNotifiers": "microphone,Microphone",
     }
     if include_pin:
         values["pin"] = "false"
@@ -307,6 +310,26 @@ def _general_hides(lines: list[str], header: str, want: set[str]) -> bool:
             if line.split("=", 1)[1].strip().lower() in ("true", "1", "yes"):
                 show_all = True
     return (not show_all) and want.issubset(hidden) and not (shown & want)
+
+
+def _microphone_disabled(lines: list[str]) -> bool:
+    """True when every tray group Plasma reads refuses the recording icon."""
+    headers = [h + "[General]" for h in find_tray_applet_headers(lines)]
+    headers.extend(f"[Containments][{cid}][General]" for cid in systray_containment_ids(lines))
+    if not headers:
+        return False
+    indexed = _section_index(lines)
+    for header in headers:
+        if header not in indexed:
+            return False
+        start, end = indexed[header]
+        disabled: set[str] = set()
+        for line in lines[start + 1 : end]:
+            if line.startswith("disabledStatusNotifiers="):
+                disabled |= parse_list(line.split("=", 1)[1])
+        if "microphone" not in disabled:
+            return False
+    return True
 
 
 def policy_is_complete(lines: list[str], want: set[str]) -> bool:
@@ -401,8 +424,11 @@ for (var p = 0; p < raw.length; p++) {{
           targets[t].writeConfig("showAllItems", false);
           targets[t].writeConfig("shownItems", []);
           targets[t].writeConfig("hiddenItems", add);
+          try {{
+            targets[t].writeConfig("disabledStatusNotifiers", ["microphone", "Microphone"]);
+          }} catch (e8) {{}}
           wrote = wrote + 1;
-          try {{ note = String(targets[t].readConfig("hiddenItems")); }} catch (e6) {{ note = note; }}
+          try {{ note = String(targets[t].readConfig("disabledStatusNotifiers")) + " " + String(targets[t].readConfig("hiddenItems")); }} catch (e6) {{ note = note; }}
         }} catch (e7) {{
           note = String(e7);
         }}
@@ -527,7 +553,8 @@ def notify_commands(lines: list[str], hidden: set[str], tool: str = "kwriteconfi
         commands.append([*base, "--key", "shownItems", "--type", "stringlist", ""])
         # Only the last write of a group notifies, so the tray reloads once
         # with the finished list rather than once per key.
-        commands.append([*base, "--notify", "--key", "hiddenItems", "--type", "stringlist", hidden_csv])
+        commands.append([*base, "--key", "hiddenItems", "--type", "stringlist", hidden_csv])
+        commands.append([*base, "--notify", "--key", "disabledStatusNotifiers", "--type", "stringlist", "microphone,Microphone"])
     return commands
 
 
@@ -649,25 +676,25 @@ def once(restart_if_changed: bool = True, announce: bool = False) -> int:
         complete = policy_is_complete(lines, hidden)
         del restart_if_changed
         signature = frozenset(hidden)
-        if not complete:
-            new_lines = write_policy(lines, hidden)
-            new_raw = "".join(new_lines)
-            if new_raw != raw:
-                APPLETRC.write_text(new_raw, encoding="utf-8")
-                lines = new_lines
-                complete = True
-            # The saved layout is missing a hide entry. Push it once.
-            # A later sign-in reads that file as the shell starts, so it must
-            # not be pushed again: that second write hides the menus.
+        # The saved list can already name the microphone while the running
+        # tray still draws it. A click on that icon is the "Microphone Muted"
+        # notice. Only a command the person runs pushes the running tray.
+        # The sign-in watcher leaves a finished file alone, so the menus
+        # are not redrawn on every login.
+        if announce:
+            if not complete or not _microphone_disabled(lines):
+                new_lines = write_policy(lines, hidden)
+                new_raw = "".join(new_lines)
+                if new_raw != raw:
+                    APPLETRC.write_text(new_raw, encoding="utf-8")
+                    lines = new_lines
             if _panel_can_hide(lines):
                 pin_footer()
             if _notified_for != signature:
                 notify_running_shell(lines, hidden)
                 _notified_for = signature
-                _live_done = False
-            if not _live_done:
-                if apply_live(hidden):
-                    _live_done = True
+            if apply_live(hidden):
+                _live_done = True
         else:
             _notified_for = signature
             _live_done = True
