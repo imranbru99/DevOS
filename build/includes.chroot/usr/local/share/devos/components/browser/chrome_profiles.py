@@ -1361,6 +1361,47 @@ def _find_icontasks_general_section(text: str):
     return None
 
 
+def _cmdline_is_app_window(raw: str) -> bool:
+    """Chrome app / PWA command lines are not normal browser windows."""
+    low = (raw or "").lower()
+    if "windows.cloud.microsoft" in low or "devos/windows-app/" in low:
+        return True
+    if "--app-id=" in low or "--app=" in low:
+        return True
+    return False
+
+
+def _open_chrome_profile_keys():
+    """Profile directories of real Chrome browser processes.
+
+    Wayland Chrome does not show up in wmctrl. The footer still has to badge
+    those windows, and must not decide Chrome is closed.
+    """
+    keys = []
+    seen = set()
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return keys
+    for name in entries:
+        if not name.isdigit():
+            continue
+        raw = _read_proc_cmdline(int(name))
+        if not raw or "--type=" in raw:
+            continue
+        low = raw.lower()
+        if "chrome" not in low and "chromium" not in low:
+            continue
+        if _cmdline_is_app_window(raw):
+            continue
+        key = _profile_key_from_cmdline(raw)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        keys.append(key)
+    return keys
+
+
 def _is_windows_app_window(window) -> bool:
     """Microsoft Windows App / Cloud PC. Never retag it as a Chrome profile.
 
@@ -2639,10 +2680,24 @@ def refresh_open_profile_icons(home_dir, chrome_wins) -> None:
     if not home_dir:
         home_dir = os.path.expanduser("~")
     if not chrome_wins:
-        if _DESKTOP_ICON_BACKUP:
-            _restore_desktop_icons()
-        _restore_theme_chrome_icon(home_dir)
-        return
+        # No X11 window does not mean Chrome is closed. Wayland windows are
+        # invisible to wmctrl; wiping the badge then puts the plain logo back.
+        proc_keys = _open_chrome_profile_keys()
+        if proc_keys:
+            chrome_wins = [
+                {
+                    "id": None,
+                    "wm_class": "google-chrome.Google-chrome",
+                    "title": "",
+                    "forced_key": key,
+                }
+                for key in proc_keys
+            ]
+        else:
+            if _DESKTOP_ICON_BACKUP:
+                _restore_desktop_icons()
+            _restore_theme_chrome_icon(home_dir)
+            return
     chrome_dir = os.path.join(home_dir, ".config/google-chrome")
     details = get_chrome_profile_details(chrome_dir)
     profiles = {k: v["name"] for k, v in details.items()}
@@ -2657,8 +2712,9 @@ def refresh_open_profile_icons(home_dir, chrome_wins) -> None:
         # The process flag is the profile this window actually opened. A cached
         # name can belong to a different account, and the button then shows
         # that account's face.
+        forced = (w.get("forced_key") or "").strip()
         pid = _window_pid(wid) if wid else 0
-        prof_key = _cmdline_profile_key(pid) if pid else ""
+        prof_key = forced or (_cmdline_profile_key(pid) if pid else "")
         if prof_key and prof_key in details and (prof_key or "").lower() != "guest":
             prof_name = details[prof_key]["name"]
             avatar = (details.get(prof_key) or {}).get("avatar")
@@ -2682,6 +2738,12 @@ def refresh_open_profile_icons(home_dir, chrome_wins) -> None:
         if not (_badge_is_current(icon_48, avatar) and _badge_is_current(icon_128, avatar)):
             generate_badged_icon(prof_name, icon_48, icon_128, avatar_path=avatar)
         if not wid:
+            shown = icon_128 if os.path.isfile(icon_128) else icon_48
+            open_badges.append({
+                "key": prof_key or slug or "",
+                "icon": shown if os.path.isfile(shown) else "",
+                "avatar": avatar or shown,
+            })
             continue
         # One file per window. A shared Chrome launcher was painting the first
         # account's photo onto every other browser button.
@@ -2725,7 +2787,7 @@ def _shared_launcher_icon(rows):
         if not key:
             continue
         keys.append(key)
-        if (row or {}).get("avatar") and (row or {}).get("icon"):
+        if (row or {}).get("icon"):
             icon = (row or {}).get("icon")
     if len(set(keys)) != 1 or not icon:
         return None
@@ -2807,11 +2869,42 @@ def _install_theme_chrome_icon(home_dir: str, badge_path: str) -> None:
                 img.resize((size, size), Image.Resampling.LANCZOS).save(dest, format="PNG")
             except OSError:
                 return
+    index = os.path.join(root, "index.theme")
+    if not os.path.isfile(index):
+        try:
+            with open(index, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "[Icon Theme]\n"
+                    "Name=Hicolor\n"
+                    "Comment=DevOS profile badges\n"
+                    "Directories=48x48/apps,128x128/apps,256x256/apps\n"
+                    "\n"
+                    "[48x48/apps]\nSize=48\nContext=Applications\nType=Fixed\n"
+                    "\n"
+                    "[128x128/apps]\nSize=128\nContext=Applications\nType=Fixed\n"
+                    "\n"
+                    "[256x256/apps]\nSize=256\nContext=Applications\nType=Fixed\n"
+                )
+        except OSError:
+            pass
     try:
         with open(marker, "w", encoding="utf-8") as handle:
             handle.write(badge_path)
     except OSError:
         pass
+    import subprocess
+    cache_tool = shutil.which("gtk-update-icon-cache")
+    if cache_tool:
+        try:
+            subprocess.run(
+                [cache_tool, "-f", "-t", root],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=15,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            pass
 
 
 def _restore_theme_chrome_icon(home_dir: str) -> None:
@@ -3036,20 +3129,23 @@ def watch_chrome_windows(home_dir=None, poll_interval=None):
             # The profile photo goes on the button as soon as the window is
             # open. Waiting here left Chrome's own logo on the footer.
             try:
+                # Do not retag WM_CLASS. That drops Windows App and the footer.
                 refresh_open_profile_icons(home_dir, chrome_wins)
-                bind_each_chrome_window_once(home_dir, chrome_wins)
             except Exception:
                 pass
 
             # A window opened or closed. Drop every browser button once Chrome
             # is gone. Title changes are not part of ident. If the running bar
             # does not accept the list, try again on the next pass.
-            if ident != last_ident:
-                try:
-                    if publish_chrome_task_launchers(home_dir, chrome_wins):
-                        last_ident = ident
-                except Exception:
-                    pass
+            # Wayland Chrome has no X11 window. Publishing "closed" would
+            # remove the button while the browser is still open.
+            if chrome_wins or not _open_chrome_profile_keys():
+                if ident != last_ident:
+                    try:
+                        if publish_chrome_task_launchers(home_dir, chrome_wins):
+                            last_ident = ident
+                    except Exception:
+                        pass
 
             # Photos only. Never retag the window and never reload the panel:
             # both of those remove the footer for a second or two.

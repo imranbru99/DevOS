@@ -148,47 +148,11 @@ def discover_app_id(profile: Path | None = None) -> str | None:
     return None
 
 
-def _windows_app_pids() -> set[int]:
-    try:
-        out = subprocess.check_output(["ps", "-eo", "pid,args"], text=True, timeout=3)
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
-        return set()
-    found: set[int] = set()
-    for line in out.splitlines():
-        low = line.lower()
-        if "windows.cloud.microsoft" not in low and "devos/windows-app/" not in low:
-            continue
-        pid_text = line.split(None, 1)[0]
-        try:
-            found.add(int(pid_text))
-        except ValueError:
-            continue
-    return found
-
-
-def _x_window_pid(wid: str) -> int:
-    if not shutil.which("xprop"):
-        return 0
-    try:
-        out = subprocess.check_output(
-            ["xprop", "-id", wid, "_NET_WM_PID"],
-            text=True,
-            stderr=subprocess.DEVNULL,
-            timeout=2,
-        )
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
-        return 0
-    try:
-        return int(out.rsplit(None, 1)[-1])
-    except (TypeError, ValueError):
-        return 0
-
-
 def focus_existing_window() -> bool:
-    """Raise an already-open Windows App window if one exists.
+    """Raise a Windows App window only when that window itself is open.
 
-    Return True only when a window was actually raised. A leftover process
-    with no window must not swallow the click.
+    Chrome puts one process id on every window. Matching by that id focuses
+    the Facebook window and the Windows App click never starts the app.
     """
     if not shutil.which("wmctrl"):
         return False
@@ -196,7 +160,6 @@ def focus_existing_window() -> bool:
         listing = subprocess.check_output(["wmctrl", "-lx"], text=True, timeout=3)
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
         return False
-    pids = _windows_app_pids()
     for line in listing.splitlines():
         parts = line.split(None, 4)
         if len(parts) < 3:
@@ -204,14 +167,11 @@ def focus_existing_window() -> bool:
         wid = parts[0]
         title = parts[4] if len(parts) > 4 else ""
         low = line.lower()
-        matched = (
+        if not (
             WM_CLASS.lower() in low
             or "windows.cloud.microsoft" in low
             or "windows app" in title.lower()
-        )
-        if not matched and pids and _x_window_pid(wid) in pids:
-            matched = True
-        if not matched:
+        ):
             continue
         subprocess.run(["wmctrl", "-ia", wid], check=False, timeout=3)
         return True

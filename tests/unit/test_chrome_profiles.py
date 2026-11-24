@@ -127,6 +127,19 @@ class TestChromeProfiles(unittest.TestCase):
         self.assertFalse(chrome_profiles._is_chrome_launcher(
             "applications:chrome-windows.cloud.microsoft__-Default.desktop"
         ))
+        self.assertTrue(chrome_profiles._cmdline_is_app_window(
+            "/opt/google/chrome/chrome --app-id=abc --class=chrome-windows.cloud.microsoft__-Default"
+        ))
+        self.assertFalse(chrome_profiles._cmdline_is_app_window(
+            "/opt/google/chrome/chrome --profile-directory=Default"
+        ))
+        self.assertEqual(
+            chrome_profiles._shared_launcher_icon([
+                {"key": "Default", "icon": badge, "avatar": ""},
+            ]),
+            badge,
+        )
+        self.assertNotIn("bind_each_chrome_window_once", inspect.getsource(chrome_profiles.watch_chrome_windows))
         self.assertTrue(chrome_profiles._is_chrome_launcher("applications:google-chrome.desktop"))
         with tempfile.TemporaryDirectory() as tmp:
             folder = os.path.join(tmp, "Default")
