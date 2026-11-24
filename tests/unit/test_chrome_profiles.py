@@ -89,6 +89,41 @@ class TestChromeProfiles(unittest.TestCase):
             named = chrome_profiles.get_profile_avatar_path(tmp, "Profile 1", {})
             self.assertEqual(named, photo)
             self.assertIn("XChangeProperty.argtypes", inspect.getsource(chrome_profiles.set_window_icon))
+            images = os.path.join(folder, "Accounts", "Avatar Images", "0")
+            os.makedirs(images, exist_ok=True)
+            cached = os.path.join(images, "128")
+            PILImage.new("RGB", (128, 128), (20, 80, 200)).save(cached, format="PNG")
+            os.remove(photo)
+            if os.path.isfile(plain):
+                os.remove(plain)
+            found_cached = chrome_profiles.get_profile_avatar_path(tmp, "Profile 1", {})
+            self.assertEqual(found_cached, cached)
+
+    def test_one_open_account_uses_its_own_photo(self):
+        badge = "/tmp/chrome-imran-w1.png"
+        self.assertEqual(
+            chrome_profiles._shared_launcher_icon([
+                {"key": "Default", "icon": badge, "avatar": "/tmp/face.png"},
+            ]),
+            badge,
+        )
+        self.assertIsNone(
+            chrome_profiles._shared_launcher_icon([
+                {"key": "Default", "icon": badge, "avatar": "/tmp/face.png"},
+                {"key": "Profile 1", "icon": "/tmp/other.png", "avatar": "/tmp/other-face.png"},
+            ])
+        )
+        self.assertEqual(chrome_profiles._kde_desktop_file_name("chrome-imran-w1.desktop"), "chrome-imran-w1")
+        with tempfile.TemporaryDirectory() as tmp:
+            from PIL import Image as PILImage
+
+            photo = os.path.join(tmp, "Google Profile Picture.png")
+            PILImage.new("RGB", (96, 96), (10, 180, 40)).save(photo)
+            png = os.path.join(tmp, "old.png")
+            PILImage.new("RGB", (48, 48), (0, 0, 0)).save(png)
+            self.assertFalse(chrome_profiles._badge_is_current(png, photo))
+            chrome_profiles.generate_badged_icon("Imran", png, avatar_path=photo)
+            self.assertTrue(chrome_profiles._badge_is_current(png, photo))
 
     def test_account_photo_is_a_badge_on_the_chrome_logo(self):
         from PIL import Image as PILImage

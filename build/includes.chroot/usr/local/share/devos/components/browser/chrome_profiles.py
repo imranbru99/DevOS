@@ -155,6 +155,22 @@ def get_profile_avatar_path(config_dir, profile_key, info=None):
     except OSError:
         pass
 
+    # Chrome keeps the toolbar account photo here when it has not written
+    # "Google Profile Picture.png" into the profile root.
+    images_dir = os.path.join(folder, "Accounts", "Avatar Images")
+    sized = []
+    if os.path.isdir(images_dir):
+        for root, _dirs, files in os.walk(images_dir):
+            for name in files:
+                path = os.path.join(root, name)
+                try:
+                    sized.append((os.path.getsize(path), path))
+                except OSError:
+                    continue
+    sized.sort(reverse=True)
+    for _size, path in sized:
+        candidates.append(path)
+
     seen = set()
     for path in candidates:
         if path in seen:
@@ -175,14 +191,20 @@ def _accept_account_photo(path: str) -> bool:
     if not path or not os.path.isfile(path):
         return False
     low = os.path.basename(path).lower()
-    named = "profile picture" in low or "gaia" in low
+    parent = os.path.basename(os.path.dirname(path)).lower()
+    named = (
+        "profile picture" in low
+        or "gaia" in low
+        or parent == "avatar images"
+        or os.path.basename(os.path.dirname(os.path.dirname(path))).lower() == "avatar images"
+    )
     if not named:
         return _is_usable_profile_photo(path)
     try:
-        if os.path.getsize(path) < 400:
+        if os.path.getsize(path) < 32:
             return False
         with Image.open(path) as img:
-            if max(img.size) < 32:
+            if max(img.size) < 24:
                 return False
         return True
     except Exception:
@@ -439,9 +461,11 @@ def generate_badged_icon(name, output_48, output_128=None, base_icon=None, avata
     if avatar_path and _accept_account_photo(avatar_path) and _draw_photo_badge(img, avatar_path):
         os.makedirs(os.path.dirname(os.path.abspath(output_48)), exist_ok=True)
         img.resize((48, 48), Image.Resampling.LANCZOS).save(output_48, format="PNG")
+        _write_badge_stamp(output_48, avatar_path)
         if output_128:
             os.makedirs(os.path.dirname(os.path.abspath(output_128)), exist_ok=True)
             img.save(output_128, format="PNG")
+            _write_badge_stamp(output_128, avatar_path)
         return
 
     label = badge_letter(name)
@@ -473,10 +497,12 @@ def generate_badged_icon(name, output_48, output_128=None, base_icon=None, avata
     os.makedirs(os.path.dirname(os.path.abspath(output_48)), exist_ok=True)
     img_48 = img.resize((48, 48), Image.Resampling.LANCZOS)
     img_48.save(output_48, format="PNG")
+    _write_badge_stamp(output_48, None)
 
     if output_128:
         os.makedirs(os.path.dirname(os.path.abspath(output_128)), exist_ok=True)
         img.save(output_128, format="PNG")
+        _write_badge_stamp(output_128, None)
 
 
 def update_google_chrome_desktop(home_dir, all_profiles):
@@ -908,17 +934,28 @@ def get_x11_windows():
     return windows
 
 
+def _kde_desktop_file_name(desktop_slug: str) -> str:
+    """Desktop id Plasma uses to find the file. No .desktop suffix."""
+    name = (desktop_slug or "").strip()
+    if name.lower().endswith(".desktop"):
+        name = name[: -len(".desktop")]
+    return name
+
+
 def set_window_desktop_file(wid, desktop_slug, home_dir=None):
     """Point the window at a distinct .desktop so Plasma can split task icons."""
     try:
         import subprocess
         slug = desktop_slug if desktop_slug.endswith(".desktop") else f"{desktop_slug}.desktop"
+        # Plasma looks this name up without the suffix. Sending "x.desktop"
+        # misses the file, and the button stays the plain Chrome logo.
+        kde_name = _kde_desktop_file_name(slug)
         home = home_dir or os.path.expanduser("~")
         abs_desktop = os.path.join(home, ".local/share/applications", slug)
         if not os.path.isfile(abs_desktop):
             abs_desktop = f"/usr/share/applications/{slug}"
         for atom, value in (
-            ("_KDE_NET_WM_DESKTOP_FILE", slug),
+            ("_KDE_NET_WM_DESKTOP_FILE", kde_name),
             ("BAMF_DESKTOP_FILE_HINT", abs_desktop if os.path.isfile(abs_desktop) else slug),
         ):
             subprocess.run(
@@ -974,10 +1011,10 @@ def ensure_window_task_desktop(home_dir, prof_name: str, slug: str, wm_class: st
         # Best-effort: profile directory may be unknown here; class is what matters for the taskbar.
         exec_line = f"{devos_bin} --class={wm_class}"
     # Absolute Icon= path — Plasma theme lookup often misses new hicolor files
-    # and falls back to Chrome's gray person badge.
-    icon_abs = os.path.join(home, ".local/share/icons/hicolor/48x48/apps", f"{wm_class}.png")
+    # and falls back to Chrome's plain logo. The 128px file keeps the photo sharp.
+    icon_abs = os.path.join(home, ".local/share/icons/hicolor/128x128/apps", f"{wm_class}.png")
     if not os.path.isfile(icon_abs):
-        icon_abs = os.path.join(home, ".local/share/icons/hicolor/128x128/apps", f"{wm_class}.png")
+        icon_abs = os.path.join(home, ".local/share/icons/hicolor/48x48/apps", f"{wm_class}.png")
     if not os.path.isfile(icon_abs):
         icon_abs = wm_class
     content = f"""[Desktop Entry]
@@ -2222,16 +2259,34 @@ def detect_window_profile(w, profiles, home_dir=None, assigned_profiles=None, pr
     return default_name
 
 
+def _avatar_stamp(avatar_path) -> str:
+    """Identity of the picture baked into a taskbar icon."""
+    if avatar_path and os.path.isfile(avatar_path) and _accept_account_photo(avatar_path):
+        st = os.stat(avatar_path)
+        return f"photo|{os.path.abspath(avatar_path)}|{st.st_mtime_ns}|{st.st_size}"
+    return "letter"
+
+
+def _write_badge_stamp(png_path, avatar_path) -> None:
+    if not png_path:
+        return
+    try:
+        with open(png_path + ".src", "w", encoding="utf-8") as handle:
+            handle.write(_avatar_stamp(avatar_path))
+    except OSError:
+        pass
+
+
 def _badge_is_current(png_path, avatar_path):
-    """True when the taskbar PNG already shows this profile photo."""
+    """True when this PNG was already drawn from this exact profile photo."""
     if not png_path or not os.path.isfile(png_path):
         return False
-    if avatar_path and os.path.isfile(avatar_path) and _is_usable_profile_photo(avatar_path):
-        try:
-            return os.path.getmtime(png_path) >= os.path.getmtime(avatar_path)
-        except OSError:
-            return False
-    return True
+    try:
+        with open(png_path + ".src", encoding="utf-8") as handle:
+            saved = handle.read()
+    except OSError:
+        return False
+    return saved == _avatar_stamp(avatar_path)
 
 
 def _reassert_window_icons(home_dir, chrome_wins):
@@ -2486,6 +2541,7 @@ def refresh_open_profile_icons(home_dir, chrome_wins) -> None:
     icons_128 = os.path.join(home_dir, ".local/share/icons/hicolor/128x128/apps")
     os.makedirs(icons_48, exist_ok=True)
     os.makedirs(icons_128, exist_ok=True)
+    open_badges = []
     for w in chrome_wins:
         wid = w.get("id")
         # The process flag is the profile this window actually opened. A cached
@@ -2521,17 +2577,99 @@ def refresh_open_profile_icons(home_dir, chrome_wins) -> None:
         # account's photo onto every other browser button.
         class_name = window_task_class(slug or "chrome", int(wid))
         win_icon = os.path.join(icons_48, f"{class_name}.png")
+        win_icon_128 = os.path.join(icons_128, f"{class_name}.png")
         try:
-            if os.path.abspath(icon_48) != os.path.abspath(win_icon) and os.path.isfile(icon_48):
+            if os.path.isfile(icon_48) and os.path.abspath(icon_48) != os.path.abspath(win_icon):
                 shutil.copyfile(icon_48, win_icon)
+            if os.path.isfile(icon_128) and os.path.abspath(icon_128) != os.path.abspath(win_icon_128):
+                shutil.copyfile(icon_128, win_icon_128)
         except OSError:
             win_icon = icon_48
+            win_icon_128 = icon_128
         ensure_window_task_desktop(home_dir, prof_name, slug, class_name, class_name)
         w["task_class"] = class_name
         w["task_desktop"] = f"{class_name}.desktop"
-        set_window_icon(wid, win_icon, icon_128)
-    # The shared Chrome launcher must not keep the first account's picture.
-    _release_shared_chrome_icons(home_dir)
+        set_window_icon(wid, win_icon, win_icon_128)
+        shown = win_icon_128 if os.path.isfile(win_icon_128) else win_icon
+        open_badges.append({
+            "key": prof_key or slug or "",
+            "icon": shown if os.path.isfile(shown) else "",
+            "avatar": avatar if avatar and _accept_account_photo(avatar) else "",
+        })
+    # The footer button uses the shared Chrome launcher's Icon. One open
+    # account: that icon is the Chrome logo with this account's photo.
+    # Different accounts keep their own buttons and do not inherit the first.
+    _apply_shared_launcher_icon(home_dir, open_badges)
+
+
+def _shared_launcher_icon(rows):
+    """Badge path for the shared Chrome button.
+
+    One open account returns that account's Chrome-logo-plus-photo file.
+    Two accounts return None so the first photo is not painted on the others.
+    """
+    keys = []
+    icon = None
+    for row in rows or []:
+        key = (row or {}).get("key") or ""
+        if not key:
+            continue
+        keys.append(key)
+        if (row or {}).get("avatar") and (row or {}).get("icon"):
+            icon = (row or {}).get("icon")
+    if len(set(keys)) != 1 or not icon:
+        return None
+    return icon
+
+
+def _point_shared_launchers(home_dir: str, target: str) -> bool:
+    """Point the pinned Chrome button at one account's badged icon."""
+    if not target or not os.path.isfile(target):
+        return False
+    target = os.path.abspath(target)
+    _text, _section, existing = _read_launcher_entries(home_dir)
+    apps = os.path.join(home_dir, ".local/share/applications")
+    os.makedirs(apps, exist_ok=True)
+    names = ["google-chrome.desktop", "devos-browser.desktop", "com.google.chrome.desktop"]
+    for entry in existing or []:
+        if not _is_chrome_launcher(entry):
+            continue
+        base = entry.split(":")[-1]
+        if "-w" in base.lower():
+            continue
+        if base not in names:
+            names.append(base)
+    changed = False
+    for base in names:
+        path = os.path.join(apps, base)
+        if not os.path.isfile(path):
+            system = os.path.join("/usr/share/applications", base)
+            if not os.path.isfile(system):
+                continue
+            try:
+                shutil.copyfile(system, path)
+            except OSError:
+                continue
+        if _swap_desktop_icon(path, target):
+            changed = True
+    return changed
+
+
+def _apply_shared_launcher_icon(home_dir, rows) -> None:
+    """Show this account's photo on the button the footer actually draws."""
+    global _PHOTO_PUSHED
+    target = _shared_launcher_icon(rows)
+    if target:
+        if target != _PHOTO_PUSHED:
+            if _point_shared_launchers(home_dir, target):
+                _refresh_service_cache()
+            _PHOTO_PUSHED = target
+        return
+    if _PHOTO_PUSHED or _DESKTOP_ICON_BACKUP:
+        _release_shared_chrome_icons(home_dir)
+        if _DESKTOP_ICON_BACKUP:
+            _restore_desktop_icons()
+        _PHOTO_PUSHED = None
 
 
 def _release_shared_chrome_icons(home_dir: str) -> None:
