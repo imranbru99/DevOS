@@ -1259,7 +1259,6 @@ def apply_plasma_launchers_live(launcher_csv: str, grouping: str = "1") -> bool:
         "    widgets[j].writeConfig('onlyGroupWhenFull', 'false');"
         "    widgets[j].writeConfig('launchInPlace', 'true');"
         "    widgets[j].writeConfig('hideActivatedLaunchers', 'false');"
-        "    widgets[j].reloadConfig();"
         "  }"
         "}"
     ) % (launcher_csv.replace("'", "\\'"), group, popups)
@@ -1422,8 +1421,9 @@ def sync_plasma_profile_launchers(home_dir=None, active_slugs=None, window_deskt
         # Same pins. Rewriting appletsrc or restarting the panel hides the footer.
         return True
     cfg.write_text(new_text, encoding="utf-8")
-    # Live update only. Restarting plasmashell hides the whole footer.
-    apply_plasma_launchers_live(launcher_csv, updates["groupingStrategy"])
+    # Save the pin list for the next login. Do not push it into the running
+    # panel: reloadConfig() removes the footer for a second or two, then draws
+    # it again. The open windows keep their photos through the window icon.
     return True
 
 
@@ -1950,7 +1950,7 @@ def _reassert_window_icons(home_dir, chrome_wins):
         )
 
 
-def apply_window_profiles(home_dir=None):
+def apply_window_profiles(home_dir=None, panel=True):
     """
     Windows-like Chrome taskbar: one avatar icon per open profile, never grouped.
 
@@ -2081,22 +2081,18 @@ def apply_window_profiles(home_dir=None):
         })
         processed += 1
 
-    # KWin keeps the app id it saw at map time (usually google-chrome.desktop).
-    # xprop WM_CLASS changes do not split the footer group. desktopFileName does,
-    # and that file's Icon= is this profile's photo or letter — like Windows.
-    apply_kwin_window_desktops(kwin_rows, home_dir)
-
-    # Pin each open window's .desktop on Icon Tasks so Plasma shows OUR badge
-    # (matching StartupWMClass), not Chrome's gray person window icon.
-    launcher_key = tuple(sorted(window_classes))
-    # Update the pins in the running panel. Never restart plasmashell:
-    # a restart is what hides the footer when you change window or profile.
-    sync_plasma_profile_launchers(
-        home_dir,
-        active_slugs,
-        window_desktops=[f"{c}.desktop" for c in window_classes],
-    )
-    _LAST_PLASMA_LAUNCHERS = launcher_key
+    # The running footer is left alone. Unloading the KWin script or rewriting
+    # the taskbar pins removes the bar for a second or two, then it comes back.
+    # Photos are applied with the window icon above. A manual `apply` may still
+    # record the pin list for the next sign-in.
+    if panel:
+        apply_kwin_window_desktops(kwin_rows, home_dir)
+        sync_plasma_profile_launchers(
+            home_dir,
+            active_slugs,
+            window_desktops=[f"{c}.desktop" for c in window_classes],
+        )
+        _LAST_PLASMA_LAUNCHERS = tuple(sorted(window_classes))
 
     return processed
 
@@ -2114,8 +2110,9 @@ def _chrome_switch_identity(chrome_wins):
             key = "guest"
         else:
             key = _cmdline_profile_directory(pid) or ""
-        tagged = "chrome-" in (w.get("wm_class") or "").lower()
-        ident.append((w["id"], key, tagged))
+        # Class text flickers between google-chrome and chrome-<profile> after
+        # we retag the window. Including it made every flicker rebuild the bar.
+        ident.append((w["id"], key))
     return tuple(ident)
 
 
@@ -2141,8 +2138,11 @@ def keep_footer_visible(home_dir=None) -> bool:
                 part += "hiding=0\n"
                 changed = True
         out.append(part)
-    if changed:
-        cfg.write_text("".join(out), encoding="utf-8")
+    if not changed:
+        # Already always-visible. A script call here still makes plasmashell
+        # repaint the bar, which is the one-to-two second blank.
+        return False
+    cfg.write_text("".join(out), encoding="utf-8")
     script = (
         'var panels = panels();'
         'for (var i = 0; i < panels.length; i++) { panels[i].hiding = "none"; }'
@@ -2186,7 +2186,7 @@ def watch_chrome_windows(home_dir=None, poll_interval=None):
         pass
     sync_all_profiles(home_dir)
     try:
-        apply_window_profiles(home_dir)
+        apply_window_profiles(home_dir, panel=False)
     except Exception:
         pass
 
@@ -2208,7 +2208,7 @@ def watch_chrome_windows(home_dir=None, poll_interval=None):
             # A new window or a real profile change updates the photo once.
             # A title change (switching chats or apps) leaves the footer alone.
             if chrome_wins and ident != last_ident:
-                apply_window_profiles(home_dir)
+                apply_window_profiles(home_dir, panel=False)
                 last_ident = ident
                 last_icon = now
             elif chrome_wins and now - last_icon >= 15:

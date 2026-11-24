@@ -206,8 +206,9 @@ class TestChromeProfiles(unittest.TestCase):
                 )
             with patch.object(chrome_profiles, "apply_plasma_launchers_live", return_value=True) as live:
                 chrome_profiles.sync_plasma_profile_launchers(tmp_home, ["work"])
-                self.assertEqual(live.call_count, 1)
-                live.reset_mock()
+                live.assert_not_called()
+                text = open(appletsrc, encoding="utf-8").read()
+                self.assertIn("applications:chrome-work.desktop", text)
                 chrome_profiles.sync_plasma_profile_launchers(tmp_home, ["work"])
                 live.assert_not_called()
 
@@ -218,6 +219,8 @@ class TestChromeProfiles(unittest.TestCase):
         self.assertNotIn("reload_plasmashell", apply_src)
         self.assertNotIn("reload_plasmashell", watch_src)
         self.assertIn("_chrome_switch_identity", watch_src)
+        self.assertIn("panel=False", watch_src)
+        self.assertNotIn("reloadConfig", inspect.getsource(chrome_profiles.apply_plasma_launchers_live))
         self.assertNotIn('"org.kde.kwin.Scripting.start"', kwin_src)
         ident_src = inspect.getsource(chrome_profiles._chrome_switch_identity)
         self.assertNotIn('["title"]', ident_src)
