@@ -2,6 +2,12 @@
 """Keep StatusNotifier / tray icons under Plasma Status & Notifications (^).
 
 Open windows stay on the center taskbar. This only manages the system tray.
+The speaker (org.kde.plasma.volume) belongs in that popup, not beside the clock.
+
+Plasma 6 reads the live hide-list from the private system tray containment
+([Containments][N][General], plugin=org.kde.plasma.private.systemtray), not
+from the panel applet's [Configuration][General]. A finished applet section
+must not mask an empty containment section — that left the speaker on the bar.
 
 Do not use plasmashell writeConfig() for hiddenItems — it breaks KConfig
 StringList matching so icons stay on the panel. Write appletsrc only, and
@@ -140,18 +146,50 @@ def find_tray_applet_headers(lines: list[str]) -> list[str]:
     return found
 
 
-def find_tray_general_locs(lines: list[str]) -> list[tuple[int, int]]:
-    """All systemtray General sections (legacy + Plasma Configuration/General)."""
-    locs: list[tuple[int, int]] = []
-    candidates: list[str] = []
+def find_systray_containment_headers(lines: list[str]) -> list[str]:
+    """Live tray containments Plasma 6 actually reads.
+
+    The panel applet only stores SystrayContainmentId. Volume, network and the
+    other status plasmoids follow [Containments][that id][General].
+    """
+    found: list[str] = []
+    seen: set[str] = set()
+    sections = _sections(lines)
+    for hdr, start, end in sections:
+        if not re.fullmatch(r"\[Containments\]\[\d+\]", hdr):
+            continue
+        body = "".join(lines[start:end])
+        if "plugin=org.kde.plasma.private.systemtray" in body and hdr not in seen:
+            found.append(hdr)
+            seen.add(hdr)
+    for line in lines:
+        match = re.match(r"SystrayContainmentId=(\d+)\s*$", line.strip())
+        if not match:
+            continue
+        hdr = f"[Containments][{match.group(1)}]"
+        if hdr in seen:
+            continue
+        if any(section == hdr for section, _, _ in sections):
+            found.append(hdr)
+            seen.add(hdr)
+    return found
+
+
+def policy_section_headers(lines: list[str]) -> list[str]:
+    """Every group that can pin the speaker beside the clock."""
+    headers: list[str] = []
     for applet_hdr in find_tray_applet_headers(lines):
-        # Prefer live Plasma path; keep legacy [Applets][N][General] too.
-        candidates.append(applet_hdr + "[Configuration][General]")
-        candidates.append(applet_hdr + "[General]")
-    for hdr, start, end in _sections(lines):
-        if hdr in candidates:
-            locs.append((start, end))
-    return locs
+        headers.append(applet_hdr + "[Configuration][General]")
+        headers.append(applet_hdr + "[General]")
+    for containment in find_systray_containment_headers(lines):
+        headers.append(containment + "[General]")
+    return headers
+
+
+def find_tray_general_locs(lines: list[str]) -> list[tuple[int, int]]:
+    """All systemtray General sections (applet + private containment)."""
+    wanted = set(policy_section_headers(lines))
+    return [(start, end) for hdr, start, end in _sections(lines) if hdr in wanted]
 
 
 def find_tray_general(lines: list[str]) -> tuple[int, int] | None:
@@ -159,14 +197,35 @@ def find_tray_general(lines: list[str]) -> tuple[int, int] | None:
     locs = find_tray_general_locs(lines)
     if not locs:
         return None
-    # Prefer Configuration/General when both exist.
+    # The private containment is the one Plasma 6 shows on the panel.
+    for start, end in locs:
+        if re.search(r"\[Containments\]\[\d+\]\[General\]", lines[start]):
+            return start, end
     for start, end in locs:
         if "[Configuration][General]" in lines[start]:
             return start, end
     return locs[0]
 
 
+def _read_section_policy(lines: list[str], start: int, end: int) -> tuple[set[str], bool, str]:
+    hidden: set[str] = set()
+    show_all = False
+    shown = ""
+    for line in lines[start + 1 : end]:
+        if line.startswith("hiddenItems="):
+            hidden |= parse_list(line.split("=", 1)[1])
+        elif line.startswith("showAllItems="):
+            if line.split("=", 1)[1].strip().lower() in ("true", "1", "yes"):
+                show_all = True
+        elif line.startswith("shownItems="):
+            val = line.split("=", 1)[1].strip()
+            if val:
+                shown = val
+    return hidden, show_all, shown
+
+
 def read_policy(lines: list[str]) -> tuple[set[str], bool, str]:
+    """Union of every tray section. Prefer policies_satisfied for apply checks."""
     locs = find_tray_general_locs(lines)
     if not locs:
         return set(), True, ""
@@ -174,17 +233,32 @@ def read_policy(lines: list[str]) -> tuple[set[str], bool, str]:
     show_all = False
     shown = ""
     for start, end in locs:
-        for line in lines[start + 1 : end]:
-            if line.startswith("hiddenItems="):
-                hidden |= parse_list(line.split("=", 1)[1])
-            elif line.startswith("showAllItems="):
-                if line.split("=", 1)[1].strip().lower() in ("true", "1", "yes"):
-                    show_all = True
-            elif line.startswith("shownItems="):
-                val = line.split("=", 1)[1].strip()
-                if val:
-                    shown = val
+        section_hidden, section_show_all, section_shown = _read_section_policy(lines, start, end)
+        hidden |= section_hidden
+        show_all = show_all or section_show_all
+        if section_shown:
+            shown = section_shown
     return hidden, show_all, shown
+
+
+def policies_satisfied(lines: list[str], want: set[str]) -> bool:
+    """True only when every live tray section hides the full set.
+
+    A complete panel-applet copy must not hide an incomplete containment.
+    That is the Plasma 6 path, and it is what leaves the speaker beside the clock.
+    """
+    headers = policy_section_headers(lines)
+    if not headers:
+        return False
+    existing = {hdr: (start, end) for hdr, start, end in _sections(lines)}
+    for header in headers:
+        if header not in existing:
+            return False
+        start, end = existing[header]
+        hidden, show_all, shown = _read_section_policy(lines, start, end)
+        if show_all or shown or not want.issubset(hidden):
+            return False
+    return True
 
 
 def _policy_body(hidden: set[str]) -> list[str]:
@@ -200,30 +274,50 @@ def _policy_body(hidden: set[str]) -> list[str]:
     ]
 
 
+def _insert_missing_section(lines: list[str], header: str, body: list[str]) -> list[str]:
+    """Insert header+body after the closest parent section that already exists."""
+    parts = re.findall(r"\[[^\]]+\]", header)
+    existing = {hdr: (start, end) for hdr, start, end in _sections(lines)}
+    for size in range(len(parts) - 1, 0, -1):
+        parent = "".join(parts[:size])
+        if parent not in existing:
+            continue
+        end = existing[parent][1]
+        return lines[:end] + [header + "\n"] + body + lines[end:]
+    return lines
+
+
 def write_policy(lines: list[str], hidden: set[str]) -> list[str]:
     body = _policy_body(hidden)
-    locs = find_tray_general_locs(lines)
-    if locs:
-        # Rewrite every matching General section (live + legacy) so Plasma
-        # cannot keep volume/brightness Always Shown from a second copy.
-        for start, end in sorted(locs, reverse=True):
-            header = lines[start]
-            lines = (
-                lines[:start]
-                + [header if header.endswith("\n") else header + "\n"]
-                + body
-                + lines[end:]
-            )
+    headers = policy_section_headers(lines)
+    if not headers:
+        # Insert Configuration/General after systemtray applet section
+        for hdr, start, end in _sections(lines):
+            chunk = "".join(lines[start:end])
+            if "plugin=org.kde.plasma.systemtray" in chunk and re.fullmatch(
+                r"\[Containments\]\[\d+\]\[Applets\]\[\d+\]", hdr
+            ):
+                general = hdr + "[Configuration][General]\n"
+                return lines[:end] + [general] + body + lines[end:]
         return lines
 
-    # Insert Configuration/General after systemtray applet section
-    for hdr, start, end in _sections(lines):
-        chunk = "".join(lines[start:end])
-        if "plugin=org.kde.plasma.systemtray" in chunk and re.fullmatch(
-            r"\[Containments\]\[\d+\]\[Applets\]\[\d+\]", hdr
-        ):
-            general = hdr + "[Configuration][General]\n"
-            return lines[:end] + [general] + body + lines[end:]
+    existing = {hdr: (start, end) for hdr, start, end in _sections(lines)}
+    present = sorted(
+        ((existing[header][0], existing[header][1]) for header in headers if header in existing),
+        reverse=True,
+    )
+    for start, end in present:
+        header = lines[start]
+        lines = (
+            lines[:start]
+            + [header if header.endswith("\n") else header + "\n"]
+            + body
+            + lines[end:]
+        )
+    for header in headers:
+        if any(section == header for section, _, _ in _sections(lines)):
+            continue
+        lines = _insert_missing_section(lines, header, body)
     return lines
 
 
@@ -260,8 +354,7 @@ def once(restart_if_changed: bool = True) -> int:
         raw = APPLETRC.read_text(encoding="utf-8", errors="replace")
         lines = raw.splitlines(keepends=True)
         want = desired_hidden_set()
-        have, show_all, shown = read_policy(lines)
-        if want.issubset(have) and not show_all and not shown:
+        if policies_satisfied(lines, want):
             print("DevOS: tray overflow policy already applied.")
             return 0
         new_lines = write_policy(lines, have | want)

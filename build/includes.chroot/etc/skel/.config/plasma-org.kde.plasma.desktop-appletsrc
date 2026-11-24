@@ -117,7 +117,18 @@ expanding=true
 immutability=1
 plugin=org.kde.plasma.systemtray
 
+[Containments][3][Applets][7][Configuration]
+SystrayContainmentId=4
+
 [Containments][3][Applets][7][Configuration][General]
+showAllItems=false
+extraItems=org.kde.plasma.battery,org.kde.plasma.bluetooth,org.kde.plasma.brightness,org.kde.plasma.brightnesscontrol,org.kde.plasma.clipboard,org.kde.plasma.devicenotifier,org.kde.plasma.keyboardlayout,org.kde.plasma.manage-inputmethod,org.kde.plasma.mediacontroller,org.kde.plasma.networkmanagement,org.kde.plasma.nightcolorcontrol,org.kde.plasma.notifications,org.kde.plasma.printmanager,org.kde.plasma.cameraindicator,org.kde.plasma.volume
+hiddenItems=Antigravity_status_icon_1,Antigravity_status_icon_2,Antigravity_status_icon_3,Brightness,ChatGPT,Cursor,Cursor_status_icon_1,Cursor_status_icon_2,Cursor_status_icon_3,Cursor_status_icon_4,Cursor_status_icon_5,DevOS Display,DevOS Optimizer,DevOS Sound,Display,Sound,antigravity,chatgpt,chrome_status_icon_1,chrome_status_icon_10,chrome_status_icon_11,chrome_status_icon_12,chrome_status_icon_13,chrome_status_icon_14,chrome_status_icon_15,chrome_status_icon_16,chrome_status_icon_17,chrome_status_icon_18,chrome_status_icon_19,chrome_status_icon_2,chrome_status_icon_20,chrome_status_icon_3,chrome_status_icon_4,chrome_status_icon_5,chrome_status_icon_6,chrome_status_icon_7,chrome_status_icon_8,chrome_status_icon_9,cursor,devos-display,devos-optimizer,devos-sound,ibus_ui_gtk3,org.kde.plasma.battery,org.kde.plasma.bluetooth,org.kde.plasma.brightness,org.kde.plasma.brightnesscontrol,org.kde.plasma.clipboard,org.kde.plasma.devicenotifier,org.kde.plasma.keyboardlayout,org.kde.plasma.manage-inputmethod,org.kde.plasma.mediacontroller,org.kde.plasma.networkmanagement,org.kde.plasma.nightcolorcontrol,org.kde.plasma.notifications,org.kde.plasma.printmanager,org.kde.plasma.volume,devos-voice,microphone,Microphone
+knownItems=org.kde.plasma.battery,org.kde.plasma.bluetooth,org.kde.plasma.brightness,org.kde.plasma.brightnesscontrol,org.kde.plasma.clipboard,org.kde.plasma.devicenotifier,org.kde.plasma.keyboardlayout,org.kde.plasma.manage-inputmethod,org.kde.plasma.mediacontroller,org.kde.plasma.networkmanagement,org.kde.plasma.nightcolorcontrol,org.kde.plasma.notifications,org.kde.plasma.printmanager,org.kde.plasma.cameraindicator,org.kde.plasma.volume
+pin=false
+shownItems=
+
+[Containments][3][Applets][7][General]
 showAllItems=false
 extraItems=org.kde.plasma.battery,org.kde.plasma.bluetooth,org.kde.plasma.brightness,org.kde.plasma.brightnesscontrol,org.kde.plasma.clipboard,org.kde.plasma.devicenotifier,org.kde.plasma.keyboardlayout,org.kde.plasma.manage-inputmethod,org.kde.plasma.mediacontroller,org.kde.plasma.networkmanagement,org.kde.plasma.nightcolorcontrol,org.kde.plasma.notifications,org.kde.plasma.printmanager,org.kde.plasma.cameraindicator,org.kde.plasma.volume
 hiddenItems=Antigravity_status_icon_1,Antigravity_status_icon_2,Antigravity_status_icon_3,Brightness,ChatGPT,Cursor,Cursor_status_icon_1,Cursor_status_icon_2,Cursor_status_icon_3,Cursor_status_icon_4,Cursor_status_icon_5,DevOS Display,DevOS Optimizer,DevOS Sound,Display,Sound,antigravity,chatgpt,chrome_status_icon_1,chrome_status_icon_10,chrome_status_icon_11,chrome_status_icon_12,chrome_status_icon_13,chrome_status_icon_14,chrome_status_icon_15,chrome_status_icon_16,chrome_status_icon_17,chrome_status_icon_18,chrome_status_icon_19,chrome_status_icon_2,chrome_status_icon_20,chrome_status_icon_3,chrome_status_icon_4,chrome_status_icon_5,chrome_status_icon_6,chrome_status_icon_7,chrome_status_icon_8,chrome_status_icon_9,cursor,devos-display,devos-optimizer,devos-sound,ibus_ui_gtk3,org.kde.plasma.battery,org.kde.plasma.bluetooth,org.kde.plasma.brightness,org.kde.plasma.brightnesscontrol,org.kde.plasma.clipboard,org.kde.plasma.devicenotifier,org.kde.plasma.keyboardlayout,org.kde.plasma.manage-inputmethod,org.kde.plasma.mediacontroller,org.kde.plasma.networkmanagement,org.kde.plasma.nightcolorcontrol,org.kde.plasma.notifications,org.kde.plasma.printmanager,org.kde.plasma.volume,devos-voice,microphone,Microphone
@@ -135,3 +146,20 @@ showSeconds=false
 
 [Containments][3][General]
 AppletOrder=4;5;6;9;7;8
+
+[Containments][4]
+activityId=
+formfactor=2
+immutability=1
+lastScreen=0
+location=4
+plugin=org.kde.plasma.private.systemtray
+wallpaperplugin=org.kde.image
+
+[Containments][4][General]
+showAllItems=false
+extraItems=org.kde.plasma.battery,org.kde.plasma.bluetooth,org.kde.plasma.brightness,org.kde.plasma.brightnesscontrol,org.kde.plasma.clipboard,org.kde.plasma.devicenotifier,org.kde.plasma.keyboardlayout,org.kde.plasma.manage-inputmethod,org.kde.plasma.mediacontroller,org.kde.plasma.networkmanagement,org.kde.plasma.nightcolorcontrol,org.kde.plasma.notifications,org.kde.plasma.printmanager,org.kde.plasma.cameraindicator,org.kde.plasma.volume
+hiddenItems=Antigravity_status_icon_1,Antigravity_status_icon_2,Antigravity_status_icon_3,Brightness,ChatGPT,Cursor,Cursor_status_icon_1,Cursor_status_icon_2,Cursor_status_icon_3,Cursor_status_icon_4,Cursor_status_icon_5,DevOS Display,DevOS Optimizer,DevOS Sound,Display,Sound,antigravity,chatgpt,chrome_status_icon_1,chrome_status_icon_10,chrome_status_icon_11,chrome_status_icon_12,chrome_status_icon_13,chrome_status_icon_14,chrome_status_icon_15,chrome_status_icon_16,chrome_status_icon_17,chrome_status_icon_18,chrome_status_icon_19,chrome_status_icon_2,chrome_status_icon_20,chrome_status_icon_3,chrome_status_icon_4,chrome_status_icon_5,chrome_status_icon_6,chrome_status_icon_7,chrome_status_icon_8,chrome_status_icon_9,cursor,devos-display,devos-optimizer,devos-sound,ibus_ui_gtk3,org.kde.plasma.battery,org.kde.plasma.bluetooth,org.kde.plasma.brightness,org.kde.plasma.brightnesscontrol,org.kde.plasma.clipboard,org.kde.plasma.devicenotifier,org.kde.plasma.keyboardlayout,org.kde.plasma.manage-inputmethod,org.kde.plasma.mediacontroller,org.kde.plasma.networkmanagement,org.kde.plasma.nightcolorcontrol,org.kde.plasma.notifications,org.kde.plasma.printmanager,org.kde.plasma.volume,devos-voice,microphone,Microphone
+knownItems=org.kde.plasma.battery,org.kde.plasma.bluetooth,org.kde.plasma.brightness,org.kde.plasma.brightnesscontrol,org.kde.plasma.clipboard,org.kde.plasma.devicenotifier,org.kde.plasma.keyboardlayout,org.kde.plasma.manage-inputmethod,org.kde.plasma.mediacontroller,org.kde.plasma.networkmanagement,org.kde.plasma.nightcolorcontrol,org.kde.plasma.notifications,org.kde.plasma.printmanager,org.kde.plasma.cameraindicator,org.kde.plasma.volume
+pin=false
+shownItems=
