@@ -246,6 +246,17 @@ class TestChromeProfiles(unittest.TestCase):
         self.assertIn("applications:chrome-work-w11.desktop", still_open)
         self.assertNotIn("applications:chrome-mirza-w22.desktop", still_open)
         self.assertIn("applications:devos-search.desktop", still_open)
+        separate = chrome_profiles._reconcile_launcher_entries(
+            existing,
+            [
+                {"id": 0x11, "wm_class": "google-chrome.Google-chrome", "task_desktop": "chrome-work-w11.desktop"},
+                {"id": 0x22, "wm_class": "google-chrome.Google-chrome", "task_desktop": "chrome-mirza-w22.desktop"},
+            ],
+            idle,
+        )
+        self.assertIn("applications:chrome-work-w11.desktop", separate)
+        self.assertIn("applications:chrome-mirza-w22.desktop", separate)
+        self.assertNotIn("applications:devos-browser.desktop", separate)
         closed = chrome_profiles._reconcile_launcher_entries(existing, [], idle)
         self.assertEqual(closed, ["applications:devos-search.desktop"])
         live = inspect.getsource(chrome_profiles.apply_plasma_launchers_live)

@@ -1439,6 +1439,13 @@ def _reconcile_launcher_entries(existing, chrome_wins, idle_pin: str) -> list:
             open_hex.add(f"{int(win.get('id') or 0) & 0xFFFFFFFF:x}")
         except (TypeError, ValueError):
             pass
+        desk = (win.get("task_desktop") or "").strip()
+        if desk:
+            name = desk if desk.endswith(".desktop") else f"{desk}.desktop"
+            entry = name if name.startswith("applications:") else f"applications:{name}"
+            if entry not in seen:
+                seen.add(entry)
+                open_desktops.append(entry)
         for token in re.split(r"[\s,]+", (win.get("wm_class") or "").lower()):
             if token.startswith("chrome-") and "-w" in token:
                 name = token if token.endswith(".desktop") else f"{token}.desktop"
@@ -2479,7 +2486,6 @@ def refresh_open_profile_icons(home_dir, chrome_wins) -> None:
     icons_128 = os.path.join(home_dir, ".local/share/icons/hicolor/128x128/apps")
     os.makedirs(icons_48, exist_ok=True)
     os.makedirs(icons_128, exist_ok=True)
-    photos = []
     for w in chrome_wins:
         wid = w.get("id")
         # The process flag is the profile this window actually opened. A cached
@@ -2509,48 +2515,82 @@ def refresh_open_profile_icons(home_dir, chrome_wins) -> None:
         icon_128 = os.path.join(icons_128, f"{icon_base}.png")
         if not (_badge_is_current(icon_48, avatar) and _badge_is_current(icon_128, avatar)):
             generate_badged_icon(prof_name, icon_48, icon_128, avatar_path=avatar)
-        if wid:
-            set_window_icon(wid, icon_48, icon_128)
-        if avatar and os.path.isfile(icon_48):
-            photos.append(os.path.abspath(icon_48))
-        elif os.path.isfile(icon_48):
-            photos.append(os.path.abspath(icon_48))
-    # The task button uses the launcher's Icon, which is still the Chrome logo.
-    # One open profile: point that launcher at this picture. Different profiles
-    # keep the picture that was just set on each window.
-    target = photos[0] if photos and len(set(photos)) == 1 else None
-    if not target or target == _PHOTO_PUSHED:
-        return
-    _text, section, existing = _read_launcher_entries(home_dir)
-    changed = False
+        if not wid:
+            continue
+        # One file per window. A shared Chrome launcher was painting the first
+        # account's photo onto every other browser button.
+        class_name = window_task_class(slug or "chrome", int(wid))
+        win_icon = os.path.join(icons_48, f"{class_name}.png")
+        try:
+            if os.path.abspath(icon_48) != os.path.abspath(win_icon) and os.path.isfile(icon_48):
+                shutil.copyfile(icon_48, win_icon)
+        except OSError:
+            win_icon = icon_48
+        ensure_window_task_desktop(home_dir, prof_name, slug, class_name, class_name)
+        w["task_class"] = class_name
+        w["task_desktop"] = f"{class_name}.desktop"
+        set_window_icon(wid, win_icon, icon_128)
+    # The shared Chrome launcher must not keep the first account's picture.
+    _release_shared_chrome_icons(home_dir)
+
+
+def _release_shared_chrome_icons(home_dir: str) -> None:
+    """Stop the plain Chrome launcher from showing one account's photo.
+
+    Each open window has its own button. The shared launcher is only the
+    Chrome logo, and it is not the picture for every profile.
+    """
     apps = os.path.join(home_dir, ".local/share/applications")
-    os.makedirs(apps, exist_ok=True)
-    names = ["google-chrome.desktop", "devos-browser.desktop", "com.google.chrome.desktop"]
-    for entry in existing:
-        if not _is_chrome_launcher(entry):
-            continue
-        base = entry.split(":")[-1]
-        if "-w" in base.lower():
-            continue
-        if base not in names:
-            names.append(base)
-    for base in names:
-        path = os.path.join(apps, base)
+    for name, icon in (
+        ("google-chrome.desktop", "google-chrome"),
+        ("com.google.chrome.desktop", "google-chrome"),
+        ("devos-browser.desktop", "devos-browser"),
+    ):
+        path = os.path.join(apps, name)
         if not os.path.isfile(path):
-            system = os.path.join("/usr/share/applications", base)
-            if not os.path.isfile(system):
-                continue
-            try:
-                shutil.copyfile(system, path)
-            except OSError:
-                continue
-        if _swap_desktop_icon(path, target):
-            changed = True
-    if changed:
-        _refresh_service_cache()
-        if section:
-            _notify_launcher_list(home_dir, ",".join(existing))
-    _PHOTO_PUSHED = target
+            continue
+        try:
+            with open(path, encoding="utf-8") as handle:
+                text = handle.read()
+        except OSError:
+            continue
+        found = re.search(r"(?m)^Icon=(.*)$", text)
+        if not found:
+            continue
+        current = found.group(1).strip()
+        if current == icon:
+            continue
+        if not (current.endswith(".png") or "/hicolor/" in current or "-win.png" in current or "-face.png" in current):
+            continue
+        text = re.sub(r"(?m)^Icon=.*$", f"Icon={icon}", text, count=1)
+        try:
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(text)
+        except OSError:
+            continue
+
+
+def bind_each_chrome_window_once(home_dir, chrome_wins) -> None:
+    """Point each window at its own button, once.
+
+    Repeating the class change drops the task and the footer flashes, so a
+    window is tagged only the first time it is seen.
+    """
+    if not home_dir:
+        home_dir = os.path.expanduser("~")
+    for w in chrome_wins or []:
+        wid = w.get("id")
+        class_name = w.get("task_class") or ""
+        desk = w.get("task_desktop") or ""
+        if not wid or not class_name:
+            continue
+        already = (w.get("wm_class") or "").lower()
+        if class_name.lower() not in already and _APPLIED_CLASS.get(wid) != class_name:
+            set_window_wm_class(wid, class_name, class_name)
+            _APPLIED_CLASS[wid] = class_name
+        if desk and _APPLIED_CLASS.get(f"desk:{wid}") != desk:
+            set_window_desktop_file(wid, desk, home_dir=home_dir)
+            _APPLIED_CLASS[f"desk:{wid}"] = desk
 
 
 def _refresh_service_cache() -> None:
@@ -2681,6 +2721,7 @@ def watch_chrome_windows(home_dir=None, poll_interval=None):
             # open. Waiting here left Chrome's own logo on the footer.
             try:
                 refresh_open_profile_icons(home_dir, chrome_wins)
+                bind_each_chrome_window_once(home_dir, chrome_wins)
             except Exception:
                 pass
 
