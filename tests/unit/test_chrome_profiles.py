@@ -64,6 +64,27 @@ class TestChromeProfiles(unittest.TestCase):
             self.assertGreater(os.path.getsize(icon_48), 500)
             self.assertGreater(os.path.getsize(icon_128), 1000)
 
+    def test_account_photo_is_found_without_the_gaia_flag(self):
+        from PIL import Image as PILImage
+
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = os.path.join(tmp, "Profile 1")
+            os.makedirs(folder, exist_ok=True)
+            photo = os.path.join(folder, "Google Profile Picture.png")
+            img = PILImage.new("RGB", (96, 96))
+            pixels = img.load()
+            for y in range(96):
+                for x in range(96):
+                    pixels[x, y] = ((x * 13) % 256, (y * 17) % 256, ((x * y) + 40) % 256)
+            img.save(photo)
+            found = chrome_profiles.get_profile_avatar_path(
+                tmp, "Profile 1", {"name": "Mirza", "avatar_icon": "chrome://theme/IDR_PROFILE_AVATAR_26"}
+            )
+            self.assertEqual(found, photo)
+            out = os.path.join(tmp, "face48.png")
+            chrome_profiles.generate_badged_icon("Mirza", out, avatar_path=photo)
+            self.assertGreater(os.path.getsize(out), 400)
+
     def test_letter_badge_when_no_photo(self):
         self.assertEqual(chrome_profiles._profile_initial("Work"), "W")
         self.assertEqual(chrome_profiles._profile_initial("guest"), "G")
@@ -251,7 +272,13 @@ class TestChromeProfiles(unittest.TestCase):
         self.assertNotIn("reload_plasmashell", apply_src)
         self.assertNotIn("reload_plasmashell", watch_src)
         self.assertIn("paint_chrome_icons", watch_src)
+        self.assertIn("refresh_open_profile_icons", watch_src)
+        self.assertLess(
+            watch_src.index("refresh_open_profile_icons"),
+            watch_src.index("now - last_icon"),
+        )
         self.assertNotIn("apply_window_profiles", watch_src)
+        self.assertNotIn("set_window_wm_class", inspect.getsource(chrome_profiles.refresh_open_profile_icons))
         self.assertNotIn("set_window_wm_class", inspect.getsource(chrome_profiles.paint_chrome_icons))
         self.assertNotIn("reloadConfig", inspect.getsource(chrome_profiles.apply_plasma_launchers_live))
         self.assertNotIn('"org.kde.kwin.Scripting.start"', kwin_src)

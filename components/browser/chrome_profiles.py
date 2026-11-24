@@ -120,29 +120,32 @@ def get_profile_avatar_path(config_dir, profile_key, info=None):
     candidates = []
     info = info if isinstance(info, dict) else {}
 
-    # Theme ids like chrome://theme/IDR_PROFILE_AVATAR_* are never files — letter badge.
-    avatar_icon = str(info.get("avatar_icon") or "")
-    if "IDR_PROFILE_AVATAR" in avatar_icon.upper() or avatar_icon.startswith("chrome://theme/"):
-        # Only override when Gaia is actually in use.
-        if not info.get("use_gaia_picture"):
-            return None
-
-    # Require an explicit Gaia picture — unsigned-in defaults must not badge as photos.
-    using_gaia = bool(info.get("use_gaia_picture"))
+    # A real account photo lives in the profile folder. Chrome still shows it
+    # when the theme avatar id is set and use_gaia_picture was not written.
     picture_name = info.get("gaia_picture_file_name")
-    if using_gaia and isinstance(picture_name, str) and picture_name and "/" not in picture_name:
+    if isinstance(picture_name, str) and picture_name and "/" not in picture_name:
         if picture_name.endswith((".png", ".jpg", ".jpeg", ".webp")):
             candidates.append(os.path.join(folder, picture_name))
+    for name in (
+        "Google Profile Picture.png",
+        "Google Profile Picture.jpg",
+        "Google Profile Picture.jpeg",
+        "Google Profile Picture.webp",
+    ):
+        candidates.append(os.path.join(folder, name))
+    try:
+        for entry in os.listdir(folder):
+            low = entry.lower()
+            if "profile picture" in low or low.startswith("gaia"):
+                candidates.append(os.path.join(folder, entry))
+    except OSError:
+        pass
 
-    if using_gaia:
-        for name in (
-            "Google Profile Picture.png",
-            "Google Profile Picture.jpg",
-            "Google Profile Picture.jpeg",
-        ):
-            candidates.append(os.path.join(folder, name))
-
+    seen = set()
     for path in candidates:
+        if path in seen:
+            continue
+        seen.add(path)
         if _is_usable_profile_photo(path):
             return path
     return None
@@ -365,6 +368,24 @@ def generate_badged_icon(name, output_48, output_128=None, base_icon=None, avata
       2) Colored circle with the profile name's FIRST CHARACTER
          (profiles with no photo — never leave blank / gray person)
     """
+    # A real account photo is the task button itself. A corner badge on the
+    # Chrome logo stays the Chrome logo at footer size, which is what the
+    # user still sees.
+    if avatar_path and _is_usable_profile_photo(avatar_path):
+        try:
+            photo = _circle_crop(Image.open(avatar_path), 112)
+            img = Image.new("RGBA", (128, 128), (0, 0, 0, 0))
+            ImageDraw.Draw(img).ellipse((0, 0, 127, 127), fill=(255, 255, 255, 255))
+            img.paste(photo, (8, 8), photo)
+            os.makedirs(os.path.dirname(os.path.abspath(output_48)), exist_ok=True)
+            img.resize((48, 48), Image.Resampling.LANCZOS).save(output_48, format="PNG")
+            if output_128:
+                os.makedirs(os.path.dirname(os.path.abspath(output_128)), exist_ok=True)
+                img.save(output_128, format="PNG")
+            return
+        except Exception:
+            pass
+
     if not base_icon or not os.path.isfile(base_icon):
         base_icon = get_stock_chrome_icon()
 
@@ -377,52 +398,31 @@ def generate_badged_icon(name, output_48, output_128=None, base_icon=None, avata
     # missing, so a normal install crashed here and the footer kept one icon.
     draw = ImageDraw.Draw(img)
 
-    used_avatar = False
-    if avatar_path and _is_usable_profile_photo(avatar_path):
-        try:
-            badge_size = 56
-            ring = 4
-            badge = _circle_crop(Image.open(avatar_path), badge_size)
-            cx = 128 - badge_size // 2 - 4
-            cy = 128 - badge_size // 2 - 4
-            outer = badge_size + ring * 2
-            ring_img = Image.new("RGBA", (outer, outer), (0, 0, 0, 0))
-            ImageDraw.Draw(ring_img).ellipse(
-                (0, 0, outer - 1, outer - 1),
-                fill=(255, 255, 255, 245),
-            )
-            ring_img.paste(badge, (ring, ring), badge)
-            img.alpha_composite(ring_img, (cx - outer // 2, cy - outer // 2))
-            used_avatar = True
-        except Exception:
-            used_avatar = False
-
-    if not used_avatar:
-        label = badge_letter(name)
-        bg_color = get_profile_color(name or "Chrome")
-        font = None
-        for font_path in [
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-            "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
-        ]:
-            if os.path.isfile(font_path):
-                try:
-                    font = ImageFont.truetype(font_path, 42)
-                    break
-                except Exception:
-                    pass
-        draw.rounded_rectangle(
-            [4, 76, 124, 124],
-            radius=12,
-            fill=bg_color,
-            outline=(255, 255, 255, 230),
-            width=3,
-        )
-        if font:
-            draw.text((64, 100), label, fill=(255, 255, 255), font=font, anchor="mm")
-        else:
-            draw.text((64, 100), label, fill=(255, 255, 255), anchor="mm")
+    label = badge_letter(name)
+    bg_color = get_profile_color(name or "Chrome")
+    font = None
+    for font_path in [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+    ]:
+        if os.path.isfile(font_path):
+            try:
+                font = ImageFont.truetype(font_path, 42)
+                break
+            except Exception:
+                pass
+    draw.rounded_rectangle(
+        [4, 76, 124, 124],
+        radius=12,
+        fill=bg_color,
+        outline=(255, 255, 255, 230),
+        width=3,
+    )
+    if font:
+        draw.text((64, 100), label, fill=(255, 255, 255), font=font, anchor="mm")
+    else:
+        draw.text((64, 100), label, fill=(255, 255, 255), anchor="mm")
 
     os.makedirs(os.path.dirname(os.path.abspath(output_48)), exist_ok=True)
     img_48 = img.resize((48, 48), Image.Resampling.LANCZOS)
@@ -2334,6 +2334,128 @@ def _chrome_switch_identity(chrome_wins):
     return tuple(w["id"] for w in chrome_wins)
 
 
+_DESKTOP_ICON_BACKUP = {}
+_PHOTO_PUSHED = None
+
+
+def _swap_desktop_icon(path: str, new_icon: str) -> bool:
+    """Point one launcher file at a profile photo. Remember the original Icon=."""
+    if not path or not os.path.isfile(path):
+        return False
+    try:
+        with open(path, encoding="utf-8") as handle:
+            text = handle.read()
+    except OSError:
+        return False
+    if path not in _DESKTOP_ICON_BACKUP:
+        found = re.search(r"(?m)^Icon=.*$", text)
+        _DESKTOP_ICON_BACKUP[path] = found.group(0) if found else "Icon=google-chrome"
+    new_line = f"Icon={new_icon}"
+    if re.search(r"(?m)^" + re.escape(new_line) + r"\s*$", text):
+        return False
+    if re.search(r"(?m)^Icon=.*$", text):
+        text = re.sub(r"(?m)^Icon=.*$", new_line, text, count=1)
+    else:
+        if text and not text.endswith("\n"):
+            text += "\n"
+        text += new_line + "\n"
+    try:
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(text)
+    except OSError:
+        return False
+    return True
+
+
+def _restore_desktop_icons() -> None:
+    """Put the browser logo back on launcher files after Chrome closes."""
+    global _PHOTO_PUSHED
+    for path, line in list(_DESKTOP_ICON_BACKUP.items()):
+        try:
+            with open(path, encoding="utf-8") as handle:
+                text = handle.read()
+            text = re.sub(r"(?m)^Icon=.*$", line, text, count=1)
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(text)
+        except OSError:
+            pass
+        _DESKTOP_ICON_BACKUP.pop(path, None)
+    _PHOTO_PUSHED = None
+
+
+def refresh_open_profile_icons(home_dir, chrome_wins) -> None:
+    """Put the open profile's photo on the task button. Do not retag the window.
+
+    The footer was keeping Chrome's own logo because the photo was painted
+    late, and only as a corner on that logo. This writes the photo as the
+    icon and sets it on the window. It does not change WM_CLASS and it does
+    not reload the panel.
+    """
+    global _PHOTO_PUSHED
+    if not home_dir:
+        home_dir = os.path.expanduser("~")
+    if not chrome_wins:
+        if _DESKTOP_ICON_BACKUP:
+            _restore_desktop_icons()
+        return
+    chrome_dir = os.path.join(home_dir, ".config/google-chrome")
+    details = get_chrome_profile_details(chrome_dir)
+    profiles = {k: v["name"] for k, v in details.items()}
+    name_to_key = {v["name"]: k for k, v in details.items()}
+    icons_48 = os.path.join(home_dir, ".local/share/icons/hicolor/48x48/apps")
+    icons_128 = os.path.join(home_dir, ".local/share/icons/hicolor/128x128/apps")
+    os.makedirs(icons_48, exist_ok=True)
+    os.makedirs(icons_128, exist_ok=True)
+    photos = []
+    for w in chrome_wins:
+        wid = w.get("id")
+        prof_name = WINDOW_PROFILE_CACHE.get(wid) if wid else None
+        if not prof_name:
+            prof_name = detect_window_profile(w, profiles, home_dir, None, None)
+        slug = slugify(prof_name or "")
+        is_guest = (prof_name or "").lower() == "guest" or slug == "guest"
+        prof_key = None if is_guest else name_to_key.get(prof_name)
+        avatar = None if is_guest else ((details.get(prof_key) or {}).get("avatar") if prof_key else None)
+        icon_base = f"chrome-{slug}-face" if avatar else f"chrome-{slug}"
+        icon_48 = os.path.join(icons_48, f"{icon_base}.png")
+        icon_128 = os.path.join(icons_128, f"{icon_base}.png")
+        if not (_badge_is_current(icon_48, avatar) and _badge_is_current(icon_128, avatar)):
+            generate_badged_icon(prof_name, icon_48, icon_128, avatar_path=avatar)
+        if wid:
+            set_window_icon(wid, icon_48, icon_128)
+        if avatar and os.path.isfile(icon_48):
+            photos.append(os.path.abspath(icon_48))
+    # One profile is open. The pinned browser button uses its .desktop Icon,
+    # so point that file at the photo. Several profiles keep their own window
+    # icons and do not share one launcher picture.
+    target = photos[0] if photos and len(set(photos)) == 1 else None
+    if not target or target == _PHOTO_PUSHED:
+        return
+    _text, section, existing = _read_launcher_entries(home_dir)
+    changed = False
+    apps = os.path.join(home_dir, ".local/share/applications")
+    os.makedirs(apps, exist_ok=True)
+    for entry in existing:
+        if not _is_chrome_launcher(entry):
+            continue
+        base = entry.split(":")[-1]
+        if "-w" in base.lower():
+            continue
+        path = os.path.join(apps, base)
+        if not os.path.isfile(path):
+            system = os.path.join("/usr/share/applications", base)
+            if os.path.isfile(system):
+                try:
+                    shutil.copyfile(system, path)
+                except OSError:
+                    continue
+        if _swap_desktop_icon(path, target):
+            changed = True
+    if changed and section:
+        _notify_launcher_list(home_dir, ",".join(existing))
+    _PHOTO_PUSHED = target
+
+
 def paint_chrome_icons(home_dir, chrome_wins):
     """Put the profile photo on each window. Do not retag it or touch the panel."""
     if not home_dir:
@@ -2355,8 +2477,9 @@ def paint_chrome_icons(home_dir, chrome_wins):
         is_guest = (prof_name or "").lower() == "guest" or slug == "guest"
         prof_key = None if is_guest else name_to_key.get(prof_name)
         avatar = None if is_guest else ((details.get(prof_key) or {}).get("avatar") if prof_key else None)
-        icon_48 = os.path.join(icons_48, f"chrome-{slug}.png")
-        icon_128 = os.path.join(icons_128, f"chrome-{slug}.png")
+        icon_base = f"chrome-{slug}-face" if avatar else f"chrome-{slug}"
+        icon_48 = os.path.join(icons_48, f"{icon_base}.png")
+        icon_128 = os.path.join(icons_128, f"{icon_base}.png")
         if not (_badge_is_current(icon_48, avatar) and _badge_is_current(icon_128, avatar)):
             generate_badged_icon(prof_name, icon_48, icon_128, avatar_path=avatar)
         set_window_icon(wid, icon_48, icon_128)
@@ -2429,6 +2552,13 @@ def watch_chrome_windows(home_dir=None, poll_interval=None):
             ]
             ident = _chrome_switch_identity(chrome_wins)
             now = time.time()
+
+            # The profile photo goes on the button as soon as the window is
+            # open. Waiting here left Chrome's own logo on the footer.
+            try:
+                refresh_open_profile_icons(home_dir, chrome_wins)
+            except Exception:
+                pass
 
             # A window opened or closed. Drop every browser button once Chrome
             # is gone. Title changes are not part of ident. If the running bar
