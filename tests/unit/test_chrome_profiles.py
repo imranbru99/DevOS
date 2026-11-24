@@ -89,6 +89,20 @@ class TestChromeProfiles(unittest.TestCase):
             named = chrome_profiles.get_profile_avatar_path(tmp, "Profile 1", {})
             self.assertEqual(named, photo)
             self.assertIn("XChangeProperty.argtypes", inspect.getsource(chrome_profiles.set_window_icon))
+
+    def test_account_photo_is_a_badge_on_the_chrome_logo(self):
+        from PIL import Image as PILImage
+
+        with tempfile.TemporaryDirectory() as tmp:
+            photo = os.path.join(tmp, "Google Profile Picture.png")
+            PILImage.new("RGB", (96, 96), (220, 30, 30)).save(photo)
+            out = os.path.join(tmp, "badge48.png")
+            chrome_profiles.generate_badged_icon("Mirza", out, avatar_path=photo)
+            img = PILImage.open(out).convert("RGB")
+            # The Chrome logo stays in the top of the button. The photo is the
+            # corner, so the top-left pixel is not the account photo's red.
+            top = img.getpixel((4, 4))
+            self.assertLess(top[0] - max(top[1], top[2]), 80)
             out = os.path.join(tmp, "face48.png")
             chrome_profiles.generate_badged_icon("Mirza", out, avatar_path=photo)
             self.assertGreater(os.path.getsize(out), 400)

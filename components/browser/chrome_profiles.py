@@ -397,33 +397,34 @@ def _draw_letter_badge(img, name: str) -> None:
         img.alpha_composite(strip, (0, 2))
 
 
+def _draw_photo_badge(img, avatar_path: str) -> bool:
+    """Windows-style corner photo. The Chrome logo stays visible."""
+    try:
+        badge_size = 72
+        ring = 4
+        photo = _circle_crop(Image.open(avatar_path), badge_size)
+        outer = badge_size + ring * 2
+        badge = Image.new("RGBA", (outer, outer), (0, 0, 0, 0))
+        ImageDraw.Draw(badge).ellipse((0, 0, outer - 1, outer - 1), fill=(255, 255, 255, 255))
+        badge.paste(photo, (ring, ring), photo)
+        img.alpha_composite(badge, (128 - outer - 1, 128 - outer - 1))
+        return True
+    except Exception:
+        return False
+
+
 def generate_badged_icon(name, output_48, output_128=None, base_icon=None, avatar_path=None):
     """
     Windows-style Chrome profile icon: stock Chrome logo + badge.
+
+    The Chrome logo is the button. The account photo is the corner badge,
+    the same arrangement Windows uses. A photo never replaces the logo.
 
     Badge priority:
       1) Real Google account photo (Gaia)
       2) Colored circle with the profile name's FIRST CHARACTER
          (profiles with no photo — never leave blank / gray person)
     """
-    # A real account photo is the task button itself. A corner badge on the
-    # Chrome logo stays the Chrome logo at footer size, which is what the
-    # user still sees.
-    if avatar_path and _is_usable_profile_photo(avatar_path):
-        try:
-            photo = _circle_crop(Image.open(avatar_path), 112)
-            img = Image.new("RGBA", (128, 128), (0, 0, 0, 0))
-            ImageDraw.Draw(img).ellipse((0, 0, 127, 127), fill=(255, 255, 255, 255))
-            img.paste(photo, (8, 8), photo)
-            os.makedirs(os.path.dirname(os.path.abspath(output_48)), exist_ok=True)
-            img.resize((48, 48), Image.Resampling.LANCZOS).save(output_48, format="PNG")
-            if output_128:
-                os.makedirs(os.path.dirname(os.path.abspath(output_128)), exist_ok=True)
-                img.save(output_128, format="PNG")
-            return
-        except Exception:
-            pass
-
     if not base_icon or not os.path.isfile(base_icon):
         base_icon = get_stock_chrome_icon()
 
@@ -435,6 +436,13 @@ def generate_badged_icon(name, output_48, output_128=None, base_icon=None, avata
     # Always a new context. `draw` used to exist only when the Chrome logo was
     # missing, so a normal install crashed here and the footer kept one icon.
     draw = ImageDraw.Draw(img)
+    if avatar_path and _accept_account_photo(avatar_path) and _draw_photo_badge(img, avatar_path):
+        os.makedirs(os.path.dirname(os.path.abspath(output_48)), exist_ok=True)
+        img.resize((48, 48), Image.Resampling.LANCZOS).save(output_48, format="PNG")
+        if output_128:
+            os.makedirs(os.path.dirname(os.path.abspath(output_128)), exist_ok=True)
+            img.save(output_128, format="PNG")
+        return
 
     label = badge_letter(name)
     bg_color = get_profile_color(name or "Chrome")
@@ -2410,7 +2418,13 @@ def _swap_desktop_icon(path: str, new_icon: str) -> bool:
         return False
     if path not in _DESKTOP_ICON_BACKUP:
         found = re.search(r"(?m)^Icon=.*$", text)
-        _DESKTOP_ICON_BACKUP[path] = found.group(0) if found else "Icon=google-chrome"
+        line = found.group(0) if found else "Icon=google-chrome"
+        # A previous run stored a bare face here. Closing Chrome must bring
+        # the Chrome logo back, not that face.
+        if "-face.png" in line or "-win.png" in line or "/hicolor/" in line:
+            base = os.path.basename(path)
+            line = "Icon=devos-browser" if base.startswith("devos-browser") else "Icon=google-chrome"
+        _DESKTOP_ICON_BACKUP[path] = line
     new_line = f"Icon={new_icon}"
     if re.search(r"(?m)^" + re.escape(new_line) + r"\s*$", text):
         return False
@@ -2445,12 +2459,10 @@ def _restore_desktop_icons() -> None:
 
 
 def refresh_open_profile_icons(home_dir, chrome_wins) -> None:
-    """Put the open profile's photo on the task button. Do not retag the window.
+    """Windows task button: Chrome logo with this account's photo on the corner.
 
-    The footer was keeping Chrome's own logo because the photo was painted
-    late, and only as a corner on that logo. This writes the photo as the
-    icon and sets it on the window. It does not change WM_CLASS and it does
-    not reload the panel.
+    The logo stays. The photo is only the badge, and it is the photo of the
+    profile this window opened. The panel is not reloaded.
     """
     global _PHOTO_PUSHED
     if not home_dir:
@@ -2470,14 +2482,29 @@ def refresh_open_profile_icons(home_dir, chrome_wins) -> None:
     photos = []
     for w in chrome_wins:
         wid = w.get("id")
-        prof_name = WINDOW_PROFILE_CACHE.get(wid) if wid else None
-        if not prof_name:
-            prof_name = detect_window_profile(w, profiles, home_dir, None, None)
+        # The process flag is the profile this window actually opened. A cached
+        # name can belong to a different account, and the button then shows
+        # that account's face.
+        pid = _window_pid(wid) if wid else 0
+        prof_key = _cmdline_profile_key(pid) if pid else ""
+        if prof_key and prof_key in details and (prof_key or "").lower() != "guest":
+            prof_name = details[prof_key]["name"]
+            avatar = (details.get(prof_key) or {}).get("avatar")
+            if wid:
+                WINDOW_PROFILE_CACHE[wid] = prof_name
+        else:
+            prof_name = WINDOW_PROFILE_CACHE.get(wid) if wid else None
+            if not prof_name:
+                prof_name = detect_window_profile(w, profiles, home_dir, None, None)
+            slug_guess = slugify(prof_name or "")
+            is_guest = (prof_name or "").lower() == "guest" or slug_guess == "guest"
+            prof_key = None if is_guest else name_to_key.get(prof_name)
+            avatar = None if is_guest else ((details.get(prof_key) or {}).get("avatar") if prof_key else None)
         slug = slugify(prof_name or "")
         is_guest = (prof_name or "").lower() == "guest" or slug == "guest"
-        prof_key = None if is_guest else name_to_key.get(prof_name)
-        avatar = None if is_guest else ((details.get(prof_key) or {}).get("avatar") if prof_key else None)
-        icon_base = f"chrome-{slug}-face" if avatar else f"chrome-{slug}"
+        if is_guest:
+            avatar = None
+        icon_base = f"chrome-{slug}-win" if avatar else f"chrome-{slug}"
         icon_48 = os.path.join(icons_48, f"{icon_base}.png")
         icon_128 = os.path.join(icons_128, f"{icon_base}.png")
         if not (_badge_is_current(icon_48, avatar) and _badge_is_current(icon_128, avatar)):
@@ -2558,14 +2585,23 @@ def paint_chrome_icons(home_dir, chrome_wins):
     os.makedirs(icons_128, exist_ok=True)
     for w in chrome_wins:
         wid = w["id"]
-        prof_name = WINDOW_PROFILE_CACHE.get(wid)
-        if not prof_name:
-            prof_name = detect_window_profile(w, profiles, home_dir, None, None)
-        slug = slugify(prof_name)
-        is_guest = (prof_name or "").lower() == "guest" or slug == "guest"
-        prof_key = None if is_guest else name_to_key.get(prof_name)
-        avatar = None if is_guest else ((details.get(prof_key) or {}).get("avatar") if prof_key else None)
-        icon_base = f"chrome-{slug}-face" if avatar else f"chrome-{slug}"
+        pid = _window_pid(wid) if wid else 0
+        prof_key = _cmdline_profile_key(pid) if pid else ""
+        if prof_key and prof_key in details and str(prof_key).lower() != "guest":
+            prof_name = details[prof_key]["name"]
+            avatar = (details.get(prof_key) or {}).get("avatar")
+        else:
+            prof_name = WINDOW_PROFILE_CACHE.get(wid)
+            if not prof_name:
+                prof_name = detect_window_profile(w, profiles, home_dir, None, None)
+            slug = slugify(prof_name)
+            is_guest = (prof_name or "").lower() == "guest" or slug == "guest"
+            prof_key = None if is_guest else name_to_key.get(prof_name)
+            avatar = None if is_guest else ((details.get(prof_key) or {}).get("avatar") if prof_key else None)
+        slug = slugify(prof_name or "")
+        if (prof_name or "").lower() == "guest" or slug == "guest":
+            avatar = None
+        icon_base = f"chrome-{slug}-win" if avatar else f"chrome-{slug}"
         icon_48 = os.path.join(icons_48, f"{icon_base}.png")
         icon_128 = os.path.join(icons_128, f"{icon_base}.png")
         if not (_badge_is_current(icon_48, avatar) and _badge_is_current(icon_128, avatar)):
