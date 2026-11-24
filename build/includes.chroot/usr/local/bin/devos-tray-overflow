@@ -94,7 +94,19 @@ def _run(cmd: list[str], timeout: float = 5.0) -> str:
     return ""
 
 
+def _dbus_string(service: str, iface: str, prop: str) -> str:
+    raw = _run(["busctl", "--user", "get-property", service, "/StatusNotifierItem", iface, prop])
+    match = re.search(r'"([^"]*)"', raw or "")
+    return match.group(1).strip() if match else ""
+
+
 def registered_tray_ids() -> list[str]:
+    """Ids Plasma uses for the icons that are on the bus right now.
+
+    The plain microphone beside the clock is one of these. Its Id is usually
+    ``microphone``, but a fallback tray icon can use another Id while its
+    title or icon name still says microphone. Both have to be hidden.
+    """
     ids: list[str] = []
     bus = _run(["busctl", "--user", "list"])
     if not bus:
@@ -104,15 +116,20 @@ def registered_tray_ids() -> list[str]:
             continue
         service = ln.split()[0]
         for iface in ("org.kde.StatusNotifierItem", "org.freedesktop.StatusNotifierItem"):
-            raw = _run(
-                ["busctl", "--user", "get-property", service, "/StatusNotifierItem", iface, "Id"]
-            )
-            if not raw:
+            item_id = _dbus_string(service, iface, "Id")
+            if not item_id:
                 continue
-            m = re.search(r'"([^"]+)"', raw)
-            if m and m.group(1).strip():
-                ids.append(m.group(1).strip())
-                break
+            title = _dbus_string(service, iface, "Title")
+            icon = _dbus_string(service, iface, "IconName")
+            tip = _dbus_string(service, iface, "ToolTipTitle")
+            blob = " ".join((item_id, title, icon, tip)).lower()
+            if item_id not in ids:
+                ids.append(item_id)
+            if "microphone" in blob:
+                for extra in (item_id, title, icon):
+                    if extra and extra not in ids:
+                        ids.append(extra)
+            break
     return ids
 
 
@@ -377,15 +394,18 @@ for (var p = 0; p < raw.length; p++) {{
       }} catch (e5) {{}}
     }}
     for (var t = 0; t < targets.length; t++) {{
-      try {{
-        targets[t].currentConfigGroup = [];
-        targets[t].writeConfig("showAllItems", false);
-        targets[t].writeConfig("shownItems", []);
-        targets[t].writeConfig("hiddenItems", add);
-        wrote = wrote + 1;
-        try {{ note = String(targets[t].readConfig("hiddenItems")); }} catch (e6) {{ note = ""; }}
-      }} catch (e7) {{
-        note = String(e7);
+      var groups = [[], ["General"], ["Configuration", "General"]];
+      for (var g = 0; g < groups.length; g++) {{
+        try {{
+          targets[t].currentConfigGroup = groups[g];
+          targets[t].writeConfig("showAllItems", false);
+          targets[t].writeConfig("shownItems", []);
+          targets[t].writeConfig("hiddenItems", add);
+          wrote = wrote + 1;
+          try {{ note = String(targets[t].readConfig("hiddenItems")); }} catch (e6) {{ note = note; }}
+        }} catch (e7) {{
+          note = String(e7);
+        }}
       }}
     }}
   }}
@@ -474,6 +494,9 @@ def _evaluate(script: str) -> str:
             continue
         text = ((out.stdout or "") + "\n" + (out.stderr or "")).strip()
         last = text or f"exit {out.returncode}"
+        if "devos-tray-ok" in text or "footer-pinned" in text or "footer-none" in text:
+            _last_eval = text
+            return text
         if out.returncode != 0:
             continue
         if any(word in text for word in ("TypeError", "ReferenceError", "SyntaxError", "Error:")):
@@ -659,8 +682,10 @@ def watch(interval: float = 25.0) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
-        return 0
+    # A Konsole on this desktop sometimes has no DISPLAY. The tray lives on
+    # the user session bus, so the hide still has to run, and it has to say
+    # what happened. Returning here is why the icon stayed beside the clock
+    # with no line in the terminal.
     args = list(sys.argv[1:] if argv is None else argv)
     if args and args[0] == "--watch":
         return watch()

@@ -114,6 +114,9 @@ class TrayOverflowTests(unittest.TestCase):
         self.assertNotIn("plasmashell", pin)
         once = SCRIPT.read_text(encoding="utf-8").split("def once", 1)[1].split("def watch", 1)[0]
         self.assertNotIn("restart_plasmashell()", once)
+        main = SCRIPT.read_text(encoding="utf-8").split("def main", 1)[1]
+        self.assertNotIn('os.environ.get("DISPLAY")', main)
+        self.assertIn('currentConfigGroup = groups[g]', script)
         self.assertIn("apply_live", once)
         self.assertIn("pin_footer", once)
         self.assertIn("notify_running_shell", once)
