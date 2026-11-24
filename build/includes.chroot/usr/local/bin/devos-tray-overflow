@@ -342,80 +342,55 @@ def write_policy(lines: list[str], hidden: set[str]) -> list[str]:
 def live_hide_script(hidden: set[str]) -> str:
     """Tell the running tray to keep these ids in the ^ menu.
 
-    writeConfig updates the widget's config scheme directly and emits
-    configChanged, so the icons move without a panel reload. The widget and
-    the old private containment are both written: after Plasma 6.4 the widget
-    is the tray, and a stale SystrayContainmentId must not be the only target.
-    shownItems wins over hiddenItems, so those ids are removed from it, and
-    showAllItems is turned off because it forces every icon onto the panel.
+    The plain microphone is Plasma's PulseAudio indicator. Its id is
+    ``microphone`` and its status is Active, so it stays on the bar until
+    this widget's own hiddenItems list contains that id. shownItems wins
+    over hiddenItems, so it is cleared. ``panels()`` is not stored in a
+    variable of the same name: that throws before the write. A panel id is
+    resolved with ``panelById`` when ``panels()`` does not return objects.
     """
     add = json.dumps(sorted(hidden))
     return f"""var add = {add};
-function asList(value) {{
-  if (!value) return [];
-  if (typeof value === "string") return value.split(",");
-  var out = [];
-  try {{
-    var n = value.length;
-    for (var i = 0; i < n; i++) out.push(String(value[i]));
-    if (out.length) return out;
-  }} catch (e) {{}}
-  return String(value).split(",");
-}}
-function cleaned(parts) {{
-  var seen = {{}};
-  var out = [];
-  for (var i = 0; i < parts.length; i++) {{
-    var id = String(parts[i] || "").replace(/^\\s+|\\s+$/g, "");
-    if (!id || seen[id]) continue;
-    seen[id] = true;
-    out.push(id);
-  }}
-  return out;
-}}
+var raw = [];
+try {{ raw = panels(); }} catch (e0) {{ raw = []; }}
 var wrote = 0;
-var panelList = panels();
-for (var p = 0; p < panelList.length; p++) {{
-  var widgets = panelList[p].widgets();
+var note = "";
+for (var p = 0; p < raw.length; p++) {{
+  var panel = raw[p];
+  if (!panel || !panel.widgets) {{
+    try {{ panel = panelById(raw[p]); }} catch (e1) {{ panel = null; }}
+  }}
+  if (!panel || !panel.widgets) continue;
+  var widgets = [];
+  try {{ widgets = panel.widgets(); }} catch (e2) {{ widgets = []; }}
   for (var w = 0; w < widgets.length; w++) {{
-    if (widgets[w].type !== "org.kde.plasma.systemtray") continue;
+    var kind = "";
+    try {{ kind = String(widgets[w].type || ""); }} catch (e3) {{ kind = ""; }}
+    if (kind !== "org.kde.plasma.systemtray") continue;
     var targets = [widgets[w]];
     var sid = "";
-    try {{ sid = String(widgets[w].readConfig("SystrayContainmentId") || ""); }} catch (e1) {{ sid = ""; }}
+    try {{ sid = String(widgets[w].readConfig("SystrayContainmentId") || ""); }} catch (e4) {{ sid = ""; }}
     if (sid) {{
       try {{
         var oldTray = desktopById(sid);
         if (oldTray) targets.push(oldTray);
-      }} catch (e2) {{}}
+      }} catch (e5) {{}}
     }}
-    var groups = [[], ["General"], ["Configuration", "General"]];
     for (var t = 0; t < targets.length; t++) {{
-      for (var g = 0; g < groups.length; g++) {{
-        try {{
-          var target = targets[t];
-          target.currentConfigGroup = groups[g];
-          var have = [];
-          var shown = [];
-          try {{ have = asList(target.readConfig("hiddenItems")); }} catch (e3) {{ have = []; }}
-          try {{ shown = asList(target.readConfig("shownItems")); }} catch (e4) {{ shown = []; }}
-          var hidden = cleaned(have.concat(shown).concat(add));
-          var hideSet = {{}};
-          for (var h = 0; h < hidden.length; h++) hideSet[hidden[h]] = true;
-          var keep = [];
-          for (var s = 0; s < shown.length; s++) {{
-            var shownId = String(shown[s] || "").replace(/^\\s+|\\s+$/g, "");
-            if (shownId && !hideSet[shownId]) keep.push(shownId);
-          }}
-          target.writeConfig("showAllItems", false);
-          target.writeConfig("hiddenItems", hidden);
-          target.writeConfig("shownItems", keep);
-          wrote = wrote + 1;
-        }} catch (e5) {{}}
+      try {{
+        targets[t].currentConfigGroup = [];
+        targets[t].writeConfig("showAllItems", false);
+        targets[t].writeConfig("shownItems", []);
+        targets[t].writeConfig("hiddenItems", add);
+        wrote = wrote + 1;
+        try {{ note = String(targets[t].readConfig("hiddenItems")); }} catch (e6) {{ note = ""; }}
+      }} catch (e7) {{
+        note = String(e7);
       }}
     }}
   }}
 }}
-wrote > 0 ? "devos-tray-ok" : "devos-tray-miss";
+(wrote > 0 && note.indexOf("microphone") >= 0) ? "devos-tray-ok" : ("devos-tray-miss " + wrote + " " + note);
 """
 
 
@@ -427,11 +402,17 @@ def pin_footer_script() -> str:
     write the property when it is already ``none``.
     """
     return """var changed = 0;
-var panelList = panels();
-for (var i = 0; i < panelList.length; i++) {
-  var mode = String(panelList[i].hiding || "");
+var raw = [];
+try { raw = panels(); } catch (e0) { raw = []; }
+for (var i = 0; i < raw.length; i++) {
+  var panel = raw[i];
+  if (!panel || panel.hiding === undefined) {
+    try { panel = panelById(raw[i]); } catch (e1) { panel = null; }
+  }
+  if (!panel) continue;
+  var mode = String(panel.hiding || "");
   if (mode === "autohide" || mode === "dodgewindows" || mode === "windowscover" || mode === "windowsbelow" || mode === "windowsgobelow" || mode === "1" || mode === "2" || mode === "3") {
-    panelList[i].hiding = "none";
+    panel.hiding = "none";
     changed = changed + 1;
   }
 }
@@ -591,7 +572,36 @@ def pin_footer() -> bool:
     return False
 
 
-def once(restart_if_changed: bool = True) -> int:
+def _announce(ok: bool, detail: str) -> None:
+    """Say the result on the terminal and as a notification the user can see."""
+    line = (
+        "DevOS: microphone moved under the status menu."
+        if ok
+        else f"DevOS: the microphone is still on the footer ({detail})."
+    )
+    print(line, flush=True)
+    try:
+        path = Path.home() / ".local/share/devos/tray-overflow.result"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(line + "\n", encoding="utf-8")
+    except OSError:
+        pass
+    if shutil.which("notify-send"):
+        title = "Microphone moved" if ok else "Microphone still on the footer"
+        body = "It is under Status and Notifications." if ok else detail[:180]
+        try:
+            subprocess.run(
+                ["notify-send", "-a", "devos", title, body],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=3,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            pass
+
+
+def once(restart_if_changed: bool = True, announce: bool = False) -> int:
     global _live_done, _notified_for
     try:
         if not APPLETRC.is_file():
@@ -623,11 +633,9 @@ def once(restart_if_changed: bool = True) -> int:
         if not _live_done:
             if apply_live(hidden):
                 _live_done = True
-        if _live_done:
-            print("DevOS: microphone moved under the status menu.")
-        else:
+        if announce:
             detail = (_last_eval or "plasmashell did not answer").replace("\n", " ")
-            print(f"DevOS: the running tray kept the microphone on the footer ({detail}).")
+            _announce(_live_done, detail)
     except Exception as exc:
         print(f"DevOS: tray overflow update skipped: {exc}", file=sys.stderr)
         return 1
@@ -657,8 +665,8 @@ def main(argv: list[str] | None = None) -> int:
     if args and args[0] == "--watch":
         return watch()
     if args and args[0] == "--write-only":
-        return once(restart_if_changed=False)
-    return once(restart_if_changed=True)
+        return once(restart_if_changed=False, announce=True)
+    return once(restart_if_changed=True, announce=True)
 
 
 if __name__ == "__main__":
