@@ -298,16 +298,14 @@ def policy_is_complete(lines: list[str], want: set[str]) -> bool:
     containments = systray_containment_ids(lines)
     if not applets and not containments:
         return False
+    indexed = _section_index(lines)
     for applet in applets:
+        # 6.4 reads this group. It has to exist; the Configuration group is
+        # not a substitute.
+        if not _general_hides(lines, applet + "[General]", want):
+            return False
         conf = applet + "[Configuration][General]"
-        legacy = applet + "[General]"
-        if conf in _section_index(lines):
-            if not _general_hides(lines, conf, want):
-                return False
-        elif legacy in _section_index(lines):
-            if not _general_hides(lines, legacy, want):
-                return False
-        else:
+        if conf in indexed and not _general_hides(lines, conf, want):
             return False
     for cid in containments:
         if not _general_hides(lines, f"[Containments][{cid}][General]", want):
@@ -316,20 +314,22 @@ def policy_is_complete(lines: list[str], want: set[str]) -> bool:
 
 
 def write_policy(lines: list[str], hidden: set[str]) -> list[str]:
-    """Write the hide list to the applet group and to Plasma 6's tray containment."""
+    """Write the hide list everywhere Plasma has stored tray visibility.
+
+    Plasma 6.3 reads ``[Containments][<SystrayContainmentId>][General]``.
+    Plasma 6.4 folded that containment into the tray widget and reads
+    ``[Containments][<panel>][Applets][<tray>][General]``. An older file still
+    has ``[Configuration][General]``. All three are updated. ``shownItems`` is
+    cleared of these ids because an id in that list stays on the panel even
+    when it is also hidden.
+    """
     applets = find_tray_applet_headers(lines)
     if not applets and not systray_containment_ids(lines):
         return lines
-    indexed = _section_index(lines)
     for applet in applets:
-        conf = applet + "[Configuration][General]"
-        legacy = applet + "[General]"
-        if conf in indexed or legacy not in indexed:
-            lines = _rewrite_section(lines, conf, _policy_map(hidden, include_pin=True))
-            indexed = _section_index(lines)
-        if legacy in indexed:
-            lines = _rewrite_section(lines, legacy, _policy_map(hidden, include_pin=True))
-            indexed = _section_index(lines)
+        lines = _rewrite_section(lines, applet + "[Configuration][General]", _policy_map(hidden, include_pin=True))
+        # 6.4 group. pin is not a key there.
+        lines = _rewrite_section(lines, applet + "[General]", _policy_map(hidden, include_pin=False))
     for cid in systray_containment_ids(lines):
         lines = _rewrite_section(
             lines,
@@ -340,11 +340,17 @@ def write_policy(lines: list[str], hidden: set[str]) -> list[str]:
 
 
 def live_hide_script(hidden: set[str]) -> str:
-    """Plasma script: hide these ids in the running tray. Do not reload the panel."""
+    """Tell the running tray to keep these ids in the ^ menu.
+
+    writeConfig updates the widget's config scheme directly and emits
+    configChanged, so the icons move without a panel reload. The widget and
+    the old private containment are both written: after Plasma 6.4 the widget
+    is the tray, and a stale SystrayContainmentId must not be the only target.
+    shownItems wins over hiddenItems, so those ids are removed from it, and
+    showAllItems is turned off because it forces every icon onto the panel.
+    """
     add = json.dumps(sorted(hidden))
-    extra = json.dumps(list(EXTRA_ITEMS))
     return f"""var add = {add};
-var extra = {extra};
 function asList(value) {{
   if (!value) return [];
   if (typeof value === "string") return value.split(",");
@@ -367,47 +373,74 @@ function cleaned(parts) {{
   }}
   return out;
 }}
+var wrote = 0;
 var panels = panels();
 for (var p = 0; p < panels.length; p++) {{
   var widgets = panels[p].widgets();
   for (var w = 0; w < widgets.length; w++) {{
     if (widgets[w].type !== "org.kde.plasma.systemtray") continue;
+    var targets = [widgets[w]];
     var sid = "";
     try {{ sid = String(widgets[w].readConfig("SystrayContainmentId") || ""); }} catch (e1) {{ sid = ""; }}
-    var target = null;
     if (sid) {{
-      try {{ target = desktopById(sid); }} catch (e2) {{ target = null; }}
+      try {{
+        var oldTray = desktopById(sid);
+        if (oldTray) targets.push(oldTray);
+      }} catch (e2) {{}}
     }}
-    if (!target) target = widgets[w];
-    target.currentConfigGroup = ["General"];
-    var have = [];
-    var shown = [];
-    try {{ have = asList(target.readConfig("hiddenItems")); }} catch (e3) {{ have = []; }}
-    try {{ shown = asList(target.readConfig("shownItems")); }} catch (e4) {{ shown = []; }}
-    var hidden = cleaned(have.concat(shown).concat(add));
-    var hideSet = {{}};
-    for (var h = 0; h < hidden.length; h++) hideSet[hidden[h]] = true;
-    var keep = [];
-    for (var s = 0; s < shown.length; s++) {{
-      var shownId = String(shown[s] || "").replace(/^\\s+|\\s+$/g, "");
-      if (shownId && !hideSet[shownId]) keep.push(shownId);
+    var groups = [[], ["General"], ["Configuration", "General"]];
+    for (var t = 0; t < targets.length; t++) {{
+      for (var g = 0; g < groups.length; g++) {{
+        try {{
+          var target = targets[t];
+          target.currentConfigGroup = groups[g];
+          var have = [];
+          var shown = [];
+          try {{ have = asList(target.readConfig("hiddenItems")); }} catch (e3) {{ have = []; }}
+          try {{ shown = asList(target.readConfig("shownItems")); }} catch (e4) {{ shown = []; }}
+          var hidden = cleaned(have.concat(shown).concat(add));
+          var hideSet = {{}};
+          for (var h = 0; h < hidden.length; h++) hideSet[hidden[h]] = true;
+          var keep = [];
+          for (var s = 0; s < shown.length; s++) {{
+            var shownId = String(shown[s] || "").replace(/^\\s+|\\s+$/g, "");
+            if (shownId && !hideSet[shownId]) keep.push(shownId);
+          }}
+          target.writeConfig("showAllItems", false);
+          target.writeConfig("hiddenItems", hidden);
+          target.writeConfig("shownItems", keep);
+          wrote = wrote + 1;
+        }} catch (e5) {{}}
+      }}
     }}
-    target.writeConfig("showAllItems", false);
-    target.writeConfig("extraItems", extra);
-    target.writeConfig("knownItems", extra);
-    target.writeConfig("hiddenItems", hidden);
-    target.writeConfig("shownItems", keep);
   }}
 }}
+wrote > 0 ? "devos-tray-ok" : "devos-tray-miss";
 """
 
 
-_live_done = False
+def pin_footer_script() -> str:
+    """One assignment, and only when the panel is allowed to hide.
+
+    A maximized window covers a dodge or auto-hide panel. Setting the mode
+    on every window switch is what blanked the footer; this script does not
+    write the property when it is already ``none``.
+    """
+    return """var changed = 0;
+var panels = panels();
+for (var i = 0; i < panels.length; i++) {
+  var mode = String(panels[i].hiding || "");
+  if (mode === "autohide" || mode === "dodgewindows" || mode === "windowscover" || mode === "windowsbelow" || mode === "windowsgobelow" || mode === "1" || mode === "2" || mode === "3") {
+    panels[i].hiding = "none";
+    changed = changed + 1;
+  }
+}
+changed ? "footer-pinned" : "footer-none";
+"""
 
 
-def apply_live(hidden: set[str]) -> bool:
-    """Move icons under ^ in the running shell. Never restarts plasmashell."""
-    script = live_hide_script(hidden)
+def _evaluate(script: str) -> str:
+    """Run a plasmashell script. Empty string when the shell did not accept it."""
     for bus in ("qdbus6", "qdbus", "qdbus-qt6"):
         if not shutil.which(bus):
             continue
@@ -418,15 +451,106 @@ def apply_live(hidden: set[str]) -> bool:
                 text=True,
                 timeout=8,
             )
-            if out.returncode == 0:
-                return True
         except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
             continue
+        text = ((out.stdout or "") + "\n" + (out.stderr or "")).strip()
+        if out.returncode != 0:
+            continue
+        if any(word in text for word in ("TypeError", "ReferenceError", "SyntaxError")):
+            continue
+        return text
+    return ""
+
+
+def notify_commands(lines: list[str], hidden: set[str], tool: str = "kwriteconfig6") -> list[list[str]]:
+    """kwriteconfig invocations that poke the running tray's config watcher.
+
+    The signal is what makes SystemTraySettings reload. Rewriting the file
+    alone does nothing until the next sign-in.
+    """
+    hidden_csv = ",".join(sorted(hidden))
+    commands: list[list[str]] = []
+    for header in policy_headers(lines):
+        groups = re.findall(r"\[([^\]]+)\]", header)
+        if not groups:
+            continue
+        group_args: list[str] = []
+        for part in groups:
+            group_args.extend(["--group", part])
+        base = [tool, "--file", str(APPLETRC), *group_args]
+        commands.append([*base, "--key", "showAllItems", "--type", "bool", "false"])
+        commands.append([*base, "--key", "shownItems", "--type", "stringlist", ""])
+        # Only the last write of a group notifies, so the tray reloads once
+        # with the finished list rather than once per key.
+        commands.append([*base, "--notify", "--key", "hiddenItems", "--type", "stringlist", hidden_csv])
+    return commands
+
+
+def notify_running_shell(lines: list[str], hidden: set[str]) -> bool:
+    sent = False
+    tool = shutil.which("kwriteconfig6") or shutil.which("kwriteconfig5") or shutil.which("kwriteconfig") or ""
+    for cmd in notify_commands(lines, hidden, tool or "kwriteconfig6"):
+        if not tool:
+            break
+        try:
+            out = subprocess.run(cmd, capture_output=True, text=True, timeout=8)
+            if out.returncode == 0:
+                sent = True
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            continue
+    if shutil.which("busctl"):
+        try:
+            out = subprocess.run(
+                [
+                    "busctl",
+                    "--user",
+                    "emit",
+                    "/KConfig",
+                    "org.kde.kconfig.notify",
+                    "ConfigChanged",
+                    "a{sv}",
+                    "1",
+                    "files",
+                    "as",
+                    "1",
+                    str(APPLETRC),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=8,
+            )
+            if out.returncode == 0:
+                sent = True
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            pass
+    return sent
+
+
+_live_done = False
+_footer_done = False
+_notified_for: frozenset[str] | None = None
+
+
+def apply_live(hidden: set[str]) -> bool:
+    """Move icons under ^ in the running shell. Never restarts plasmashell."""
+    text = _evaluate(live_hide_script(hidden))
+    return "devos-tray-ok" in text
+
+
+def pin_footer() -> bool:
+    """Keep a maximized window from covering the footer. Once per process."""
+    global _footer_done
+    if _footer_done:
+        return True
+    text = _evaluate(pin_footer_script())
+    if "footer-pinned" in text or "footer-none" in text:
+        _footer_done = True
+        return True
     return False
 
 
 def once(restart_if_changed: bool = True) -> int:
-    global _live_done
+    global _live_done, _notified_for
     try:
         if not APPLETRC.is_file():
             print("DevOS: no plasma appletsrc yet.")
@@ -442,11 +566,19 @@ def once(restart_if_changed: bool = True) -> int:
             new_raw = "".join(new_lines)
             if new_raw != raw:
                 APPLETRC.write_text(new_raw, encoding="utf-8")
-        # The file can already list the microphone while Plasma is still
-        # reading the other group. Push the list into the running tray once.
-        # Do not restart plasmashell: that removes the footer for a second.
+                lines = new_lines
+                complete = True
+        # The file can already list the microphone while the running tray is
+        # still reading another group. Push the list into that tray. Do not
+        # restart plasmashell: that removes the footer for a second.
         del restart_if_changed
-        if not _live_done or not complete:
+        pin_footer()
+        signature = frozenset(hidden)
+        if _notified_for != signature:
+            notify_running_shell(lines, hidden)
+            _notified_for = signature
+            _live_done = False
+        if not _live_done:
             if apply_live(hidden):
                 _live_done = True
         if complete:

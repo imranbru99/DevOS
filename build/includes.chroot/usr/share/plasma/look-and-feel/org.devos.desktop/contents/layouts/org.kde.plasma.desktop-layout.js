@@ -56,18 +56,18 @@ rightSpace.currentConfigGroup = ["General"]
 rightSpace.writeConfig("expanding", true)
 
 var systray = panel.addWidget("org.kde.plasma.systemtray")
-// Plasma 6 stores the hide list on the private tray containment, not on the applet.
+// Plasma 6.3 reads the private containment. Plasma 6.4 reads the widget.
+// Write both, or the microphone stays on the panel after an upgrade.
 var systrayId = ""
 try { systrayId = String(systray.readConfig("SystrayContainmentId") || "") } catch (e) { systrayId = "" }
-var trayConfig = null
+var trayTargets = [systray]
 if (systrayId) {
-    try { trayConfig = desktopById(systrayId) } catch (e2) { trayConfig = null }
+    try {
+        var oldTray = desktopById(systrayId)
+        if (oldTray) trayTargets.push(oldTray)
+    } catch (e2) {}
 }
-if (!trayConfig) trayConfig = systray
-trayConfig.currentConfigGroup = ["General"]
-trayConfig.writeConfig("showAllItems", false)
-trayConfig.writeConfig("shownItems", [])
-trayConfig.writeConfig("hiddenItems", [
+var trayHidden = [
     "org.kde.plasma.battery",
     "org.kde.plasma.bluetooth",
     "org.kde.plasma.brightness",
@@ -92,7 +92,13 @@ trayConfig.writeConfig("hiddenItems", [
     "devos-sound",
     "DevOS Sound",
     "Sound"
-])
+]
+for (var t = 0; t < trayTargets.length; t++) {
+    trayTargets[t].currentConfigGroup = ["General"]
+    trayTargets[t].writeConfig("showAllItems", false)
+    trayTargets[t].writeConfig("shownItems", [])
+    trayTargets[t].writeConfig("hiddenItems", trayHidden)
+}
 var clock = panel.addWidget("org.kde.plasma.digitalclock")
 clock.currentConfigGroup = ["Appearance"]
 // 0 is 12-hour (8:12 PM). 1 would follow a language that uses 20:12.

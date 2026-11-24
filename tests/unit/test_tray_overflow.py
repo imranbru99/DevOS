@@ -64,6 +64,11 @@ class TrayOverflowTests(unittest.TestCase):
         )[0]
         self.assertIn("devos-voice", applet)
         self.assertIn("pin=false", applet)
+        general = updated.split("[Containments][3][Applets][7][General]", 1)[1].split("[Containments][3][Applets][7][Configuration]", 1)[0]
+        self.assertIn("devos-voice", general)
+        self.assertIn("microphone", general)
+        self.assertIn("showAllItems=false", general)
+        self.assertNotIn("shownItems=microphone", general)
 
     def test_applet_list_alone_is_not_enough_when_a_containment_exists(self):
         mod = load()
@@ -75,18 +80,49 @@ class TrayOverflowTests(unittest.TestCase):
 
     def test_live_script_updates_the_tray_without_reloading_the_footer(self):
         mod = load()
-        script = mod.live_hide_script({"devos-voice", "microphone"})
+        script = mod.live_hide_script({"devos-voice", "microphone", "org.kde.plasma.cameraindicator"})
         self.assertIn('"devos-voice"', script)
         self.assertIn('"microphone"', script)
+        self.assertIn('"org.kde.plasma.cameraindicator"', script)
         self.assertIn('writeConfig("hiddenItems"', script)
+        self.assertIn('writeConfig("showAllItems", false)', script)
+        self.assertIn('writeConfig("shownItems"', script)
         self.assertIn("desktopById", script)
+        # The panel widget itself is a target. A stale containment id must not
+        # be the only place the list is written.
+        self.assertIn("targets = [widgets[w]]", script)
+        self.assertIn("devos-tray-ok", script)
         self.assertNotIn("reloadConfig", script)
         self.assertNotIn("icontasks", script)
         self.assertNotIn("restart", script)
         self.assertNotIn("plasmashell", script)
+        self.assertNotIn("hiding", script)
+        pin = mod.pin_footer_script()
+        self.assertIn('hiding = "none"', pin)
+        self.assertIn("dodgewindows", pin)
+        self.assertIn("footer-none", pin)
+        self.assertNotIn("reloadConfig", pin)
+        self.assertNotIn("plasmashell", pin)
         once = SCRIPT.read_text(encoding="utf-8").split("def once", 1)[1].split("def watch", 1)[0]
         self.assertNotIn("restart_plasmashell()", once)
         self.assertIn("apply_live", once)
+        self.assertIn("pin_footer", once)
+        self.assertIn("notify_running_shell", once)
+
+    def test_notify_pokes_the_running_tray_without_restarting_it(self):
+        mod = load()
+        lines = SAMPLE.splitlines(keepends=True)
+        hidden = {"devos-voice", "org.kde.plasma.cameraindicator"}
+        commands = mod.notify_commands(lines, hidden)
+        self.assertTrue(commands)
+        joined = "\n".join(" ".join(cmd) for cmd in commands)
+        self.assertIn("--notify", joined)
+        self.assertIn("hiddenItems", joined)
+        self.assertIn("showAllItems", joined)
+        self.assertIn("--group 8", joined)
+        self.assertIn("devos-voice", joined)
+        self.assertNotIn("plasmashell", joined)
+        self.assertNotIn("reloadConfig", joined)
 
     def test_skel_hides_the_microphone_in_the_containment_plasma_reads(self):
         mod = load()
@@ -97,6 +133,7 @@ class TrayOverflowTests(unittest.TestCase):
         self.assertIn("SystrayContainmentId=10", skel)
         lines = skel.splitlines(keepends=True)
         self.assertEqual(mod.systray_containment_ids(lines), ["10"])
+        self.assertIn("[Containments][3][Applets][7][General]", skel)
         self.assertTrue(mod.policy_is_complete(lines, set(mod.ALWAYS_HIDE)))
 
 
