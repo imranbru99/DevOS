@@ -181,11 +181,12 @@ class TestChromeProfiles(unittest.TestCase):
             self.assertIn("applications:chrome-work-w1a2.desktop", text)
             self.assertIn("applications:chrome-work-w3b4.desktop", text)
             self.assertNotIn("applications:chrome-work.desktop,", text + ",")
-            # All closed → restore the idle browser pin (DevOS Browser on this panel).
+            # All closed → the browser icon leaves. Other pins stay.
             ok = chrome_profiles.sync_plasma_profile_launchers(tmp_home, [])
             self.assertTrue(ok)
             text = open(appletsrc, encoding="utf-8").read()
-            self.assertIn("applications:devos-browser.desktop", text)
+            self.assertIn("applications:devos-search.desktop", text)
+            self.assertNotIn("devos-browser.desktop", text)
             self.assertNotIn("chrome-work-w1a2.desktop", text)
 
     def test_closed_chrome_window_leaves_the_taskbar(self):
@@ -203,16 +204,15 @@ class TestChromeProfiles(unittest.TestCase):
         self.assertNotIn("applications:chrome-mirza-w22.desktop", still_open)
         self.assertIn("applications:devos-search.desktop", still_open)
         closed = chrome_profiles._reconcile_launcher_entries(existing, [], idle)
-        self.assertEqual(
-            closed,
-            ["applications:devos-search.desktop", "applications:devos-browser.desktop"],
-        )
+        self.assertEqual(closed, ["applications:devos-search.desktop"])
         live = inspect.getsource(chrome_profiles.apply_plasma_launchers_live)
         self.assertNotIn("var panels = panels()", live)
         self.assertNotIn("reloadConfig", live)
         self.assertIn("devos-launchers-ok", live)
+        self.assertIn('writeConfig("launchers", parts)', live)
         watch_src = inspect.getsource(chrome_profiles.watch_chrome_windows)
         self.assertIn("publish_chrome_task_launchers", watch_src)
+        self.assertIn("if publish_chrome_task_launchers", watch_src)
 
     def test_same_pins_do_not_rewrite_the_panel(self):
         with tempfile.TemporaryDirectory() as tmp_home:

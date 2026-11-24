@@ -1260,8 +1260,30 @@ def apply_plasma_launchers_live(launcher_csv: str, grouping: str = "1", launcher
         )
     script = f"""var raw = [];
 try {{ raw = panels(); }} catch (e0) {{ raw = []; }}
-var parts = '{safe}'.split(",");
+var rawParts = '{safe}'.split(",");
+var parts = [];
+for (var k = 0; k < rawParts.length; k++) {{
+  if (rawParts[k]) parts.push(rawParts[k]);
+}}
+function pinKey(v) {{
+  var text = "";
+  try {{
+    if (v && v.join) text = v.join(",");
+    else text = String(v || "");
+  }} catch (e) {{ text = String(v || ""); }}
+  var bits = text.split(",");
+  var out = [];
+  for (var i = 0; i < bits.length; i++) {{
+    var s = String(bits[i] || "").replace(/^\\s+|\\s+$/g, "");
+    if (s) out.push(s);
+  }}
+  out.sort();
+  return out.join(",");
+}}
+var want = pinKey(parts);
 var n = 0;
+var matched = 0;
+var note = "";
 for (var i = 0; i < raw.length; i++) {{
   var panel = raw[i];
   if (!panel || !panel.widgets) {{
@@ -1274,13 +1296,21 @@ for (var i = 0; i < raw.length; i++) {{
     var kind = "";
     try {{ kind = String(widgets[j].type || ""); }} catch (e3) {{ kind = ""; }}
     if (kind !== "org.kde.plasma.icontasks" && kind !== "org.kde.plasma.taskmanager") continue;
-    widgets[j].currentConfigGroup = ["General"];
-    widgets[j].writeConfig("launchers", parts.join(","));
+    var groups = [[], ["General"], ["Configuration", "General"]];
+    for (var g = 0; g < groups.length; g++) {{
+      try {{
+        widgets[j].currentConfigGroup = groups[g];
+        widgets[j].writeConfig("launchers", parts);
 {extra}
-    n = n + 1;
+        n = n + 1;
+        var got = pinKey(widgets[j].readConfig("launchers"));
+        note = got;
+        if (got === want) matched = 1;
+      }} catch (e4) {{ note = String(e4); }}
+    }}
   }}
 }}
-n > 0 ? "devos-launchers-ok" : "devos-launchers-miss";
+(n > 0 && matched) ? "devos-launchers-ok" : ("devos-launchers-miss " + n + " " + note);
 """
     try:
         import subprocess
@@ -1323,14 +1353,15 @@ _PUBLISHED_LAUNCHERS = None
 def _reconcile_launcher_entries(existing, chrome_wins, idle_pin: str) -> list:
     """Launcher list after Chrome windows open or close.
 
-    A closed window's chrome-*-w<id> pin is dropped. When no Chrome window is
-    open, every Chrome face is removed and the single browser shortcut returns.
-    Other apps on the bar are left as they are.
+    A closed window's pin is dropped. When no Chrome window is open, every
+    browser icon is removed, including DevOS Browser and Google Chrome.
+    Other apps on the bar stay.
     """
+    del idle_pin
     preserved = [e for e in (existing or []) if not _is_chrome_launcher(e)]
     wins = list(chrome_wins or [])
     if not wins:
-        return preserved + ([idle_pin] if idle_pin else [])
+        return preserved
     open_hex = set()
     open_desktops = []
     seen = set()
@@ -1356,8 +1387,6 @@ def _reconcile_launcher_entries(existing, chrome_wins, idle_pin: str) -> list:
         if match and match.group(1) not in open_hex:
             continue
         kept.append(entry)
-    if not any(_is_chrome_launcher(e) for e in kept) and idle_pin:
-        kept.append(idle_pin)
     return preserved + kept
 
 
@@ -1428,13 +1457,14 @@ def sync_plasma_profile_launchers(home_dir=None, active_slugs=None, window_deskt
                 continue
             chrome_launchers.append(f"applications:{desktop}")
             seen.add(slug)
-        if not chrome_launchers:
+        if not chrome_launchers and idle_pin:
             chrome_launchers = [idle_pin]
     else:
-        chrome_launchers = [idle_pin]
+        # Browser is closed. Do not put the shortcut back on the footer.
+        chrome_launchers = []
 
     launchers = preserved + chrome_launchers
-    launcher_csv = ",".join(launchers) if launchers else idle_pin
+    launcher_csv = ",".join(launchers)
     # Always Do Not Group on DevOS Icon Tasks. Plasma "By program name" merges
     # Chrome windows that share a binary even after avatar badging.
     updates = {
@@ -1516,6 +1546,19 @@ def _read_launcher_entries(home_dir):
     return text, section, existing
 
 
+def _launcher_sections(text: str) -> list:
+    """Groups Plasma may read for Icon Tasks pins."""
+    section = _find_icontasks_general_section(text or "")
+    if not section:
+        return []
+    found = [section]
+    if section.endswith("[Configuration][General]"):
+        sibling = section[: -len("[Configuration][General]")] + "[General]"
+        if sibling not in found:
+            found.append(sibling)
+    return found
+
+
 def _write_launcher_entries(home_dir, entries) -> str:
     """Replace only the Icon Tasks launcher list. Leave every other applet alone."""
     home = home_dir or os.path.expanduser("~")
@@ -1523,11 +1566,14 @@ def _write_launcher_entries(home_dir, entries) -> str:
     csv = ",".join(entries)
     if not section or text is None:
         return csv
+    wanted = set(_launcher_sections(text))
     parts = re.split(r"(?m)(?=^\[)", text)
     out = []
+    seen_headers = set()
     for part in parts:
         header = part.split("\n", 1)[0].strip()
-        if header != section:
+        seen_headers.add(header)
+        if header not in wanted:
             out.append(part)
             continue
         hdr, _, rest = part.partition("\n")
@@ -1546,10 +1592,40 @@ def _write_launcher_entries(home_dir, entries) -> str:
         if not part.endswith("\n"):
             part += "\n"
         out.append(part)
+    for header in wanted:
+        if header in seen_headers:
+            continue
+        block = header + "\n" + f"launchers={csv}\n"
+        out.append(block)
     new_text = "".join(out)
     if new_text != text:
         (Path(home) / ".config/plasma-org.kde.plasma.desktop-appletsrc").write_text(new_text, encoding="utf-8")
     return csv
+
+
+def _notify_launcher_list(home_dir, csv: str) -> None:
+    """Tell the running taskbar the pin list changed, without rebuilding the panel."""
+    import subprocess
+    home = home_dir or os.path.expanduser("~")
+    cfg = Path(home) / ".config/plasma-org.kde.plasma.desktop-appletsrc"
+    if not cfg.is_file():
+        return
+    tool = shutil.which("kwriteconfig6") or shutil.which("kwriteconfig5") or ""
+    if not tool:
+        return
+    headers = _launcher_sections(cfg.read_text(encoding="utf-8", errors="replace"))
+    for index, header in enumerate(headers):
+        groups = re.findall(r"\[([^\]]+)\]", header)
+        cmd = [tool, "--file", str(cfg)]
+        for group in groups:
+            cmd.extend(["--group", group])
+        if index == len(headers) - 1:
+            cmd.append("--notify")
+        cmd.extend(["--key", "launchers", "--type", "stringlist", csv])
+        try:
+            subprocess.run(cmd, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=8)
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            continue
 
 
 def publish_chrome_task_launchers(home_dir, chrome_wins) -> bool:
@@ -1567,7 +1643,8 @@ def publish_chrome_task_launchers(home_dir, chrome_wins) -> bool:
     desired = _reconcile_launcher_entries(existing, chrome_wins, idle)
     csv = _write_launcher_entries(home, desired)
     if csv == _PUBLISHED_LAUNCHERS:
-        return False
+        return True
+    _notify_launcher_list(home, csv)
     if apply_plasma_launchers_live(csv, "0", launchers_only=True):
         _PUBLISHED_LAUNCHERS = csv
         return True
@@ -2350,22 +2427,22 @@ def watch_chrome_windows(home_dir=None, poll_interval=None):
             ident = _chrome_switch_identity(chrome_wins)
             now = time.time()
 
-            # A window opened or closed. Drop the closed Chrome button now.
-            # Title changes are not part of ident, so switching tabs does not
-            # rewrite the bar. writeConfig only — never reloadConfig.
+            # A window opened or closed. Drop every browser button once Chrome
+            # is gone. Title changes are not part of ident. If the running bar
+            # does not accept the list, try again on the next pass.
             if ident != last_ident:
                 try:
-                    publish_chrome_task_launchers(home_dir, chrome_wins)
+                    if publish_chrome_task_launchers(home_dir, chrome_wins):
+                        last_ident = ident
                 except Exception:
                     pass
-                last_ident = ident
 
             # Photos only. Never retag the window and never reload the panel:
             # both of those remove the footer for a second or two.
             if chrome_wins and now - last_icon >= 15:
                 paint_chrome_icons(home_dir, chrome_wins)
                 last_icon = now
-            sleep_for = 1.0 if chrome_wins else max(poll_interval, 15.0)
+            sleep_for = 1.0 if (chrome_wins or ident != last_ident) else max(poll_interval, 15.0)
 
         except Exception:
             sleep_for = poll_interval
