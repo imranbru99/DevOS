@@ -178,7 +178,79 @@ def get_profile_avatar_path(config_dir, profile_key, info=None):
         seen.add(path)
         if _accept_account_photo(path):
             return path
+    # The toolbar photo is often only a Google picture URL in Preferences.
+    # The taskbar cannot badge a face it never saved to disk.
+    url = _account_picture_url(folder)
+    if url:
+        saved = _cached_account_picture(config_dir, profile_key, url)
+        if saved and _accept_account_photo(saved):
+            return saved
     return None
+
+
+def _account_picture_url(profile_dir: str) -> str:
+    """Google account picture URL from a Chrome profile's Preferences."""
+    path = os.path.join(profile_dir, "Preferences")
+    if not os.path.isfile(path):
+        return ""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            data = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return ""
+    accounts = data.get("account_info") or []
+    if isinstance(accounts, dict):
+        accounts = list(accounts.values())
+    for account in accounts:
+        if not isinstance(account, dict):
+            continue
+        url = str(account.get("picture_url") or "").strip()
+        if url.startswith("https://"):
+            return url
+    return ""
+
+
+def _cached_account_picture(config_dir: str, profile_key: str, url: str) -> str:
+    """Save the toolbar picture once. Later passes reuse the file."""
+    if not url.startswith("https://"):
+        return ""
+    try:
+        from urllib.parse import urlparse
+        from urllib.request import Request, urlopen
+    except Exception:
+        return ""
+    host = (urlparse(url).hostname or "").lower()
+    if not host.endswith(("googleusercontent.com", "ggpht.com", "google.com")):
+        return ""
+    home = os.path.dirname(os.path.dirname(os.path.abspath(config_dir)))
+    cache = os.path.join(home, ".cache", "devos", "chrome-avatars")
+    try:
+        os.makedirs(cache, exist_ok=True)
+    except OSError:
+        return ""
+    dest = os.path.join(cache, f"{slugify(profile_key or 'profile')}.png")
+    meta = dest + ".url"
+    try:
+        if os.path.isfile(dest) and os.path.isfile(meta):
+            with open(meta, encoding="utf-8") as handle:
+                if handle.read().strip() == url and _accept_account_photo(dest):
+                    return dest
+    except OSError:
+        pass
+    try:
+        req = Request(url, headers={"User-Agent": "DevOS"})
+        with urlopen(req, timeout=8) as resp:
+            blob = resp.read(2_000_000)
+        part = dest + ".part"
+        with open(part, "wb") as handle:
+            handle.write(blob)
+        Image.open(part).convert("RGBA").save(dest, format="PNG")
+        os.remove(part)
+        with open(meta, "w", encoding="utf-8") as handle:
+            handle.write(url)
+    except Exception:
+        return ""
+    return dest if os.path.isfile(dest) else ""
 
 
 def _accept_account_photo(path: str) -> bool:
@@ -1289,9 +1361,46 @@ def _find_icontasks_general_section(text: str):
     return None
 
 
+def _is_windows_app_window(window) -> bool:
+    """Microsoft Windows App / Cloud PC. Never retag it as a Chrome profile.
+
+    Its class is chrome-windows.cloud.microsoft__-Default. Rewriting that class
+    makes KWin drop the window, and the next click thinks the app is already open.
+    """
+    if not isinstance(window, dict):
+        return False
+    wc = (window.get("wm_class") or "").lower()
+    title = (window.get("title") or "").lower()
+    if "windows.cloud.microsoft" in wc or "devos-windows" in wc:
+        return True
+    if "windows app" in title or "cloud pc" in title or "windows 365" in title:
+        return True
+    if "setting up windows" in title:
+        return True
+    return False
+
+
+def _is_profile_browser_window(window) -> bool:
+    """A normal Chrome window. Windows App and Chrome apps are not included."""
+    if not isinstance(window, dict) or _is_windows_app_window(window):
+        return False
+    wc = (window.get("wm_class") or "").lower()
+    title = (window.get("title") or "").lower()
+    if "crx_" in wc or "setting up" in title:
+        return False
+    return "google-chrome" in wc or "chrome-" in wc
+
+
 def _is_chrome_launcher(entry: str) -> bool:
     """True for idle Chrome/DevOS Browser pins and per-profile/per-window chrome-* pins."""
     e = (entry or "").strip().lower()
+    if (
+        "windows.cloud.microsoft" in e
+        or "devos-windows" in e
+        or "winapp" in e
+        or "windows-app" in e
+    ):
+        return False
     return (
         "google-chrome.desktop" in e
         or "com.google.chrome.desktop" in e
@@ -2333,7 +2442,7 @@ def apply_window_profiles(home_dir=None, panel=True):
         title = w["title"]
         active_wids.add(w["id"])
 
-        if "crx_" in wc or "windows app" in title.lower() or "setting up" in title.lower():
+        if _is_windows_app_window(w) or "crx_" in wc or "setting up" in title.lower():
             continue
 
         is_chrome = (
@@ -2532,6 +2641,7 @@ def refresh_open_profile_icons(home_dir, chrome_wins) -> None:
     if not chrome_wins:
         if _DESKTOP_ICON_BACKUP:
             _restore_desktop_icons()
+        _restore_theme_chrome_icon(home_dir)
         return
     chrome_dir = os.path.join(home_dir, ".config/google-chrome")
     details = get_chrome_profile_details(chrome_dir)
@@ -2655,11 +2765,84 @@ def _point_shared_launchers(home_dir: str, target: str) -> bool:
     return changed
 
 
+def _install_theme_chrome_icon(home_dir: str, badge_path: str) -> None:
+    """Put the badged Chrome logo where Plasma looks up the name google-chrome.
+
+    The running task button uses that theme icon. An absolute Icon= path is
+    not enough on its own, which is why the footer stayed the plain logo.
+    """
+    if not badge_path or not os.path.isfile(badge_path):
+        return
+    badge_path = os.path.abspath(badge_path)
+    root = os.path.join(home_dir, ".local/share/icons/hicolor")
+    marker = os.path.join(root, ".devos-chrome-badge")
+    sample = os.path.join(root, "48x48", "apps", "google-chrome.png")
+    try:
+        if os.path.isfile(marker) and os.path.isfile(sample):
+            with open(marker, encoding="utf-8") as handle:
+                same = handle.read().strip() == badge_path
+            if same and os.path.getmtime(sample) >= os.path.getmtime(badge_path):
+                return
+    except OSError:
+        pass
+    try:
+        img = Image.open(badge_path).convert("RGBA")
+    except Exception:
+        return
+    for size, folder in ((48, "48x48"), (128, "128x128"), (256, "256x256")):
+        dest_dir = os.path.join(root, folder, "apps")
+        try:
+            os.makedirs(dest_dir, exist_ok=True)
+        except OSError:
+            return
+        for icon_name in ("google-chrome.png", "devos-browser.png"):
+            dest = os.path.join(dest_dir, icon_name)
+            bak = dest + ".devos-bak"
+            if os.path.isfile(dest) and not os.path.isfile(bak) and not os.path.isfile(marker):
+                try:
+                    shutil.copyfile(dest, bak)
+                except OSError:
+                    pass
+            try:
+                img.resize((size, size), Image.Resampling.LANCZOS).save(dest, format="PNG")
+            except OSError:
+                return
+    try:
+        with open(marker, "w", encoding="utf-8") as handle:
+            handle.write(badge_path)
+    except OSError:
+        pass
+
+
+def _restore_theme_chrome_icon(home_dir: str) -> None:
+    """Remove the account badge from the shared Chrome icon name."""
+    root = os.path.join(home_dir, ".local/share/icons/hicolor")
+    marker = os.path.join(root, ".devos-chrome-badge")
+    if not os.path.isfile(marker):
+        return
+    for folder in ("48x48", "128x128", "256x256"):
+        for icon_name in ("google-chrome.png", "devos-browser.png"):
+            dest = os.path.join(root, folder, "apps", icon_name)
+            bak = dest + ".devos-bak"
+            try:
+                if os.path.isfile(bak):
+                    os.replace(bak, dest)
+                elif os.path.isfile(dest):
+                    os.remove(dest)
+            except OSError:
+                continue
+    try:
+        os.remove(marker)
+    except OSError:
+        pass
+
+
 def _apply_shared_launcher_icon(home_dir, rows) -> None:
     """Show this account's photo on the button the footer actually draws."""
     global _PHOTO_PUSHED
     target = _shared_launcher_icon(rows)
     if target:
+        _install_theme_chrome_icon(home_dir, target)
         if target != _PHOTO_PUSHED:
             if _point_shared_launchers(home_dir, target):
                 _refresh_service_cache()
@@ -2670,6 +2853,7 @@ def _apply_shared_launcher_icon(home_dir, rows) -> None:
         if _DESKTOP_ICON_BACKUP:
             _restore_desktop_icons()
         _PHOTO_PUSHED = None
+    _restore_theme_chrome_icon(home_dir)
 
 
 def _release_shared_chrome_icons(home_dir: str) -> None:
@@ -2845,13 +3029,7 @@ def watch_chrome_windows(home_dir=None, poll_interval=None):
     while True:
         try:
             wins = get_x11_windows()
-            chrome_wins = [
-                w for w in wins
-                if ("google-chrome" in w["wm_class"].lower() or "chrome-" in w["wm_class"].lower())
-                and "crx_" not in w["wm_class"].lower()
-                and "windows app" not in w["title"].lower()
-                and "setting up" not in w["title"].lower()
-            ]
+            chrome_wins = [w for w in wins if _is_profile_browser_window(w)]
             ident = _chrome_switch_identity(chrome_wins)
             now = time.time()
 

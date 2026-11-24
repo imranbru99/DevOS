@@ -114,6 +114,27 @@ class TestChromeProfiles(unittest.TestCase):
             ])
         )
         self.assertEqual(chrome_profiles._kde_desktop_file_name("chrome-imran-w1.desktop"), "chrome-imran-w1")
+        win_app = {
+            "wm_class": "chrome-windows.cloud.microsoft__-Default.chrome-windows.cloud.microsoft__-Default",
+            "title": "Home",
+        }
+        self.assertTrue(chrome_profiles._is_windows_app_window(win_app))
+        self.assertFalse(chrome_profiles._is_profile_browser_window(win_app))
+        self.assertTrue(chrome_profiles._is_profile_browser_window({
+            "wm_class": "google-chrome.Google-chrome",
+            "title": "Inbox - Google Chrome",
+        }))
+        self.assertFalse(chrome_profiles._is_chrome_launcher(
+            "applications:chrome-windows.cloud.microsoft__-Default.desktop"
+        ))
+        self.assertTrue(chrome_profiles._is_chrome_launcher("applications:google-chrome.desktop"))
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = os.path.join(tmp, "Default")
+            os.makedirs(folder)
+            url = "https://lh3.googleusercontent.com/a/example"
+            with open(os.path.join(folder, "Preferences"), "w", encoding="utf-8") as handle:
+                json.dump({"account_info": [{"picture_url": url, "email": "a@b.c"}]}, handle)
+            self.assertEqual(chrome_profiles._account_picture_url(folder), url)
         with tempfile.TemporaryDirectory() as tmp:
             from PIL import Image as PILImage
 
