@@ -188,6 +188,32 @@ class TestChromeProfiles(unittest.TestCase):
             self.assertIn("applications:devos-browser.desktop", text)
             self.assertNotIn("chrome-work-w1a2.desktop", text)
 
+    def test_closed_chrome_window_leaves_the_taskbar(self):
+        existing = [
+            "applications:devos-search.desktop",
+            "applications:chrome-work-w11.desktop",
+            "applications:chrome-mirza-w22.desktop",
+            "applications:devos-browser.desktop",
+        ]
+        idle = "applications:devos-browser.desktop"
+        still_open = chrome_profiles._reconcile_launcher_entries(
+            existing, [{"id": 0x11, "wm_class": "chrome-work-w11"}], idle
+        )
+        self.assertIn("applications:chrome-work-w11.desktop", still_open)
+        self.assertNotIn("applications:chrome-mirza-w22.desktop", still_open)
+        self.assertIn("applications:devos-search.desktop", still_open)
+        closed = chrome_profiles._reconcile_launcher_entries(existing, [], idle)
+        self.assertEqual(
+            closed,
+            ["applications:devos-search.desktop", "applications:devos-browser.desktop"],
+        )
+        live = inspect.getsource(chrome_profiles.apply_plasma_launchers_live)
+        self.assertNotIn("var panels = panels()", live)
+        self.assertNotIn("reloadConfig", live)
+        self.assertIn("devos-launchers-ok", live)
+        watch_src = inspect.getsource(chrome_profiles.watch_chrome_windows)
+        self.assertIn("publish_chrome_task_launchers", watch_src)
+
     def test_same_pins_do_not_rewrite_the_panel(self):
         with tempfile.TemporaryDirectory() as tmp_home:
             cfg_dir = os.path.join(tmp_home, ".config")

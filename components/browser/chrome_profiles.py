@@ -1239,54 +1239,126 @@ def _idle_chrome_launcher(existing, home_dir=None):
     return "applications:devos-browser.desktop"
 
 
-def apply_plasma_launchers_live(launcher_csv: str, grouping: str = "1") -> bool:
-    """Push Icon Tasks launchers through plasmashell without a full restart."""
+def apply_plasma_launchers_live(launcher_csv: str, grouping: str = "1", launchers_only: bool = False) -> bool:
+    """Push Icon Tasks launchers into the running bar without rebuilding it.
+
+    writeConfig updates the task buttons in place. ``panels`` is not stored
+    in a variable of the same name, because that throws before the write.
+    """
     group = "0" if str(grouping).strip() == "0" else "1"
     popups = "false" if group == "0" else "true"
-    script = (
-        "var parts = '%s'.split(',');"
-        "var panels = panels();"
-        "for (var i = 0; i < panels.length; i++) {"
-        "  var widgets = panels[i].widgets();"
-        "  for (var j = 0; j < widgets.length; j++) {"
-        "    if (widgets[j].type !== 'org.kde.plasma.icontasks'"
-        "        && widgets[j].type !== 'org.kde.plasma.taskmanager') continue;"
-        "    widgets[j].currentConfigGroup = ['General'];"
-        "    widgets[j].writeConfig('launchers', parts.join(','));"
-        "    widgets[j].writeConfig('separateLaunchers', 'true');"
-        "    widgets[j].writeConfig('groupingStrategy', '%s');"
-        "    widgets[j].writeConfig('groupPopups', '%s');"
-        "    widgets[j].writeConfig('onlyGroupWhenFull', 'false');"
-        "    widgets[j].writeConfig('launchInPlace', 'true');"
-        "    widgets[j].writeConfig('hideActivatedLaunchers', 'false');"
-        "  }"
-        "}"
-    ) % (launcher_csv.replace("'", "\\'"), group, popups)
+    safe = (launcher_csv or "").replace("\\", "\\\\").replace("'", "\\'")
+    extra = ""
+    if not launchers_only:
+        extra = (
+            '    widgets[j].writeConfig("separateLaunchers", "true");'
+            f'    widgets[j].writeConfig("groupingStrategy", "{group}");'
+            f'    widgets[j].writeConfig("groupPopups", "{popups}");'
+            '    widgets[j].writeConfig("onlyGroupWhenFull", "false");'
+            '    widgets[j].writeConfig("launchInPlace", "true");'
+            '    widgets[j].writeConfig("hideActivatedLaunchers", "false");'
+        )
+    script = f"""var raw = [];
+try {{ raw = panels(); }} catch (e0) {{ raw = []; }}
+var parts = '{safe}'.split(",");
+var n = 0;
+for (var i = 0; i < raw.length; i++) {{
+  var panel = raw[i];
+  if (!panel || !panel.widgets) {{
+    try {{ panel = panelById(raw[i]); }} catch (e1) {{ panel = null; }}
+  }}
+  if (!panel || !panel.widgets) continue;
+  var widgets = [];
+  try {{ widgets = panel.widgets(); }} catch (e2) {{ widgets = []; }}
+  for (var j = 0; j < widgets.length; j++) {{
+    var kind = "";
+    try {{ kind = String(widgets[j].type || ""); }} catch (e3) {{ kind = ""; }}
+    if (kind !== "org.kde.plasma.icontasks" && kind !== "org.kde.plasma.taskmanager") continue;
+    widgets[j].currentConfigGroup = ["General"];
+    widgets[j].writeConfig("launchers", parts.join(","));
+{extra}
+    n = n + 1;
+  }}
+}}
+n > 0 ? "devos-launchers-ok" : "devos-launchers-miss";
+"""
     try:
         import subprocess
-        ok = False
-        for bus in ("qdbus", "qdbus6", "qdbus-qt6"):
-            if not shutil.which(bus):
+        for cmd in _plasma_script_commands(script):
+            try:
+                out = subprocess.run(cmd, capture_output=True, text=True, timeout=8)
+            except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
                 continue
-            r = subprocess.run(
-                [
-                    bus,
-                    "org.kde.plasmashell",
-                    "/PlasmaShell",
-                    "org.kde.PlasmaShell.evaluateScript",
-                    script,
-                ],
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=8,
-            )
-            if r.returncode == 0:
-                ok = True
-                break
-        return ok
+            text = ((out.stdout or "") + "\n" + (out.stderr or "")).strip()
+            if out.returncode != 0:
+                continue
+            if any(word in text for word in ("TypeError", "ReferenceError", "SyntaxError")):
+                continue
+            if "devos-launchers-ok" in text:
+                return True
+        return False
     except Exception:
         return False
+
+
+def _plasma_script_commands(script: str) -> list:
+    commands = []
+    for bus in ("qdbus6", "qdbus", "qdbus-qt6"):
+        if shutil.which(bus):
+            commands.append([bus, "org.kde.plasmashell", "/PlasmaShell", "org.kde.PlasmaShell.evaluateScript", script])
+    if shutil.which("busctl"):
+        commands.append(
+            [
+                "busctl", "--user", "call", "org.kde.plasmashell", "/PlasmaShell",
+                "org.kde.PlasmaShell", "evaluateScript", "s", script,
+            ]
+        )
+    return commands
+
+
+_WIN_PIN = re.compile(r"-w([0-9a-f]+)\.desktop$", re.I)
+_PUBLISHED_LAUNCHERS = None
+
+
+def _reconcile_launcher_entries(existing, chrome_wins, idle_pin: str) -> list:
+    """Launcher list after Chrome windows open or close.
+
+    A closed window's chrome-*-w<id> pin is dropped. When no Chrome window is
+    open, every Chrome face is removed and the single browser shortcut returns.
+    Other apps on the bar are left as they are.
+    """
+    preserved = [e for e in (existing or []) if not _is_chrome_launcher(e)]
+    wins = list(chrome_wins or [])
+    if not wins:
+        return preserved + ([idle_pin] if idle_pin else [])
+    open_hex = set()
+    open_desktops = []
+    seen = set()
+    for win in wins:
+        try:
+            open_hex.add(f"{int(win.get('id') or 0) & 0xFFFFFFFF:x}")
+        except (TypeError, ValueError):
+            pass
+        for token in re.split(r"[\s,]+", (win.get("wm_class") or "").lower()):
+            if token.startswith("chrome-") and "-w" in token:
+                name = token if token.endswith(".desktop") else f"{token}.desktop"
+                entry = name if name.startswith("applications:") else f"applications:{name}"
+                if entry not in seen:
+                    seen.add(entry)
+                    open_desktops.append(entry)
+    if open_desktops:
+        return preserved + open_desktops
+    kept = []
+    for entry in existing or []:
+        if not _is_chrome_launcher(entry):
+            continue
+        match = _WIN_PIN.search(entry.lower())
+        if match and match.group(1) not in open_hex:
+            continue
+        kept.append(entry)
+    if not any(_is_chrome_launcher(e) for e in kept) and idle_pin:
+        kept.append(idle_pin)
+    return preserved + kept
 
 
 def sync_plasma_profile_launchers(home_dir=None, active_slugs=None, window_desktops=None):
@@ -1421,10 +1493,85 @@ def sync_plasma_profile_launchers(home_dir=None, active_slugs=None, window_deskt
         # Same pins. Rewriting appletsrc or restarting the panel hides the footer.
         return True
     cfg.write_text(new_text, encoding="utf-8")
-    # Save the pin list for the next login. Do not push it into the running
-    # panel: reloadConfig() removes the footer for a second or two, then draws
-    # it again. The open windows keep their photos through the window icon.
+    # Save the pin list. publish_chrome_task_launchers pushes it with writeConfig.
     return True
+
+
+def _read_launcher_entries(home_dir):
+    home = home_dir or os.path.expanduser("~")
+    cfg = Path(home) / ".config/plasma-org.kde.plasma.desktop-appletsrc"
+    if not cfg.is_file():
+        return None, None, []
+    text = cfg.read_text(encoding="utf-8", errors="replace")
+    section = _find_icontasks_general_section(text)
+    if not section:
+        return text, None, []
+    existing = []
+    match = re.search(rf"(?ms)^{re.escape(section)}\n(.*?)(?=^\[|\Z)", text)
+    if match:
+        for line in match.group(1).splitlines():
+            if line.startswith("launchers="):
+                existing = [x.strip() for x in line.split("=", 1)[1].split(",") if x.strip()]
+                break
+    return text, section, existing
+
+
+def _write_launcher_entries(home_dir, entries) -> str:
+    """Replace only the Icon Tasks launcher list. Leave every other applet alone."""
+    home = home_dir or os.path.expanduser("~")
+    text, section, _existing = _read_launcher_entries(home)
+    csv = ",".join(entries)
+    if not section or text is None:
+        return csv
+    parts = re.split(r"(?m)(?=^\[)", text)
+    out = []
+    for part in parts:
+        header = part.split("\n", 1)[0].strip()
+        if header != section:
+            out.append(part)
+            continue
+        hdr, _, rest = part.partition("\n")
+        lines = []
+        seen = False
+        for line in rest.splitlines(keepends=True):
+            if line.startswith("launchers="):
+                if not seen:
+                    lines.append(f"launchers={csv}\n")
+                    seen = True
+            else:
+                lines.append(line)
+        if not seen:
+            lines.append(f"launchers={csv}\n")
+        part = hdr + "\n" + "".join(lines)
+        if not part.endswith("\n"):
+            part += "\n"
+        out.append(part)
+    new_text = "".join(out)
+    if new_text != text:
+        (Path(home) / ".config/plasma-org.kde.plasma.desktop-appletsrc").write_text(new_text, encoding="utf-8")
+    return csv
+
+
+def publish_chrome_task_launchers(home_dir, chrome_wins) -> bool:
+    """Make the footer match the Chrome windows that are actually open.
+
+    Called when a window appears or disappears, not on a title change. A closed
+    Chrome window loses its task button immediately. The rest of the bar stays.
+    """
+    global _PUBLISHED_LAUNCHERS
+    home = home_dir or os.path.expanduser("~")
+    _text, section, existing = _read_launcher_entries(home)
+    if not section:
+        return False
+    idle = _idle_chrome_launcher(existing, home)
+    desired = _reconcile_launcher_entries(existing, chrome_wins, idle)
+    csv = _write_launcher_entries(home, desired)
+    if csv == _PUBLISHED_LAUNCHERS:
+        return False
+    if apply_plasma_launchers_live(csv, "0", launchers_only=True):
+        _PUBLISHED_LAUNCHERS = csv
+        return True
+    return False
 
 
 _LAST_PLASMA_RELOAD = 0.0
@@ -2203,13 +2350,22 @@ def watch_chrome_windows(home_dir=None, poll_interval=None):
             ident = _chrome_switch_identity(chrome_wins)
             now = time.time()
 
+            # A window opened or closed. Drop the closed Chrome button now.
+            # Title changes are not part of ident, so switching tabs does not
+            # rewrite the bar. writeConfig only — never reloadConfig.
+            if ident != last_ident:
+                try:
+                    publish_chrome_task_launchers(home_dir, chrome_wins)
+                except Exception:
+                    pass
+                last_ident = ident
+
             # Photos only. Never retag the window and never reload the panel:
             # both of those remove the footer for a second or two.
-            if chrome_wins and (ident != last_ident or now - last_icon >= 15):
+            if chrome_wins and now - last_icon >= 15:
                 paint_chrome_icons(home_dir, chrome_wins)
-                last_ident = ident
                 last_icon = now
-            sleep_for = 2.0 if chrome_wins else max(poll_interval, 15.0)
+            sleep_for = 1.0 if chrome_wins else max(poll_interval, 15.0)
 
         except Exception:
             sleep_for = poll_interval
