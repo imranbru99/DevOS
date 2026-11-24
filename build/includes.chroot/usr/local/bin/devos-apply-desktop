@@ -193,15 +193,20 @@ if cfg.is_file():
     launchers = ",".join(pin for pin in launchers.split(",") if pin not in disabled)
     favorites = ",".join(pin for pin in favorites.split(",") if pin not in disabled)
 
-    def scrub(value: str) -> str:
+    def drop_dead(value: str) -> str:
+        # Remove only dead pins. Replacing the whole list on every sign-in
+        # makes Plasma reload the panel, so the menus show and then hide.
         keep = [p.strip() for p in value.split(",")
                 if p.strip() and p.strip() not in disabled and not any(d in p for d in dead)]
-        return ",".join(keep) if keep else launchers
+        return ",".join(keep)
 
-    text = re.sub(r"(?m)^(launchers=).*$", lambda m: m.group(1) + scrub(m.group(0).split("=", 1)[1]), text)
+    def sub_list(match, fallback: str) -> str:
+        cleaned = drop_dead(match.group(0).split("=", 1)[1])
+        return match.group(1) + (cleaned if cleaned else fallback)
+
+    text = re.sub(r"(?m)^(launchers=).*$", lambda m: sub_list(m, launchers), text)
     if "favorites=" in text:
-        text = re.sub(r"(?m)^(favorites=).*$", r"\1" + favorites, text)
-        text = re.sub(r"(?m)^(favoritesPortedToKAstats=).*$", r"\1false", text)
+        text = re.sub(r"(?m)^(favorites=).*$", lambda m: sub_list(m, favorites), text)
     elif "icon=devos-logo" in text:
         text = text.replace(
             "icon=devos-logo",

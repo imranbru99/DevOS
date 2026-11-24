@@ -583,6 +583,17 @@ def apply_live(hidden: set[str]) -> bool:
     return "devos-tray-ok" in text
 
 
+def _panel_can_hide(lines: list[str]) -> bool:
+    """True when a panel is allowed to dodge or auto-hide."""
+    for line in lines:
+        if not line.startswith("hiding="):
+            continue
+        mode = line.split("=", 1)[1].strip().lower()
+        if mode not in ("", "0", "none"):
+            return True
+    return False
+
+
 def pin_footer() -> bool:
     """Keep a maximized window from covering the footer. Once per process."""
     global _footer_done
@@ -636,6 +647,8 @@ def once(restart_if_changed: bool = True, announce: bool = False) -> int:
         have, _show_all, _shown = read_policy(lines)
         hidden = have | want
         complete = policy_is_complete(lines, hidden)
+        del restart_if_changed
+        signature = frozenset(hidden)
         if not complete:
             new_lines = write_policy(lines, hidden)
             new_raw = "".join(new_lines)
@@ -643,19 +656,21 @@ def once(restart_if_changed: bool = True, announce: bool = False) -> int:
                 APPLETRC.write_text(new_raw, encoding="utf-8")
                 lines = new_lines
                 complete = True
-        # The file can already list the microphone while the running tray is
-        # still reading another group. Push the list into that tray. Do not
-        # restart plasmashell: that removes the footer for a second.
-        del restart_if_changed
-        pin_footer()
-        signature = frozenset(hidden)
-        if _notified_for != signature:
-            notify_running_shell(lines, hidden)
+            # The saved layout is missing a hide entry. Push it once.
+            # A later sign-in reads that file as the shell starts, so it must
+            # not be pushed again: that second write hides the menus.
+            if _panel_can_hide(lines):
+                pin_footer()
+            if _notified_for != signature:
+                notify_running_shell(lines, hidden)
+                _notified_for = signature
+                _live_done = False
+            if not _live_done:
+                if apply_live(hidden):
+                    _live_done = True
+        else:
             _notified_for = signature
-            _live_done = False
-        if not _live_done:
-            if apply_live(hidden):
-                _live_done = True
+            _live_done = True
         if announce:
             detail = (_last_eval or "plasmashell did not answer").replace("\n", " ")
             _announce(_live_done, detail)

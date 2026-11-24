@@ -1641,14 +1641,17 @@ def publish_chrome_task_launchers(home_dir, chrome_wins) -> bool:
         return False
     idle = _idle_chrome_launcher(existing, home)
     desired = _reconcile_launcher_entries(existing, chrome_wins, idle)
-    csv = _write_launcher_entries(home, desired)
-    if csv == _PUBLISHED_LAUNCHERS:
-        return True
-    _notify_launcher_list(home, csv)
-    if apply_plasma_launchers_live(csv, "0", launchers_only=True):
+    csv = ",".join(desired)
+    current = ",".join(existing)
+    if csv == current or csv == _PUBLISHED_LAUNCHERS:
         _PUBLISHED_LAUNCHERS = csv
         return True
-    return False
+    # Write the file and notify. Do not run a shell script against Icon Tasks:
+    # that script reloads the applet, and the menus hide for a second or two.
+    _write_launcher_entries(home, desired)
+    _notify_launcher_list(home, csv)
+    _PUBLISHED_LAUNCHERS = csv
+    return True
 
 
 _LAST_PLASMA_RELOAD = 0.0
