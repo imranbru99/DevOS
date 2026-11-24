@@ -81,6 +81,14 @@ class TestChromeProfiles(unittest.TestCase):
                 tmp, "Profile 1", {"name": "Mirza", "avatar_icon": "chrome://theme/IDR_PROFILE_AVATAR_26"}
             )
             self.assertEqual(found, photo)
+            plain = os.path.join(folder, "Google Profile Picture.jpg")
+            PILImage.new("RGB", (64, 64), (200, 120, 80)).save(plain, format="JPEG")
+            # A flat account picture must still be used. The strict color check
+            # is for unnamed default avatars, not this file.
+            self.assertFalse(chrome_profiles._is_usable_profile_photo(plain))
+            named = chrome_profiles.get_profile_avatar_path(tmp, "Profile 1", {})
+            self.assertEqual(named, photo)
+            self.assertIn("XChangeProperty.argtypes", inspect.getsource(chrome_profiles.set_window_icon))
             out = os.path.join(tmp, "face48.png")
             chrome_profiles.generate_badged_icon("Mirza", out, avatar_path=photo)
             self.assertGreater(os.path.getsize(out), 400)

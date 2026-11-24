@@ -141,14 +141,52 @@ def get_profile_avatar_path(config_dir, profile_key, info=None):
     except OSError:
         pass
 
+    # One folder down as well. Chrome sometimes keeps the account picture
+    # beside the profile, not only in the profile root.
+    try:
+        for entry in os.listdir(folder):
+            nested = os.path.join(folder, entry)
+            if not os.path.isdir(nested):
+                continue
+            for name in os.listdir(nested):
+                low = name.lower()
+                if "profile picture" in low or "gaia" in low:
+                    candidates.append(os.path.join(nested, name))
+    except OSError:
+        pass
+
     seen = set()
     for path in candidates:
         if path in seen:
             continue
         seen.add(path)
-        if _is_usable_profile_photo(path):
+        if _accept_account_photo(path):
             return path
     return None
+
+
+def _accept_account_photo(path: str) -> bool:
+    """True for a Google account picture file.
+
+    Files Chrome names as the account picture are the photo. The strict color
+    check is only for unnamed images, so a real picture is not rejected for
+    looking simple.
+    """
+    if not path or not os.path.isfile(path):
+        return False
+    low = os.path.basename(path).lower()
+    named = "profile picture" in low or "gaia" in low
+    if not named:
+        return _is_usable_profile_photo(path)
+    try:
+        if os.path.getsize(path) < 400:
+            return False
+        with Image.open(path) as img:
+            if max(img.size) < 32:
+                return False
+        return True
+    except Exception:
+        return False
 
 
 def get_chrome_profile_details(config_dir=None):
@@ -770,13 +808,33 @@ def _png_cardinals(path):
 
 
 def set_window_icon(wid, icon_path_48, icon_path_128=None):
-    """Set _NET_WM_ICON on an X11 window using libX11.so.6."""
+    """Set _NET_WM_ICON on an X11 window using libX11.so.6.
+
+    The display pointer and the window id are 64-bit. Without argument types,
+    the call is truncated and the task button keeps Chrome's own logo.
+    """
     paths = [p for p in [icon_path_48, icon_path_128] if p and os.path.isfile(p)]
-    if not paths:
+    if not paths or not wid:
         return
     try:
         x11 = ctypes.CDLL("libX11.so.6")
+        x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
         x11.XOpenDisplay.restype = ctypes.c_void_p
+        x11.XInternAtom.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+        x11.XInternAtom.restype = ctypes.c_ulong
+        x11.XChangeProperty.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_void_p,
+            ctypes.c_int,
+        ]
+        x11.XChangeProperty.restype = ctypes.c_int
+        x11.XFlush.argtypes = [ctypes.c_void_p]
+        x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
 
         disp_name = os.environ.get("DISPLAY")
         if not disp_name:
@@ -793,16 +851,19 @@ def set_window_icon(wid, icon_path_48, icon_path_128=None):
         pixels = []
         for p in paths:
             pixels.extend(_png_cardinals(p))
+        if not pixels:
+            x11.XCloseDisplay(display)
+            return
 
         c_data = (ctypes.c_ulong * len(pixels))(*pixels)
         x11.XChangeProperty(
             display,
-            wid,
+            ctypes.c_ulong(int(wid)),
             net_wm_icon,
             cardinal,
             32,
             0,  # PropModeReplace
-            ctypes.cast(c_data, ctypes.POINTER(ctypes.c_ubyte)),
+            ctypes.cast(c_data, ctypes.c_void_p),
             len(pixels),
         )
         x11.XFlush(display)
@@ -2425,9 +2486,11 @@ def refresh_open_profile_icons(home_dir, chrome_wins) -> None:
             set_window_icon(wid, icon_48, icon_128)
         if avatar and os.path.isfile(icon_48):
             photos.append(os.path.abspath(icon_48))
-    # One profile is open. The pinned browser button uses its .desktop Icon,
-    # so point that file at the photo. Several profiles keep their own window
-    # icons and do not share one launcher picture.
+        elif os.path.isfile(icon_48):
+            photos.append(os.path.abspath(icon_48))
+    # The task button uses the launcher's Icon, which is still the Chrome logo.
+    # One open profile: point that launcher at this picture. Different profiles
+    # keep the picture that was just set on each window.
     target = photos[0] if photos and len(set(photos)) == 1 else None
     if not target or target == _PHOTO_PUSHED:
         return
@@ -2435,25 +2498,50 @@ def refresh_open_profile_icons(home_dir, chrome_wins) -> None:
     changed = False
     apps = os.path.join(home_dir, ".local/share/applications")
     os.makedirs(apps, exist_ok=True)
+    names = ["google-chrome.desktop", "devos-browser.desktop", "com.google.chrome.desktop"]
     for entry in existing:
         if not _is_chrome_launcher(entry):
             continue
         base = entry.split(":")[-1]
         if "-w" in base.lower():
             continue
+        if base not in names:
+            names.append(base)
+    for base in names:
         path = os.path.join(apps, base)
         if not os.path.isfile(path):
             system = os.path.join("/usr/share/applications", base)
-            if os.path.isfile(system):
-                try:
-                    shutil.copyfile(system, path)
-                except OSError:
-                    continue
+            if not os.path.isfile(system):
+                continue
+            try:
+                shutil.copyfile(system, path)
+            except OSError:
+                continue
         if _swap_desktop_icon(path, target):
             changed = True
-    if changed and section:
-        _notify_launcher_list(home_dir, ",".join(existing))
+    if changed:
+        _refresh_service_cache()
+        if section:
+            _notify_launcher_list(home_dir, ",".join(existing))
     _PHOTO_PUSHED = target
+
+
+def _refresh_service_cache() -> None:
+    """Make Plasma read the new Icon= path. Does not restart the desktop."""
+    import subprocess
+    tool = shutil.which("kbuildsycoca6") or shutil.which("kbuildsycoca5")
+    if not tool:
+        return
+    try:
+        subprocess.run(
+            [tool, "--noincremental"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=20,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        pass
 
 
 def paint_chrome_icons(home_dir, chrome_wins):
