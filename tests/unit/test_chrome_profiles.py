@@ -212,14 +212,21 @@ class TestChromeProfiles(unittest.TestCase):
                 chrome_profiles.sync_plasma_profile_launchers(tmp_home, ["work"])
                 live.assert_not_called()
 
+    def test_tray_watch_does_not_restart_the_footer(self):
+        path = os.path.join(ROOT, "build/includes.chroot/usr/local/bin/devos-tray-overflow")
+        text = open(path, encoding="utf-8").read()
+        once = text.split("def once", 1)[1].split("def watch", 1)[0]
+        self.assertNotIn("restart_plasmashell()", once)
+
     def test_window_switch_does_not_restart_the_footer(self):
         apply_src = inspect.getsource(chrome_profiles.apply_window_profiles)
         watch_src = inspect.getsource(chrome_profiles.watch_chrome_windows)
         kwin_src = inspect.getsource(chrome_profiles.apply_kwin_window_desktops)
         self.assertNotIn("reload_plasmashell", apply_src)
         self.assertNotIn("reload_plasmashell", watch_src)
-        self.assertIn("_chrome_switch_identity", watch_src)
-        self.assertIn("panel=False", watch_src)
+        self.assertIn("paint_chrome_icons", watch_src)
+        self.assertNotIn("apply_window_profiles", watch_src)
+        self.assertNotIn("set_window_wm_class", inspect.getsource(chrome_profiles.paint_chrome_icons))
         self.assertNotIn("reloadConfig", inspect.getsource(chrome_profiles.apply_plasma_launchers_live))
         self.assertNotIn('"org.kde.kwin.Scripting.start"', kwin_src)
         ident_src = inspect.getsource(chrome_profiles._chrome_switch_identity)

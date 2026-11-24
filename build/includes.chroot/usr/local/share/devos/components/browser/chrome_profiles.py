@@ -2098,22 +2098,41 @@ def apply_window_profiles(home_dir=None, panel=True):
 
 
 def _chrome_switch_identity(chrome_wins):
-    """What actually changed: which windows, and which profile each one is.
+    """Window ids only.
 
-    The window title is not part of this. Clicking a WhatsApp chat or moving
-    to another app changes the title and must not rebuild the footer.
+    Profile-directory text from /proc flickers empty and then filled. Treating
+    that flicker as a change rewrote WM_CLASS, KWin dropped the task, and the
+    footer went empty for a second or two.
     """
-    ident = []
+    return tuple(w["id"] for w in chrome_wins)
+
+
+def paint_chrome_icons(home_dir, chrome_wins):
+    """Put the profile photo on each window. Do not retag it or touch the panel."""
+    if not home_dir:
+        home_dir = os.path.expanduser("~")
+    chrome_dir = os.path.join(home_dir, ".config/google-chrome")
+    details = get_chrome_profile_details(chrome_dir)
+    profiles = {k: v["name"] for k, v in details.items()}
+    name_to_key = {v["name"]: k for k, v in details.items()}
+    icons_48 = os.path.join(home_dir, ".local/share/icons/hicolor/48x48/apps")
+    icons_128 = os.path.join(home_dir, ".local/share/icons/hicolor/128x128/apps")
+    os.makedirs(icons_48, exist_ok=True)
+    os.makedirs(icons_128, exist_ok=True)
     for w in chrome_wins:
-        pid = _window_pid(w["id"])
-        if _cmdline_is_guest(pid):
-            key = "guest"
-        else:
-            key = _cmdline_profile_directory(pid) or ""
-        # Class text flickers between google-chrome and chrome-<profile> after
-        # we retag the window. Including it made every flicker rebuild the bar.
-        ident.append((w["id"], key))
-    return tuple(ident)
+        wid = w["id"]
+        prof_name = WINDOW_PROFILE_CACHE.get(wid)
+        if not prof_name:
+            prof_name = detect_window_profile(w, profiles, home_dir, None, None)
+        slug = slugify(prof_name)
+        is_guest = (prof_name or "").lower() == "guest" or slug == "guest"
+        prof_key = None if is_guest else name_to_key.get(prof_name)
+        avatar = None if is_guest else ((details.get(prof_key) or {}).get("avatar") if prof_key else None)
+        icon_48 = os.path.join(icons_48, f"chrome-{slug}.png")
+        icon_128 = os.path.join(icons_128, f"chrome-{slug}.png")
+        if not (_badge_is_current(icon_48, avatar) and _badge_is_current(icon_128, avatar)):
+            generate_badged_icon(prof_name, icon_48, icon_128, avatar_path=avatar)
+        set_window_icon(wid, icon_48, icon_128)
 
 
 def keep_footer_visible(home_dir=None) -> bool:
@@ -2184,12 +2203,6 @@ def watch_chrome_windows(home_dir=None, poll_interval=None):
         keep_footer_visible(home_dir)
     except Exception:
         pass
-    sync_all_profiles(home_dir)
-    try:
-        apply_window_profiles(home_dir, panel=False)
-    except Exception:
-        pass
-
     last_ident = None
     last_icon = 0.0
     while True:
@@ -2205,14 +2218,11 @@ def watch_chrome_windows(home_dir=None, poll_interval=None):
             ident = _chrome_switch_identity(chrome_wins)
             now = time.time()
 
-            # A new window or a real profile change updates the photo once.
-            # A title change (switching chats or apps) leaves the footer alone.
-            if chrome_wins and ident != last_ident:
-                apply_window_profiles(home_dir, panel=False)
+            # Photos only. Never retag the window and never reload the panel:
+            # both of those remove the footer for a second or two.
+            if chrome_wins and (ident != last_ident or now - last_icon >= 15):
+                paint_chrome_icons(home_dir, chrome_wins)
                 last_ident = ident
-                last_icon = now
-            elif chrome_wins and now - last_icon >= 15:
-                _reassert_window_icons(home_dir, chrome_wins)
                 last_icon = now
             sleep_for = 2.0 if chrome_wins else max(poll_interval, 15.0)
 

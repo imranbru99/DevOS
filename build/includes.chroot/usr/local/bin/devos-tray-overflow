@@ -268,11 +268,11 @@ def once(restart_if_changed: bool = True) -> int:
         new_raw = "".join(new_lines)
         if new_raw != raw:
             APPLETRC.write_text(new_raw, encoding="utf-8")
-        if restart_if_changed and (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
-            restart_plasmashell()
-            print("DevOS: tray icons moved under Status & Notifications (^).")
-        else:
-            print("DevOS: tray overflow config updated (restart plasmashell to apply).")
+        # Do not restart plasmashell. Chrome registers a new status icon when
+        # you switch windows, this watch saw it, and the restart removed the
+        # footer for a second or two. The hide list applies on next sign-in.
+        del restart_if_changed
+        print("DevOS: tray overflow config updated (footer left on screen).")
     except Exception as exc:
         print(f"DevOS: tray overflow update skipped: {exc}", file=sys.stderr)
         return 1
