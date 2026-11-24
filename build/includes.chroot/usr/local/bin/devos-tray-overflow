@@ -374,9 +374,9 @@ function cleaned(parts) {{
   return out;
 }}
 var wrote = 0;
-var panels = panels();
-for (var p = 0; p < panels.length; p++) {{
-  var widgets = panels[p].widgets();
+var panelList = panels();
+for (var p = 0; p < panelList.length; p++) {{
+  var widgets = panelList[p].widgets();
   for (var w = 0; w < widgets.length; w++) {{
     if (widgets[w].type !== "org.kde.plasma.systemtray") continue;
     var targets = [widgets[w]];
@@ -427,11 +427,11 @@ def pin_footer_script() -> str:
     write the property when it is already ``none``.
     """
     return """var changed = 0;
-var panels = panels();
-for (var i = 0; i < panels.length; i++) {
-  var mode = String(panels[i].hiding || "");
+var panelList = panels();
+for (var i = 0; i < panelList.length; i++) {
+  var mode = String(panelList[i].hiding || "");
   if (mode === "autohide" || mode === "dodgewindows" || mode === "windowscover" || mode === "windowsbelow" || mode === "windowsgobelow" || mode === "1" || mode === "2" || mode === "3") {
-    panels[i].hiding = "none";
+    panelList[i].hiding = "none";
     changed = changed + 1;
   }
 }
@@ -439,26 +439,67 @@ changed ? "footer-pinned" : "footer-none";
 """
 
 
+def _script_commands(script: str) -> list[list[str]]:
+    """Ways to reach the running shell. qdbus is not always installed."""
+    commands: list[list[str]] = []
+    for bus in ("qdbus6", "qdbus", "qdbus-qt6"):
+        if shutil.which(bus):
+            commands.append([bus, "org.kde.plasmashell", "/PlasmaShell", "org.kde.PlasmaShell.evaluateScript", script])
+    if shutil.which("busctl"):
+        commands.append(
+            [
+                "busctl",
+                "--user",
+                "call",
+                "org.kde.plasmashell",
+                "/PlasmaShell",
+                "org.kde.PlasmaShell",
+                "evaluateScript",
+                "s",
+                script,
+            ]
+        )
+    if shutil.which("gdbus"):
+        commands.append(
+            [
+                "gdbus",
+                "call",
+                "--session",
+                "--dest",
+                "org.kde.plasmashell",
+                "--object-path",
+                "/PlasmaShell",
+                "--method",
+                "org.kde.PlasmaShell.evaluateScript",
+                script,
+            ]
+        )
+    return commands
+
+
 def _evaluate(script: str) -> str:
     """Run a plasmashell script. Empty string when the shell did not accept it."""
-    for bus in ("qdbus6", "qdbus", "qdbus-qt6"):
-        if not shutil.which(bus):
-            continue
+    global _last_eval
+    commands = _script_commands(script)
+    if not commands:
+        _last_eval = "qdbus and busctl are not installed"
+        return ""
+    last = ""
+    for cmd in commands:
         try:
-            out = subprocess.run(
-                [bus, "org.kde.plasmashell", "/PlasmaShell", "org.kde.PlasmaShell.evaluateScript", script],
-                capture_output=True,
-                text=True,
-                timeout=8,
-            )
-        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            out = subprocess.run(cmd, capture_output=True, text=True, timeout=8)
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
+            last = str(exc)
             continue
         text = ((out.stdout or "") + "\n" + (out.stderr or "")).strip()
+        last = text or f"exit {out.returncode}"
         if out.returncode != 0:
             continue
-        if any(word in text for word in ("TypeError", "ReferenceError", "SyntaxError")):
+        if any(word in text for word in ("TypeError", "ReferenceError", "SyntaxError", "Error:")):
             continue
+        _last_eval = text
         return text
+    _last_eval = last
     return ""
 
 
@@ -529,6 +570,7 @@ def notify_running_shell(lines: list[str], hidden: set[str]) -> bool:
 _live_done = False
 _footer_done = False
 _notified_for: frozenset[str] | None = None
+_last_eval = ""
 
 
 def apply_live(hidden: set[str]) -> bool:
@@ -581,10 +623,11 @@ def once(restart_if_changed: bool = True) -> int:
         if not _live_done:
             if apply_live(hidden):
                 _live_done = True
-        if complete:
-            print("DevOS: tray overflow policy already applied.")
+        if _live_done:
+            print("DevOS: microphone moved under the status menu.")
         else:
-            print("DevOS: tray overflow config updated (footer left on screen).")
+            detail = (_last_eval or "plasmashell did not answer").replace("\n", " ")
+            print(f"DevOS: the running tray kept the microphone on the footer ({detail}).")
     except Exception as exc:
         print(f"DevOS: tray overflow update skipped: {exc}", file=sys.stderr)
         return 1
