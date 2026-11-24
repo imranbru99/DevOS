@@ -2,8 +2,10 @@
 
 import importlib.machinery
 import importlib.util
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -84,6 +86,23 @@ class TrayOverflowTests(unittest.TestCase):
                 updated.splitlines(keepends=True), {"org.kde.plasma.volume"}
             )
         )
+
+    def test_once_writes_the_live_containment(self):
+        mod = load_overflow()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "plasma-org.kde.plasma.desktop-appletsrc"
+            path.write_text(APPLET_HIDDEN, encoding="utf-8")
+            with patch.object(mod, "APPLETRC", path), \
+                    patch.object(mod, "desired_hidden_set", return_value={"org.kde.plasma.volume", "devos-sound"}), \
+                    patch.object(mod, "restart_plasmashell") as restart, \
+                    patch.dict("os.environ", {"DISPLAY": ":0"}, clear=False):
+                self.assertEqual(mod.once(), 0)
+            text = path.read_text(encoding="utf-8")
+            restart.assert_called_once()
+            containment = text.split("[Containments][19][General]", 1)[1]
+            hidden = next(line for line in containment.splitlines() if line.startswith("hiddenItems="))
+            self.assertIn("org.kde.plasma.volume", hidden)
+            self.assertIn("microphone", hidden)
 
 
 if __name__ == "__main__":

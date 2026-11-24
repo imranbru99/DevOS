@@ -357,6 +357,7 @@ def once(restart_if_changed: bool = True) -> int:
         if policies_satisfied(lines, want):
             print("DevOS: tray overflow policy already applied.")
             return 0
+        have, _, _ = read_policy(lines)
         new_lines = write_policy(lines, have | want)
         new_raw = "".join(new_lines)
         if new_raw != raw:
