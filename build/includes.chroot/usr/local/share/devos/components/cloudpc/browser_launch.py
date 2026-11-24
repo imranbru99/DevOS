@@ -261,6 +261,8 @@ def _spawn(cmd: list[str]):
     env = os.environ.copy()
     # Same Chromium+KDE trap as the main browser: colorreload-gtk-module SIGSEGVs
     # on theme/palette changes. Keep Windows App isolated from those modules.
+    # Skip the Chrome profile sync: it hides this menu entry and wipes icons.
+    env["DEVOS_SKIP_CHROME_SYNC"] = "1"
     env["GTK_MODULES"] = ""
     env["GTK3_MODULES"] = ""
     env.pop("LOADED_GTK_MODULES", None)
@@ -325,7 +327,52 @@ def _notify(message: str) -> None:
         )
 
 
+def _open_app_url():
+    """Open Windows App immediately. Do not wait on an installer."""
+    _family, binary = browser_binary()
+    return _spawn(
+        [
+            binary,
+            *_chrome_extra(),
+            "--profile-directory=Default",
+            f"--class={WM_CLASS}",
+            f"--enable-features={BASE_FEATURES}",
+            f"--app={URL}",
+        ]
+    )
+
+
+def repair_menu_entry() -> None:
+    """Restore the Start-menu Windows App entry if a Chrome sync hid it."""
+    apps = applications_dir()
+    try:
+        apps.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return
+    path = apps / "devos-web-winapp.desktop"
+    content = """[Desktop Entry]
+Type=Application
+Name=Windows App
+GenericName=Microsoft Cloud PC
+Comment=Windows 365, Azure Virtual Desktop and remote apps
+Exec=/usr/local/bin/devos-windows-app
+Icon=devos-web-winapp
+StartupWMClass=chrome-windows.cloud.microsoft__-Default
+Terminal=false
+Categories=Network;Office;
+Keywords=windows;cloud;pc;rdp;azure;virtual desktop;365;
+X-DevOS-WebApp=true
+"""
+    try:
+        if path.is_file() and path.read_text(encoding="utf-8") == content:
+            return
+        path.write_text(content, encoding="utf-8")
+    except OSError:
+        return
+
+
 def open_isolated():
+    repair_menu_entry()
     if focus_existing_window():
         return None
 
@@ -333,8 +380,18 @@ def open_isolated():
     app_id = discover_app_id(None)
 
     # Installed Windows App PWA → real app window (no URL bar on Microsoft login).
+    # If that process quits without a window, open the site as an app window.
     if app_id and not force_isolated:
-        return _spawn(launch_via_default_pwa(app_id))
+        proc = _spawn(launch_via_default_pwa(app_id))
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            return proc
+        if focus_existing_window():
+            return proc
+        return _open_app_url()
+    if not force_isolated:
+        return _open_app_url()
 
     # No PWA yet: start installer, wait for --app-id, then open as PWA.
     # Never leave the user on a plain --app=URL window for sign-in.

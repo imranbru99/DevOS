@@ -494,7 +494,7 @@ def _draw_letter_badge(img, name: str) -> None:
 def _draw_photo_badge(img, avatar_path: str) -> bool:
     """Windows-style corner photo. The Chrome logo stays visible."""
     try:
-        badge_size = 72
+        badge_size = 86
         ring = 4
         photo = _circle_crop(Image.open(avatar_path), badge_size)
         outer = badge_size + ring * 2
@@ -651,6 +651,58 @@ Exec={devos_bin} --guest --class=chrome-guest
         f.write(full_content)
 
 
+def _launcher_icon_line(home_dir) -> str:
+    """Icon the Chrome button should keep. A badge already on disk wins."""
+    marker = os.path.join(home_dir, ".local/share/icons/hicolor/.devos-chrome-badge")
+    try:
+        if os.path.isfile(marker):
+            with open(marker, encoding="utf-8") as handle:
+                pointed = handle.read().strip()
+            if pointed and os.path.isfile(pointed):
+                return pointed
+    except OSError:
+        pass
+    return "google-chrome"
+
+
+def repair_windows_app_launcher(home_dir=None) -> str:
+    """Put a working Windows App menu entry in the user application folder.
+
+    The menu item was hidden or pointed at a Chrome file this watcher had
+    marked NoDisplay, so the click did nothing.
+    """
+    home = home_dir or os.path.expanduser("~")
+    apps = os.path.join(home, ".local/share/applications")
+    try:
+        os.makedirs(apps, exist_ok=True)
+    except OSError:
+        return ""
+    path = os.path.join(apps, "devos-web-winapp.desktop")
+    content = """[Desktop Entry]
+Type=Application
+Name=Windows App
+GenericName=Microsoft Cloud PC
+Comment=Windows 365, Azure Virtual Desktop and remote apps
+Exec=/usr/local/bin/devos-windows-app
+Icon=devos-web-winapp
+StartupWMClass=chrome-windows.cloud.microsoft__-Default
+Terminal=false
+Categories=Network;Office;
+Keywords=windows;cloud;pc;rdp;azure;virtual desktop;365;
+X-DevOS-WebApp=true
+"""
+    try:
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as handle:
+                if handle.read() == content:
+                    return path
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(content)
+    except OSError:
+        return ""
+    return path
+
+
 def sync_all_profiles(home_dir=None):
     """Generate all profile icons and desktop launcher entries."""
     if not home_dir:
@@ -787,6 +839,14 @@ X-DevOS-ChromeProfile=true
                 continue
             if "NoDisplay=true" in text:
                 continue
+            low = text.lower()
+            # Windows App's own launcher. Hiding it makes the menu click do nothing.
+            if (
+                "windows.cloud.microsoft" in low
+                or "windows.cloud.microsoft" in name.lower()
+                or "name=windows app" in low
+            ):
+                continue
             if "X-DevOS-ChromeProfile=true" not in text and "StartupWMClass=chrome-" not in text:
                 continue
             if "NoDisplay=" in text:
@@ -803,19 +863,22 @@ X-DevOS-ChromeProfile=true
     except OSError:
         pass
 
-    # Idle pin: Chrome logo. Running windows use chrome-<profile> classes instead.
-    stock = get_stock_chrome_icon()
-    for dest in (
-        os.path.join(icons_dir_48, "google-chrome.png"),
-        os.path.join(icons_dir_128, "google-chrome.png"),
-    ):
-        try:
-            if stock and os.path.isfile(stock):
-                shutil.copyfile(stock, dest)
-            else:
-                generate_badged_icon("Chrome", dest, None, avatar_path=None)
-        except OSError:
-            pass
+    # Idle pin: Chrome logo, unless the watcher already badged this account.
+    # Copying the stock logo here used to erase the profile photo on every launch.
+    icon_line = _launcher_icon_line(home_dir)
+    if icon_line == "google-chrome":
+        stock = get_stock_chrome_icon()
+        for dest in (
+            os.path.join(icons_dir_48, "google-chrome.png"),
+            os.path.join(icons_dir_128, "google-chrome.png"),
+        ):
+            try:
+                if stock and os.path.isfile(stock):
+                    shutil.copyfile(stock, dest)
+                else:
+                    generate_badged_icon("Chrome", dest, None, avatar_path=None)
+            except OSError:
+                pass
     user_desktop = os.path.join(home_dir, ".local/share/applications/google-chrome.desktop")
     base_content = f"""[Desktop Entry]
 Version=1.0
@@ -826,7 +889,7 @@ Exec={devos_bin} --profile-directory="{default_key}" --class={default_class} %U
 StartupNotify=true
 StartupWMClass=google-chrome
 Terminal=false
-Icon=google-chrome
+Icon={icon_line}
 Type=Application
 Categories=Network;WebBrowser;
 MimeType=application/pdf;application/rdf+xml;application/rss+xml;application/xhtml+xml;application/xhtml_xml;application/xml;image/gif;image/jpeg;image/png;image/webp;text/html;text/xml;x-scheme-handler/http;x-scheme-handler/https;
@@ -3115,6 +3178,7 @@ def watch_chrome_windows(home_dir=None, poll_interval=None):
     # for the first poll cycle. Pin the footer so a maximized window cannot cover it.
     try:
         keep_footer_visible(home_dir)
+        repair_windows_app_launcher(home_dir)
     except Exception:
         pass
     last_ident = None

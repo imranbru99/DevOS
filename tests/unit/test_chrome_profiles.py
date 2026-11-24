@@ -139,6 +139,21 @@ class TestChromeProfiles(unittest.TestCase):
             ]),
             badge,
         )
+        with tempfile.TemporaryDirectory() as tmp_home:
+            from PIL import Image as PILImage
+
+            badge_file = os.path.join(tmp_home, "badge.png")
+            PILImage.new("RGB", (8, 8), (1, 2, 3)).save(badge_file)
+            marker_dir = os.path.join(tmp_home, ".local/share/icons/hicolor")
+            os.makedirs(marker_dir, exist_ok=True)
+            with open(os.path.join(marker_dir, ".devos-chrome-badge"), "w", encoding="utf-8") as handle:
+                handle.write(badge_file)
+            self.assertEqual(chrome_profiles._launcher_icon_line(tmp_home), badge_file)
+            menu = chrome_profiles.repair_windows_app_launcher(tmp_home)
+            body = open(menu, encoding="utf-8").read()
+            self.assertIn("Exec=/usr/local/bin/devos-windows-app", body)
+            self.assertNotIn("NoDisplay=true", body)
+            self.assertNotIn("Hidden=true", body)
         self.assertNotIn("bind_each_chrome_window_once", inspect.getsource(chrome_profiles.watch_chrome_windows))
         self.assertTrue(chrome_profiles._is_chrome_launcher("applications:google-chrome.desktop"))
         with tempfile.TemporaryDirectory() as tmp:
