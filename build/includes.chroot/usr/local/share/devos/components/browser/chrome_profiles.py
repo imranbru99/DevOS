@@ -715,6 +715,9 @@ def sync_all_profiles(home_dir=None):
     os.makedirs(icons_dir_48, exist_ok=True)
     os.makedirs(icons_dir_128, exist_ok=True)
     os.makedirs(apps_dir, exist_ok=True)
+    # Badge pictures belong in these folders. A theme file here hides every
+    # other application icon after the next start.
+    repair_user_icon_theme(home_dir)
 
     chrome_dir = os.path.join(home_dir, ".config/google-chrome")
     details = get_chrome_profile_details(chrome_dir)
@@ -2890,12 +2893,111 @@ def _point_shared_launchers(home_dir: str, target: str) -> bool:
     return changed
 
 
+def _hicolor_index_is_devos(text: str) -> bool:
+    """True when this theme file is the one that replaced the system icons."""
+    if "DevOS profile badges" in (text or ""):
+        return True
+    body = text or ""
+    return (
+        "Name=Hicolor" in body
+        and "Directories=48x48/apps,128x128/apps,256x256/apps" in body
+        and "Inherits=" not in body
+    )
+
+
+def _user_hicolor_has_chrome_badges(root: str) -> bool:
+    if os.path.isfile(os.path.join(root, ".devos-chrome-badge")):
+        return True
+    for folder in ("48x48", "128x128", "256x256"):
+        apps_dir = os.path.join(root, folder, "apps")
+        try:
+            names = os.listdir(apps_dir)
+        except OSError:
+            continue
+        for name in names:
+            if name in ("google-chrome.png", "devos-browser.png"):
+                return True
+            if name.startswith("chrome-") and name.endswith(".png"):
+                return True
+    return False
+
+
+def repair_user_icon_theme(home_dir=None) -> bool:
+    """Remove the private Hicolor theme that blanks application icons.
+
+    The Chrome account photo is a PNG in the home icon folder. Writing a
+    theme file named Hicolor in that same folder replaces
+    /usr/share/icons/hicolor. The pictures already on screen stay until the
+    PC is shut off. The next start reads the private theme, which only
+    lists the badge folders, so the other application icons are missing.
+    The badge PNGs stay.
+    """
+    home = home_dir or os.path.expanduser("~")
+    root = os.path.join(home, ".local/share/icons/hicolor")
+    index = os.path.join(root, "index.theme")
+    removed = False
+    index_left = os.path.isfile(index)
+    try:
+        if index_left:
+            with open(index, encoding="utf-8", errors="replace") as handle:
+                text = handle.read()
+            if _hicolor_index_is_devos(text):
+                os.remove(index)
+                removed = True
+                index_left = False
+    except OSError:
+        pass
+    cache = os.path.join(root, "icon-theme.cache")
+    # A cache in the home Hicolor folder hides the system icon list. Keep a
+    # cache only when a theme file we did not write is still there and this
+    # folder has no Chrome badges.
+    owns = removed or _user_hicolor_has_chrome_badges(root)
+    try:
+        if os.path.isfile(cache) and (owns or not index_left):
+            os.remove(cache)
+            removed = True
+    except OSError:
+        pass
+    if not removed:
+        return False
+    kcache = os.path.join(home, ".cache", "icon-cache.kcache")
+    try:
+        if os.path.isfile(kcache):
+            os.remove(kcache)
+    except OSError:
+        pass
+    _nudge_icon_theme()
+    return True
+
+
+def _nudge_icon_theme() -> None:
+    """Ask the running desktop to read icons again. Does not restart the panel."""
+    import subprocess
+    for cmd in (
+        ["busctl", "--user", "emit", "/KIconLoader", "org.kde.KIconLoader", "iconChanged", "i", "0"],
+        ["dbus-send", "--session", "--type=signal", "/KIconLoader", "org.kde.KIconLoader.iconChanged", "int32:0"],
+    ):
+        try:
+            subprocess.run(
+                cmd,
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=3,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            continue
+
+
 def _install_theme_chrome_icon(home_dir: str, badge_path: str) -> None:
     """Put the badged Chrome logo where Plasma looks up the name google-chrome.
 
     The running task button uses that theme icon. An absolute Icon= path is
     not enough on its own, which is why the footer stayed the plain logo.
+    The PNG is enough. A Hicolor theme file in this folder replaces the
+    system icons, so it is never written.
     """
+    repair_user_icon_theme(home_dir)
     if not badge_path or not os.path.isfile(badge_path):
         return
     badge_path = os.path.abspath(badge_path)
@@ -2932,42 +3034,15 @@ def _install_theme_chrome_icon(home_dir: str, badge_path: str) -> None:
                 img.resize((size, size), Image.Resampling.LANCZOS).save(dest, format="PNG")
             except OSError:
                 return
-    index = os.path.join(root, "index.theme")
-    if not os.path.isfile(index):
-        try:
-            with open(index, "w", encoding="utf-8") as handle:
-                handle.write(
-                    "[Icon Theme]\n"
-                    "Name=Hicolor\n"
-                    "Comment=DevOS profile badges\n"
-                    "Directories=48x48/apps,128x128/apps,256x256/apps\n"
-                    "\n"
-                    "[48x48/apps]\nSize=48\nContext=Applications\nType=Fixed\n"
-                    "\n"
-                    "[128x128/apps]\nSize=128\nContext=Applications\nType=Fixed\n"
-                    "\n"
-                    "[256x256/apps]\nSize=256\nContext=Applications\nType=Fixed\n"
-                )
-        except OSError:
-            pass
     try:
         with open(marker, "w", encoding="utf-8") as handle:
             handle.write(badge_path)
     except OSError:
         pass
-    import subprocess
-    cache_tool = shutil.which("gtk-update-icon-cache")
-    if cache_tool:
-        try:
-            subprocess.run(
-                [cache_tool, "-f", "-t", root],
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=15,
-            )
-        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-            pass
+    # Drop a cache left by an older update. Rebuilding it would hide the
+    # system icons again. The new PNG is found by name without that cache.
+    repair_user_icon_theme(home_dir)
+    _nudge_icon_theme()
 
 
 def _restore_theme_chrome_icon(home_dir: str) -> None:
@@ -2991,6 +3066,7 @@ def _restore_theme_chrome_icon(home_dir: str) -> None:
         os.remove(marker)
     except OSError:
         pass
+    repair_user_icon_theme(home_dir)
 
 
 def _apply_shared_launcher_icon(home_dir, rows) -> None:
@@ -3179,6 +3255,7 @@ def watch_chrome_windows(home_dir=None, poll_interval=None):
     try:
         keep_footer_visible(home_dir)
         repair_windows_app_launcher(home_dir)
+        repair_user_icon_theme(home_dir)
     except Exception:
         pass
     last_ident = None

@@ -3,6 +3,61 @@
 # It applies the DevOS theme, icons, wallpaper, and taskbar once Plasma is up.
 export DISPLAY="${DISPLAY:-:0}"
 mkdir -p "${HOME}/.config"
+# The Chrome account photo used to install a private Hicolor theme in the
+# home folder. That file replaces the system icons. After a shut down the
+# desktop starts from it, and most application icons are blank. Remove only
+# that file. The badge pictures stay.
+python3 - << 'PY' || true
+import os
+home = os.path.expanduser("~")
+root = os.path.join(home, ".local/share/icons/hicolor")
+index = os.path.join(root, "index.theme")
+removed = False
+index_left = os.path.isfile(index)
+try:
+    if index_left:
+        text = open(index, encoding="utf-8", errors="replace").read()
+        ours = "DevOS profile badges" in text or (
+            "Name=Hicolor" in text
+            and "Directories=48x48/apps,128x128/apps,256x256/apps" in text
+            and "Inherits=" not in text
+        )
+        if ours:
+            os.remove(index)
+            removed = True
+            index_left = False
+except OSError:
+    pass
+cache = os.path.join(root, "icon-theme.cache")
+owns = removed or os.path.isfile(os.path.join(root, ".devos-chrome-badge"))
+if not owns:
+    for folder in ("48x48", "128x128", "256x256"):
+        apps = os.path.join(root, folder, "apps")
+        try:
+            names = os.listdir(apps)
+        except OSError:
+            continue
+        if any(
+            n in ("google-chrome.png", "devos-browser.png")
+            or (n.startswith("chrome-") and n.endswith(".png"))
+            for n in names
+        ):
+            owns = True
+            break
+try:
+    if os.path.isfile(cache) and (owns or not index_left):
+        os.remove(cache)
+        removed = True
+except OSError:
+    pass
+if removed:
+    kcache = os.path.join(home, ".cache", "icon-cache.kcache")
+    try:
+        if os.path.isfile(kcache):
+            os.remove(kcache)
+    except OSError:
+        pass
+PY
 # Migrate only the stock desktop splash on existing DevOS accounts.
 if command -v kreadconfig6 >/dev/null 2>&1 && command -v kwriteconfig6 >/dev/null 2>&1; then
     case "$(kreadconfig6 --file ksplashrc --group KSplash --key Theme)" in

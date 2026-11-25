@@ -609,6 +609,74 @@ class TestChromeProfiles(unittest.TestCase):
         self.assertNotIn("Logs", by_title)
         self.assertEqual(by_title.get("Guest"), "chrome-guest-w3.desktop")
 
+    def test_chrome_badge_does_not_replace_system_icons(self):
+        from PIL import Image as PILImage
+
+        with tempfile.TemporaryDirectory() as tmp_home:
+            badge = os.path.join(tmp_home, "badge.png")
+            PILImage.new("RGBA", (32, 32), (10, 20, 30, 255)).save(badge)
+            root = os.path.join(tmp_home, ".local/share/icons/hicolor")
+            os.makedirs(root, exist_ok=True)
+            index = os.path.join(root, "index.theme")
+            with open(index, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "[Icon Theme]\nName=Hicolor\nComment=DevOS profile badges\n"
+                    "Directories=48x48/apps,128x128/apps,256x256/apps\n"
+                )
+            cache = os.path.join(root, "icon-theme.cache")
+            with open(cache, "wb") as handle:
+                handle.write(b"cache")
+            os.makedirs(os.path.join(tmp_home, ".cache"), exist_ok=True)
+            kcache = os.path.join(tmp_home, ".cache", "icon-cache.kcache")
+            with open(kcache, "wb") as handle:
+                handle.write(b"k")
+            with patch.object(chrome_profiles, "_nudge_icon_theme"):
+                chrome_profiles._install_theme_chrome_icon(tmp_home, badge)
+                self.assertFalse(os.path.isfile(index))
+                self.assertFalse(os.path.isfile(cache))
+                self.assertFalse(os.path.isfile(kcache))
+                png = os.path.join(root, "48x48", "apps", "google-chrome.png")
+                self.assertTrue(os.path.isfile(png))
+                # The photo is already installed. A later pass must not put
+                # the private theme file back, or the next start blanks icons.
+                chrome_profiles._install_theme_chrome_icon(tmp_home, badge)
+            self.assertFalse(os.path.isfile(index))
+            self.assertFalse(os.path.isfile(cache))
+            self.assertTrue(os.path.isfile(png))
+
+    def test_repair_leaves_a_foreign_icon_theme(self):
+        with tempfile.TemporaryDirectory() as tmp_home:
+            root = os.path.join(tmp_home, ".local/share/icons/hicolor")
+            os.makedirs(root, exist_ok=True)
+            index = os.path.join(root, "index.theme")
+            with open(index, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "[Icon Theme]\nName=Hicolor\nInherits=Adwaita\n"
+                    "Directories=16x16/apps,48x48/apps\n"
+                )
+            cache = os.path.join(root, "icon-theme.cache")
+            with open(cache, "wb") as handle:
+                handle.write(b"keep")
+            self.assertFalse(chrome_profiles.repair_user_icon_theme(tmp_home))
+            self.assertTrue(os.path.isfile(index))
+            self.assertEqual(open(cache, "rb").read(), b"keep")
+
+    def test_repair_drops_an_orphan_icon_cache(self):
+        with tempfile.TemporaryDirectory() as tmp_home:
+            apps = os.path.join(tmp_home, ".local/share/icons/hicolor/48x48/apps")
+            os.makedirs(apps, exist_ok=True)
+            png = os.path.join(apps, "chrome-work.png")
+            with open(png, "wb") as handle:
+                handle.write(b"png")
+            cache = os.path.join(tmp_home, ".local/share/icons/hicolor/icon-theme.cache")
+            with open(cache, "wb") as handle:
+                handle.write(b"old")
+            with patch.object(chrome_profiles, "_nudge_icon_theme") as nudge:
+                self.assertTrue(chrome_profiles.repair_user_icon_theme(tmp_home))
+            nudge.assert_called()
+            self.assertFalse(os.path.isfile(cache))
+            self.assertTrue(os.path.isfile(png))
+
 
 if __name__ == "__main__":
     unittest.main()
