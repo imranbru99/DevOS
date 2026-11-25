@@ -145,11 +145,15 @@ class TestFeaturesAndNotice(unittest.TestCase):
     def test_browser_policy_uses_only_chosen_active_web_apps(self):
         windows = catalog.feature("winapp")
         other = catalog.feature("m365web")
+        stock = Path(ROOT, "build/includes.chroot/usr/share/applications/devos-web-winapp.desktop")
+        # The update bundle overwrites this file. Hidden=true makes the menu
+        # treat Windows App as deleted, so a click after update does nothing.
+        self.assertEqual(stock.read_text(encoding="utf-8"), cli.webapp_entry(windows))
+        self.assertNotIn("Hidden=true", stock.read_text(encoding="utf-8"))
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp)
-            stock = Path(ROOT, "build/includes.chroot/usr/share/applications/devos-web-winapp.desktop")
             win = path / "winapp.desktop"
-            win.write_bytes(stock.read_bytes())
+            win.write_text(cli.HIDDEN_ENTRY, encoding="utf-8")
             office = path / "m365web.desktop"
             office.write_text(cli.webapp_entry(other), encoding="utf-8")
             policy = path / "policy.json"

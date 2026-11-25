@@ -17,6 +17,22 @@ def _load_wrapper_text() -> str:
     )
 
 
+def test_menu_entry_stays_launchable_after_update():
+    text = (
+        ROOT / "build/includes.chroot/usr/share/applications/devos-web-winapp.desktop"
+    ).read_text(encoding="utf-8")
+    assert "Name=Windows App" in text
+    assert "Exec=/usr/local/bin/devos-windows-app" in text
+    assert "Hidden=true" not in text
+    assert "NoDisplay=true" not in text
+
+
+def test_pwa_installer_does_not_call_windows_app_back():
+    text = (ROOT / "build/includes.chroot/usr/local/bin/devos-pwa").read_text(encoding="utf-8")
+    assert "exec /usr/local/bin/devos-windows-app" not in text
+    assert "DEVOS_WINDOWS_APP_PARENT" in text
+
+
 def test_wrapper_defaults_to_browser_launch_not_flatpak_client():
     text = _load_wrapper_text()
     assert "browser_launch.py" in text
