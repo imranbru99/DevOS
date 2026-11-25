@@ -154,37 +154,6 @@ def discover_app_id(profile: Path | None = None) -> str | None:
     return None
 
 
-def _window_ids() -> set[str]:
-    if not shutil.which("wmctrl"):
-        return set()
-    try:
-        listing = subprocess.check_output(["wmctrl", "-lx"], text=True, timeout=3)
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
-        return set()
-    ids = set()
-    for line in listing.splitlines():
-        low = line.lower()
-        if WM_CLASS.lower() in low or "windows.cloud.microsoft" in low or "windows app" in low:
-            parts = line.split()
-            if parts:
-                ids.add(parts[0])
-    return ids
-
-
-def _window_appeared(previous: set[str] | None = None, timeout_s: float = 2.0) -> bool:
-    """True when a Windows App window is mapped. Unknown when wmctrl is absent."""
-    if not shutil.which("wmctrl"):
-        return True
-    before = previous if previous is not None else set()
-    deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
-        now = _window_ids()
-        if now - before:
-            return True
-        time.sleep(0.25)
-    return False
-
-
 def focus_existing_window() -> bool:
     """Raise a mapped Windows App window.
 
@@ -316,22 +285,6 @@ def _wait_for_pwa_install(timeout_s: float = 45.0) -> str | None:
     return None
 
 
-def _visible_window_command() -> list[str]:
-    """Open the portal in the Chrome that is already running.
-
-    A taskbar pin often hits an existing Chrome. --app-id is easy for that
-    Chrome to ignore, so the click looks dead. A new window is visible.
-    """
-    _family, binary = browser_binary()
-    return [
-        binary,
-        *_chrome_extra(),
-        "--profile-directory=Default",
-        "--new-window",
-        URL,
-    ]
-
-
 def _portal_command() -> list[str]:
     """App window for the portal when a PWA id is not ready yet."""
     family, binary = browser_binary()
@@ -441,20 +394,18 @@ def open_isolated():
     force_isolated = os.environ.get("DEVOS_WINDOWS_APP_ISOLATED", "").strip() in ("1", "true", "yes")
     app_id = discover_app_id(None)
 
-    # Installed Windows App PWA → real app window (no URL bar on Microsoft login).
+    # Installed Windows App PWA → its own app window, the way it ran before.
+    # A normal Chrome window (--new-window) puts Cloud PC in a browser tab.
     if app_id and not force_isolated:
-        proc = _spawn(launch_via_default_pwa(app_id))
-        # The running Chrome (the one with your other sites) often accepts the
-        # process and then drops --app-id. If no Windows App window is mapped,
-        # open a normal window so the click is visible.
-        if _window_appeared():
-            return proc
-        return _spawn(_visible_window_command())
+        return _spawn(launch_via_default_pwa(app_id))
 
-    # No PWA yet. Do not wait. The taskbar click must show a window now.
+    # No id yet. Still an app window (--app=), never a browser tab.
     if not force_isolated:
         open_via_devos_pwa()
-        return _spawn(_visible_window_command())
+        installed = discover_app_id(None)
+        if installed:
+            return _spawn(launch_via_default_pwa(installed))
+        return _spawn(_portal_command())
 
     # Forced isolation: setup window only long enough to install, then --app-id.
     family, binary = browser_binary()
