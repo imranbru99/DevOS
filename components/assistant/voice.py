@@ -31,13 +31,14 @@ FRAME_BYTES = RATE * 2 * FRAME_MS // 1000      # 16-bit mono
 SILENCE_STOP_S = 1.15         # a breath inside a sentence must not end it
 MAX_SECONDS = 28               # one whisper window; longer than this is cut mid-word
 NO_SPEECH_TIMEOUT_S = 5
-CALL_SILENCE_STOP_S = 1.45     # pause → auto-send; shorter than this is a breath
+CALL_SILENCE_STOP_S = 2.6      # send only after they have actually stopped
 CALL_MAX_SECONDS = 28
 LONG_UTTERANCE_S = 3.5         # at this length, compare Bangla and English
 CALL_NO_SPEECH_S = 10.0        # wait for the person to start talking
 CALL_SPEECH_HOLD_S = 0.12      # brief noise blips ignored; real words kept
-CALL_NOISE_MULT = 3.8          # speech above ambient
-CALL_MIN_THRESHOLD = 420.0     # laptop mics are often quiet — don't set this too high
+CALL_SPEECH_HANG_S = 0.45      # a dip inside a word is still speech
+CALL_NOISE_MULT = 2.4          # quiet speech still counts as talking
+CALL_MIN_THRESHOLD = 260.0     # laptop mics are often quiet
 
 MODEL_PATH = os.environ.get("DEVOS_VOICE_MODEL", "/usr/share/devos/ai/voice/ggml-base-q5_1.bin")
 LANGUAGES = ("bn", "en")        # what voice commands may be in; anything else is retried as English
@@ -80,7 +81,7 @@ class VAD:
     def __init__(self, frame_ms: int = FRAME_MS, silence_s: float = SILENCE_STOP_S,
                  max_s: float = MAX_SECONDS, no_speech_s: float = NO_SPEECH_TIMEOUT_S,
                  min_threshold: float = 350.0, noise_mult: float = 3.0,
-                 speech_hold_s: float = 0.12):
+                 speech_hold_s: float = 0.12, speech_hang_s: float = 0.0):
         self.frame_s = frame_ms / 1000.0
         self.silence_s = silence_s
         self.max_s = max_s
@@ -88,6 +89,8 @@ class VAD:
         self.min_threshold = min_threshold
         self.noise_mult = noise_mult
         self.speech_hold_s = speech_hold_s
+        self.speech_hang_s = speech_hang_s
+        self._hang_left = 0.0
         self.noise = None
         self.elapsed = 0.0
         self.silent_for = 0.0
@@ -107,15 +110,20 @@ class VAD:
         r = rms(frame)
         self.elapsed += self.frame_s
         speech = r >= self.threshold
-        if not speech:
-            self.noise = r if self.noise is None else (0.92 * self.noise + 0.08 * r)
-            self.silent_for += self.frame_s
-            self.speech_for = 0.0
-        else:
+        # A short dip inside a word must not start the "they stopped" clock.
+        if speech or self._hang_left > 0:
+            if speech:
+                self._hang_left = self.speech_hang_s
+            else:
+                self._hang_left = max(0.0, self._hang_left - self.frame_s)
             self.speech_for += self.frame_s
             self.silent_for = 0.0
             if self.speech_for >= self.speech_hold_s:
                 self.heard_speech = True
+        else:
+            self.noise = r if self.noise is None else (0.92 * self.noise + 0.08 * r)
+            self.silent_for += self.frame_s
+            self.speech_for = 0.0
         if self.heard_speech and self.silent_for >= self.silence_s:
             self.stop_reason = "silence"
             return True
@@ -223,6 +231,7 @@ class Recorder:
                 min_threshold=CALL_MIN_THRESHOLD,
                 noise_mult=CALL_NOISE_MULT,
                 speech_hold_s=CALL_SPEECH_HOLD_S,
+                speech_hang_s=CALL_SPEECH_HANG_S,
             )
         else:
             self.vad = VAD()

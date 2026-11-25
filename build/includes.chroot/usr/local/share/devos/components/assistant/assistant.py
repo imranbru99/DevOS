@@ -696,7 +696,7 @@ class MicButton(QtWidgets.QAbstractButton):
         if self.unavailable and not on and not self.in_call:
             self.setToolTip(self.unavailable)
         elif on or self.in_call:
-            self.setToolTip("End call — tap ■ (or Esc / say “Mira stop”). Speak, then pause to send.")
+            self.setToolTip("End call — tap ■ (or Esc / say “Mira stop”). It keeps listening until you finish.")
         else:
             self.setToolTip("Start voice call (tap) · or say “Mira”")
         if on or self.in_call:
@@ -4170,8 +4170,8 @@ class AssistantWindow(QtWidgets.QWidget):
         if not self._call_active:
             return
         labels = {
-            "listening": "Call · Listening — speak, then pause · ■ End call",
-            "hearing": "Call · Hearing you… — pause to send · ■ End call",
+            "listening": "Call · Listening — ■ End call",
+            "hearing": "Call · Hearing you… — ■ End call",
             "understanding": "Call · Thinking… — ■ End call",
             "speaking": "Call · Speaking… — ■ End call",
             "waiting": "Call · Waiting for you… — ■ End call",
@@ -4228,7 +4228,7 @@ class AssistantWindow(QtWidgets.QWidget):
         self._set_call_status("waiting", wave=True)
         self.toast.show_for(
             self.mic_btn,
-            f"Call started — speak, then pause to send. Tap ■ to End call (or say “{name} stop”).",
+            f"Call started — I’m listening until you finish. Tap ■ to End call (or say “{name} stop”).",
             above=self.composer,
         )
         self.start_listening()
@@ -4302,10 +4302,11 @@ class AssistantWindow(QtWidgets.QWidget):
                 self.mic_btn.set_level(0)
                 return
             if self._call_active:
-                if v >= 0.35:
-                    self._set_call_status("hearing", wave=True)
-                elif v >= 0.12:
-                    self._set_call_status("listening", wave=True)
+                # A quiet moment inside the sentence stays "Hearing you".
+                # Flipping to Waiting made the call look like it had stopped.
+                heard = bool(getattr(rec, "speaking", False))
+                if heard or v >= 0.2:
+                    self._set_call_status("hearing" if heard else "listening", wave=True)
                 else:
                     self._set_call_status("waiting", wave=True)
             self.rec_bar.set_level(v)
