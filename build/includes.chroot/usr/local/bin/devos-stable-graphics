@@ -1,0 +1,54 @@
+#!/bin/bash
+# Stop the Intel graphics lock that freezes the whole PC, and reboot the
+# machine by itself if a lock still happens. One restart is required.
+set -euo pipefail
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo "Run with sudo." >&2
+  exit 1
+fi
+
+PARAMS=(i915.enable_psr=0 i915.enable_fbc=0 i915.enable_dc=0)
+GRUB=/etc/default/grub
+
+add_param() {
+  local key="$1"
+  local file="$2"
+  if grep -q -- "$key" "$file"; then
+    return 0
+  fi
+  if grep -q '^GRUB_CMDLINE_LINUX_DEFAULT="' "$file"; then
+    sed -i "s/^\(GRUB_CMDLINE_LINUX_DEFAULT=\"[^\"]*\)\"/\\1 ${key}\"/" "$file"
+  elif grep -q "^GRUB_CMDLINE_LINUX_DEFAULT='" "$file"; then
+    sed -i "s/^\(GRUB_CMDLINE_LINUX_DEFAULT='[^']*\)'/\\1 ${key}'/" "$file"
+  else
+    echo "GRUB_CMDLINE_LINUX_DEFAULT=\"quiet splash ${key}\"" >> "$file"
+  fi
+}
+
+if [ -f "$GRUB" ]; then
+  for key in "${PARAMS[@]}"; do
+    add_param "$key" "$GRUB"
+  done
+fi
+
+mkdir -p /etc/modprobe.d /etc/modules-load.d /etc/systemd/system.conf.d
+cat > /etc/modprobe.d/devos-i915.conf << 'EOF'
+# Alder Lake display lock: purple stripes, then the whole PC stops.
+options i915 enable_psr=0 enable_fbc=0 enable_dc=0
+EOF
+echo iTCO_wdt > /etc/modules-load.d/devos-watchdog.conf
+cat > /etc/systemd/system.conf.d/devos-watchdog.conf << 'EOF'
+[Manager]
+# Graphics lock that freezes the kernel: reboot instead of staying dead.
+RuntimeWatchdogSec=30s
+EOF
+
+modprobe iTCO_wdt 2>/dev/null || true
+systemctl daemon-reexec 2>/dev/null || true
+
+if command -v update-grub >/dev/null 2>&1; then
+  update-grub
+fi
+
+echo "Intel graphics lock protection is on. Restart the PC once."
