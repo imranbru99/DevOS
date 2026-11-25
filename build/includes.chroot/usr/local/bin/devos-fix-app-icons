@@ -1,0 +1,278 @@
+#!/usr/bin/env python3
+"""Paint DevOS icons that are showing as a question mark.
+
+Those shortcuts point at a drawing (SVG). A private Hicolor theme in the
+home folder only looks in the picture folders, so the drawings disappear
+after a restart and the desktop shows a question mark. This writes a
+normal PNG next to each drawing, removes that private theme, and reloads
+the desktop once.
+"""
+from __future__ import annotations
+
+import ctypes
+import os
+import pwd
+import shutil
+import subprocess
+import sys
+import urllib.request
+from pathlib import Path
+
+RAW_ICONS = (
+    "https://raw.githubusercontent.com/imranbru99/DevOS/"
+    "cursor/fix-icons-after-reboot-283b/build/includes.chroot/usr/share/icons/hicolor"
+)
+
+SIZES = (48, 128, 256)
+
+
+def _load_renderer():
+    rsvg = ctypes.CDLL("librsvg-2.so.2")
+    cairo = ctypes.CDLL("libcairo.so.2")
+    gobj = ctypes.CDLL("libgobject-2.0.so.0")
+    rsvg.rsvg_handle_new_from_file.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_void_p)]
+    rsvg.rsvg_handle_new_from_file.restype = ctypes.c_void_p
+    rsvg.rsvg_handle_render_cairo.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    rsvg.rsvg_handle_render_cairo.restype = ctypes.c_bool
+    rsvg.rsvg_handle_get_intrinsic_size_in_pixels.argtypes = [
+        ctypes.c_void_p, ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double)
+    ]
+    rsvg.rsvg_handle_get_intrinsic_size_in_pixels.restype = ctypes.c_bool
+    cairo.cairo_image_surface_create.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int]
+    cairo.cairo_image_surface_create.restype = ctypes.c_void_p
+    cairo.cairo_create.argtypes = [ctypes.c_void_p]
+    cairo.cairo_create.restype = ctypes.c_void_p
+    cairo.cairo_scale.argtypes = [ctypes.c_void_p, ctypes.c_double, ctypes.c_double]
+    cairo.cairo_destroy.argtypes = [ctypes.c_void_p]
+    cairo.cairo_surface_destroy.argtypes = [ctypes.c_void_p]
+    cairo.cairo_surface_write_to_png.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+    cairo.cairo_surface_write_to_png.restype = ctypes.c_int
+    gobj.g_object_unref.argtypes = [ctypes.c_void_p]
+    return rsvg, cairo, gobj
+
+
+def render_png(svg_path: Path, png_path: Path, size: int, libs=None) -> bool:
+    """Rasterize one SVG. Returns True when a new PNG was written."""
+    rsvg, cairo, gobj = libs or _load_renderer()
+    err = ctypes.c_void_p()
+    handle = rsvg.rsvg_handle_new_from_file(str(svg_path).encode(), ctypes.byref(err))
+    if not handle:
+        return False
+    surface = cr = None
+    try:
+        width = ctypes.c_double(64)
+        height = ctypes.c_double(64)
+        if rsvg.rsvg_handle_get_intrinsic_size_in_pixels(handle, ctypes.byref(width), ctypes.byref(height)):
+            src = width.value if width.value > 0 else 64.0
+        else:
+            src = 64.0
+        surface = cairo.cairo_image_surface_create(0, size, size)
+        cr = cairo.cairo_create(surface)
+        cairo.cairo_scale(cr, size / src, size / src)
+        if not rsvg.rsvg_handle_render_cairo(handle, cr):
+            return False
+        png_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = png_path.with_suffix(".png.tmp")
+        if cairo.cairo_surface_write_to_png(surface, str(tmp).encode()) != 0:
+            return False
+        tmp.replace(png_path)
+        return True
+    finally:
+        if cr:
+            cairo.cairo_destroy(cr)
+        if surface:
+            cairo.cairo_surface_destroy(surface)
+        gobj.g_object_unref(handle)
+
+
+def _fetch_png(name: str, size: int, dest: Path) -> bool:
+    url = f"{RAW_ICONS}/{size}x{size}/apps/{name}.png"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(".png.tmp")
+    try:
+        with urllib.request.urlopen(url, timeout=20) as response:
+            data = response.read()
+        if not data.startswith(b"\x89PNG"):
+            return False
+        tmp.write_bytes(data)
+        tmp.replace(dest)
+        return True
+    except OSError:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        return False
+
+
+def paint_missing_pngs(hicolor: Path, svg_dir: Path | None = None) -> int:
+    """Write 48, 128 and 256 PNG files for every DevOS icon that lacks one."""
+    svg_dir = svg_dir or (hicolor / "scalable" / "apps")
+    names = sorted(p.stem for p in svg_dir.glob("devos-*.svg")) if svg_dir.is_dir() else []
+    if not names:
+        names = [
+            "devos-browser", "devos-calculator", "devos-code", "devos-pdf",
+            "devos-disk", "devos-thispc", "devos-notepad",
+        ]
+    libs = None
+    try:
+        libs = _load_renderer()
+    except OSError:
+        libs = None
+    written = 0
+    for name in names:
+        svg = svg_dir / f"{name}.svg"
+        for size in SIZES:
+            dest = hicolor / f"{size}x{size}" / "apps" / f"{name}.png"
+            if dest.is_file() and dest.stat().st_size > 0:
+                continue
+            if libs is not None and svg.is_file() and render_png(svg, dest, size, libs):
+                written += 1
+                continue
+            if _fetch_png(name, size, dest):
+                written += 1
+    return written
+
+
+def _theme_is_ours(text: str) -> bool:
+    if "DevOS profile badges" in text:
+        return True
+    return (
+        "Name=Hicolor" in text
+        and "Directories=48x48/apps,128x128/apps,256x256/apps" in text
+        and "Inherits=" not in text
+    )
+
+
+def drop_private_hicolor(home: Path) -> bool:
+    """Remove the home-folder theme that hides the system icons."""
+    root = home / ".local/share/icons/hicolor"
+    removed = False
+    index = root / "index.theme"
+    index_left = index.is_file()
+    try:
+        if index_left and _theme_is_ours(index.read_text(encoding="utf-8", errors="replace")):
+            index.unlink()
+            removed = True
+            index_left = False
+    except OSError:
+        pass
+    cache = root / "icon-theme.cache"
+    owns = (root / ".devos-chrome-badge").is_file()
+    if not owns:
+        for folder in ("48x48", "128x128", "256x256"):
+            apps = root / folder / "apps"
+            try:
+                names = [p.name for p in apps.iterdir()]
+            except OSError:
+                continue
+            if any(
+                name in ("google-chrome.png", "devos-browser.png")
+                or (name.startswith("chrome-") and name.endswith(".png"))
+                or (name.startswith("devos-") and name.endswith(".png"))
+                for name in names
+            ):
+                owns = True
+                break
+    try:
+        if cache.is_file() and (removed or owns or not index_left):
+            cache.unlink()
+            removed = True
+    except OSError:
+        pass
+    if removed:
+        kcache = home / ".cache/icon-cache.kcache"
+        try:
+            if kcache.is_file():
+                kcache.unlink()
+        except OSError:
+            pass
+    return removed
+
+
+def _session_user() -> tuple[str, Path]:
+    name = os.environ.get("SUDO_USER") or os.environ.get("USER") or pwd.getpwuid(os.getuid()).pw_name
+    if name == "root":
+        name = os.environ.get("SUDO_USER") or "dev"
+    try:
+        entry = pwd.getpwnam(name)
+    except KeyError:
+        entry = pwd.getpwuid(os.getuid())
+        name = entry.pw_name
+    return name, Path(entry.pw_dir)
+
+
+def reload_desktop(user: str) -> None:
+    """Reload the panel once so the new pictures replace the question marks."""
+    try:
+        uid = pwd.getpwnam(user).pw_uid
+    except KeyError:
+        return
+    runtime = f"/run/user/{uid}"
+    bus = f"unix:path={runtime}/bus"
+    cmd = [
+        "systemctl", "--user", "restart", "plasma-plasmashell.service",
+    ]
+    env = os.environ.copy()
+    env["XDG_RUNTIME_DIR"] = runtime
+    env["DBUS_SESSION_BUS_ADDRESS"] = bus
+    if os.geteuid() == 0 and user != "root":
+        starter = ["runuser", "-u", user, "--"]
+        if not shutil.which("runuser"):
+            starter = ["sudo", "-u", user, "--"]
+        cmd = [*starter, "env", f"XDG_RUNTIME_DIR={runtime}", f"DBUS_SESSION_BUS_ADDRESS={bus}", *cmd]
+        env = os.environ.copy()
+    try:
+        subprocess.run(cmd, check=False, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        pass
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = list(sys.argv[1:] if argv is None else argv)
+    tree = None
+    if args[:1] == ["--root"] and len(args) >= 2:
+        tree = Path(args[1])
+    if tree is not None:
+        count = paint_missing_pngs(tree)
+        print(f"DevOS: wrote {count} icon pictures under {tree}")
+        return 0
+
+    hicolor = Path("/usr/share/icons/hicolor")
+    if os.geteuid() != 0 and not os.access(hicolor, os.W_OK):
+        user, home = _session_user()
+        hicolor = home / ".local/share/icons/hicolor"
+        # Draw from the system SVGs into the home picture folders.
+        svg_src = Path("/usr/share/icons/hicolor/scalable/apps")
+        dest_svg = hicolor / "scalable" / "apps"
+        if svg_src.is_dir():
+            dest_svg.mkdir(parents=True, exist_ok=True)
+            for svg in svg_src.glob("devos-*.svg"):
+                target = dest_svg / svg.name
+                if not target.exists():
+                    try:
+                        target.write_bytes(svg.read_bytes())
+                    except OSError:
+                        pass
+    else:
+        user, home = _session_user()
+    try:
+        written = paint_missing_pngs(hicolor)
+    except OSError as exc:
+        print(f"DevOS: could not paint icons: {exc}", file=sys.stderr)
+        return 1
+    dropped = drop_private_hicolor(home)
+    cache_tool = "/usr/bin/gtk-update-icon-cache"
+    system = Path("/usr/share/icons/hicolor")
+    if os.geteuid() == 0 and Path(cache_tool).is_file() and (system / "index.theme").is_file():
+        subprocess.run([cache_tool, "-f", "-t", str(system)], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if "--no-restart" not in args:
+        reload_desktop(user)
+    print(f"DevOS: painted {written} icons. The question marks reload with the desktop.")
+    if not dropped and written == 0:
+        print("DevOS: icon pictures were already in place.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
