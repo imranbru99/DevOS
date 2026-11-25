@@ -12,6 +12,7 @@ from browser_launch import (
     launch_via_default_pwa,
     open_via_devos_pwa,
     restore_menu_entry,
+    _visible_window_command,
     PWA_NAV,
 )
 from launchers import integrate
@@ -84,6 +85,14 @@ def test_rewritten_shortcut_still_launches_app_id(tmp_path, monkeypatch):
     assert f'--app-id={app_id}' in cmd
     assert not any(a.startswith('--app=') for a in cmd)
     assert not any(a.startswith('--user-data-dir=') for a in cmd)
+
+
+def test_visible_window_uses_a_new_chrome_window():
+    with patch('browser_launch.browser_binary', return_value=('chrome', '/browser')):
+        cmd = _visible_window_command()
+    assert cmd[0] == '/browser'
+    assert '--new-window' in cmd
+    assert 'https://windows.cloud.microsoft/' in cmd
 
 
 def test_focus_existing_ignores_a_process_that_is_not_a_window(monkeypatch):
