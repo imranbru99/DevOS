@@ -323,6 +323,97 @@ class TestChromeProfiles(unittest.TestCase):
             chrome_profiles._cmdline_profile_key = original_key
             chrome_profiles.WINDOW_PROFILE_CACHE.pop(9091, None)
 
+    def test_focused_new_tab_uses_the_profile_chrome_has_open(self):
+        profiles = {"Default": "IMRAN", "Profile 1": "Mirza"}
+        windows = [
+            {"id": 1, "title": "New Tab - Google Chrome", "wm_class": "google-chrome"},
+            {"id": 2, "title": "New Tab - Google Chrome", "wm_class": "google-chrome"},
+        ]
+        session = {
+            "Default": {"titles": {"new tab"}, "domains": {"google"}, "mtime": 10},
+            "Profile 1": {"titles": {"new tab"}, "domains": {"google"}, "mtime": 20},
+        }
+        names = chrome_profiles.assign_chrome_window_profiles(
+            windows, profiles, ["Default", "Profile 1"], session,
+            last_used_key="Profile 1", active_wid=2,
+        )
+        self.assertEqual(names[2], "Mirza")
+        self.assertEqual(names[1], "IMRAN")
+        self.assertNotEqual(names[1], names[2])
+
+    def test_one_open_profile_uses_its_photo_on_every_window(self):
+        profiles = {"Default": "IMRAN", "Profile 1": "Mirza"}
+        windows = [
+            {"id": 1, "title": "New Tab - Google Chrome", "wm_class": "google-chrome"},
+            {"id": 2, "title": "Inbox - Google Chrome", "wm_class": "google-chrome"},
+        ]
+        names = chrome_profiles.assign_chrome_window_profiles(
+            windows, profiles, ["Default"], {},
+            last_used_key="Default", active_wid=1,
+        )
+        self.assertEqual(names[1], "IMRAN")
+        self.assertEqual(names[2], "IMRAN")
+
+    def test_unique_page_keeps_its_own_profile(self):
+        profiles = {"Default": "IMRAN", "Profile 1": "Mirza"}
+        windows = [
+            {"id": 1, "title": "New Tab - Google Chrome", "wm_class": "google-chrome"},
+            {"id": 2, "title": "BlogCutter Dashboard - Google Chrome", "wm_class": "google-chrome"},
+        ]
+        session = {
+            "Default": {"titles": {"new tab", "inbox"}, "domains": {"gmail"}, "mtime": 10},
+            "Profile 1": {"titles": {"blogcutter dashboard"}, "domains": {"blogcutter"}, "mtime": 30},
+        }
+        names = chrome_profiles.assign_chrome_window_profiles(
+            windows, profiles, ["Default", "Profile 1"], session,
+            last_used_key="Default", active_wid=1,
+        )
+        self.assertEqual(names[1], "IMRAN")
+        self.assertEqual(names[2], "Mirza")
+
+    def test_shared_browser_pid_uses_each_windows_own_profile(self):
+        profiles = {"Default": "IMRAN", "Profile 1": "Mirza"}
+        session = {
+            "Default": {"titles": {"inbox"}, "domains": {"gmail"}, "mtime": 10},
+            "Profile 1": {
+                "titles": {"blogcutter dashboard"},
+                "domains": {"blogcutter"},
+                "mtime": 20,
+            },
+        }
+        windows = [
+            {"id": 9101, "title": "Inbox - Google Chrome", "wm_class": "chrome-imran-w1"},
+            {
+                "id": 9102,
+                "title": "BlogCutter Dashboard - Google Chrome",
+                "wm_class": "chrome-imran-w2",
+            },
+        ]
+        original_pid = chrome_profiles._window_pid
+        original_key = chrome_profiles._cmdline_profile_key
+        chrome_profiles._window_pid = lambda wid: 7
+        chrome_profiles._cmdline_profile_key = lambda pid: "Default"
+        try:
+            with tempfile.TemporaryDirectory() as home:
+                for window in windows:
+                    chrome_profiles.WINDOW_PROFILE_CACHE.pop(window["id"], None)
+                first = chrome_profiles.detect_window_profile(
+                    windows[0], profiles, home_dir=home, prof_session_data=session,
+                    shared_pids={7},
+                )
+                second = chrome_profiles.detect_window_profile(
+                    windows[1], profiles, home_dir=home, prof_session_data=session,
+                    shared_pids={7}, trust_class=False,
+                )
+            self.assertEqual(first, "IMRAN")
+            self.assertEqual(second, "Mirza")
+            self.assertNotEqual(first, second)
+        finally:
+            chrome_profiles._window_pid = original_pid
+            chrome_profiles._cmdline_profile_key = original_key
+            for window in windows:
+                chrome_profiles.WINDOW_PROFILE_CACHE.pop(window["id"], None)
+
     def test_kwin_script_gives_each_window_its_own_desktop(self):
         rows = [
             {"id": 0x12A0, "pid": 40, "title": "Inbox - Google Chrome", "desktop": "chrome-imran-w12a0.desktop"},
@@ -351,6 +442,110 @@ class TestChromeProfiles(unittest.TestCase):
         # Same title on two windows must not pin both to one desktop file.
         self.assertNotIn("Logs", by_title)
         self.assertEqual(by_title.get("Guest"), "chrome-guest-w3.desktop")
+
+
+def _save_portrait(path, center):
+    from PIL import Image as PILImage
+
+    img = PILImage.new("RGB", (96, 96), (248, 248, 248))
+    px = img.load()
+    for y in range(96):
+        for x in range(96):
+            px[x, y] = ((x * 7) % 256, (y * 5 + 20) % 256, (x + y * 3) % 256)
+    for y in range(40, 56):
+        for x in range(40, 56):
+            px[x, y] = center
+    img.save(path)
+
+
+class TestChromeProfilePhoto(unittest.TestCase):
+    def test_account_photo_is_used_even_with_a_theme_avatar_id(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            folder = os.path.join(tmpdir, "Default")
+            os.makedirs(folder)
+            photo = os.path.join(folder, "Google Profile Picture.png")
+            _save_portrait(photo, (210, 48, 150))
+            with open(os.path.join(tmpdir, "Local State"), "w", encoding="utf-8") as handle:
+                json.dump(
+                    {
+                        "profile": {
+                            "info_cache": {
+                                "Default": {
+                                    "name": "IMRAN",
+                                    "avatar_icon": "chrome://theme/IDR_PROFILE_AVATAR_26",
+                                }
+                            }
+                        }
+                    },
+                    handle,
+                )
+            found = chrome_profiles.get_profile_avatar_path(tmpdir, "Default")
+            self.assertEqual(found, photo)
+
+    def test_preferences_picture_is_found_when_local_state_has_no_filename(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            folder = os.path.join(tmpdir, "Profile 1")
+            os.makedirs(folder)
+            photo = os.path.join(folder, "Google Profile Picture.png")
+            _save_portrait(photo, (40, 90, 200))
+            with open(os.path.join(tmpdir, "Local State"), "w", encoding="utf-8") as handle:
+                json.dump({"profile": {"info_cache": {"Profile 1": {"name": "Mirza"}}}}, handle)
+            with open(os.path.join(folder, "Preferences"), "w", encoding="utf-8") as handle:
+                json.dump(
+                    {"profile": {"gaia_picture_file_name": "Google Profile Picture.png", "use_gaia_picture": True}},
+                    handle,
+                )
+            self.assertEqual(
+                chrome_profiles.get_profile_avatar_path(tmpdir, "Profile 1"),
+                photo,
+            )
+
+    def test_flat_saved_picture_is_not_a_photo(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            folder = os.path.join(tmpdir, "Default")
+            os.makedirs(folder)
+            flat = os.path.join(folder, "Google Profile Picture.png")
+            from PIL import Image as PILImage
+
+            PILImage.new("RGB", (96, 96), (20, 120, 220)).save(flat)
+            self.assertIsNone(
+                chrome_profiles.get_profile_avatar_path(
+                    tmpdir,
+                    "Default",
+                    {"gaia_picture_file_name": "Google Profile Picture.png", "use_gaia_picture": True},
+                )
+            )
+
+    def test_taskbar_icon_updates_when_the_account_photo_changes(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            photo = os.path.join(tmpdir, "Google Profile Picture.png")
+            _save_portrait(photo, (220, 30, 140))
+            icons = os.path.join(tmpdir, "icons")
+            os.makedirs(icons)
+            first = chrome_profiles.profile_icon_fingerprint("IMRAN", photo)
+            path_48, _short = chrome_profiles.profile_icon_file(icons, "chrome-imran", first)
+            path_128, _short = chrome_profiles.profile_icon_file(
+                os.path.join(tmpdir, "icons128"), "chrome-imran", first
+            )
+            self.assertTrue(chrome_profiles.ensure_badged_icon("IMRAN", path_48, path_128, photo, first))
+            self.assertFalse(chrome_profiles.ensure_badged_icon("IMRAN", path_48, path_128, photo, first))
+            self.assertTrue(chrome_profiles.icon_matches_photo(path_48, first))
+            _save_portrait(photo, (20, 40, 230))
+            second = chrome_profiles.profile_icon_fingerprint("IMRAN", photo)
+            self.assertNotEqual(first, second)
+            self.assertFalse(chrome_profiles.icon_matches_photo(path_48, second))
+            new_48, _short = chrome_profiles.profile_icon_file(icons, "chrome-imran", second)
+            new_128, _short = chrome_profiles.profile_icon_file(
+                os.path.join(tmpdir, "icons128"), "chrome-imran", second
+            )
+            self.assertNotEqual(path_48, new_48)
+            self.assertTrue(chrome_profiles.ensure_badged_icon("IMRAN", new_48, new_128, photo, second))
+            from PIL import Image as PILImage
+
+            img = PILImage.open(new_48).convert("RGB")
+            corner = list(img.crop((30, 30, 47, 47)).getdata())
+            blues = sum(1 for px in corner if px[2] > 150 and px[0] < 80)
+            self.assertGreater(blues, 4)
 
 
 if __name__ == "__main__":

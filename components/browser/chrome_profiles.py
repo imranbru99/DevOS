@@ -43,30 +43,39 @@ def get_chrome_profiles(config_dir=None):
     return profiles
 
 
-def _is_usable_profile_photo(path: str) -> bool:
-    """True for real Gaia photos — reject Chrome default circle+person silhouettes.
+_GAIA_PICTURE_NAMES = (
+    "Google Profile Picture.png",
+    "Google Profile Picture.jpg",
+    "Google Profile Picture.jpeg",
+    "Google Profile Picture.webp",
+)
 
-    Chrome's unsigned-in / default avatars are flat colored circles with a white
-    or gray person shape. Those look "colorful" (green/blue/orange bg) so a
-    naive saturation check wrongly treats them as photos — then the taskbar
-    badge becomes the same gray person the user sees in Chrome's profile chip.
+
+def _is_usable_profile_photo(path: str, trusted_name: bool = False) -> bool:
+    """True when this file is the account photo Chrome shows for the profile.
+
+    Chrome's unsigned-in placeholders are flat circles (often named avatar_*).
+    A real Google profile picture is the file Chrome saved, including portraits
+    on a plain background. Those were rejected before, so the taskbar drew a
+    letter instead of the photo Windows shows.
     """
     if not path or not os.path.isfile(path):
         return False
     try:
-        if os.path.getsize(path) < 400:
+        if os.path.getsize(path) < 120:
             return False
     except OSError:
         return False
     low = os.path.basename(path).lower()
-    # Chrome ships generic avatar_* placeholders that look like the gray person.
-    if low.startswith("avatar") or "placeholder" in low or "silhouette" in low:
-        return False
-    if "idr_profile_avatar" in low or "default_avatar" in low:
-        return False
+    if not trusted_name:
+        # Chrome ships generic avatar_* placeholders that look like the gray person.
+        if low.startswith("avatar") or "placeholder" in low or "silhouette" in low:
+            return False
+        if "idr_profile_avatar" in low or "default_avatar" in low:
+            return False
     try:
         raw = Image.open(path).convert("RGBA")
-        # Built-in / theme avatars are small simple PNGs; real Gaia photos are larger.
+        # Built-in / theme avatars are small simple PNGs; account photos are larger.
         if max(raw.size) < 48:
             return False
         img = raw.resize((32, 32), Image.Resampling.NEAREST)
@@ -94,6 +103,11 @@ def _is_usable_profile_photo(path: str) -> bool:
         unique = len(buckets)
         top = max(buckets.values()) if buckets else 0
         dominant_share = top / float(len(opaque))
+        if trusted_name:
+            # One flat fill is a built-in circle, not a person's photo.
+            if unique <= 8 and dominant_share >= 0.55:
+                return False
+            return True
         gray_share = grayish / float(len(opaque))
 
         # Flat badge: few unique colors + one dominant fill (the colored circle).
@@ -112,40 +126,131 @@ def _is_usable_profile_photo(path: str) -> bool:
         return False
 
 
+def _read_json(path):
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+def _safe_picture_name(name):
+    if not isinstance(name, str):
+        return ""
+    base = os.path.basename(name.strip())
+    if not base or base != name.strip():
+        return ""
+    if not base.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
+        return ""
+    return base
+
+
+def _merged_profile_info(config_dir, profile_key, info):
+    """Local State first, then the profile Preferences Chrome writes on sign-in."""
+    merged = dict(info or {})
+    prefs = _read_json(os.path.join(config_dir, profile_key, "Preferences"))
+    prof = prefs.get("profile") if isinstance(prefs.get("profile"), dict) else {}
+    for key in ("use_gaia_picture", "gaia_picture_file_name", "avatar_icon", "gaia_name", "name"):
+        if merged.get(key) in (None, "") and prof.get(key) not in (None, ""):
+            merged[key] = prof.get(key)
+    return merged
+
+
 def get_profile_avatar_path(config_dir, profile_key, info=None):
-    """Return a real Google account photo, or None → letter-badge fallback."""
+    """Return the account photo Chrome shows, or None when there is no photo."""
     if not config_dir or not profile_key or profile_key == "guest":
         return None
     folder = os.path.join(config_dir, profile_key)
+    info = _merged_profile_info(config_dir, profile_key, info)
+    named = _safe_picture_name(info.get("gaia_picture_file_name"))
     candidates = []
-    info = info if isinstance(info, dict) else {}
-
-    # Theme ids like chrome://theme/IDR_PROFILE_AVATAR_* are never files — letter badge.
-    avatar_icon = str(info.get("avatar_icon") or "")
-    if "IDR_PROFILE_AVATAR" in avatar_icon.upper() or avatar_icon.startswith("chrome://theme/"):
-        # Only override when Gaia is actually in use.
-        if not info.get("use_gaia_picture"):
-            return None
-
-    # Require an explicit Gaia picture — unsigned-in defaults must not badge as photos.
-    using_gaia = bool(info.get("use_gaia_picture"))
-    picture_name = info.get("gaia_picture_file_name")
-    if using_gaia and isinstance(picture_name, str) and picture_name and "/" not in picture_name:
-        if picture_name.endswith((".png", ".jpg", ".jpeg", ".webp")):
-            candidates.append(os.path.join(folder, picture_name))
-
-    if using_gaia:
-        for name in (
-            "Google Profile Picture.png",
-            "Google Profile Picture.jpg",
-            "Google Profile Picture.jpeg",
-        ):
-            candidates.append(os.path.join(folder, name))
-
+    if named:
+        candidates.append(os.path.join(folder, named))
+    for name in _GAIA_PICTURE_NAMES:
+        candidates.append(os.path.join(folder, name))
+    accounts = os.path.join(folder, "Accounts")
+    if os.path.isdir(accounts):
+        try:
+            for entry in os.listdir(accounts):
+                sub = os.path.join(accounts, entry)
+                if not os.path.isdir(sub):
+                    continue
+                for name in _GAIA_PICTURE_NAMES:
+                    candidates.append(os.path.join(sub, name))
+                if named:
+                    candidates.append(os.path.join(sub, named))
+        except OSError:
+            pass
+    seen = set()
     for path in candidates:
-        if _is_usable_profile_photo(path):
+        if path in seen:
+            continue
+        seen.add(path)
+        base = os.path.basename(path)
+        trusted = base in _GAIA_PICTURE_NAMES or base == named
+        if _is_usable_profile_photo(path, trusted_name=trusted):
             return path
     return None
+
+
+def avatar_fingerprint(path):
+    """Stable id for the current photo bytes. Empty when the file is unreadable."""
+    if not path or not os.path.isfile(path):
+        return ""
+    try:
+        digest = hashlib.sha256()
+        with open(path, "rb") as handle:
+            while True:
+                chunk = handle.read(65536)
+                if not chunk:
+                    break
+                digest.update(chunk)
+        return digest.hexdigest()[:16]
+    except OSError:
+        return ""
+
+
+def profile_icon_fingerprint(name, avatar_path):
+    """Photo hash, or the letter fallback when Chrome has no account picture."""
+    photo = avatar_fingerprint(avatar_path) if avatar_path else ""
+    if photo:
+        return "photo:" + photo
+    return "letter:" + badge_letter(name or "Chrome")
+
+
+def profile_icon_file(icons_dir, icon_name, fingerprint):
+    """Hashed filename so a new photo is a new path the taskbar will load."""
+    short = hashlib.sha256((fingerprint or "none").encode("utf-8")).hexdigest()[:8]
+    return os.path.join(icons_dir, f"{icon_name}-{short}.png"), short
+
+
+def _stamp_path(png_path):
+    return png_path + ".stamp"
+
+
+def _png_ok(path):
+    if not path or not os.path.isfile(path):
+        return False
+    try:
+        if os.path.getsize(path) < 400:
+            return False
+        with Image.open(path) as image:
+            image.verify()
+        return True
+    except Exception:
+        return False
+
+
+def icon_matches_photo(png_path, fingerprint):
+    """True when this taskbar icon was built from the photo we have now."""
+    if not fingerprint or not _png_ok(png_path):
+        return False
+    try:
+        with open(_stamp_path(png_path), "r", encoding="utf-8") as handle:
+            return handle.read().strip() == fingerprint
+    except OSError:
+        return False
 
 
 def get_chrome_profile_details(config_dir=None):
@@ -360,10 +465,10 @@ def generate_badged_icon(name, output_48, output_128=None, base_icon=None, avata
     """
     Windows-style Chrome profile icon: stock Chrome logo + badge.
 
-    Badge priority:
-      1) Real Google account photo (Gaia)
-      2) Colored circle with the profile name's FIRST CHARACTER
-         (profiles with no photo — never leave blank / gray person)
+    Badge priority, same corner chip Windows puts on the Chrome logo:
+      1) The Google account photo Chrome saved for this profile
+      2) Colored circle with the profile name's first character
+         only when that photo is missing
     """
     if not base_icon or not os.path.isfile(base_icon):
         base_icon = get_stock_chrome_icon()
@@ -378,13 +483,17 @@ def generate_badged_icon(name, output_48, output_128=None, base_icon=None, avata
     draw = ImageDraw.Draw(img)
 
     used_avatar = False
-    if avatar_path and _is_usable_profile_photo(avatar_path):
+    base = os.path.basename(avatar_path or "").lower()
+    trusted = bool(avatar_path) and not (
+        base.startswith("avatar") or "placeholder" in base or "silhouette" in base
+        or "idr_profile_avatar" in base or "default_avatar" in base
+    )
+    if avatar_path and _is_usable_profile_photo(avatar_path, trusted_name=trusted):
         try:
-            badge_size = 56
+            # Windows draws the account photo as a large circle on the logo.
+            badge_size = 68
             ring = 4
             badge = _circle_crop(Image.open(avatar_path), badge_size)
-            cx = 128 - badge_size // 2 - 4
-            cy = 128 - badge_size // 2 - 4
             outer = badge_size + ring * 2
             ring_img = Image.new("RGBA", (outer, outer), (0, 0, 0, 0))
             ImageDraw.Draw(ring_img).ellipse(
@@ -392,7 +501,7 @@ def generate_badged_icon(name, output_48, output_128=None, base_icon=None, avata
                 fill=(255, 255, 255, 245),
             )
             ring_img.paste(badge, (ring, ring), badge)
-            img.alpha_composite(ring_img, (cx - outer // 2, cy - outer // 2))
+            img.alpha_composite(ring_img, (128 - outer - 2, 128 - outer - 2))
             used_avatar = True
         except Exception:
             used_avatar = False
@@ -431,6 +540,32 @@ def generate_badged_icon(name, output_48, output_128=None, base_icon=None, avata
     if output_128:
         os.makedirs(os.path.dirname(os.path.abspath(output_128)), exist_ok=True)
         img.save(output_128, format="PNG")
+
+
+_ICONS_CHANGED = False
+
+
+def ensure_badged_icon(name, output_48, output_128, avatar_path, fingerprint):
+    """Write the taskbar icon when the photo is missing, broken, or changed.
+
+    Returns True when a new PNG was written.
+    """
+    global _ICONS_CHANGED
+    if icon_matches_photo(output_48, fingerprint) and (
+        not output_128 or icon_matches_photo(output_128, fingerprint)
+    ):
+        return False
+    generate_badged_icon(name, output_48, output_128, avatar_path=avatar_path)
+    for path in (output_48, output_128):
+        if not path:
+            continue
+        try:
+            with open(_stamp_path(path), "w", encoding="utf-8") as handle:
+                handle.write(fingerprint or "")
+        except OSError:
+            pass
+    _ICONS_CHANGED = True
+    return True
 
 
 def update_google_chrome_desktop(home_dir, all_profiles):
@@ -589,8 +724,21 @@ Exec={devos_bin} --guest --class=chrome-guest
         icon_file_48 = os.path.join(icons_dir_48, f"{icon_name}.png")
         icon_file_128 = os.path.join(icons_dir_128, f"{icon_name}.png")
         avatar = None if key == "guest" else (details.get(key) or {}).get("avatar")
-
-        generate_badged_icon(name, icon_file_48, icon_file_128, avatar_path=avatar)
+        fingerprint = profile_icon_fingerprint(name, avatar)
+        hashed_48, _short = profile_icon_file(icons_dir_48, icon_name, fingerprint)
+        hashed_128, _short = profile_icon_file(icons_dir_128, icon_name, fingerprint)
+        if ensure_badged_icon(name, hashed_48, hashed_128, avatar, fingerprint):
+            for src, dest in ((hashed_48, icon_file_48), (hashed_128, icon_file_128)):
+                try:
+                    shutil.copyfile(src, dest)
+                except OSError:
+                    pass
+        elif not _png_ok(icon_file_48):
+            try:
+                shutil.copyfile(hashed_48, icon_file_48)
+                shutil.copyfile(hashed_128, icon_file_128)
+            except OSError:
+                pass
 
         desktop_file = os.path.join(apps_dir, f"{icon_name}.desktop")
         wm_class = icon_name
@@ -873,7 +1021,7 @@ def _install_icon_name(home_dir, icon_name: str, src_48: str, src_128: str = Non
         pass
 
 
-def ensure_window_task_desktop(home_dir, prof_name: str, slug: str, wm_class: str, icon_name: str) -> str:
+def ensure_window_task_desktop(home_dir, prof_name: str, slug: str, wm_class: str, icon_name: str, icon_file: str = None) -> str:
     """
     Create a NoDisplay .desktop whose StartupWMClass matches this ONE window.
 
@@ -899,7 +1047,9 @@ def ensure_window_task_desktop(home_dir, prof_name: str, slug: str, wm_class: st
         exec_line = f"{devos_bin} --class={wm_class}"
     # Absolute Icon= path — Plasma theme lookup often misses new hicolor files
     # and falls back to Chrome's gray person badge.
-    icon_abs = os.path.join(home, ".local/share/icons/hicolor/48x48/apps", f"{wm_class}.png")
+    icon_abs = icon_file if icon_file and os.path.isfile(icon_file) else ""
+    if not icon_abs:
+        icon_abs = os.path.join(home, ".local/share/icons/hicolor/48x48/apps", f"{wm_class}.png")
     if not os.path.isfile(icon_abs):
         icon_abs = os.path.join(home, ".local/share/icons/hicolor/128x128/apps", f"{wm_class}.png")
     if not os.path.isfile(icon_abs):
@@ -1547,6 +1697,189 @@ def get_open_browser_profile_keys(chrome_dir, profiles):
     return out
 
 
+def get_last_used_profile_key(chrome_dir):
+    """Directory of the profile Chrome is showing in the focused window."""
+    local_state = os.path.join(chrome_dir, "Local State")
+    if not os.path.isfile(local_state):
+        return ""
+    try:
+        with open(local_state, "r", encoding="utf-8") as handle:
+            return str((json.load(handle).get("profile") or {}).get("last_used") or "")
+    except Exception:
+        return ""
+
+
+_GENERIC_WINDOW_TITLES = {
+    "",
+    "new tab",
+    "new incognito tab",
+    "new private tab",
+    "google",
+    "google chrome",
+    "chrome",
+    "about:blank",
+    "settings",
+    "history",
+    "downloads",
+    "extensions",
+}
+
+
+def window_title_key(title):
+    """Tab title without the browser suffix Chrome appends."""
+    text = (title or "").strip()
+    text = re.sub(r"\s+-\s+Google Chrome$", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s+-\s+Chromium$", "", text, flags=re.IGNORECASE)
+    return text.strip().lower()
+
+
+def title_is_generic(title):
+    """True for titles every profile shows, such as New Tab."""
+    key = window_title_key(title)
+    if key in _GENERIC_WINDOW_TITLES:
+        return True
+    return key.startswith("new tab")
+
+
+def _window_is_guest(window):
+    title = (window or {}).get("title") or ""
+    wm_class = ((window or {}).get("wm_class") or "").lower()
+    if "chrome-guest" in wm_class:
+        return True
+    return bool(re.search(
+        r"(\(Guest\)| - Guest( - |$)|browsing as a Guest|You.?re browsing as a Guest)",
+        title,
+        re.IGNORECASE,
+    ))
+
+
+def _effective_open_keys(windows, open_keys, profiles, prof_session_data):
+    """Profiles that have a window open.
+
+    last_active_profiles is the list Chrome writes. When that list is missing
+    and more than one window is open, a profile whose session file was written
+    in the last few minutes is open too.
+    """
+    keys = [key for key in (open_keys or []) if key in (profiles or {})]
+    if len(windows or []) < 2 or len(keys) >= 2:
+        return keys
+    now = time.time()
+    for key, data in (prof_session_data or {}).items():
+        if key in keys or key not in profiles:
+            continue
+        mtime = (data or {}).get("mtime") or 0
+        if mtime and now - mtime <= 180:
+            keys.append(key)
+    return keys
+
+
+def unique_profile_for_title(title, profiles, prof_session_data, open_keys=None):
+    """Profile whose open tabs contain this title, when only one profile does."""
+    key = window_title_key(title)
+    if title_is_generic(title) or len(key) < 4:
+        return None
+    keys = [k for k in (open_keys or list((profiles or {}).keys())) if k in (profiles or {})]
+    hits = []
+    for profile_key in keys:
+        data = (prof_session_data or {}).get(profile_key) or {}
+        matched = False
+        for tab in data.get("titles") or ():
+            if tab == key or (len(tab) >= 5 and (tab in key or key in tab)):
+                matched = True
+                break
+        if not matched:
+            for domain in data.get("domains") or ():
+                if len(domain) >= 4 and domain in key:
+                    matched = True
+                    break
+        if matched:
+            name = profiles.get(profile_key)
+            if name and name not in hits:
+                hits.append(name)
+    if len(hits) == 1:
+        return hits[0]
+    return None
+
+
+def _root_active_window():
+    """X id of the window the user is looking at, or 0."""
+    try:
+        import subprocess
+        out = subprocess.check_output(
+            ["xprop", "-root", "_NET_ACTIVE_WINDOW"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        return 0
+    match = re.search(r"0x[0-9a-fA-F]+", out or "")
+    if not match:
+        return 0
+    try:
+        return int(match.group(0), 16)
+    except ValueError:
+        return 0
+
+
+def assign_chrome_window_profiles(chrome_wins, profiles, open_keys, prof_session_data, last_used_key="", active_wid=0):
+    """
+    Map each Chrome window id to the profile name whose photo it should wear.
+
+    Chrome keeps every profile in one process, and a New Tab title is in every
+    profile, so the process flag and the tab title both paint the first photo
+    on every icon. The focused window is the profile Chrome saved as last_used
+    (the account shown at the top of that window). Each other window takes an
+    open profile that does not already have an icon.
+    """
+    profiles = profiles or {}
+    names = {}
+    for window in chrome_wins or []:
+        if _window_is_guest(window):
+            names[window["id"]] = "Guest"
+    rest = [window for window in (chrome_wins or []) if window["id"] not in names]
+    open_keys = _effective_open_keys(rest, open_keys, profiles, prof_session_data)
+    open_names = []
+    for key in open_keys:
+        name = profiles.get(key)
+        if name and name not in open_names:
+            open_names.append(name)
+
+    if len(open_names) == 1:
+        for window in rest:
+            names[window["id"]] = open_names[0]
+        return names
+
+    last_used_name = profile_name_for_key(last_used_key, profiles) if last_used_key else None
+    if active_wid and last_used_name:
+        for window in rest:
+            if window["id"] == active_wid:
+                names[window["id"]] = last_used_name
+                break
+
+    for window in rest:
+        if window["id"] in names:
+            continue
+        unique = unique_profile_for_title(
+            window.get("title"), profiles, prof_session_data, open_keys or None,
+        )
+        if unique:
+            names[window["id"]] = unique
+
+    used = set(names.values())
+    unused = [name for name in open_names if name not in used]
+    left = [window for window in rest if window["id"] not in names]
+    if left and len(unused) == 1:
+        names[left[0]["id"]] = unused[0]
+        extra = last_used_name or (open_names[0] if open_names else None)
+        for window in left[1:]:
+            if extra:
+                names[window["id"]] = extra
+    elif left and len(left) == len(unused):
+        for window, name in zip(left, unused):
+            names[window["id"]] = name
+    return names
+
+
 def get_ranked_active_profiles(chrome_dir, profiles):
     """
     Return profile keys ordered by recent active browser usage,
@@ -1740,7 +2073,7 @@ def _wm_class_profile(wm_class, profiles):
     return None
 
 
-def detect_window_profile(w, profiles, home_dir=None, assigned_profiles=None, prof_session_data=None):
+def detect_window_profile(w, profiles, home_dir=None, assigned_profiles=None, prof_session_data=None, shared_pids=None, allow_fallback=True, trust_class=True):
     """
     Determine profile name from window attributes and session activity:
     - Real Guest (--guest cmdline / chrome-guest class) before any avatar profile
@@ -1777,10 +2110,12 @@ def detect_window_profile(w, profiles, home_dir=None, assigned_profiles=None, pr
             WINDOW_PROFILE_CACHE[wid] = "Guest"
         return "Guest"
 
-    # The process flag is the profile Chrome actually opened. A previous pass
-    # can leave the wrong chrome-<slug> class on the window (both icons then
-    # show Mirza's M). The directory wins over that sticky class.
-    if pid:
+    # One Chrome process serves every profile. Its --profile-directory is only
+    # the profile that started the browser, so using it for every window paints
+    # the first account photo on every taskbar icon. A private PID can still
+    # correct a sticky class. A shared PID cannot.
+    shared = bool(pid and shared_pids and pid in shared_pids)
+    if pid and not shared:
         keyed = profile_name_for_key(_cmdline_profile_key(pid), profiles)
         if keyed:
             if wid:
@@ -1788,10 +2123,10 @@ def detect_window_profile(w, profiles, home_dir=None, assigned_profiles=None, pr
             return keyed
 
     # Trust chrome-<slug> only if that profile is among Chrome's open browser
-    # profiles. A shared Chrome PID previously got Work windows rewritten to
-    # chrome-tony; without this check the wrong face sticks forever.
+    # profiles. On a shared process the class may already be the first profile
+    # stamped onto every window, so session matching has to run instead.
     class_prof = _wm_class_profile(wm_class, profiles)
-    if class_prof and class_prof != "Guest":
+    if class_prof and class_prof != "Guest" and not shared:
         if not open_names or class_prof in open_names:
             if wid:
                 WINDOW_PROFILE_CACHE[wid] = class_prof
@@ -1825,8 +2160,9 @@ def detect_window_profile(w, profiles, home_dir=None, assigned_profiles=None, pr
     if prof_session_data is None:
         prof_session_data = get_profile_session_data(chrome_dir)
 
-    # Clean title for comparison
-    title_clean = title.replace(" - Google Chrome", "").strip().lower()
+    # Clean title for comparison. "New Tab" is open in every profile, so it
+    # must not award the first profile to every window.
+    title_clean = "" if title_is_generic(title) else window_title_key(title)
 
     # Prefer open browser profiles when scoring session/title matches.
     score_keys = open_keys or list(profiles.keys())
@@ -1845,15 +2181,16 @@ def detect_window_profile(w, profiles, home_dir=None, assigned_profiles=None, pr
         p_name = profiles[p_key]
         score = 0
 
-        for t in sdata.get("titles", []):
-            if t == title_clean:
-                score += 150
-            elif len(t) >= 5 and (t in title_clean or title_clean in t):
-                score += 100
+        if title_clean:
+            for t in sdata.get("titles", []):
+                if t == title_clean:
+                    score += 150
+                elif len(t) >= 5 and (t in title_clean or title_clean in t):
+                    score += 100
 
-        for d in sdata.get("domains", []):
-            if len(d) >= 4 and d in title_clean:
-                score += 40
+            for d in sdata.get("domains", []):
+                if len(d) >= 4 and d in title_clean:
+                    score += 40
 
         if score > 0:
             mtime = sdata.get("mtime", 0)
@@ -1874,10 +2211,23 @@ def detect_window_profile(w, profiles, home_dir=None, assigned_profiles=None, pr
             WINDOW_PROFILE_CACHE[wid] = best_prof
         return best_prof
 
-    if wid and wid in WINDOW_PROFILE_CACHE:
+    # Session missed. A shared process may already carry a per-window class
+    # from the last good match. Ignore that class when every window still
+    # wears the same profile and more than one profile is open — that is the
+    # first photo painted onto every icon.
+    if shared and trust_class and class_prof and class_prof != "Guest":
+        if not open_names or class_prof in open_names:
+            if wid:
+                WINDOW_PROFILE_CACHE[wid] = class_prof
+            return class_prof
+
+    if wid and wid in WINDOW_PROFILE_CACHE and not shared:
         cached = WINDOW_PROFILE_CACHE[wid]
         if not open_names or cached in open_names:
             return cached
+
+    if not allow_fallback:
+        return None
 
     # Unassigned fallback: open browser profiles first (never invent Guest → Work)
     ranked_keys = open_keys or get_ranked_active_profiles(chrome_dir, profiles)
@@ -1973,12 +2323,43 @@ def apply_window_profiles(home_dir=None):
     # Ensure profile avatar icons + pin desktops exist first.
     sync_all_profiles(home_dir)
 
+    pid_counts = {}
     for w in chrome_wins:
-        # Do NOT mark profiles "assigned" across windows — two Work windows are
-        # both Work; forcing the second onto Guest/Mirza made grouping worse.
+        pid = _window_pid(w["id"])
+        if pid:
+            pid_counts[pid] = pid_counts.get(pid, 0) + 1
+    shared_pids = {pid for pid, count in pid_counts.items() if count > 1}
+    open_keys = get_open_browser_profile_keys(chrome_dir, profiles)
+    open_names = [profiles[key] for key in open_keys if key in profiles]
+    class_names = {_wm_class_profile(w.get("wm_class"), profiles) for w in chrome_wins}
+    class_names.discard(None)
+    # Every window of one Chrome process was labeled with the profile that
+    # launched it. When those labels are all the same and another profile is
+    # open, do not keep that first photo.
+    trust_class = not (bool(shared_pids) and len(class_names) <= 1 and len(open_names) > 1)
+
+    named = assign_chrome_window_profiles(
+        chrome_wins,
+        profiles,
+        open_keys,
+        prof_session_data,
+        get_last_used_profile_key(chrome_dir),
+        _root_active_window(),
+    )
+    for w in chrome_wins:
+        if named.get(w["id"]):
+            continue
         prof_name = detect_window_profile(
-            w, profiles, home_dir, None, prof_session_data
+            w, profiles, home_dir, None, prof_session_data,
+            shared_pids=shared_pids, allow_fallback=True, trust_class=trust_class,
         )
+        named[w["id"]] = prof_name or "Chrome"
+
+    for w in chrome_wins:
+        # Two windows of one profile keep that profile. Only a window we could
+        # not match is given a still-unused open profile, so it does not wear
+        # the first account's photo.
+        prof_name = named.get(w["id"]) or "Chrome"
         slug = slugify(prof_name)
         if slug not in active_slugs:
             active_slugs.append(slug)
@@ -1987,9 +2368,12 @@ def apply_window_profiles(home_dir=None):
         avatar = None if is_guest else ((details.get(prof_key) or {}).get("avatar") if prof_key else None)
 
         icon_name = f"chrome-{slug}"
-        prof_icon_48 = os.path.join(icons_dir_48, f"{icon_name}.png")
-        prof_icon_128 = os.path.join(icons_dir_128, f"{icon_name}.png")
-        generate_badged_icon(prof_name, prof_icon_48, prof_icon_128, avatar_path=avatar)
+        fingerprint = profile_icon_fingerprint(prof_name, avatar)
+        prof_icon_48, _short = profile_icon_file(icons_dir_48, icon_name, fingerprint)
+        prof_icon_128, _short = profile_icon_file(icons_dir_128, icon_name, fingerprint)
+        # Each open checks the saved photo. A missing, broken, or replaced
+        # picture rebuilds the chip; an unchanged picture is left in place.
+        ensure_badged_icon(prof_name, prof_icon_48, prof_icon_128, avatar, fingerprint)
 
         # Unique class+desktop+icon per WINDOW so tiles never share one graphic.
         class_name = window_task_class(slug, w["id"])
@@ -2006,7 +2390,7 @@ def apply_window_profiles(home_dir=None):
 
         # .desktop Icon= uses absolute path to the badge file installed above.
         desktop_name = ensure_window_task_desktop(
-            home_dir, prof_name, slug, class_name, class_name
+            home_dir, prof_name, slug, class_name, class_name, icon_file=prof_icon_48
         )
         set_window_wm_class(w["id"], class_name, class_name)
         set_window_desktop_file(w["id"], desktop_name, home_dir=home_dir)
@@ -2032,10 +2416,14 @@ def apply_window_profiles(home_dir=None):
         active_slugs,
         window_desktops=[f"{c}.desktop" for c in window_classes],
     )
-    if launcher_key != _LAST_PLASMA_LAUNCHERS:
+    global _ICONS_CHANGED
+    icons_changed = _ICONS_CHANGED
+    _ICONS_CHANGED = False
+    if launcher_key != _LAST_PLASMA_LAUNCHERS or icons_changed:
         _LAST_PLASMA_LAUNCHERS = launcher_key
         os.environ["DEVOS_FORCE_PLASMA_RELOAD"] = "1"
         reload_plasmashell()
+        os.environ.pop("DEVOS_FORCE_PLASMA_RELOAD", None)
 
     return processed
 
