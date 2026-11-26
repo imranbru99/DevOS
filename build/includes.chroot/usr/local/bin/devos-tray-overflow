@@ -2,21 +2,19 @@
 """Keep StatusNotifier / tray icons under Plasma Status & Notifications (^).
 
 Open windows stay on the center taskbar. This only manages the system tray.
-The speaker (org.kde.plasma.volume) belongs in that popup, not beside the clock.
 
-Plasma 6 reads the live hide-list from the private system tray containment
-([Containments][N][General], plugin=org.kde.plasma.private.systemtray), not
-from the panel applet's [Configuration][General]. A finished applet section
-must not mask an empty containment section — that left the speaker on the bar.
-
-Do not use plasmashell writeConfig() for hiddenItems — it breaks KConfig
-StringList matching so icons stay on the panel. Write appletsrc only, and
-restart plasmashell only when the hide-set actually gains new Ids.
+Plasma 6 reads hiddenItems from the private system-tray containment
+(SystrayContainmentId), not from the panel applet's Configuration group.
+A comma-separated string passed to writeConfig is stored as one entry, so
+the icon never matches. Pass a real list, and do not restart plasmashell:
+that restart is what removes the footer for a second or two.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -44,13 +42,15 @@ ALWAYS_HIDE = (
     "org.kde.plasma.printmanager",
     "org.kde.plasma.cameraindicator",
     "org.kde.plasma.volume",
-    # PulseAudio draws this while any app is recording. Status is Active, so
-    # it sticks beside the clock unless it is listed here. Voice and voice
-    # typing should only show it under Status & Notifications (^).
+    # The volume applet draws a plain microphone while any app is recording
+    # and pins it beside the clock unless this id is hidden too.
     "microphone",
     "Microphone",
+    "audio-input-microphone",
     # Hands-free listener. Qt's tray icon reports Active, which pins it too.
     "devos-voice",
+    "Voice Command",
+    "DevOS AI",
     "DevOS Optimizer",
     "devos-optimizer",
     "DevOS Sound",
@@ -80,6 +80,9 @@ EXTRA_ITEMS = (
     "org.kde.plasma.volume",
 )
 
+# Applet-only keys. The private tray containment does not use these.
+_APPLET_ONLY = ("pin",)
+
 
 def _run(cmd: list[str], timeout: float = 5.0) -> str:
     try:
@@ -91,7 +94,19 @@ def _run(cmd: list[str], timeout: float = 5.0) -> str:
     return ""
 
 
+def _dbus_string(service: str, iface: str, prop: str) -> str:
+    raw = _run(["busctl", "--user", "get-property", service, "/StatusNotifierItem", iface, prop])
+    match = re.search(r'"([^"]*)"', raw or "")
+    return match.group(1).strip() if match else ""
+
+
 def registered_tray_ids() -> list[str]:
+    """Ids Plasma uses for the icons that are on the bus right now.
+
+    The plain microphone beside the clock is one of these. Its Id is usually
+    ``microphone``, but a fallback tray icon can use another Id while its
+    title or icon name still says microphone. Both have to be hidden.
+    """
     ids: list[str] = []
     bus = _run(["busctl", "--user", "list"])
     if not bus:
@@ -101,16 +116,105 @@ def registered_tray_ids() -> list[str]:
             continue
         service = ln.split()[0]
         for iface in ("org.kde.StatusNotifierItem", "org.freedesktop.StatusNotifierItem"):
-            raw = _run(
-                ["busctl", "--user", "get-property", service, "/StatusNotifierItem", iface, "Id"]
-            )
-            if not raw:
+            item_id = _dbus_string(service, iface, "Id")
+            if not item_id:
                 continue
-            m = re.search(r'"([^"]+)"', raw)
-            if m and m.group(1).strip():
-                ids.append(m.group(1).strip())
-                break
+            title = _dbus_string(service, iface, "Title")
+            icon = _dbus_string(service, iface, "IconName")
+            tip = _dbus_string(service, iface, "ToolTipTitle")
+            blob = " ".join((item_id, title, icon, tip)).lower()
+            if item_id not in ids:
+                ids.append(item_id)
+            if "microphone" in blob:
+                for extra in (item_id, title, icon):
+                    if extra and extra not in ids:
+                        ids.append(extra)
+            break
     return ids
+
+
+def is_recording_microphone(item_id: str, title: str = "", icon: str = "") -> bool:
+    """Plasma's recording indicator, not the DevOS voice icon in the status menu."""
+    ident = (item_id or "").strip()
+    if ident.lower() == "devos-voice":
+        return False
+    if ident in {"microphone", "Microphone"}:
+        return True
+    # plasma-pa titles this item "Microphone". The voice icon does not.
+    return (title or "").strip() == "Microphone" and "devos" not in ident.lower()
+
+
+def recording_microphone_services() -> list[str]:
+    """Session-bus services that are the recording microphone on the footer."""
+    found: list[str] = []
+    bus = _run(["busctl", "--user", "list"])
+    if not bus:
+        return found
+    for ln in bus.splitlines():
+        if "StatusNotifierItem" not in ln or "Watcher" in ln:
+            continue
+        service = ln.split()[0]
+        for iface in ("org.kde.StatusNotifierItem", "org.freedesktop.StatusNotifierItem"):
+            item_id = _dbus_string(service, iface, "Id")
+            if not item_id:
+                continue
+            title = _dbus_string(service, iface, "Title")
+            icon = _dbus_string(service, iface, "IconName")
+            if is_recording_microphone(item_id, title, icon) and service not in found:
+                found.append(service)
+            break
+    return found
+
+
+def _unregister_sni(service: str) -> bool:
+    """Drop one tray icon. The panel stays up; this is not a shell restart."""
+    attempts: list[list[str]] = []
+    if shutil.which("busctl"):
+        attempts.append(
+            [
+                "busctl",
+                "--user",
+                "call",
+                "org.kde.StatusNotifierWatcher",
+                "/StatusNotifierWatcher",
+                "org.kde.StatusNotifierWatcher",
+                "UnregisterStatusNotifierItem",
+                "s",
+                service,
+            ]
+        )
+    if shutil.which("gdbus"):
+        attempts.append(
+            [
+                "gdbus",
+                "call",
+                "--session",
+                "--dest",
+                "org.kde.StatusNotifierWatcher",
+                "--object-path",
+                "/StatusNotifierWatcher",
+                "--method",
+                "org.kde.StatusNotifierWatcher.UnregisterStatusNotifierItem",
+                service,
+            ]
+        )
+    for cmd in attempts:
+        try:
+            out = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            continue
+        if out.returncode == 0:
+            return True
+    return False
+
+
+def drop_recording_microphone() -> int:
+    """Take the recording microphone off the footer without redrawing the panel."""
+    removed = 0
+    for service in recording_microphone_services():
+        if _unregister_sni(service):
+            removed += 1
+    return removed
 
 
 def desired_hidden_set() -> set[str]:
@@ -146,49 +250,41 @@ def find_tray_applet_headers(lines: list[str]) -> list[str]:
     return found
 
 
-def find_systray_containment_headers(lines: list[str]) -> list[str]:
-    """Live tray containments Plasma 6 actually reads.
-
-    The panel applet only stores SystrayContainmentId. Volume, network and the
-    other status plasmoids follow [Containments][that id][General].
-    """
+def systray_containment_ids(lines: list[str]) -> list[str]:
+    """Ids Plasma 6 actually reads: private tray containment + SystrayContainmentId."""
     found: list[str] = []
-    seen: set[str] = set()
-    sections = _sections(lines)
-    for hdr, start, end in sections:
-        if not re.fullmatch(r"\[Containments\]\[\d+\]", hdr):
-            continue
+    for hdr, start, end in _sections(lines):
         body = "".join(lines[start:end])
-        if "plugin=org.kde.plasma.private.systemtray" in body and hdr not in seen:
-            found.append(hdr)
-            seen.add(hdr)
-    for line in lines:
-        match = re.match(r"SystrayContainmentId=(\d+)\s*$", line.strip())
-        if not match:
-            continue
-        hdr = f"[Containments][{match.group(1)}]"
-        if hdr in seen:
-            continue
-        if any(section == hdr for section, _, _ in sections):
-            found.append(hdr)
-            seen.add(hdr)
-    return found
+        if (
+            re.fullmatch(r"\[Containments\]\[\d+\]", hdr)
+            and "plugin=org.kde.plasma.private.systemtray" in body
+        ):
+            match = re.search(r"\[(\d+)\]$", hdr)
+            if match:
+                found.append(match.group(1))
+        for match in re.finditer(r"(?m)^SystrayContainmentId=(\d+)\s*$", body):
+            found.append(match.group(1))
+    out: list[str] = []
+    for item in found:
+        if item not in out:
+            out.append(item)
+    return out
 
 
-def policy_section_headers(lines: list[str]) -> list[str]:
-    """Every group that can pin the speaker beside the clock."""
+def policy_headers(lines: list[str]) -> list[str]:
+    """Every General group that can keep an icon on the panel."""
     headers: list[str] = []
     for applet_hdr in find_tray_applet_headers(lines):
         headers.append(applet_hdr + "[Configuration][General]")
         headers.append(applet_hdr + "[General]")
-    for containment in find_systray_containment_headers(lines):
-        headers.append(containment + "[General]")
+    for cid in systray_containment_ids(lines):
+        headers.append(f"[Containments][{cid}][General]")
     return headers
 
 
 def find_tray_general_locs(lines: list[str]) -> list[tuple[int, int]]:
-    """All systemtray General sections (applet + private containment)."""
-    wanted = set(policy_section_headers(lines))
+    """All systemtray General sections (applet, legacy, and private containment)."""
+    wanted = set(policy_headers(lines))
     return [(start, end) for hdr, start, end in _sections(lines) if hdr in wanted]
 
 
@@ -197,35 +293,14 @@ def find_tray_general(lines: list[str]) -> tuple[int, int] | None:
     locs = find_tray_general_locs(lines)
     if not locs:
         return None
-    # The private containment is the one Plasma 6 shows on the panel.
-    for start, end in locs:
-        if re.search(r"\[Containments\]\[\d+\]\[General\]", lines[start]):
-            return start, end
+    # Prefer Configuration/General when both exist.
     for start, end in locs:
         if "[Configuration][General]" in lines[start]:
             return start, end
     return locs[0]
 
 
-def _read_section_policy(lines: list[str], start: int, end: int) -> tuple[set[str], bool, str]:
-    hidden: set[str] = set()
-    show_all = False
-    shown = ""
-    for line in lines[start + 1 : end]:
-        if line.startswith("hiddenItems="):
-            hidden |= parse_list(line.split("=", 1)[1])
-        elif line.startswith("showAllItems="):
-            if line.split("=", 1)[1].strip().lower() in ("true", "1", "yes"):
-                show_all = True
-        elif line.startswith("shownItems="):
-            val = line.split("=", 1)[1].strip()
-            if val:
-                shown = val
-    return hidden, show_all, shown
-
-
 def read_policy(lines: list[str]) -> tuple[set[str], bool, str]:
-    """Union of every tray section. Prefer policies_satisfied for apply checks."""
     locs = find_tray_general_locs(lines)
     if not locs:
         return set(), True, ""
@@ -233,140 +308,495 @@ def read_policy(lines: list[str]) -> tuple[set[str], bool, str]:
     show_all = False
     shown = ""
     for start, end in locs:
-        section_hidden, section_show_all, section_shown = _read_section_policy(lines, start, end)
-        hidden |= section_hidden
-        show_all = show_all or section_show_all
-        if section_shown:
-            shown = section_shown
+        for line in lines[start + 1 : end]:
+            if line.startswith("hiddenItems="):
+                hidden |= parse_list(line.split("=", 1)[1])
+            elif line.startswith("showAllItems="):
+                if line.split("=", 1)[1].strip().lower() in ("true", "1", "yes"):
+                    show_all = True
+            elif line.startswith("shownItems="):
+                val = line.split("=", 1)[1].strip()
+                if val:
+                    shown = val
     return hidden, show_all, shown
 
 
-def policies_satisfied(lines: list[str], want: set[str]) -> bool:
-    """True only when every live tray section hides the full set.
+def _policy_map(hidden: set[str], *, include_pin: bool) -> dict[str, str]:
+    hidden_csv = ",".join(sorted(hidden))
+    extra = ",".join(EXTRA_ITEMS)
+    values = {
+        "showAllItems": "false",
+        "extraItems": extra,
+        "hiddenItems": hidden_csv,
+        "knownItems": extra,
+        "shownItems": "",
+        # Clicking this icon pops the "Microphone Muted" notice. Disabled means
+        # it is not drawn on the footer at all.
+        "disabledStatusNotifiers": "microphone,Microphone",
+    }
+    if include_pin:
+        values["pin"] = "false"
+    return values
 
-    A complete panel-applet copy must not hide an incomplete containment.
-    That is the Plasma 6 path, and it is what leaves the speaker beside the clock.
-    """
-    headers = policy_section_headers(lines)
+
+def _section_index(lines: list[str]) -> dict[str, tuple[int, int]]:
+    return {hdr: (start, end) for hdr, start, end in _sections(lines)}
+
+
+def _rewrite_section(lines: list[str], header: str, values: dict[str, str]) -> list[str]:
+    """Update policy keys in one group. Leave every other key in that group."""
+    indexed = _section_index(lines)
+    if header in indexed:
+        start, end = indexed[header]
+        seen: set[str] = set()
+        body: list[str] = []
+        for line in lines[start + 1 : end]:
+            key = line.split("=", 1)[0].strip() if "=" in line and not line.startswith("[") else ""
+            if key in values:
+                if key not in seen:
+                    body.append(f"{key}={values[key]}\n")
+                    seen.add(key)
+            else:
+                body.append(line if line.endswith("\n") else line + "\n")
+        for key, value in values.items():
+            if key not in seen:
+                body.append(f"{key}={value}\n")
+        hline = lines[start] if lines[start].endswith("\n") else lines[start] + "\n"
+        return lines[:start] + [hline] + body + lines[end:]
+    block = [header + "\n"] + [f"{key}={value}\n" for key, value in values.items()]
+    parent = header[: -len("[General]")] if header.endswith("[General]") else ""
+    if parent:
+        for hdr, _start, end in _sections(lines):
+            if hdr == parent:
+                return lines[:end] + block + lines[end:]
+    tail = list(lines)
+    if tail and not tail[-1].endswith("\n"):
+        tail[-1] = tail[-1] + "\n"
+    if tail and tail[-1].strip():
+        tail.append("\n")
+    return tail + block
+
+
+def _general_hides(lines: list[str], header: str, want: set[str]) -> bool:
+    indexed = _section_index(lines)
+    if header not in indexed:
+        return False
+    start, end = indexed[header]
+    hidden: set[str] = set()
+    shown: set[str] = set()
+    show_all = False
+    for line in lines[start + 1 : end]:
+        if line.startswith("hiddenItems="):
+            hidden |= parse_list(line.split("=", 1)[1])
+        elif line.startswith("shownItems="):
+            shown |= parse_list(line.split("=", 1)[1])
+        elif line.startswith("showAllItems="):
+            if line.split("=", 1)[1].strip().lower() in ("true", "1", "yes"):
+                show_all = True
+    return (not show_all) and want.issubset(hidden) and not (shown & want)
+
+
+def _microphone_disabled(lines: list[str]) -> bool:
+    """True when every tray group Plasma reads refuses the recording icon."""
+    headers = [h + "[General]" for h in find_tray_applet_headers(lines)]
+    headers.extend(f"[Containments][{cid}][General]" for cid in systray_containment_ids(lines))
     if not headers:
         return False
-    existing = {hdr: (start, end) for hdr, start, end in _sections(lines)}
+    indexed = _section_index(lines)
     for header in headers:
-        if header not in existing:
+        if header not in indexed:
             return False
-        start, end = existing[header]
-        hidden, show_all, shown = _read_section_policy(lines, start, end)
-        if show_all or shown or not want.issubset(hidden):
+        start, end = indexed[header]
+        disabled: set[str] = set()
+        for line in lines[start + 1 : end]:
+            if line.startswith("disabledStatusNotifiers="):
+                disabled |= parse_list(line.split("=", 1)[1])
+        if "microphone" not in disabled:
             return False
     return True
 
 
-def _policy_body(hidden: set[str]) -> list[str]:
-    hidden_csv = ",".join(sorted(hidden))
-    extra = ",".join(EXTRA_ITEMS)
-    return [
-        "showAllItems=false\n",
-        f"extraItems={extra}\n",
-        f"hiddenItems={hidden_csv}\n",
-        f"knownItems={extra}\n",
-        "pin=false\n",
-        "shownItems=\n",
-    ]
-
-
-def _insert_missing_section(lines: list[str], header: str, body: list[str]) -> list[str]:
-    """Insert header+body after the closest parent section that already exists."""
-    parts = re.findall(r"\[[^\]]+\]", header)
-    existing = {hdr: (start, end) for hdr, start, end in _sections(lines)}
-    for size in range(len(parts) - 1, 0, -1):
-        parent = "".join(parts[:size])
-        if parent not in existing:
-            continue
-        end = existing[parent][1]
-        return lines[:end] + [header + "\n"] + body + lines[end:]
-    return lines
+def policy_is_complete(lines: list[str], want: set[str]) -> bool:
+    """True only when every group Plasma may read already hides `want`."""
+    applets = find_tray_applet_headers(lines)
+    containments = systray_containment_ids(lines)
+    if not applets and not containments:
+        return False
+    indexed = _section_index(lines)
+    for applet in applets:
+        # 6.4 reads this group. It has to exist; the Configuration group is
+        # not a substitute.
+        if not _general_hides(lines, applet + "[General]", want):
+            return False
+        conf = applet + "[Configuration][General]"
+        if conf in indexed and not _general_hides(lines, conf, want):
+            return False
+    for cid in containments:
+        if not _general_hides(lines, f"[Containments][{cid}][General]", want):
+            return False
+    return True
 
 
 def write_policy(lines: list[str], hidden: set[str]) -> list[str]:
-    body = _policy_body(hidden)
-    headers = policy_section_headers(lines)
-    if not headers:
-        # Insert Configuration/General after systemtray applet section
-        for hdr, start, end in _sections(lines):
-            chunk = "".join(lines[start:end])
-            if "plugin=org.kde.plasma.systemtray" in chunk and re.fullmatch(
-                r"\[Containments\]\[\d+\]\[Applets\]\[\d+\]", hdr
-            ):
-                general = hdr + "[Configuration][General]\n"
-                return lines[:end] + [general] + body + lines[end:]
-        return lines
+    """Write the hide list everywhere Plasma has stored tray visibility.
 
-    existing = {hdr: (start, end) for hdr, start, end in _sections(lines)}
-    present = sorted(
-        ((existing[header][0], existing[header][1]) for header in headers if header in existing),
-        reverse=True,
-    )
-    for start, end in present:
-        header = lines[start]
-        lines = (
-            lines[:start]
-            + [header if header.endswith("\n") else header + "\n"]
-            + body
-            + lines[end:]
+    Plasma 6.3 reads ``[Containments][<SystrayContainmentId>][General]``.
+    Plasma 6.4 folded that containment into the tray widget and reads
+    ``[Containments][<panel>][Applets][<tray>][General]``. An older file still
+    has ``[Configuration][General]``. All three are updated. ``shownItems`` is
+    cleared of these ids because an id in that list stays on the panel even
+    when it is also hidden.
+    """
+    applets = find_tray_applet_headers(lines)
+    if not applets and not systray_containment_ids(lines):
+        return lines
+    for applet in applets:
+        lines = _rewrite_section(lines, applet + "[Configuration][General]", _policy_map(hidden, include_pin=True))
+        # 6.4 group. pin is not a key there.
+        lines = _rewrite_section(lines, applet + "[General]", _policy_map(hidden, include_pin=False))
+    for cid in systray_containment_ids(lines):
+        lines = _rewrite_section(
+            lines,
+            f"[Containments][{cid}][General]",
+            _policy_map(hidden, include_pin=False),
         )
-    for header in headers:
-        if any(section == header for section, _, _ in _sections(lines)):
-            continue
-        lines = _insert_missing_section(lines, header, body)
     return lines
 
 
-def plasmashell_up() -> bool:
-    return "up" in _run(
-        [
-            "qdbus6",
-            "org.kde.plasmashell",
-            "/PlasmaShell",
-            "org.kde.PlasmaShell.evaluateScript",
-            'print("up")',
-        ]
+def live_hide_script(hidden: set[str]) -> str:
+    """Tell the running tray to keep these ids in the ^ menu.
+
+    The plain microphone is Plasma's PulseAudio indicator. Its id is
+    ``microphone`` and its status is Active, so it stays on the bar until
+    this widget's own hiddenItems list contains that id. shownItems wins
+    over hiddenItems, so it is cleared. ``panels()`` is not stored in a
+    variable of the same name: that throws before the write. A panel id is
+    resolved with ``panelById`` when ``panels()`` does not return objects.
+    """
+    add = json.dumps(sorted(hidden))
+    return f"""var add = {add};
+var raw = [];
+try {{ raw = panels(); }} catch (e0) {{ raw = []; }}
+var wrote = 0;
+var note = "";
+for (var p = 0; p < raw.length; p++) {{
+  var panel = raw[p];
+  if (!panel || !panel.widgets) {{
+    try {{ panel = panelById(raw[p]); }} catch (e1) {{ panel = null; }}
+  }}
+  if (!panel || !panel.widgets) continue;
+  var widgets = [];
+  try {{ widgets = panel.widgets(); }} catch (e2) {{ widgets = []; }}
+  for (var w = 0; w < widgets.length; w++) {{
+    var kind = "";
+    try {{ kind = String(widgets[w].type || ""); }} catch (e3) {{ kind = ""; }}
+    if (kind !== "org.kde.plasma.systemtray") continue;
+    var targets = [widgets[w]];
+    var sid = "";
+    try {{ sid = String(widgets[w].readConfig("SystrayContainmentId") || ""); }} catch (e4) {{ sid = ""; }}
+    if (sid) {{
+      try {{
+        var oldTray = desktopById(sid);
+        if (oldTray) targets.push(oldTray);
+      }} catch (e5) {{}}
+    }}
+    for (var t = 0; t < targets.length; t++) {{
+      var groups = [[], ["General"], ["Configuration", "General"]];
+      for (var g = 0; g < groups.length; g++) {{
+        try {{
+          targets[t].currentConfigGroup = groups[g];
+          targets[t].writeConfig("showAllItems", false);
+          targets[t].writeConfig("shownItems", []);
+          targets[t].writeConfig("hiddenItems", add);
+          try {{
+            targets[t].writeConfig("disabledStatusNotifiers", ["microphone", "Microphone"]);
+          }} catch (e8) {{}}
+          wrote = wrote + 1;
+          try {{ note = String(targets[t].readConfig("disabledStatusNotifiers")) + " " + String(targets[t].readConfig("hiddenItems")); }} catch (e6) {{ note = note; }}
+        }} catch (e7) {{
+          note = String(e7);
+        }}
+      }}
+    }}
+  }}
+}}
+(wrote > 0 && note.indexOf("microphone") >= 0) ? "devos-tray-ok" : ("devos-tray-miss " + wrote + " " + note);
+"""
+
+
+def pin_footer_script() -> str:
+    """One assignment, and only when the panel is allowed to hide.
+
+    A maximized window covers a dodge or auto-hide panel. Setting the mode
+    on every window switch is what blanked the footer; this script does not
+    write the property when it is already ``none``.
+    """
+    return """var changed = 0;
+var raw = [];
+try { raw = panels(); } catch (e0) { raw = []; }
+for (var i = 0; i < raw.length; i++) {
+  var panel = raw[i];
+  if (!panel || panel.hiding === undefined) {
+    try { panel = panelById(raw[i]); } catch (e1) { panel = null; }
+  }
+  if (!panel) continue;
+  var mode = String(panel.hiding || "");
+  if (mode === "autohide" || mode === "dodgewindows" || mode === "windowscover" || mode === "windowsbelow" || mode === "windowsgobelow" || mode === "1" || mode === "2" || mode === "3") {
+    panel.hiding = "none";
+    changed = changed + 1;
+  }
+}
+changed ? "footer-pinned" : "footer-none";
+"""
+
+
+def _script_commands(script: str) -> list[list[str]]:
+    """Ways to reach the running shell. qdbus is not always installed."""
+    commands: list[list[str]] = []
+    for bus in ("qdbus6", "qdbus", "qdbus-qt6"):
+        if shutil.which(bus):
+            commands.append([bus, "org.kde.plasmashell", "/PlasmaShell", "org.kde.PlasmaShell.evaluateScript", script])
+    if shutil.which("busctl"):
+        commands.append(
+            [
+                "busctl",
+                "--user",
+                "call",
+                "org.kde.plasmashell",
+                "/PlasmaShell",
+                "org.kde.PlasmaShell",
+                "evaluateScript",
+                "s",
+                script,
+            ]
+        )
+    if shutil.which("gdbus"):
+        commands.append(
+            [
+                "gdbus",
+                "call",
+                "--session",
+                "--dest",
+                "org.kde.plasmashell",
+                "--object-path",
+                "/PlasmaShell",
+                "--method",
+                "org.kde.PlasmaShell.evaluateScript",
+                script,
+            ]
+        )
+    return commands
+
+
+def _evaluate(script: str) -> str:
+    """Run a plasmashell script. Empty string when the shell did not accept it."""
+    global _last_eval
+    commands = _script_commands(script)
+    if not commands:
+        _last_eval = "qdbus and busctl are not installed"
+        return ""
+    last = ""
+    for cmd in commands:
+        try:
+            out = subprocess.run(cmd, capture_output=True, text=True, timeout=8)
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
+            last = str(exc)
+            continue
+        text = ((out.stdout or "") + "\n" + (out.stderr or "")).strip()
+        last = text or f"exit {out.returncode}"
+        if "devos-tray-ok" in text or "footer-pinned" in text or "footer-none" in text:
+            _last_eval = text
+            return text
+        if out.returncode != 0:
+            continue
+        if any(word in text for word in ("TypeError", "ReferenceError", "SyntaxError", "Error:")):
+            continue
+        _last_eval = text
+        return text
+    _last_eval = last
+    return ""
+
+
+def notify_commands(lines: list[str], hidden: set[str], tool: str = "kwriteconfig6") -> list[list[str]]:
+    """kwriteconfig invocations that poke the running tray's config watcher.
+
+    The signal is what makes SystemTraySettings reload. Rewriting the file
+    alone does nothing until the next sign-in.
+    """
+    hidden_csv = ",".join(sorted(hidden))
+    commands: list[list[str]] = []
+    for header in policy_headers(lines):
+        groups = re.findall(r"\[([^\]]+)\]", header)
+        if not groups:
+            continue
+        group_args: list[str] = []
+        for part in groups:
+            group_args.extend(["--group", part])
+        base = [tool, "--file", str(APPLETRC), *group_args]
+        commands.append([*base, "--key", "showAllItems", "--type", "bool", "false"])
+        commands.append([*base, "--key", "shownItems", "--type", "stringlist", ""])
+        # Only the last write of a group notifies, so the tray reloads once
+        # with the finished list rather than once per key.
+        commands.append([*base, "--key", "hiddenItems", "--type", "stringlist", hidden_csv])
+        commands.append([*base, "--notify", "--key", "disabledStatusNotifiers", "--type", "stringlist", "microphone,Microphone"])
+    return commands
+
+
+def notify_running_shell(lines: list[str], hidden: set[str]) -> bool:
+    sent = False
+    tool = shutil.which("kwriteconfig6") or shutil.which("kwriteconfig5") or shutil.which("kwriteconfig") or ""
+    for cmd in notify_commands(lines, hidden, tool or "kwriteconfig6"):
+        if not tool:
+            break
+        try:
+            out = subprocess.run(cmd, capture_output=True, text=True, timeout=8)
+            if out.returncode == 0:
+                sent = True
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            continue
+    if shutil.which("busctl"):
+        try:
+            out = subprocess.run(
+                [
+                    "busctl",
+                    "--user",
+                    "emit",
+                    "/KConfig",
+                    "org.kde.kconfig.notify",
+                    "ConfigChanged",
+                    "a{sv}",
+                    "1",
+                    "files",
+                    "as",
+                    "1",
+                    str(APPLETRC),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=8,
+            )
+            if out.returncode == 0:
+                sent = True
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            pass
+    return sent
+
+
+_live_done = False
+_footer_done = False
+_notified_for: frozenset[str] | None = None
+_last_eval = ""
+
+
+def apply_live(hidden: set[str]) -> bool:
+    """Move icons under ^ in the running shell. Never restarts plasmashell."""
+    text = _evaluate(live_hide_script(hidden))
+    return "devos-tray-ok" in text
+
+
+def _panel_can_hide(lines: list[str]) -> bool:
+    """True when a panel is allowed to dodge or auto-hide."""
+    for line in lines:
+        if not line.startswith("hiding="):
+            continue
+        mode = line.split("=", 1)[1].strip().lower()
+        if mode not in ("", "0", "none"):
+            return True
+    return False
+
+
+def pin_footer() -> bool:
+    """Keep a maximized window from covering the footer. Once per process."""
+    global _footer_done
+    if _footer_done:
+        return True
+    text = _evaluate(pin_footer_script())
+    if "footer-pinned" in text or "footer-none" in text:
+        _footer_done = True
+        return True
+    return False
+
+
+def _announce(ok: bool, detail: str) -> None:
+    """Say the result on the terminal and as a notification the user can see."""
+    line = (
+        "DevOS: microphone removed from the footer."
+        if ok
+        else f"DevOS: the microphone is still on the footer ({detail})."
     )
-
-
-def restart_plasmashell() -> None:
-    subprocess.run(
-        ["systemctl", "--user", "restart", "plasma-plasmashell.service"],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    for _ in range(25):
-        if plasmashell_up():
-            return
-        time.sleep(0.4)
-
-
-def once(restart_if_changed: bool = True) -> int:
+    print(line, flush=True)
     try:
+        path = Path.home() / ".local/share/devos/tray-overflow.result"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(line + "\n", encoding="utf-8")
+    except OSError:
+        pass
+    if shutil.which("notify-send"):
+        title = "Microphone moved" if ok else "Microphone still on the footer"
+        body = "It is under Status and Notifications." if ok else detail[:180]
+        try:
+            subprocess.run(
+                ["notify-send", "-a", "devos", title, body],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=3,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            pass
+
+
+def once(restart_if_changed: bool = True, announce: bool = False) -> int:
+    global _live_done, _notified_for
+    try:
+        # The icon beside the clock is plasma-pa's recording item. The settings
+        # file can already name it while the bar still draws it. Unregistering
+        # that one item removes it. This does not rewrite the panel, so sign-in
+        # and the login screen are left alone.
+        removed = drop_recording_microphone()
+        gone = not recording_microphone_services()
         if not APPLETRC.is_file():
-            print("DevOS: no plasma appletsrc yet.")
+            if announce:
+                _announce(bool(removed and gone), "no plasma appletsrc yet")
+            else:
+                print("DevOS: no plasma appletsrc yet.")
             return 0
         raw = APPLETRC.read_text(encoding="utf-8", errors="replace")
         lines = raw.splitlines(keepends=True)
         want = desired_hidden_set()
-        if policies_satisfied(lines, want):
-            print("DevOS: tray overflow policy already applied.")
-            return 0
-        have, _, _ = read_policy(lines)
-        new_lines = write_policy(lines, have | want)
-        new_raw = "".join(new_lines)
-        if new_raw != raw:
-            APPLETRC.write_text(new_raw, encoding="utf-8")
-        if restart_if_changed and (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
-            restart_plasmashell()
-            print("DevOS: tray icons moved under Status & Notifications (^).")
+        have, _show_all, _shown = read_policy(lines)
+        hidden = have | want
+        complete = policy_is_complete(lines, hidden)
+        del restart_if_changed
+        signature = frozenset(hidden)
+        if announce:
+            if not complete or not _microphone_disabled(lines):
+                new_lines = write_policy(lines, hidden)
+                new_raw = "".join(new_lines)
+                if new_raw != raw:
+                    APPLETRC.write_text(new_raw, encoding="utf-8")
+                    lines = new_lines
+            if _panel_can_hide(lines):
+                pin_footer()
+            if _notified_for != signature:
+                notify_running_shell(lines, hidden)
+                _notified_for = signature
+            if apply_live(hidden):
+                _live_done = True
         else:
-            print("DevOS: tray overflow config updated (restart plasmashell to apply).")
+            _notified_for = signature
+            _live_done = True
+        if announce:
+            if removed and gone:
+                detail = "removed"
+                ok = True
+            elif recording_microphone_services():
+                detail = "the recording microphone is still registered"
+                ok = False
+            else:
+                detail = "Plasma did not list a recording microphone to remove"
+                ok = False
+            _announce(ok, detail)
     except Exception as exc:
         print(f"DevOS: tray overflow update skipped: {exc}", file=sys.stderr)
         return 1
@@ -375,27 +805,40 @@ def once(restart_if_changed: bool = True) -> int:
 
 def watch(interval: float = 25.0) -> int:
     once(restart_if_changed=True)
-    seen = set(registered_tray_ids())
+    drop_recording_microphone()
+    seen: set[str] = set()
+    try:
+        seen = set(registered_tray_ids())
+    except Exception:
+        seen = set()
+    next_full = time.monotonic() + interval
     while True:
         try:
-            ids = set(registered_tray_ids())
-            if ids - seen:
-                once(restart_if_changed=True)
-                seen |= ids
+            # The recording icon comes back when an app opens the mic.
+            # Drop that one item. Do not rewrite the panel on this tick.
+            drop_recording_microphone()
+            if time.monotonic() >= next_full:
+                ids = set(registered_tray_ids())
+                if ids - seen or not _live_done:
+                    once(restart_if_changed=True)
+                    seen |= ids
+                next_full = time.monotonic() + interval
         except Exception as exc:
             print(f"DevOS: tray overflow watch tick failed: {exc}", file=sys.stderr)
-        time.sleep(interval)
+        time.sleep(2)
 
 
 def main(argv: list[str] | None = None) -> int:
-    if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
-        return 0
+    # A Konsole on this desktop sometimes has no DISPLAY. The tray lives on
+    # the user session bus, so the hide still has to run, and it has to say
+    # what happened. Returning here is why the icon stayed beside the clock
+    # with no line in the terminal.
     args = list(sys.argv[1:] if argv is None else argv)
     if args and args[0] == "--watch":
         return watch()
     if args and args[0] == "--write-only":
-        return once(restart_if_changed=False)
-    return once(restart_if_changed=True)
+        return once(restart_if_changed=False, announce=True)
+    return once(restart_if_changed=True, announce=True)
 
 
 if __name__ == "__main__":

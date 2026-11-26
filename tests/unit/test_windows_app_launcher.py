@@ -17,6 +17,13 @@ def _load_wrapper_text() -> str:
     )
 
 
+def test_focus_does_not_swallow_a_click_when_no_window_is_open():
+    import browser_launch
+    with patch.object(browser_launch.shutil, "which", return_value="/usr/bin/wmctrl"):
+        with patch.object(browser_launch.subprocess, "check_output", return_value=""):
+            assert browser_launch.focus_existing_window() is False
+
+
 def test_wrapper_defaults_to_browser_launch_not_flatpak_client():
     text = _load_wrapper_text()
     assert "browser_launch.py" in text

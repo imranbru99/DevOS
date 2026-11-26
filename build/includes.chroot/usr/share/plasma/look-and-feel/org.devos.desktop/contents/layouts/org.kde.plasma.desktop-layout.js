@@ -57,7 +57,51 @@ var rightSpace = panel.addWidget("org.kde.plasma.panelspacer")
 rightSpace.currentConfigGroup = ["General"]
 rightSpace.writeConfig("expanding", true)
 
-panel.addWidget("org.kde.plasma.systemtray")
+var systray = panel.addWidget("org.kde.plasma.systemtray")
+// Plasma 6.3 reads the private containment. Plasma 6.4 reads the widget.
+// Write both, or the microphone stays on the panel after an upgrade.
+var systrayId = ""
+try { systrayId = String(systray.readConfig("SystrayContainmentId") || "") } catch (e) { systrayId = "" }
+var trayTargets = [systray]
+if (systrayId) {
+    try {
+        var oldTray = desktopById(systrayId)
+        if (oldTray) trayTargets.push(oldTray)
+    } catch (e2) {}
+}
+var trayHidden = [
+    "org.kde.plasma.battery",
+    "org.kde.plasma.bluetooth",
+    "org.kde.plasma.brightness",
+    "org.kde.plasma.brightnesscontrol",
+    "org.kde.plasma.clipboard",
+    "org.kde.plasma.devicenotifier",
+    "org.kde.plasma.keyboardlayout",
+    "org.kde.plasma.manage-inputmethod",
+    "org.kde.plasma.mediacontroller",
+    "org.kde.plasma.networkmanagement",
+    "org.kde.plasma.nightcolorcontrol",
+    "org.kde.plasma.notifications",
+    "org.kde.plasma.printmanager",
+    "org.kde.plasma.cameraindicator",
+    "org.kde.plasma.volume",
+    "microphone",
+    "Microphone",
+    "audio-input-microphone",
+    "devos-voice",
+    "Voice Command",
+    "DevOS AI",
+    "devos-sound",
+    "DevOS Sound",
+    "Sound"
+]
+for (var t = 0; t < trayTargets.length; t++) {
+    trayTargets[t].currentConfigGroup = ["General"]
+    trayTargets[t].writeConfig("showAllItems", false)
+    trayTargets[t].writeConfig("shownItems", [])
+    trayTargets[t].writeConfig("hiddenItems", trayHidden)
+    trayTargets[t].writeConfig("disabledStatusNotifiers", ["microphone", "Microphone"])
+}
 var clock = panel.addWidget("org.kde.plasma.digitalclock")
 clock.currentConfigGroup = ["Appearance"]
 // 0 is 12-hour (8:12 PM). 1 would follow a language that uses 20:12.

@@ -17,9 +17,10 @@ It hides itself 3 s after a result (longer when it shows a button).
 """
 
 import math
+import os
 import threading
 
-from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt5 import QtCore, QtDBus, QtGui, QtWidgets
 from PyQt5.QtCore import Qt
 
 import assistant as ui      # colours and painted icons of the DevOS AI window
@@ -404,14 +405,117 @@ def mic_pixmap(size=64, paused=False):
     return pm
 
 
-class HandsFreeTray(QtWidgets.QSystemTrayIcon):
-    """Shows that the microphone is listening for "Hey DevOS"."""
+# Qt's QSystemTrayIcon publishes Status "Active", and that property is
+# read-only. Plasma then pins the icon on the panel whenever it is not in
+# hiddenItems. A real StatusNotifierItem with Status "Passive" stays in the
+# Status & Notifications menu instead.
+_SNI_XML = """
+<node>
+  <interface name="org.kde.StatusNotifierItem">
+    <property name="Category" type="s" access="read"/>
+    <property name="Id" type="s" access="read"/>
+    <property name="Title" type="s" access="read"/>
+    <property name="Status" type="s" access="read"/>
+    <property name="IconName" type="s" access="read"/>
+    <property name="ItemIsMenu" type="b" access="read"/>
+    <method name="Activate">
+      <arg name="x" type="i" direction="in"/>
+      <arg name="y" type="i" direction="in"/>
+    </method>
+    <method name="SecondaryActivate">
+      <arg name="x" type="i" direction="in"/>
+      <arg name="y" type="i" direction="in"/>
+    </method>
+    <method name="ContextMenu">
+      <arg name="x" type="i" direction="in"/>
+      <arg name="y" type="i" direction="in"/>
+    </method>
+    <method name="Scroll">
+      <arg name="delta" type="i" direction="in"/>
+      <arg name="orientation" type="s" direction="in"/>
+    </method>
+    <signal name="NewStatus">
+      <arg type="s" name="status"/>
+    </signal>
+    <signal name="NewIcon"/>
+    <signal name="NewToolTip"/>
+  </interface>
+</node>
+"""
+
+
+class _VoiceStatusItem(QtDBus.QDBusAbstractAdaptor):
+    QtCore.Q_CLASSINFO("D-Bus Interface", "org.kde.StatusNotifierItem")
+    QtCore.Q_CLASSINFO("D-Bus Introspection", _SNI_XML)
+
+    NewStatus = QtCore.pyqtSignal(str)
+    NewIcon = QtCore.pyqtSignal()
+    NewToolTip = QtCore.pyqtSignal()
+
+    def __init__(self, tray):
+        super().__init__(tray)
+        self.setAutoRelaySignals(False)
+
+    @QtCore.pyqtProperty(str)
+    def Category(self):
+        return "ApplicationStatus"
+
+    @QtCore.pyqtProperty(str)
+    def Id(self):
+        return "devos-voice"
+
+    @QtCore.pyqtProperty(str)
+    def Title(self):
+        return "devos-voice"
+
+    @QtCore.pyqtProperty(str)
+    def Status(self):
+        return "Passive"
+
+    @QtCore.pyqtProperty(str)
+    def IconName(self):
+        if self.parent().paused:
+            return "microphone-sensitivity-muted"
+        return "audio-input-microphone"
+
+    @QtCore.pyqtProperty(bool)
+    def ItemIsMenu(self):
+        return False
+
+    @QtCore.pyqtSlot(int, int)
+    def Activate(self, x, y):
+        self.parent().open_app.emit()
+
+    @QtCore.pyqtSlot(int, int)
+    def SecondaryActivate(self, x, y):
+        self.parent().popup_menu(x, y)
+
+    @QtCore.pyqtSlot(int, int)
+    def ContextMenu(self, x, y):
+        self.parent().popup_menu(x, y)
+
+    @QtCore.pyqtSlot(int, str)
+    def Scroll(self, delta, orientation):
+        return
+
+
+class HandsFreeTray(QtCore.QObject):
+    """Microphone menu for hands-free, kept under Status & Notifications.
+
+    The icon reports Passive, so Plasma files it in the ^ menu. The plain
+    black microphone Plasma draws while an app is recording is a different
+    icon (the camera indicator); the tray policy hides that one.
+    """
     pause_toggled = QtCore.pyqtSignal(bool)
     turn_off = QtCore.pyqtSignal()
     open_app = QtCore.pyqtSignal()
 
     def __init__(self, paused=False):
         super().__init__()
+        self.paused = bool(paused)
+        self._sni = None
+        self._fallback = None
+        self._service = ""
         self.menu = QtWidgets.QMenu()
         self.a_pause = self.menu.addAction("Pause hands-free")
         self.a_pause.triggered.connect(lambda: self.pause_toggled.emit(not self.paused))
@@ -420,14 +524,83 @@ class HandsFreeTray(QtWidgets.QSystemTrayIcon):
         self.menu.addSeparator()
         self.a_off = self.menu.addAction("Turn off")
         self.a_off.triggered.connect(self.turn_off.emit)
-        self.setContextMenu(self.menu)
-        self.activated.connect(lambda reason: self.open_app.emit()
-                               if reason == QtWidgets.QSystemTrayIcon.Trigger else None)
         self.set_paused(paused)
+
+    def _tooltip(self):
+        if self.paused:
+            return "DevOS AI: hands-free is paused"
+        return "DevOS AI is listening for “Hey DevOS”"
+
+    def popup_menu(self, x=0, y=0):
+        if x or y:
+            self.menu.popup(QtCore.QPoint(int(x), int(y)))
+        else:
+            self.menu.popup(QtGui.QCursor.pos())
+
+    def _register_sni(self):
+        bus = QtDBus.QDBusConnection.sessionBus()
+        if not bus.isConnected():
+            return False
+        self._sni = _VoiceStatusItem(self)
+        if not bus.registerObject(
+            "/StatusNotifierItem",
+            self,
+            QtDBus.QDBusConnection.ExportAdaptors | QtDBus.QDBusConnection.ExportAllSignals,
+        ):
+            self._sni = None
+            return False
+        self._service = "org.kde.StatusNotifierItem-%s-1" % os.getpid()
+        if not bus.registerService(self._service):
+            self._service = "org.kde.StatusNotifierItem-%s-2" % os.getpid()
+            if not bus.registerService(self._service):
+                bus.unregisterObject("/StatusNotifierItem")
+                self._sni = None
+                return False
+        watcher = QtDBus.QDBusInterface(
+            "org.kde.StatusNotifierWatcher",
+            "/StatusNotifierWatcher",
+            "org.kde.StatusNotifierWatcher",
+            bus,
+        )
+        if not watcher.isValid():
+            bus.unregisterObject("/StatusNotifierItem")
+            bus.unregisterService(self._service)
+            self._sni = None
+            return False
+        reply = watcher.call(QtDBus.QDBus.Block, "RegisterStatusNotifierItem", self._service)
+        if reply.type() == QtDBus.QDBusMessage.ErrorMessage:
+            bus.unregisterObject("/StatusNotifierItem")
+            bus.unregisterService(self._service)
+            self._sni = None
+            return False
+        return True
+
+    def _use_fallback(self):
+        self._fallback = QtWidgets.QSystemTrayIcon()
+        self._fallback.setContextMenu(self.menu)
+        self._fallback.activated.connect(
+            lambda reason: self.open_app.emit() if reason == QtWidgets.QSystemTrayIcon.Trigger else None
+        )
+        self._fallback.setIcon(QtGui.QIcon(mic_pixmap(64, self.paused)))
+        self._fallback.setToolTip(self._tooltip())
+        self._fallback.show()
+
+    def show(self):
+        if self._sni is not None or self._fallback is not None:
+            return
+        try:
+            if self._register_sni():
+                return
+        except Exception:
+            pass
+        self._use_fallback()
 
     def set_paused(self, on):
         self.paused = bool(on)
-        self.setIcon(QtGui.QIcon(mic_pixmap(64, self.paused)))
         self.a_pause.setText("Resume hands-free" if self.paused else "Pause hands-free")
-        self.setToolTip("DevOS AI: hands-free is paused" if self.paused
-                        else "DevOS AI is listening for “Hey DevOS”")
+        if self._fallback is not None:
+            self._fallback.setIcon(QtGui.QIcon(mic_pixmap(64, self.paused)))
+            self._fallback.setToolTip(self._tooltip())
+        if self._sni is not None:
+            self._sni.NewIcon.emit()
+            self._sni.NewToolTip.emit()

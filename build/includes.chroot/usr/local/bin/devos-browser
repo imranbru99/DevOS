@@ -141,13 +141,16 @@ for uevent in /sys/class/drm/card*/device/uevent; do
 done
 
 
-# Sync profile badged icons & desktop launchers
+# Sync profile badged icons & desktop launchers.
+# Windows App sets DEVOS_SKIP_CHROME_SYNC so this does not hide its menu entry.
 sync_script="/usr/local/share/devos/components/browser/chrome_profiles.py"
 user_sync_script="$HOME/.local/share/devos/components/browser/chrome_profiles.py"
-if [ -f "$sync_script" ]; then
-    python3 "$sync_script" sync >/dev/null 2>&1 &
-elif [ -f "$user_sync_script" ]; then
-    python3 "$user_sync_script" sync >/dev/null 2>&1 &
+if [ -z "${DEVOS_SKIP_CHROME_SYNC:-}" ]; then
+    if [ -f "$sync_script" ]; then
+        python3 "$sync_script" sync >/dev/null 2>&1 &
+    elif [ -f "$user_sync_script" ]; then
+        python3 "$user_sync_script" sync >/dev/null 2>&1 &
+    fi
 fi
 
 # Windows-like profiles: each Chrome user gets its own WM class (chrome-<slug>)

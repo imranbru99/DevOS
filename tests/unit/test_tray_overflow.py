@@ -1,108 +1,161 @@
-"""The speaker must follow the Plasma 6 tray containment, not only the applet copy."""
-
+"""Plasma 6 keeps tray visibility on the private system-tray containment."""
 import importlib.machinery
 import importlib.util
-import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
-
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "build/includes.chroot/usr/local/bin/devos-tray-overflow"
 
 
-def load_overflow():
+def load():
     loader = importlib.machinery.SourceFileLoader("devos_tray_overflow", str(SCRIPT))
-    spec = importlib.util.spec_from_loader("devos_tray_overflow", loader)
+    spec = importlib.util.spec_from_loader(loader.name, loader)
     module = importlib.util.module_from_spec(spec)
     loader.exec_module(module)
     return module
 
 
-APPLET_HIDDEN = (
-    "[Containments][3][Applets][7]\n"
-    "plugin=org.kde.plasma.systemtray\n"
-    "\n"
-    "[Containments][3][Applets][7][Configuration]\n"
-    "SystrayContainmentId=19\n"
-    "\n"
-    "[Containments][3][Applets][7][Configuration][General]\n"
-    "showAllItems=false\n"
-    "extraItems=org.kde.plasma.volume\n"
-    "hiddenItems=org.kde.plasma.volume,devos-sound,microphone\n"
-    "knownItems=org.kde.plasma.volume\n"
-    "pin=false\n"
-    "shownItems=\n"
-    "\n"
-    "[Containments][19]\n"
-    "plugin=org.kde.plasma.private.systemtray\n"
-    "\n"
-    "[Containments][19][General]\n"
-    "showAllItems=false\n"
-    "extraItems=org.kde.plasma.volume,org.kde.plasma.networkmanagement\n"
-    "knownItems=org.kde.plasma.volume,org.kde.plasma.networkmanagement\n"
-    "shownItems=org.kde.plasma.volume\n"
-)
+SAMPLE = """\
+[Containments][3][Applets][7]
+plugin=org.kde.plasma.systemtray
+
+[Containments][3][Applets][7][Configuration]
+SystrayContainmentId=8
+
+[Containments][3][Applets][7][Configuration][General]
+showAllItems=false
+hiddenItems=org.kde.plasma.clipboard
+shownItems=
+scaleIconsToFit=true
+
+[Containments][8]
+plugin=org.kde.plasma.private.systemtray
+
+[Containments][8][General]
+showAllItems=true
+hiddenItems=org.kde.plasma.clipboard
+shownItems=microphone,org.kde.plasma.volume
+scaleIconsToFit=true
+
+[Containments][3][Applets][8]
+plugin=org.kde.plasma.digitalclock
+"""
 
 
 class TrayOverflowTests(unittest.TestCase):
-    def test_applet_hide_list_does_not_mask_the_live_containment(self):
-        mod = load_overflow()
-        lines = APPLET_HIDDEN.splitlines(keepends=True)
-        want = {"org.kde.plasma.volume", "devos-sound", "microphone"}
-        self.assertFalse(mod.policies_satisfied(lines, want))
-        updated = "".join(mod.write_policy(lines, want))
-        self.assertIn("[Containments][19][General]", updated)
-        containment = updated.split("[Containments][19][General]", 1)[1]
-        hidden = next(
-            line for line in containment.splitlines() if line.startswith("hiddenItems=")
-        )
-        self.assertIn("org.kde.plasma.volume", hidden)
-        self.assertIn("devos-sound", hidden)
-        shown = next(
-            line for line in containment.splitlines() if line.startswith("shownItems=")
-        )
-        self.assertEqual(shown, "shownItems=")
-        self.assertTrue(mod.policies_satisfied(updated.splitlines(keepends=True), want))
+    def test_hide_list_is_written_to_the_private_containment(self):
+        mod = load()
+        lines = SAMPLE.splitlines(keepends=True)
+        hidden = {"devos-voice", "microphone", "org.kde.plasma.volume"}
+        updated = "".join(mod.write_policy(lines, hidden))
+        self.assertIn("SystrayContainmentId=8", updated)
+        self.assertIn("scaleIconsToFit=true", updated)
+        self.assertIn("plugin=org.kde.plasma.digitalclock", updated)
+        containment = updated.split("[Containments][8][General]", 1)[1].split("[Containments][3][Applets][8]", 1)[0]
+        self.assertIn("devos-voice", containment)
+        self.assertIn("microphone", containment)
+        self.assertIn("org.kde.plasma.volume", containment)
+        self.assertNotIn("shownItems=microphone", containment)
+        self.assertNotIn("pin=", containment)
+        self.assertIn("showAllItems=false", containment)
+        applet = updated.split("[Containments][3][Applets][7][Configuration][General]", 1)[1].split(
+            "[Containments][8]", 1
+        )[0]
+        self.assertIn("devos-voice", applet)
+        self.assertIn("pin=false", applet)
+        general = updated.split("[Containments][3][Applets][7][General]", 1)[1].split("[Containments][3][Applets][7][Configuration]", 1)[0]
+        self.assertIn("devos-voice", general)
+        self.assertIn("microphone", general)
+        self.assertIn("showAllItems=false", general)
+        self.assertNotIn("shownItems=microphone", general)
 
-    def test_missing_containment_general_is_created(self):
-        mod = load_overflow()
-        raw = (
-            "[Containments][3][Applets][7]\n"
-            "plugin=org.kde.plasma.systemtray\n"
-            "\n"
-            "[Containments][8]\n"
-            "plugin=org.kde.plasma.private.systemtray\n"
-            "formfactor=2\n"
-        )
-        lines = raw.splitlines(keepends=True)
-        updated = "".join(mod.write_policy(lines, {"org.kde.plasma.volume"}))
-        self.assertIn("[Containments][8][General]", updated)
-        self.assertIn("[Containments][3][Applets][7][General]", updated)
-        self.assertIn("org.kde.plasma.volume", updated)
-        self.assertTrue(
-            mod.policies_satisfied(
-                updated.splitlines(keepends=True), {"org.kde.plasma.volume"}
-            )
-        )
+    def test_applet_list_alone_is_not_enough_when_a_containment_exists(self):
+        mod = load()
+        lines = SAMPLE.splitlines(keepends=True)
+        want = {"devos-voice", "microphone"}
+        self.assertFalse(mod.policy_is_complete(lines, want))
+        updated = mod.write_policy(lines, want)
+        self.assertTrue(mod.policy_is_complete(updated, want))
 
-    def test_once_writes_the_live_containment(self):
-        mod = load_overflow()
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "plasma-org.kde.plasma.desktop-appletsrc"
-            path.write_text(APPLET_HIDDEN, encoding="utf-8")
-            with patch.object(mod, "APPLETRC", path), \
-                    patch.object(mod, "desired_hidden_set", return_value={"org.kde.plasma.volume", "devos-sound"}), \
-                    patch.object(mod, "restart_plasmashell") as restart, \
-                    patch.dict("os.environ", {"DISPLAY": ":0"}, clear=False):
-                self.assertEqual(mod.once(), 0)
-            text = path.read_text(encoding="utf-8")
-            restart.assert_called_once()
-            containment = text.split("[Containments][19][General]", 1)[1]
-            hidden = next(line for line in containment.splitlines() if line.startswith("hiddenItems="))
-            self.assertIn("org.kde.plasma.volume", hidden)
-            self.assertIn("microphone", hidden)
+    def test_live_script_updates_the_tray_without_reloading_the_footer(self):
+        mod = load()
+        script = mod.live_hide_script({"devos-voice", "microphone", "org.kde.plasma.cameraindicator"})
+        self.assertIn('"devos-voice"', script)
+        self.assertIn('"microphone"', script)
+        self.assertIn('"org.kde.plasma.cameraindicator"', script)
+        self.assertIn('writeConfig("hiddenItems"', script)
+        self.assertIn('writeConfig("disabledStatusNotifiers"', script)
+        self.assertIn('writeConfig("showAllItems", false)', script)
+        self.assertIn('writeConfig("shownItems"', script)
+        self.assertIn("desktopById", script)
+        # The panel widget itself is a target. A stale containment id must not
+        # be the only place the list is written.
+        self.assertIn("panelById", script)
+        self.assertIn('writeConfig("shownItems", [])', script)
+        self.assertIn('note.indexOf("microphone")', script)
+        self.assertNotIn("var panels = panels()", script)
+        self.assertNotIn("var panelList = panels()", script)
+        self.assertIn("devos-tray-ok", script)
+        self.assertIn("busctl", SCRIPT.read_text(encoding="utf-8"))
+        self.assertIn("microphone removed from the footer", SCRIPT.read_text(encoding="utf-8"))
+        self.assertIn("UnregisterStatusNotifierItem", SCRIPT.read_text(encoding="utf-8"))
+        self.assertFalse(mod.is_recording_microphone("devos-voice", "devos-voice", "audio-input-microphone"))
+        self.assertTrue(mod.is_recording_microphone("microphone", "Microphone", "microphone-sensitivity-high"))
+        self.assertTrue(mod.is_recording_microphone("plasma-pa", "Microphone", "audio-input-microphone"))
+        self.assertNotIn("reloadConfig", script)
+        self.assertNotIn("icontasks", script)
+        self.assertNotIn("restart", script)
+        self.assertNotIn("plasmashell", script)
+        self.assertNotIn("hiding", script)
+        pin = mod.pin_footer_script()
+        self.assertIn("panelById", pin)
+        self.assertNotIn("var panels = panels()", pin)
+        self.assertNotIn("var panelList = panels()", pin)
+        self.assertIn('hiding = "none"', pin)
+        self.assertIn("dodgewindows", pin)
+        self.assertIn("footer-none", pin)
+        self.assertNotIn("reloadConfig", pin)
+        self.assertNotIn("plasmashell", pin)
+        once = SCRIPT.read_text(encoding="utf-8").split("def once", 1)[1].split("def watch", 1)[0]
+        self.assertNotIn("restart_plasmashell()", once)
+        main = SCRIPT.read_text(encoding="utf-8").split("def main", 1)[1]
+        self.assertNotIn('os.environ.get("DISPLAY")', main)
+        self.assertIn('currentConfigGroup = groups[g]', script)
+        self.assertIn("apply_live", once)
+        self.assertIn("pin_footer", once)
+        self.assertIn("notify_running_shell", once)
+        self.assertIn("drop_recording_microphone", once)
+        watch = SCRIPT.read_text(encoding="utf-8").split("def watch", 1)[1].split("def main", 1)[0]
+        self.assertIn("drop_recording_microphone", watch)
+        self.assertNotIn("restart_plasmashell", watch)
+
+    def test_notify_pokes_the_running_tray_without_restarting_it(self):
+        mod = load()
+        lines = SAMPLE.splitlines(keepends=True)
+        hidden = {"devos-voice", "org.kde.plasma.cameraindicator"}
+        commands = mod.notify_commands(lines, hidden)
+        self.assertTrue(commands)
+        joined = "\n".join(" ".join(cmd) for cmd in commands)
+        self.assertIn("--notify", joined)
+        self.assertIn("hiddenItems", joined)
+        self.assertIn("showAllItems", joined)
+        self.assertIn("--group 8", joined)
+        self.assertIn("devos-voice", joined)
+        self.assertNotIn("plasmashell", joined)
+        self.assertNotIn("reloadConfig", joined)
+
+    def test_skel_hides_the_microphone_in_the_containment_plasma_reads(self):
+        mod = load()
+        skel = (
+            ROOT / "build/includes.chroot/etc/skel/.config/plasma-org.kde.plasma.desktop-appletsrc"
+        ).read_text(encoding="utf-8")
+        self.assertIn("plugin=org.kde.plasma.private.systemtray", skel)
+        self.assertIn("SystrayContainmentId=10", skel)
+        lines = skel.splitlines(keepends=True)
+        self.assertEqual(mod.systray_containment_ids(lines), ["10"])
+        self.assertIn("[Containments][3][Applets][7][General]", skel)
+        self.assertTrue(mod.policy_is_complete(lines, set(mod.ALWAYS_HIDE)))
 
 
 if __name__ == "__main__":

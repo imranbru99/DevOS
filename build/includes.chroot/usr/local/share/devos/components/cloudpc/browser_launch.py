@@ -149,28 +149,32 @@ def discover_app_id(profile: Path | None = None) -> str | None:
 
 
 def focus_existing_window() -> bool:
-    """Raise an already-open Windows App window if one exists."""
-    if shutil.which("wmctrl"):
-        try:
-            listing = subprocess.check_output(["wmctrl", "-lx"], text=True, timeout=3)
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
-            listing = ""
-        for line in listing.splitlines():
-            low = line.lower()
-            if WM_CLASS.lower() in low or "windows.cloud.microsoft" in low or "windows app" in low:
-                wid = line.split()[0]
-                subprocess.run(["wmctrl", "-ia", wid], check=False, timeout=3)
-                return True
+    """Raise a Windows App window only when that window itself is open.
 
+    Chrome puts one process id on every window. Matching by that id focuses
+    the Facebook window and the Windows App click never starts the app.
+    """
+    if not shutil.which("wmctrl"):
+        return False
     try:
-        out = subprocess.check_output(["ps", "-eo", "args"], text=True, timeout=3)
+        listing = subprocess.check_output(["wmctrl", "-lx"], text=True, timeout=3)
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
         return False
-    markers = ("--app-id=", f"--app={URL}", "windows.cloud.microsoft", "devos/windows-app/")
-    for line in out.splitlines():
-        if "windows.cloud.microsoft" in line or "devos/windows-app/" in line:
-            if any(m in line for m in markers):
-                return True
+    for line in listing.splitlines():
+        parts = line.split(None, 4)
+        if len(parts) < 3:
+            continue
+        wid = parts[0]
+        title = parts[4] if len(parts) > 4 else ""
+        low = line.lower()
+        if not (
+            WM_CLASS.lower() in low
+            or "windows.cloud.microsoft" in low
+            or "windows app" in title.lower()
+        ):
+            continue
+        subprocess.run(["wmctrl", "-ia", wid], check=False, timeout=3)
+        return True
     return False
 
 
@@ -257,6 +261,8 @@ def _spawn(cmd: list[str]):
     env = os.environ.copy()
     # Same Chromium+KDE trap as the main browser: colorreload-gtk-module SIGSEGVs
     # on theme/palette changes. Keep Windows App isolated from those modules.
+    # Skip the Chrome profile sync: it hides this menu entry and wipes icons.
+    env["DEVOS_SKIP_CHROME_SYNC"] = "1"
     env["GTK_MODULES"] = ""
     env["GTK3_MODULES"] = ""
     env.pop("LOADED_GTK_MODULES", None)
@@ -321,7 +327,52 @@ def _notify(message: str) -> None:
         )
 
 
+def _open_app_url():
+    """Open Windows App immediately. Do not wait on an installer."""
+    _family, binary = browser_binary()
+    return _spawn(
+        [
+            binary,
+            *_chrome_extra(),
+            "--profile-directory=Default",
+            f"--class={WM_CLASS}",
+            f"--enable-features={BASE_FEATURES}",
+            f"--app={URL}",
+        ]
+    )
+
+
+def repair_menu_entry() -> None:
+    """Restore the Start-menu Windows App entry if a Chrome sync hid it."""
+    apps = applications_dir()
+    try:
+        apps.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return
+    path = apps / "devos-web-winapp.desktop"
+    content = """[Desktop Entry]
+Type=Application
+Name=Windows App
+GenericName=Microsoft Cloud PC
+Comment=Windows 365, Azure Virtual Desktop and remote apps
+Exec=/usr/local/bin/devos-windows-app
+Icon=devos-web-winapp
+StartupWMClass=chrome-windows.cloud.microsoft__-Default
+Terminal=false
+Categories=Network;Office;
+Keywords=windows;cloud;pc;rdp;azure;virtual desktop;365;
+X-DevOS-WebApp=true
+"""
+    try:
+        if path.is_file() and path.read_text(encoding="utf-8") == content:
+            return
+        path.write_text(content, encoding="utf-8")
+    except OSError:
+        return
+
+
 def open_isolated():
+    repair_menu_entry()
     if focus_existing_window():
         return None
 
@@ -329,8 +380,18 @@ def open_isolated():
     app_id = discover_app_id(None)
 
     # Installed Windows App PWA → real app window (no URL bar on Microsoft login).
+    # If that process quits without a window, open the site as an app window.
     if app_id and not force_isolated:
-        return _spawn(launch_via_default_pwa(app_id))
+        proc = _spawn(launch_via_default_pwa(app_id))
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            return proc
+        if focus_existing_window():
+            return proc
+        return _open_app_url()
+    if not force_isolated:
+        return _open_app_url()
 
     # No PWA yet: start installer, wait for --app-id, then open as PWA.
     # Never leave the user on a plain --app=URL window for sign-in.

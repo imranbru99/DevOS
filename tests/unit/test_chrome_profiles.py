@@ -1,7 +1,9 @@
+import inspect
 import json
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys_path = os.path.join(ROOT, "components", "browser")
@@ -61,6 +63,133 @@ class TestChromeProfiles(unittest.TestCase):
             self.assertTrue(os.path.isfile(icon_128))
             self.assertGreater(os.path.getsize(icon_48), 500)
             self.assertGreater(os.path.getsize(icon_128), 1000)
+
+    def test_account_photo_is_found_without_the_gaia_flag(self):
+        from PIL import Image as PILImage
+
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = os.path.join(tmp, "Profile 1")
+            os.makedirs(folder, exist_ok=True)
+            photo = os.path.join(folder, "Google Profile Picture.png")
+            img = PILImage.new("RGB", (96, 96))
+            pixels = img.load()
+            for y in range(96):
+                for x in range(96):
+                    pixels[x, y] = ((x * 13) % 256, (y * 17) % 256, ((x * y) + 40) % 256)
+            img.save(photo)
+            found = chrome_profiles.get_profile_avatar_path(
+                tmp, "Profile 1", {"name": "Mirza", "avatar_icon": "chrome://theme/IDR_PROFILE_AVATAR_26"}
+            )
+            self.assertEqual(found, photo)
+            plain = os.path.join(folder, "Google Profile Picture.jpg")
+            PILImage.new("RGB", (64, 64), (200, 120, 80)).save(plain, format="JPEG")
+            # A flat account picture must still be used. The strict color check
+            # is for unnamed default avatars, not this file.
+            self.assertFalse(chrome_profiles._is_usable_profile_photo(plain))
+            named = chrome_profiles.get_profile_avatar_path(tmp, "Profile 1", {})
+            self.assertEqual(named, photo)
+            self.assertIn("XChangeProperty.argtypes", inspect.getsource(chrome_profiles.set_window_icon))
+            images = os.path.join(folder, "Accounts", "Avatar Images", "0")
+            os.makedirs(images, exist_ok=True)
+            cached = os.path.join(images, "128")
+            PILImage.new("RGB", (128, 128), (20, 80, 200)).save(cached, format="PNG")
+            os.remove(photo)
+            if os.path.isfile(plain):
+                os.remove(plain)
+            found_cached = chrome_profiles.get_profile_avatar_path(tmp, "Profile 1", {})
+            self.assertEqual(found_cached, cached)
+
+    def test_one_open_account_uses_its_own_photo(self):
+        badge = "/tmp/chrome-imran-w1.png"
+        self.assertEqual(
+            chrome_profiles._shared_launcher_icon([
+                {"key": "Default", "icon": badge, "avatar": "/tmp/face.png"},
+            ]),
+            badge,
+        )
+        self.assertIsNone(
+            chrome_profiles._shared_launcher_icon([
+                {"key": "Default", "icon": badge, "avatar": "/tmp/face.png"},
+                {"key": "Profile 1", "icon": "/tmp/other.png", "avatar": "/tmp/other-face.png"},
+            ])
+        )
+        self.assertEqual(chrome_profiles._kde_desktop_file_name("chrome-imran-w1.desktop"), "chrome-imran-w1")
+        win_app = {
+            "wm_class": "chrome-windows.cloud.microsoft__-Default.chrome-windows.cloud.microsoft__-Default",
+            "title": "Home",
+        }
+        self.assertTrue(chrome_profiles._is_windows_app_window(win_app))
+        self.assertFalse(chrome_profiles._is_profile_browser_window(win_app))
+        self.assertTrue(chrome_profiles._is_profile_browser_window({
+            "wm_class": "google-chrome.Google-chrome",
+            "title": "Inbox - Google Chrome",
+        }))
+        self.assertFalse(chrome_profiles._is_chrome_launcher(
+            "applications:chrome-windows.cloud.microsoft__-Default.desktop"
+        ))
+        self.assertTrue(chrome_profiles._cmdline_is_app_window(
+            "/opt/google/chrome/chrome --app-id=abc --class=chrome-windows.cloud.microsoft__-Default"
+        ))
+        self.assertFalse(chrome_profiles._cmdline_is_app_window(
+            "/opt/google/chrome/chrome --profile-directory=Default"
+        ))
+        self.assertEqual(
+            chrome_profiles._shared_launcher_icon([
+                {"key": "Default", "icon": badge, "avatar": ""},
+            ]),
+            badge,
+        )
+        with tempfile.TemporaryDirectory() as tmp_home:
+            from PIL import Image as PILImage
+
+            badge_file = os.path.join(tmp_home, "badge.png")
+            PILImage.new("RGB", (8, 8), (1, 2, 3)).save(badge_file)
+            marker_dir = os.path.join(tmp_home, ".local/share/icons/hicolor")
+            os.makedirs(marker_dir, exist_ok=True)
+            with open(os.path.join(marker_dir, ".devos-chrome-badge"), "w", encoding="utf-8") as handle:
+                handle.write(badge_file)
+            self.assertEqual(chrome_profiles._launcher_icon_line(tmp_home), badge_file)
+            menu = chrome_profiles.repair_windows_app_launcher(tmp_home)
+            body = open(menu, encoding="utf-8").read()
+            self.assertIn("Exec=/usr/local/bin/devos-windows-app", body)
+            self.assertNotIn("NoDisplay=true", body)
+            self.assertNotIn("Hidden=true", body)
+        self.assertNotIn("bind_each_chrome_window_once", inspect.getsource(chrome_profiles.watch_chrome_windows))
+        self.assertTrue(chrome_profiles._is_chrome_launcher("applications:google-chrome.desktop"))
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = os.path.join(tmp, "Default")
+            os.makedirs(folder)
+            url = "https://lh3.googleusercontent.com/a/example"
+            with open(os.path.join(folder, "Preferences"), "w", encoding="utf-8") as handle:
+                json.dump({"account_info": [{"picture_url": url, "email": "a@b.c"}]}, handle)
+            self.assertEqual(chrome_profiles._account_picture_url(folder), url)
+        with tempfile.TemporaryDirectory() as tmp:
+            from PIL import Image as PILImage
+
+            photo = os.path.join(tmp, "Google Profile Picture.png")
+            PILImage.new("RGB", (96, 96), (10, 180, 40)).save(photo)
+            png = os.path.join(tmp, "old.png")
+            PILImage.new("RGB", (48, 48), (0, 0, 0)).save(png)
+            self.assertFalse(chrome_profiles._badge_is_current(png, photo))
+            chrome_profiles.generate_badged_icon("Imran", png, avatar_path=photo)
+            self.assertTrue(chrome_profiles._badge_is_current(png, photo))
+
+    def test_account_photo_is_a_badge_on_the_chrome_logo(self):
+        from PIL import Image as PILImage
+
+        with tempfile.TemporaryDirectory() as tmp:
+            photo = os.path.join(tmp, "Google Profile Picture.png")
+            PILImage.new("RGB", (96, 96), (220, 30, 30)).save(photo)
+            out = os.path.join(tmp, "badge48.png")
+            chrome_profiles.generate_badged_icon("Mirza", out, avatar_path=photo)
+            img = PILImage.open(out).convert("RGB")
+            # The Chrome logo stays in the top of the button. The photo is the
+            # corner, so the top-left pixel is not the account photo's red.
+            top = img.getpixel((4, 4))
+            self.assertLess(top[0] - max(top[1], top[2]), 80)
+            out = os.path.join(tmp, "face48.png")
+            chrome_profiles.generate_badged_icon("Mirza", out, avatar_path=photo)
+            self.assertGreater(os.path.getsize(out), 400)
 
     def test_letter_badge_when_no_photo(self):
         self.assertEqual(chrome_profiles._profile_initial("Work"), "W")
@@ -179,12 +308,140 @@ class TestChromeProfiles(unittest.TestCase):
             self.assertIn("applications:chrome-work-w1a2.desktop", text)
             self.assertIn("applications:chrome-work-w3b4.desktop", text)
             self.assertNotIn("applications:chrome-work.desktop,", text + ",")
-            # All closed → restore the idle browser pin (DevOS Browser on this panel).
+            # All closed → the browser icon leaves. Other pins stay.
             ok = chrome_profiles.sync_plasma_profile_launchers(tmp_home, [])
             self.assertTrue(ok)
             text = open(appletsrc, encoding="utf-8").read()
-            self.assertIn("applications:devos-browser.desktop", text)
+            self.assertIn("applications:devos-search.desktop", text)
+            self.assertNotIn("devos-browser.desktop", text)
             self.assertNotIn("chrome-work-w1a2.desktop", text)
+
+    def test_closed_chrome_window_leaves_the_taskbar(self):
+        existing = [
+            "applications:devos-search.desktop",
+            "applications:chrome-work-w11.desktop",
+            "applications:chrome-mirza-w22.desktop",
+            "applications:devos-browser.desktop",
+        ]
+        idle = "applications:devos-browser.desktop"
+        still_open = chrome_profiles._reconcile_launcher_entries(
+            existing, [{"id": 0x11, "wm_class": "chrome-work-w11"}], idle
+        )
+        self.assertIn("applications:chrome-work-w11.desktop", still_open)
+        self.assertNotIn("applications:chrome-mirza-w22.desktop", still_open)
+        self.assertIn("applications:devos-search.desktop", still_open)
+        separate = chrome_profiles._reconcile_launcher_entries(
+            existing,
+            [
+                {"id": 0x11, "wm_class": "google-chrome.Google-chrome", "task_desktop": "chrome-work-w11.desktop"},
+                {"id": 0x22, "wm_class": "google-chrome.Google-chrome", "task_desktop": "chrome-mirza-w22.desktop"},
+            ],
+            idle,
+        )
+        self.assertIn("applications:chrome-work-w11.desktop", separate)
+        self.assertIn("applications:chrome-mirza-w22.desktop", separate)
+        self.assertNotIn("applications:devos-browser.desktop", separate)
+        closed = chrome_profiles._reconcile_launcher_entries(existing, [], idle)
+        self.assertEqual(closed, ["applications:devos-search.desktop"])
+        live = inspect.getsource(chrome_profiles.apply_plasma_launchers_live)
+        self.assertNotIn("var panels = panels()", live)
+        self.assertNotIn("reloadConfig", live)
+        self.assertIn("devos-launchers-ok", live)
+        self.assertIn('writeConfig("launchers", parts)', live)
+        watch_src = inspect.getsource(chrome_profiles.watch_chrome_windows)
+        self.assertIn("publish_chrome_task_launchers", watch_src)
+        self.assertIn("if publish_chrome_task_launchers", watch_src)
+
+    def test_same_pins_do_not_rewrite_the_panel(self):
+        with tempfile.TemporaryDirectory() as tmp_home:
+            cfg_dir = os.path.join(tmp_home, ".config")
+            apps = os.path.join(tmp_home, ".local/share/applications")
+            os.makedirs(cfg_dir, exist_ok=True)
+            os.makedirs(apps, exist_ok=True)
+            open(os.path.join(apps, "chrome-work.desktop"), "w", encoding="utf-8").write("[Desktop Entry]\n")
+            appletsrc = os.path.join(cfg_dir, "plasma-org.kde.plasma.desktop-appletsrc")
+            with open(appletsrc, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "[Containments][3][Applets][6]\n"
+                    "plugin=org.kde.plasma.icontasks\n"
+                    "\n"
+                    "[Containments][3][Applets][6][Configuration][General]\n"
+                    "launchers=applications:devos-browser.desktop\n"
+                )
+            with patch.object(chrome_profiles, "apply_plasma_launchers_live", return_value=True) as live:
+                chrome_profiles.sync_plasma_profile_launchers(tmp_home, ["work"])
+                live.assert_not_called()
+                text = open(appletsrc, encoding="utf-8").read()
+                self.assertIn("applications:chrome-work.desktop", text)
+                chrome_profiles.sync_plasma_profile_launchers(tmp_home, ["work"])
+                live.assert_not_called()
+
+    def test_tray_watch_does_not_restart_the_footer(self):
+        path = os.path.join(ROOT, "build/includes.chroot/usr/local/bin/devos-tray-overflow")
+        text = open(path, encoding="utf-8").read()
+        once = text.split("def once", 1)[1].split("def watch", 1)[0]
+        self.assertNotIn("restart_plasmashell()", once)
+
+    def test_window_switch_does_not_restart_the_footer(self):
+        apply_src = inspect.getsource(chrome_profiles.apply_window_profiles)
+        watch_src = inspect.getsource(chrome_profiles.watch_chrome_windows)
+        kwin_src = inspect.getsource(chrome_profiles.apply_kwin_window_desktops)
+        self.assertNotIn("reload_plasmashell", apply_src)
+        self.assertNotIn("reload_plasmashell", watch_src)
+        self.assertIn("paint_chrome_icons", watch_src)
+        self.assertIn("refresh_open_profile_icons", watch_src)
+        self.assertLess(
+            watch_src.index("refresh_open_profile_icons"),
+            watch_src.index("now - last_icon"),
+        )
+        self.assertNotIn("apply_window_profiles", watch_src)
+        self.assertNotIn("set_window_wm_class", inspect.getsource(chrome_profiles.refresh_open_profile_icons))
+        self.assertNotIn("set_window_wm_class", inspect.getsource(chrome_profiles.paint_chrome_icons))
+        self.assertNotIn("reloadConfig", inspect.getsource(chrome_profiles.apply_plasma_launchers_live))
+        self.assertNotIn('"org.kde.kwin.Scripting.start"', kwin_src)
+        ident_src = inspect.getsource(chrome_profiles._chrome_switch_identity)
+        self.assertNotIn('["title"]', ident_src)
+        self.assertNotIn('.get("title")', ident_src)
+
+    def test_unchanged_kwin_map_does_not_reload(self):
+        rows = [{"id": 5, "pid": 1, "title": "Inbox - Google Chrome", "desktop": "chrome-a-w5.desktop"}]
+        with tempfile.TemporaryDirectory() as home, patch("subprocess.run") as run:
+            chrome_profiles.apply_kwin_window_desktops(rows, home)
+            run.reset_mock()
+            self.assertTrue(chrome_profiles.apply_kwin_window_desktops(rows, home))
+            run.assert_not_called()
+
+    def test_title_change_is_not_a_profile_switch(self):
+        wins = [{
+            "id": 7,
+            "title": "WhatsApp - Google Chrome",
+            "wm_class": "chrome-work-w7.chrome-work-w7",
+        }]
+        with patch.object(chrome_profiles, "_window_pid", return_value=3), \
+                patch.object(chrome_profiles, "_cmdline_is_guest", return_value=False), \
+                patch.object(chrome_profiles, "_cmdline_profile_directory", return_value="Default"):
+            first = chrome_profiles._chrome_switch_identity(wins)
+            wins[0]["title"] = "nebula - WhatsApp"
+            second = chrome_profiles._chrome_switch_identity(wins)
+        self.assertEqual(first, second)
+
+    def test_dodge_windows_is_turned_off(self):
+        with tempfile.TemporaryDirectory() as home:
+            cfg = os.path.join(home, ".config")
+            os.makedirs(cfg, exist_ok=True)
+            path = os.path.join(cfg, "plasma-org.kde.plasma.desktop-appletsrc")
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "[Containments][3]\n"
+                    "plugin=org.kde.panel\n"
+                    "hiding=2\n"
+                    "location=4\n"
+                )
+            with patch("subprocess.run"), patch("shutil.which", return_value=None):
+                self.assertTrue(chrome_profiles.keep_footer_visible(home))
+            text = open(path, encoding="utf-8").read()
+            self.assertIn("hiding=0", text)
+            self.assertNotIn("hiding=2", text)
 
     def test_class_for_profile_uses_display_name(self):
         with tempfile.TemporaryDirectory() as tmp_home:
@@ -504,17 +761,11 @@ class TestChromeProfilePhoto(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             folder = os.path.join(tmpdir, "Default")
             os.makedirs(folder)
-            flat = os.path.join(folder, "Google Profile Picture.png")
+            flat = os.path.join(folder, "avatar.png")
             from PIL import Image as PILImage
 
             PILImage.new("RGB", (96, 96), (20, 120, 220)).save(flat)
-            self.assertIsNone(
-                chrome_profiles.get_profile_avatar_path(
-                    tmpdir,
-                    "Default",
-                    {"gaia_picture_file_name": "Google Profile Picture.png", "use_gaia_picture": True},
-                )
-            )
+            self.assertFalse(chrome_profiles._accept_account_photo(flat))
 
     def test_taskbar_icon_updates_when_the_account_photo_changes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
