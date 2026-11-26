@@ -110,11 +110,8 @@ def _companion_visible(name_key: str) -> bool:
             continue
         if "Name=" in text:
             return True
-    # Windows App companion is always the canonical one when present.
-    if name_key == "windows app":
-        for root in _SYSTEM_APP_DIRS:
-            if (root / "devos-web-winapp.desktop").is_file():
-                return True
+    # A Hidden companion is not in the menu. Treating the file as canonical
+    # hid Chrome's Windows App as well, so a click had nothing to open.
     return False
 
 

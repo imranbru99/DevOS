@@ -94,6 +94,27 @@ def test_dedupe_system_windows_app(tmp_path, monkeypatch):
     assert (share / "devos-web-winapp.desktop").is_file()
 
 
+def test_hidden_companion_does_not_remove_chrome_windows_app(tmp_path, monkeypatch):
+    apps = tmp_path / "applications"
+    apps.mkdir()
+    sys_apps = tmp_path / "system"
+    sys_apps.mkdir()
+    (sys_apps / "devos-web-winapp.desktop").write_text(
+        "[Desktop Entry]\nType=Application\nName=Windows App\n"
+        "Exec=/usr/local/bin/devos-windows-app\nHidden=true\nNoDisplay=true\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("browser.chrome_start_menu._SYSTEM_APP_DIRS", (sys_apps,))
+    win_desk = apps / ("chrome-" + ("b" * 32) + "-Default.desktop")
+    win_desk.write_text(
+        "[Desktop Entry]\nType=Application\nName=Windows App\n"
+        "Exec=/usr/bin/google-chrome-stable --app-id=" + ("b" * 32) + "\n",
+        encoding="utf-8",
+    )
+    clean_chrome_start_menu(apps)
+    assert "NoDisplay=true" not in win_desk.read_text(encoding="utf-8")
+
+
 def test_hides_windows_app_pwa_by_exec(tmp_path, monkeypatch):
     apps = tmp_path / "applications"
     apps.mkdir()

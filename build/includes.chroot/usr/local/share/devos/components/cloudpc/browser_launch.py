@@ -76,11 +76,17 @@ def everyday_browser_profiles() -> list[Path]:
     ]
 
 
-def _app_id_from_desktop(text: str) -> str | None:
-    if "windows.cloud.microsoft" not in text.lower() and "Windows App" not in text:
+def _app_id_from_desktop(text: str, filename: str = "") -> str | None:
+    low = text.lower()
+    if "windows.cloud.microsoft" not in low and "windows app" not in low:
         return None
     m = re.search(r"--app-id=([a-z0-9]{32})", text)
-    return m.group(1) if m else None
+    if m:
+        return m.group(1)
+    # Updates rewrite Exec to devos-windows-app and drop --app-id. The id is
+    # still the chrome-<id>-Default.desktop filename Chrome created.
+    fm = re.fullmatch(r"chrome-([a-z0-9]{32})(?:-Default|-Profile_\d+)?\.desktop", filename)
+    return fm.group(1) if fm else None
 
 
 def _app_id_from_preferences(profile: Path) -> str | None:
@@ -117,7 +123,7 @@ def discover_app_id(profile: Path | None = None) -> str | None:
                 text = entry.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
-            found = _app_id_from_desktop(text)
+            found = _app_id_from_desktop(text, entry.name)
             if found:
                 return found
 
@@ -149,10 +155,11 @@ def discover_app_id(profile: Path | None = None) -> str | None:
 
 
 def focus_existing_window() -> bool:
-    """Raise a Windows App window only when that window itself is open.
+    """Raise an already-open Windows App window if one exists.
 
-    Chrome puts one process id on every window. Matching by that id focuses
-    the Facebook window and the Windows App click never starts the app.
+    A Chrome or installer process that merely mentions the portal is not a
+    window, and Chrome shares one process id across windows. Match a mapped
+    window only.
     """
     if not shutil.which("wmctrl"):
         return False
@@ -288,8 +295,31 @@ def _wait_for_pwa_install(timeout_s: float = 45.0) -> str | None:
     return None
 
 
+def _portal_command() -> list[str]:
+    """App window for the portal when a PWA id is not ready yet."""
+    family, binary = browser_binary()
+    force_isolated = os.environ.get("DEVOS_WINDOWS_APP_ISOLATED", "").strip() in ("1", "true", "yes")
+    cmd = [
+        binary,
+        *_chrome_extra(),
+        f"--class={WM_CLASS}",
+        f"--enable-features={BASE_FEATURES}",
+        f"--app={URL}",
+        "--window-size=1280,800",
+    ]
+    if force_isolated:
+        profile = profile_dir(family)
+        cmd[1:1] = [f"--user-data-dir={profile}", "--profile-directory=Default"]
+    else:
+        cmd.insert(1, "--profile-directory=Default")
+    return cmd
+
+
 def open_via_devos_pwa() -> bool:
     """Use the same installer path as other DevOS web apps (Office, Outlook…)."""
+    # devos-pwa used to exec this launcher, which started devos-pwa again.
+    if os.environ.get("DEVOS_WINDOWS_APP_IN_PWA") == "1":
+        return False
     pwa = shutil.which("devos-pwa")
     if not pwa:
         return False
@@ -303,6 +333,8 @@ def open_via_devos_pwa() -> bool:
     env["GTK_MODULES"] = ""
     env["GTK3_MODULES"] = ""
     env.pop("LOADED_GTK_MODULES", None)
+    env["DEVOS_WINDOWS_APP_IN_PWA"] = "1"
+    env["DEVOS_WINDOWS_APP_PARENT"] = "1"
     subprocess.Popen(
         [pwa, URL, names, desktop],
         stdin=subprocess.DEVNULL,
@@ -327,60 +359,54 @@ def _notify(message: str) -> None:
         )
 
 
-def _open_app_url():
-    """Open Windows App immediately. Do not wait on an installer."""
-    _family, binary = browser_binary()
-    return _spawn(
-        [
-            binary,
-            *_chrome_extra(),
-            "--profile-directory=Default",
-            f"--class={WM_CLASS}",
-            f"--enable-features={BASE_FEATURES}",
-            f"--app={URL}",
-        ]
-    )
+def restore_menu_entry() -> None:
+    """Remove a user shortcut that marks Windows App deleted.
 
-
-def repair_menu_entry() -> None:
-    """Restore the Start-menu Windows App entry if a Chrome sync hid it."""
-    apps = applications_dir()
+    ~/.local/share/applications overrides /usr/share. The PWA installer used to
+    write Hidden=true there, so the menu still showed a cached icon that would
+    not open.
+    """
+    path = applications_dir() / "devos-web-winapp.desktop"
     try:
-        apps.mkdir(parents=True, exist_ok=True)
+        text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return
-    path = apps / "devos-web-winapp.desktop"
-    content = """[Desktop Entry]
-Type=Application
-Name=Windows App
-GenericName=Microsoft Cloud PC
-Comment=Windows 365, Azure Virtual Desktop and remote apps
-Exec=/usr/local/bin/devos-windows-app
-Icon=devos-web-winapp
-StartupWMClass=chrome-windows.cloud.microsoft__-Default
-Terminal=false
-Categories=Network;Office;
-Keywords=windows;cloud;pc;rdp;azure;virtual desktop;365;
-X-DevOS-WebApp=true
-"""
+    if "Hidden=true" not in text and "NoDisplay=true" not in text:
+        return
     try:
-        if path.is_file() and path.read_text(encoding="utf-8") == content:
-            return
-        path.write_text(content, encoding="utf-8")
+        if "Exec=" not in text:
+            path.unlink()
+        else:
+            kept = [
+                line for line in text.splitlines()
+                if line.strip() not in {"Hidden=true", "NoDisplay=true", "X-DevOS-Hidden=true"}
+            ]
+            path.write_text("\n".join(kept).rstrip() + "\n", encoding="utf-8")
     except OSError:
         return
+    for cmd in ("kbuildsycoca6", "kbuildsycoca5"):
+        if shutil.which(cmd):
+            subprocess.Popen(
+                [cmd],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            break
 
 
 def open_isolated():
-    repair_menu_entry()
+    restore_menu_entry()
     if focus_existing_window():
         return None
 
     force_isolated = os.environ.get("DEVOS_WINDOWS_APP_ISOLATED", "").strip() in ("1", "true", "yes")
     app_id = discover_app_id(None)
 
-    # Installed Windows App PWA → real app window (no URL bar on Microsoft login).
-    # If that process quits without a window, open the site as an app window.
+    # Installed Windows App PWA → its own app window, the way it ran before.
+    # A normal Chrome window (--new-window) puts Cloud PC in a browser tab.
+    # If that process quits without a window, open the portal as an app window.
     if app_id and not force_isolated:
         proc = _spawn(launch_via_default_pwa(app_id))
         try:
@@ -389,25 +415,15 @@ def open_isolated():
             return proc
         if focus_existing_window():
             return proc
-        return _open_app_url()
-    if not force_isolated:
-        return _open_app_url()
+        return _spawn(_portal_command())
 
-    # No PWA yet: start installer, wait for --app-id, then open as PWA.
-    # Never leave the user on a plain --app=URL window for sign-in.
-    if not force_isolated and open_via_devos_pwa():
-        installed = _wait_for_pwa_install(45.0)
+    # No id yet. Still an app window (--app=), never a browser tab.
+    if not force_isolated:
+        open_via_devos_pwa()
+        installed = discover_app_id(None)
         if installed:
-            # Close temporary "Setting up" / plain --app windows if still open.
-            if shutil.which("wmctrl"):
-                subprocess.run(["wmctrl", "-c", "Setting up Windows App"], check=False, timeout=3)
             return _spawn(launch_via_default_pwa(installed))
-        _notify(
-            "Windows App is still installing.\n\n"
-            "Keep Chrome online for a moment, then open Windows App again.\n"
-            "Sign-in must open without a browser address bar."
-        )
-        return None
+        return _spawn(_portal_command())
 
     # Forced isolation: setup window only long enough to install, then --app-id.
     family, binary = browser_binary()

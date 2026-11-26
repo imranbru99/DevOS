@@ -103,24 +103,28 @@ DESK
 open_app() {
     # Chrome's own launcher has the real icon: hide the DevOS first-launch
     # entry for this user so the menu shows the app once.
-    if [ -n "$ours" ] && [ ! -e "$apps/$ours" ]; then
-        mkdir -p "$apps"
-        printf '[Desktop Entry]\nType=Application\nHidden=true\nX-DevOS-Hidden=true\n' > "$apps/$ours"
-        (kbuildsycoca5 >/dev/null 2>&1 &)
-    fi
+    # Windows App is the exception: its DevOS shortcut is the one that must
+    # stay visible. Hiding it is what made the menu icon stop opening.
+    case "$url" in
+        *windows.cloud.microsoft*) ;;
+        *)
+            if [ -n "$ours" ] && [ ! -e "$apps/$ours" ]; then
+                mkdir -p "$apps"
+                printf '[Desktop Entry]\nType=Application\nHidden=true\nX-DevOS-Hidden=true\n' > "$apps/$ours"
+                (kbuildsycoca5 >/dev/null 2>&1 &)
+            fi
+            ;;
+    esac
     # Hide any auxiliary profile launchers (Profile 1, Profile 2...) so the app appears once
     for prof in "$apps"/chrome-*-Profile_*.desktop; do
         if [ -f "$prof" ] && ! grep -q '^NoDisplay=' "$prof"; then
             printf 'NoDisplay=true\n' >> "$prof"
         fi
     done
-    # Prefer DevOS companion for Windows App so Start menu never opens a
-    # plain --app=URL window (that shows https://login.microsoftonline.com).
+    # Open the installed PWA directly. Calling devos-windows-app here loops:
+    # that launcher starts devos-pwa again, and the window never appears.
     case "$url" in
         *windows.cloud.microsoft*)
-            if [ -x /usr/local/bin/devos-windows-app ]; then
-                exec /usr/local/bin/devos-windows-app
-            fi
             exec "$chrome" "${extra[@]}" --profile-directory=Default \
                 --class="$WINAPP_CLASS" --app-id="$1"
             ;;
@@ -154,8 +158,14 @@ if [ -n "$chrome" ]; then
     fi
     case "$url" in
         *windows.cloud.microsoft*)
-            if [ -x /usr/local/bin/devos-windows-app ]; then
-                exec /usr/local/bin/devos-windows-app
+            # The parent launcher is already waiting and will open the window.
+            # Calling it again starts another devos-pwa and nothing is shown.
+            if [ "${DEVOS_WINDOWS_APP_PARENT:-}" = "1" ]; then
+                exit 1
+            fi
+            if [ -n "$chrome" ]; then
+                exec "$chrome" "${extra[@]}" --profile-directory=Default \
+                    --class="$WINAPP_CLASS" --app="$url"
             fi
             ;;
     esac
