@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+# Keep All Applications open, with small Favorite icons and large app icons.
+set -uo pipefail
+
+BRANCH="${DEVOS_BRANCH:-cursor/fix-app-menu-scroll-6081}"
+RAW="https://raw.githubusercontent.com/imranbru99/DevOS/${BRANCH}"
+PKG_REL="build/includes.chroot/usr/local/share/plasma/plasmoids/org.kde.plasma.kickoff"
+MARKER="devos-keep-category-while-scrolling"
+
+as_root() {
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+  else
+    sudo "$@"
+  fi
+}
+
+echo "== Keep All Applications in place =="
+stage="$(mktemp -d)"
+trap 'rm -rf "$stage"' EXIT
+
+files="
+metadata.json
+contents/config/main.xml
+contents/ui/qmldir
+contents/ui/AbstractKickoffItemDelegate.qml
+contents/ui/ActionMenu.qml
+contents/ui/ApplicationsPage.qml
+contents/ui/Badge.qml
+contents/ui/BasePage.qml
+contents/ui/ConfigGeneral.qml
+contents/ui/DropAreaGridView.qml
+contents/ui/DropAreaListView.qml
+contents/ui/EmptyPage.qml
+contents/ui/Footer.qml
+contents/ui/FullRepresentation.qml
+contents/ui/Header.qml
+contents/ui/HorizontalStackView.qml
+contents/ui/KickoffDropArea.qml
+contents/ui/KickoffGridDelegate.qml
+contents/ui/KickoffGridView.qml
+contents/ui/KickoffListDelegate.qml
+contents/ui/KickoffListView.qml
+contents/ui/KickoffSingleton.qml
+contents/ui/LeaveButtons.qml
+contents/ui/ListOfGridsView.qml
+contents/ui/ListOfGridsViewDelegate.qml
+contents/ui/NormalPage.qml
+contents/ui/PlacesPage.qml
+contents/ui/SectionView.qml
+contents/ui/VerticalStackView.qml
+contents/ui/config.qml
+contents/ui/main.qml
+contents/ui/code/tools.js
+components/kickoff/patch_kickoff_scroll.py
+"
+
+fail=0
+for rel in $files; do
+  case "$rel" in
+    components/*) dest="$stage/$rel" ;;
+    *) dest="$stage/pkg/$rel" ;;
+  esac
+  mkdir -p "$(dirname "$dest")"
+  if ! curl -fsSL "${RAW}/${PKG_REL}/${rel}" -o "$dest" 2>/dev/null; then
+    if ! curl -fsSL "${RAW}/${rel}" -o "$dest"; then
+      echo "  Could not download ${rel}."
+      fail=1
+    fi
+  fi
+done
+if [ "$fail" -ne 0 ]; then
+  echo "  The Start Menu update was not installed."
+  exit 1
+fi
+
+if ! grep -q "$MARKER" "$stage/pkg/contents/ui/ApplicationsPage.qml" \
+    || ! grep -q "$MARKER" "$stage/pkg/contents/ui/KickoffListView.qml" \
+    || ! grep -q "devosCompact: true" "$stage/pkg/contents/ui/ApplicationsPage.qml"; then
+  echo "  The downloaded menu is incomplete, so the current menu was left as it is."
+  exit 1
+fi
+
+install_tree() {
+  local target="$1"
+  as_root rm -rf "$target"
+  as_root mkdir -p "$target"
+  as_root cp -a "$stage/pkg/." "$target/"
+}
+
+install_tree /usr/local/share/plasma/plasmoids/org.kde.plasma.kickoff
+install_tree /usr/share/plasma/plasmoids/org.kde.plasma.kickoff
+as_root mkdir -p /usr/local/share/devos/components/kickoff
+as_root install -m 0644 "$stage/components/kickoff/patch_kickoff_scroll.py" \
+  /usr/local/share/devos/components/kickoff/patch_kickoff_scroll.py
+
+# The Plasma 6 menu keeps its QML inside the plugin. Hide that plugin only
+# after the replacement menu is on disk, so a failed download cannot remove it.
+diverted=0
+while IFS= read -r so; do
+  [ -n "$so" ] || continue
+  if [ -e "${so}.devos-real" ]; then
+    continue
+  fi
+  if as_root dpkg-divert --local --rename --divert "${so}.devos-real" --add "$so"; then
+    diverted=1
+  elif [ -e "$so" ]; then
+    as_root mv "$so" "${so}.devos-real"
+    diverted=1
+  fi
+done < <(find /usr/lib /usr/lib64 -name 'org.kde.plasma.kickoff.so' 2>/dev/null || true)
+
+user_name="${SUDO_USER:-${USER:-}}"
+if [ -z "$user_name" ] || [ "$user_name" = "root" ]; then
+  user_name="$(getent passwd 1000 | cut -d: -f1 || true)"
+fi
+user_home=""
+if [ -n "$user_name" ]; then
+  user_home="$(getent passwd "$user_name" | cut -d: -f6 || true)"
+fi
+if [ -n "$user_home" ] && [ -d "$user_home" ]; then
+  as_root mkdir -p "$user_home/.local/share/plasma/plasmoids"
+  as_root rm -rf "$user_home/.local/share/plasma/plasmoids/org.kde.plasma.kickoff"
+  as_root cp -a "$stage/pkg" "$user_home/.local/share/plasma/plasmoids/org.kde.plasma.kickoff"
+  as_root chown -R "$user_name:$user_name" "$user_home/.local/share/plasma/plasmoids/org.kde.plasma.kickoff"
+  as_root rm -rf "$user_home/.cache/plasma/qmlcache" || true
+  if [ -f "$user_home/.config/plasma-org.kde.plasma.desktop-appletsrc" ]; then
+    sudo -u "$user_name" python3 /usr/local/share/devos/components/kickoff/patch_kickoff_scroll.py "$user_home" || true
+  fi
+fi
+
+user_id=""
+if [ -n "$user_name" ]; then
+  user_id="$(id -u "$user_name" 2>/dev/null || echo "")"
+fi
+if [ -n "$user_id" ] && [ -S "/run/user/${user_id}/bus" ]; then
+  sudo -u "$user_name" \
+    XDG_RUNTIME_DIR="/run/user/${user_id}" \
+    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${user_id}/bus" \
+    systemctl --user restart plasma-plasmashell.service || true
+  echo
+  echo "The taskbar blinks once. Favorites uses small icons. All Applications uses large icons."
+  echo "Leave the pointer on an application: the menu stays on All Applications."
+else
+  echo
+  echo "Log out and back in. Favorites uses small icons and All Applications uses large icons."
+fi
+if [ "$diverted" -eq 0 ] && ! find /usr/lib /usr/lib64 -name 'org.kde.plasma.kickoff.so.devos-real' 2>/dev/null | grep -q .; then
+  echo "The replacement menu is installed. If All Applications still jumps, log out and back in."
+fi
