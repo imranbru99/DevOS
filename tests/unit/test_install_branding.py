@@ -887,6 +887,21 @@ class TestDevOSIdentity(unittest.TestCase):
         total_images = [f for f in files if f.endswith(".jpg") or f.endswith(".png")]
         self.assertGreaterEqual(len(total_images), 130)
 
+    def test_intel_graphics_lock_reboots_instead_of_freezing(self):
+        grub = read("build/includes.chroot/etc/default/grub.d/devos.cfg")
+        installed = read("build/includes.chroot/etc/calamares/modules/grubcfg.conf")
+        driver = read("build/includes.chroot/etc/modprobe.d/devos-i915.conf")
+        watchdog = read("build/includes.chroot/etc/systemd/system.conf.d/devos-no-auto-power.conf")
+        script = read("build/includes.chroot/usr/local/bin/devos-stable-graphics")
+        for text in (grub, installed, script):
+            self.assertIn("i915.enable_psr=0", text)
+            self.assertIn("i915.enable_fbc=0", text)
+            self.assertIn("i915.enable_dc=0", text)
+        self.assertIn("enable_psr=0", driver)
+        self.assertIn("RuntimeWatchdogSec=30s", watchdog)
+        self.assertIn("iTCO_wdt", read("build/includes.chroot/etc/modules-load.d/devos-watchdog.conf"))
+        self.assertIn("update-grub", script)
+
 
 if __name__ == "__main__":
     unittest.main()
