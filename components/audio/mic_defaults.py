@@ -474,17 +474,23 @@ def ensure_sink_ready(name: Optional[str] = None) -> Dict[str, Any]:
     return result
 
 
-def ensure_source_ready(name: Optional[str] = None) -> Dict[str, Any]:
-    """Unmute, raise soft volume, and poke ALSA capture for the given source."""
+def ensure_source_ready(name: Optional[str] = None, adjust_volume: bool = True) -> Dict[str, Any]:
+    """Unmute and poke ALSA capture for the given source.
+
+    adjust_volume raises a quiet mic to 100%. The live meter leaves an
+    already loud slider (such as 135%) alone and only clears mute.
+    """
     name = name or get_default_source()
     result = {"source": name, "unmuted": False, "volume": False, "alsa": False}
     if not name or not _whicht("pactl"):
         return result
     rc, _ = _run(["pactl", "set-source-mute", name, "0"])
     result["unmuted"] = rc == 0
-    # 100% soft volume; hardware gain stays with ALSA/WirePlumber routes
-    rc, _ = _run(["pactl", "set-source-volume", name, "100%"])
-    result["volume"] = rc == 0
+    _run(["pactl", "suspend-source", name, "0"])
+    if adjust_volume:
+        # 100% soft volume; hardware gain stays with ALSA/WirePlumber routes
+        rc, _ = _run(["pactl", "set-source-volume", name, "100%"])
+        result["volume"] = rc == 0
     # ALSA card index from name when possible
     sources = {s["name"]: s for s in list_input_sources()}
     src = sources.get(name) or {}
@@ -500,7 +506,9 @@ def ensure_source_ready(name: Optional[str] = None) -> Dict[str, Any]:
         for control in ("Mic Capture", "Capture", "Mic", "PGA", "Digital", "ADC"):
             # Quote-free argv keeps spaces in control names intact
             rc1, _ = _run(["amixer", "-c", str(card), "-q", "sset", control, "unmute", "cap"], timeout=2)
-            rc2, _ = _run(["amixer", "-c", str(card), "-q", "sset", control, "100%"], timeout=2)
+            rc2 = 1
+            if adjust_volume:
+                rc2, _ = _run(["amixer", "-c", str(card), "-q", "sset", control, "100%"], timeout=2)
             if rc1 == 0 or rc2 == 0:
                 result["alsa"] = True
                 break
@@ -509,7 +517,8 @@ def ensure_source_ready(name: Optional[str] = None) -> Dict[str, Any]:
     node_id = _wpctl_id_for_name(name)
     if node_id and _whicht("wpctl"):
         _run(["wpctl", "set-mute", node_id, "0"])
-        _run(["wpctl", "set-volume", node_id, "1.0"])
+        if adjust_volume:
+            _run(["wpctl", "set-volume", node_id, "1.0"])
     return result
 
 

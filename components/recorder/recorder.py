@@ -850,6 +850,12 @@ class DevOSRecorder(QWidget):
                     return
             else:
                 device = get_selected_mic_source(self)
+                if device and _mic:
+                    try:
+                        # Clear mute and a suspended capture. Leave a 135% slider as it is.
+                        _mic.ensure_source_ready(device, adjust_volume=False)
+                    except Exception:
+                        pass
             self.meter.start(device)
         else:
             self.meter.stop()
