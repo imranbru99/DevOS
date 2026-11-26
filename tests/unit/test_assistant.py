@@ -1142,6 +1142,29 @@ class TestVoiceEngine(unittest.TestCase):
             self.assertLess(breaths, 30)
         self.assertEqual(vad.stop_reason, "silence")
 
+    def test_call_keeps_listening_through_a_pause(self):
+        """A breath or a short pause must not send the turn."""
+        vad = voice.VAD(
+            silence_s=voice.CALL_SILENCE_STOP_S,
+            max_s=voice.CALL_MAX_SECONDS,
+            min_threshold=voice.CALL_MIN_THRESHOLD,
+            noise_mult=voice.CALL_NOISE_MULT,
+            speech_hold_s=voice.CALL_SPEECH_HOLD_S,
+            speech_hang_s=voice.CALL_SPEECH_HANG_S,
+        )
+        loud = voice.synth_tone(voice.FRAME_MS / 1000.0, 8000)
+        soft = voice.synth_tone(voice.FRAME_MS / 1000.0, 500)
+        quiet = b"\x00" * voice.FRAME_BYTES
+        for _ in range(4):
+            self.assertFalse(vad.feed(soft))
+        self.assertTrue(vad.heard_speech)
+        # 1.6s of quiet used to end the call while the person was still talking.
+        for _ in range(16):
+            self.assertFalse(vad.feed(quiet))
+        for _ in range(3):
+            self.assertFalse(vad.feed(loud))
+        self.assertEqual(vad.stop_reason, "")
+
     def test_long_utterance_compares_bangla_and_english(self):
         voice.Transcriber.last_language = "en"
         long_pcm = b"\x00\x00" * (voice.RATE * 5)
