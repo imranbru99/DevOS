@@ -62,8 +62,11 @@ sudo /usr/local/sbin/devos-install-antigravity-kde
 
 mkdir -p "${HOME}/.config/Antigravity" "${HOME}/.config/Antigravity-KDE"
 mkdir -p "${HOME}/.gemini/antigravity" "${HOME}/.gemini/antigravity-kde"
-printf '%s\n' '{ "password-store": "basic" }' > "${HOME}/.config/Antigravity/argv.json"
-printf '%s\n' '{ "password-store": "basic" }' > "${HOME}/.config/Antigravity-KDE/argv.json"
+# A basic password store is what makes the KDE keyring notice appear.
+rm -f "${HOME}/.config/Antigravity/argv.json" "${HOME}/.config/Antigravity-KDE/argv.json"
+if [ -x /usr/local/bin/devos-kwallet-compat ]; then
+    /usr/local/bin/devos-kwallet-compat --prepare || true
+fi
 
 echo "== Close every Antigravity window =="
 pkill -f '/opt/antigravity/antigravity' 2>/dev/null || true

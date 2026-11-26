@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+# Stop the "OS keyring is not available" notice in Cursor and the other IDEs.
+set -uo pipefail
+
+BRANCH="${DEVOS_BRANCH:-cursor/fix-keyring-toast-6081}"
+RAW="https://raw.githubusercontent.com/imranbru99/DevOS/${BRANCH}"
+
+as_root() {
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+  else
+    sudo "$@"
+  fi
+}
+
+echo "== DevOS keyring for Cursor =="
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+fetch() {
+  local url="$1" dest="$2"
+  curl -fsSL "$url" -o "$dest"
+}
+
+fetch "${RAW}/build/includes.chroot/usr/local/bin/devos-kwallet-compat" "$tmp/devos-kwallet-compat"
+fetch "${RAW}/build/includes.chroot/usr/local/bin/devos-launch-cursor" "$tmp/devos-launch-cursor"
+fetch "${RAW}/build/includes.chroot/etc/systemd/user/devos-kwallet-compat.service" "$tmp/devos-kwallet-compat.service"
+fetch "${RAW}/build/includes.chroot/usr/local/share/applications/cursor.desktop" "$tmp/cursor.desktop"
+for name in org.kde.kwalletd org.kde.kwalletd5 org.kde.kwalletd6; do
+  fetch "${RAW}/build/includes.chroot/usr/local/share/dbus-1/services/${name}.service" "$tmp/${name}.service"
+done
+
+as_root install -m 0755 "$tmp/devos-kwallet-compat" /usr/local/bin/devos-kwallet-compat
+as_root install -m 0755 "$tmp/devos-launch-cursor" /usr/local/bin/devos-launch-cursor
+as_root install -m 0644 "$tmp/devos-kwallet-compat.service" /etc/systemd/user/devos-kwallet-compat.service
+as_root mkdir -p /etc/systemd/user/default.target.wants /etc/systemd/user/graphical-session.target.wants
+as_root ln -sfn ../devos-kwallet-compat.service /etc/systemd/user/default.target.wants/devos-kwallet-compat.service
+as_root ln -sfn ../devos-kwallet-compat.service /etc/systemd/user/graphical-session.target.wants/devos-kwallet-compat.service
+as_root mkdir -p /usr/local/share/dbus-1/services /usr/local/share/applications
+for name in org.kde.kwalletd org.kde.kwalletd5 org.kde.kwalletd6; do
+  as_root install -m 0644 "$tmp/${name}.service" "/usr/local/share/dbus-1/services/${name}.service"
+done
+
+# Keep the vendor icon when the package already has a Cursor entry.
+icon="cursor"
+vendor=""
+for candidate in /usr/share/applications/cursor.desktop /usr/share/applications/co.anysphere.cursor.desktop; do
+  if [ -f "$candidate" ]; then
+    vendor="$candidate"
+    break
+  fi
+done
+if [ -n "$vendor" ]; then
+  found="$(sed -n 's/^Icon=//p' "$vendor" | head -n 1)"
+  if [ -n "$found" ]; then
+    icon="$found"
+  fi
+fi
+awk -v icon="$icon" 'BEGIN { done = 0 } /^Icon=/ { print "Icon=" icon; done = 1; next } { print } END { if (!done) print "Icon=" icon }' \
+  "$tmp/cursor.desktop" > "$tmp/cursor.desktop.final"
+as_root install -m 0644 "$tmp/cursor.desktop.final" /usr/local/share/applications/cursor.desktop
+
+user_name="${SUDO_USER:-$USER}"
+user_home="$(getent passwd "$user_name" | cut -d: -f6)"
+if [ -n "$user_home" ] && [ -d "$user_home" ]; then
+  as_root mkdir -p "$user_home/.config" "$user_home/.local/share/applications" "$user_home/.local/share/dbus-1/services"
+  as_root tee "$user_home/.config/kwalletrc" >/dev/null << 'EOF'
+[Wallet]
+Enabled=false
+First Use=false
+Launch Manager=false
+Prompt on Open=false
+Close When Idle=true
+Leave Manager Open=false
+EOF
+  for kded_file in kded6rc kded5rc; do
+    if [ -f "$user_home/.config/$kded_file" ] && grep -q '^\[Module-kwallet\]' "$user_home/.config/$kded_file"; then
+      as_root sed -i '/^\[Module-kwallet\]/,/^\[/{s/^autoload=.*/autoload=false/}' "$user_home/.config/$kded_file"
+    else
+      as_root tee -a "$user_home/.config/$kded_file" >/dev/null << 'EOF'
+
+[Module-kwallet]
+autoload=false
+EOF
+    fi
+  done
+  as_root cp "$tmp/cursor.desktop.final" "$user_home/.local/share/applications/cursor.desktop"
+  for name in org.kde.kwalletd org.kde.kwalletd5 org.kde.kwalletd6; do
+    as_root cp "$tmp/${name}.service" "$user_home/.local/share/dbus-1/services/${name}.service"
+  done
+  # Drop the plaintext store that forces the same notice.
+  for argv in "$user_home/.config/Cursor/argv.json" \
+              "$user_home/.config/Antigravity/argv.json" \
+              "$user_home/.config/Antigravity-KDE/argv.json" \
+              "$user_home/.config/Code/argv.json"; do
+    if [ -f "$argv" ] && grep -q '"password-store"[[:space:]]*:[[:space:]]*"basic"' "$argv"; then
+      as_root rm -f "$argv"
+    fi
+  done
+  as_root chown -R "$user_name:" \
+    "$user_home/.config/kwalletrc" \
+    "$user_home/.config/kded6rc" \
+    "$user_home/.config/kded5rc" \
+    "$user_home/.local/share/applications/cursor.desktop" \
+    "$user_home/.local/share/dbus-1/services"
+fi
+
+if ! grep -q 'stop_real_kwallet' /usr/local/bin/devos-kwallet-compat; then
+  echo "  The keyring service was not updated."
+  exit 1
+fi
+
+user_id="$(id -u "$user_name" 2>/dev/null || echo "")"
+if [ -n "$user_id" ] && [ -S "/run/user/${user_id}/bus" ]; then
+  sudo -u "$user_name" \
+    XDG_RUNTIME_DIR="/run/user/${user_id}" \
+    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${user_id}/bus" \
+    systemctl --user daemon-reload || true
+  sudo -u "$user_name" \
+    XDG_RUNTIME_DIR="/run/user/${user_id}" \
+    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${user_id}/bus" \
+    systemctl --user enable --now devos-kwallet-compat.service || true
+  sudo -u "$user_name" \
+    XDG_RUNTIME_DIR="/run/user/${user_id}" \
+    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${user_id}/bus" \
+    /usr/local/bin/devos-kwallet-compat --prepare || true
+fi
+
+echo
+echo "Quit Cursor completely, then open it again. The keyring notice stays off."

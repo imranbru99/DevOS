@@ -21,12 +21,17 @@ Close When Idle=true
 Leave Manager Open=false
 EOF
 # Real KWallet stays off so its unlock window cannot block the screen.
-# Electron still probes org.kde.kwalletd and shows the keyring toast unless
-# this silent service is already answering. A second copy exits at once.
-if [ -x /usr/local/bin/devos-kwallet-compat ]; then
-    if ! pgrep -f "/usr/local/bin/devos-kwallet-compat" >/dev/null 2>&1; then
-        (nohup /usr/local/bin/devos-kwallet-compat >/dev/null 2>&1 &)
+# kwalletd6 owns the bus name but not /modules/kwalletd, which is the path
+# Cursor probes. --prepare makes the silent service answer that path.
+for kded_file in kded6rc kded5rc; do
+    if command -v kwriteconfig6 >/dev/null 2>&1; then
+        kwriteconfig6 --file "$kded_file" --group Module-kwallet --key autoload false
+    elif command -v kwriteconfig5 >/dev/null 2>&1; then
+        kwriteconfig5 --file "$kded_file" --group Module-kwallet --key autoload false
     fi
+done
+if [ -x /usr/local/bin/devos-kwallet-compat ]; then
+    /usr/local/bin/devos-kwallet-compat --prepare >/dev/null 2>&1 || true
 fi
 # Meta+H = DevOS AI voice command. Plasma 5 only grabs a launcher shortcut
 # that is in the user's own kglobalshortcutsrc and was there when the

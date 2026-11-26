@@ -4,18 +4,18 @@
 The real KWallet stays disabled. Its unlock window blocks the whole screen,
 which is why kwalletrc sets Enabled=false and kded does not autoload it.
 
-Electron 42 (Antigravity, Cursor, VS Code, Chrome) still calls
+Electron 42 (Cursor, Antigravity, VS Code, Chrome) calls
 org.kde.KWallet.isEnabled on the KWallet 4 path /modules/kwalletd. kwalletd6
-does not export that path, and with the wallet disabled nothing answers at
-all. safeStorage then reports encryption unavailable and the app shows:
+owns org.kde.kwalletd but does not export that path, so the call returns
+UnknownObject. safeStorage then reports encryption unavailable and the app shows:
 
     You're running in a KDE environment but the OS keyring is not available
     for encryption. Ensure you have kwallet running.
 
-This process owns org.kde.kwalletd, org.kde.kwalletd5 and org.kde.kwalletd6
-and exports the interface on /modules/kwalletd, /modules/kwalletd5 and
-/modules/kwalletd6. It stores the OSCrypt key in a mode 0600 file. It never
-opens a window and never asks for a password.
+This process stops that daemon, owns org.kde.kwalletd, org.kde.kwalletd5 and
+org.kde.kwalletd6, and exports the interface on /modules/kwalletd,
+/modules/kwalletd5 and /modules/kwalletd6. It stores the OSCrypt key in a
+mode 0600 file. It never opens a window and never asks for a password.
 """
 
 import json
@@ -345,10 +345,20 @@ def serve(store):
 
     signal.signal(signal.SIGHUP, signal.SIG_IGN)
     loop = GLib.MainLoop()
+    stopping = {"value": False}
+
+    def on_stop():
+        stopping["value"] = True
+        loop.quit()
+        return GLib.SOURCE_REMOVE
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, sig, on_stop)
     node = Gio.DBusNodeInfo.new_for_xml(INTERFACE_XML)
     interface = node.interfaces[0]
     registered = {"done": False}
     owned = {"primary": False}
+    lost = {"primary": False}
 
     def on_method(_connection, _sender, _path, _iface, method, parameters, invocation):
         try:
@@ -379,12 +389,15 @@ def serve(store):
             owned["primary"] = True
 
     def on_name_lost(_connection, name):
-        if name == PRIMARY and not owned["primary"]:
+        if name != PRIMARY:
+            return
+        lost["primary"] = True
+        if not owned["primary"]:
             print(
                 "devos-kwallet-compat: org.kde.kwalletd is already taken; not replacing it",
                 file=sys.stderr,
             )
-            loop.quit()
+        loop.quit()
 
     flags = Gio.BusNameOwnerFlags.DO_NOT_QUEUE
     for name in NAMES:
@@ -397,17 +410,200 @@ def serve(store):
             on_name_lost if name == PRIMARY else None,
         )
     loop.run()
+    return owned["primary"] and (stopping["value"] or not lost["primary"])
 
 
-def main():
-    lock = acquire_singleton()
-    if lock is None:
+def config_dir():
+    override = os.environ.get("XDG_CONFIG_HOME")
+    if override:
+        return Path(override)
+    return Path.home() / ".config"
+
+
+def disable_wallet_autoload(directory):
+    """Keep KDED from starting the real wallet over the silent one."""
+    directory = Path(directory)
+    directory.mkdir(parents=True, mode=0o700, exist_ok=True)
+    for name in ("kded6rc", "kded5rc"):
+        path = directory / name
+        text = path.read_text(encoding="utf-8") if path.exists() else ""
+        lines = text.splitlines()
+        out = []
+        in_section = False
+        saw = False
+        found = False
+        for line in lines:
+            if line.startswith("[") and line.endswith("]"):
+                if in_section and not saw:
+                    out.append("autoload=false")
+                in_section = line == "[Module-kwallet]"
+                if in_section:
+                    found = True
+                saw = False
+            elif in_section and line.startswith("autoload="):
+                line = "autoload=false"
+                saw = True
+            out.append(line)
+        if in_section and not saw:
+            out.append("autoload=false")
+        if not found:
+            if out and out[-1] != "":
+                out.append("")
+            out.extend(["[Module-kwallet]", "autoload=false"])
+        path.write_text("\n".join(out).rstrip("\n") + "\n", encoding="utf-8")
+
+
+def legacy_path_answers(timeout_ms=800):
+    """True when Electron's KWallet 4 probe would succeed."""
+    try:
+        from gi.repository import Gio
+    except Exception:
+        return False
+    try:
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        proxy = Gio.DBusProxy.new_sync(
+            bus,
+            Gio.DBusProxyFlags.NONE,
+            None,
+            PRIMARY,
+            "/modules/kwalletd",
+            "org.kde.KWallet",
+            None,
+        )
+        reply = proxy.call_sync("isEnabled", None, Gio.DBusCallFlags.NONE, timeout_ms, None)
+        return bool(reply.unpack()[0])
+    except Exception:
+        return False
+
+
+def _owner_pid(name):
+    from gi.repository import Gio, GLib
+
+    bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+    owner = bus.call_sync(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "GetNameOwner",
+        GLib.Variant("(s)", (name,)),
+        GLib.VariantType("(s)"),
+        Gio.DBusCallFlags.NONE,
+        1000,
+        None,
+    ).unpack()[0]
+    pid = bus.call_sync(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "GetConnectionUnixProcessID",
+        GLib.Variant("(s)", (owner,)),
+        GLib.VariantType("(u)"),
+        Gio.DBusCallFlags.NONE,
+        1000,
+        None,
+    ).unpack()[0]
+    return int(pid)
+
+
+def _unload_kwallet_module():
+    from gi.repository import Gio, GLib
+
+    bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+    for dest, iface in (("org.kde.kded6", "org.kde.kded6"), ("org.kde.kded5", "org.kde.kded5")):
+        try:
+            bus.call_sync(
+                dest,
+                "/kded",
+                iface,
+                "unloadModule",
+                GLib.Variant("(s)", ("kwallet",)),
+                GLib.VariantType("(b)"),
+                Gio.DBusCallFlags.NONE,
+                1000,
+                None,
+            )
+        except Exception:
+            pass
+
+
+def stop_real_kwallet():
+    """Drop kwalletd6 when it owns the bus name but not /modules/kwalletd."""
+    import subprocess
+
+    try:
+        _unload_kwallet_module()
+    except Exception:
+        pass
+    my_pid = os.getpid()
+    for name in NAMES:
+        try:
+            if not name_is_owned(name):
+                continue
+            pid = _owner_pid(name)
+        except Exception:
+            continue
+        if pid and pid != my_pid:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except OSError:
+                pass
+    for binary in ("kwalletd6", "kwalletd5", "kwalletd"):
+        try:
+            subprocess.call(
+                ["pkill", "-x", binary],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except OSError:
+            pass
+    deadline = time.time() + 3
+    while time.time() < deadline:
+        try:
+            if not any(name_is_owned(name) for name in NAMES):
+                return
+        except Exception:
+            return
+        time.sleep(0.05)
+
+
+def _wait_until_answering(seconds):
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        if legacy_path_answers():
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    prepare = "--prepare" in argv or "--ensure" in argv
+    if prepare:
+        if legacy_path_answers():
+            return 0
+        disable_wallet_autoload(config_dir())
+        pid = os.fork()
+        if pid == 0:
+            os.setsid()
+            script = os.path.abspath(__file__)
+            os.execv(sys.executable, [sys.executable, script])
+        return 0 if _wait_until_answering(8) else 1
+    if legacy_path_answers():
         return 0
     try:
-        serve(WalletStore(store_path()))
+        disable_wallet_autoload(config_dir())
+        stop_real_kwallet()
+    except Exception:
+        pass
+    lock = acquire_singleton()
+    if lock is None:
+        return 0 if _wait_until_answering(8) else 1
+    failed = {"value": False}
+    try:
+        failed["value"] = not serve(WalletStore(store_path()))
     finally:
         os.close(lock)
-    return 0
+    return 1 if failed["value"] else 0
 
 
 if __name__ == "__main__":

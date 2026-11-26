@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Cursor
+Comment=AI Code Editor
+Exec=/usr/local/bin/devos-launch-cursor %F
+Icon=cursor
+Terminal=false
+Categories=Development;IDE;
+StartupNotify=true
+StartupWMClass=Cursor
+MimeType=text/plain;inode/directory;

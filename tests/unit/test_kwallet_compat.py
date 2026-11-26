@@ -51,10 +51,21 @@ class TestKWalletCompatFiles(unittest.TestCase):
         launcher = (CHROOT / "usr/local/share/applications/kwalletd.desktop").read_text(encoding="utf-8")
         self.assertIn("NoDisplay=true", launcher)
         apply_desktop = (CHROOT / "usr/local/bin/devos-apply-desktop").read_text(encoding="utf-8")
-        self.assertIn("devos-kwallet-compat", apply_desktop)
+        self.assertIn("devos-kwallet-compat --prepare", apply_desktop)
+        unit = (CHROOT / "etc/systemd/user/devos-kwallet-compat.service").read_text(encoding="utf-8")
+        self.assertIn("ExecStart=/usr/local/bin/devos-kwallet-compat", unit)
+        self.assertIn("Before=plasma-plasmashell.service", unit)
+        launcher = (CHROOT / "usr/local/bin/devos-launch-cursor").read_text(encoding="utf-8")
+        self.assertIn("devos-kwallet-compat --prepare", launcher)
+        desktop = (CHROOT / "usr/local/share/applications/cursor.desktop").read_text(encoding="utf-8")
+        self.assertIn("Exec=/usr/local/bin/devos-launch-cursor %F", desktop)
+        script = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("def stop_real_kwallet", script)
+        self.assertIn('"/modules/kwalletd"', script)
+        self.assertIn("kwalletd6", script)
 
     def test_ides_do_not_force_plaintext_keyring(self):
-        # --password-store=basic makes safeStorage report encryption unavailable,
+        # password-store=basic makes safeStorage report encryption unavailable,
         # which is the toast in the screenshot. The silent wallet is the store.
         for rel in (
             "usr/local/bin/antigravity-kde",
@@ -63,10 +74,27 @@ class TestKWalletCompatFiles(unittest.TestCase):
             text = (CHROOT / rel).read_text(encoding="utf-8")
             self.assertNotIn("\n    --password-store=basic", text)
             self.assertNotIn("\n    --password-store=basic \\", text)
-            self.assertIn("devos-kwallet-compat", text)
+            self.assertNotIn("ELECTRON_PASSWORD_STORE=basic", text)
+            self.assertNotIn('"password-store": "basic"', text)
+            self.assertIn("devos-kwallet-compat --prepare", text)
         # Agent browsers still isolate themselves from the desktop Chrome profile.
         agent = (ROOT / "components/ai-agent/agent_browser.py").read_text(encoding="utf-8")
         self.assertIn("--password-store=basic", agent)
+
+
+class TestWalletAutoload(unittest.TestCase):
+    def test_kded_stops_reloading_the_real_wallet(self):
+        module = load_compat()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)
+            (path / "kded6rc").write_text("[Module-kwallet]\nautoload=true\n", encoding="utf-8")
+            module.disable_wallet_autoload(path)
+            text = (path / "kded6rc").read_text(encoding="utf-8")
+            self.assertIn("autoload=false", text)
+            self.assertNotIn("autoload=true", text)
+            self.assertIn("autoload=false", (path / "kded5rc").read_text(encoding="utf-8"))
+            module.disable_wallet_autoload(path)
+            self.assertEqual((path / "kded6rc").read_text(encoding="utf-8").count("autoload=false"), 1)
 
 
 class TestWalletStore(unittest.TestCase):
@@ -180,6 +208,7 @@ class TestKWalletDBus(unittest.TestCase):
             env = os.environ.copy()
             env["DEVOS_KWALLET_STORE"] = str(store)
             env["XDG_RUNTIME_DIR"] = str(runtime)
+            env["XDG_CONFIG_HOME"] = str(Path(tmp) / "config")
             result = subprocess.run(
                 ["dbus-run-session", "--", sys.executable, "-c", client],
                 env=env,

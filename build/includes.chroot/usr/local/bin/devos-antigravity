@@ -9,8 +9,8 @@ export GEMINI_APP_DATA_DIR="antigravity"
 # Bypass host GNOME Keyring so logins stay in this profile only.
 export SSH_CLIENT="127.0.0.1 0 0"
 # Keep the OS keyring. Forcing the basic password store makes Antigravity
-# show the KDE keyring warning. devos-kwallet-compat is that keyring, and
-# this profile stays separate via its user-data dir and GEMINI_APP_DATA_DIR.
+# show the KDE keyring warning. devos-kwallet-compat --prepare is that keyring,
+# and this profile stays separate via its user-data dir and GEMINI_APP_DATA_DIR.
 
 binary=/opt/antigravity/antigravity
 if [[ ! -x "$binary" ]]; then
@@ -27,14 +27,10 @@ fi
 DATA_DIR="${HOME}/.config/Antigravity"
 EXT_DIR="${HOME}/.antigravity/extensions"
 mkdir -p "$DATA_DIR" "$EXT_DIR"
-
-# DevOS disables KWallet; force basic store so the KDE keyring toast stays off.
-argv_json="${DATA_DIR}/argv.json"
-if [ ! -f "$argv_json" ] || ! grep -q '"password-store"[[:space:]]*:[[:space:]]*"basic"' "$argv_json" 2>/dev/null; then
-    printf '%s\n' '{ "password-store": "basic" }' > "$argv_json"
-fi
-export ELECTRON_PASSWORD_STORE=basic
 rm -f "${HOME}/.gemini/cache/antigravity-keyring-unavailable"
+if [ -x /usr/local/bin/devos-kwallet-compat ]; then
+    /usr/local/bin/devos-kwallet-compat --prepare || true
+fi
 
 flags=(
     --ozone-platform=x11

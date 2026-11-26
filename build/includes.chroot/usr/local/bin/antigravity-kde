@@ -287,6 +287,9 @@ printf '%s binary=%s data=%s\n' "$(date -Is)" "$IDE_BIN" "$DATA_DIR" \
     >> "${REAL_HOME}/.cache/antigravity-kde/launch.log"
 
 unset ELECTRON_RUN_AS_NODE
+if [ -x /usr/local/bin/devos-kwallet-compat ]; then
+    /usr/local/bin/devos-kwallet-compat --prepare || true
+fi
 export DONT_PROMPT_WSL_INSTALL=1
 # Must differ from Google Antigravity (main uses "antigravity").
 export GEMINI_APP_DATA_DIR="antigravity-kde"
