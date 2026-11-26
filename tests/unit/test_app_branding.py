@@ -107,6 +107,11 @@ def test_branded_icons_exist_for_desktop_references():
                 needed.add(line.split("=", 1)[1].strip())
     missing = [n for n in sorted(needed) if not (ICONS / f"{n}.svg").is_file()]
     assert not missing, f"missing icons: {missing}"
+    png_root = ROOT / "build/includes.chroot/usr/share/icons/hicolor/48x48/apps"
+    # A drawing alone becomes a question mark when the icon theme only
+    # looks in the picture folders. Every desktop icon needs a PNG too.
+    missing_png = [n for n in sorted(needed) if not (png_root / f"{n}.png").is_file()]
+    assert not missing_png, f"missing 48px icons: {missing_png}"
 
 
 def test_no_letter_placeholder_icons():

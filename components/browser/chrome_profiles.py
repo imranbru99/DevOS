@@ -843,6 +843,9 @@ def sync_all_profiles(home_dir=None):
     os.makedirs(icons_dir_48, exist_ok=True)
     os.makedirs(icons_dir_128, exist_ok=True)
     os.makedirs(apps_dir, exist_ok=True)
+    # Badge pictures belong in these folders. A theme file here hides every
+    # other application icon after the next start.
+    repair_user_icon_theme(home_dir)
 
     chrome_dir = os.path.join(home_dir, ".config/google-chrome")
     details = get_chrome_profile_details(chrome_dir)
@@ -1792,55 +1795,58 @@ def _plasma_script_commands(script: str) -> list:
     return commands
 
 
-_WIN_PIN = re.compile(r"-w([0-9a-f]+)\.desktop$", re.I)
 _PUBLISHED_LAUNCHERS = None
 
 
 def _reconcile_launcher_entries(existing, chrome_wins, idle_pin: str) -> list:
     """Launcher list after Chrome windows open or close.
 
-    A closed window's pin is dropped. When no Chrome window is open, every
-    browser icon is removed, including DevOS Browser and Google Chrome.
-    Other apps on the bar stay.
+    Plasma draws the task button from the .desktop file the window is
+    matched to, not from a second pin. A window that is still Google Chrome
+    stays on the default Chrome button. That button's picture is the
+    account photo. A private chrome-*-w pin next to it was the plain logo.
+
+    A window that already has its own class keeps that button. A closed
+    window's pin is dropped. When Chrome is closed, every browser pin goes.
+    Other apps stay.
     """
-    del idle_pin
     preserved = [e for e in (existing or []) if not _is_chrome_launcher(e)]
     wins = list(chrome_wins or [])
     if not wins:
         return preserved
-    open_hex = set()
-    open_desktops = []
+    unique = []
     seen = set()
     for win in wins:
-        try:
-            open_hex.add(f"{int(win.get('id') or 0) & 0xFFFFFFFF:x}")
-        except (TypeError, ValueError):
-            pass
+        wc = (win.get("wm_class") or "").lower()
+        tokens = {part for part in re.split(r"[\s.,]+", wc) if part}
         desk = (win.get("task_desktop") or "").strip()
+        names = []
         if desk:
-            name = desk if desk.endswith(".desktop") else f"{desk}.desktop"
-            entry = name if name.startswith("applications:") else f"applications:{name}"
+            names.append(desk)
+        for token in tokens:
+            if token.startswith("chrome-") and "-w" in token:
+                names.append(token)
+        for name in names:
+            base = name.split(":")[-1]
+            if not base.endswith(".desktop"):
+                base = f"{base}.desktop"
+            stem = base[: -len(".desktop")].lower()
+            # The window is still the normal Chrome class. Do not pin a
+            # second desktop the task is not using.
+            if stem not in tokens:
+                continue
+            entry = f"applications:{base}"
             if entry not in seen:
                 seen.add(entry)
-                open_desktops.append(entry)
-        for token in re.split(r"[\s,]+", (win.get("wm_class") or "").lower()):
-            if token.startswith("chrome-") and "-w" in token:
-                name = token if token.endswith(".desktop") else f"{token}.desktop"
-                entry = name if name.startswith("applications:") else f"applications:{name}"
-                if entry not in seen:
-                    seen.add(entry)
-                    open_desktops.append(entry)
-    if open_desktops:
-        return preserved + open_desktops
-    kept = []
-    for entry in existing or []:
-        if not _is_chrome_launcher(entry):
-            continue
-        match = _WIN_PIN.search(entry.lower())
-        if match and match.group(1) not in open_hex:
-            continue
-        kept.append(entry)
-    return preserved + kept
+                unique.append(entry)
+    if unique:
+        return preserved + unique
+    pin = (idle_pin or "").strip()
+    if pin and not pin.startswith("applications:"):
+        pin = f"applications:{pin}"
+    if not pin:
+        pin = "applications:devos-browser.desktop"
+    return preserved + [pin]
 
 
 def sync_plasma_profile_launchers(home_dir=None, active_slugs=None, window_desktops=None):
@@ -3189,34 +3195,69 @@ def refresh_open_profile_icons(home_dir, chrome_wins) -> None:
             "icon": shown if os.path.isfile(shown) else "",
             "avatar": avatar if avatar and _accept_account_photo(avatar) else "",
         })
-    # The footer button uses the shared Chrome launcher's Icon. One open
-    # account: that icon is the Chrome logo with this account's photo.
-    # Different accounts keep their own buttons and do not inherit the first.
+    # The default Chrome button and the DevOS Browser shortcut use this
+    # photo. Another open account does not put the plain logo back.
     _apply_shared_launcher_icon(home_dir, open_badges)
 
 
 def _shared_launcher_icon(rows):
-    """Badge path for the shared Chrome button.
+    """Picture for the default Chrome button.
 
-    One open account returns that account's Chrome-logo-plus-photo file.
-    Two accounts return None so the first photo is not painted on the others.
+    The pinned Chrome icon and the DevOS Browser shortcut use this file.
+    It is the Chrome logo with the account photo. A second open account
+    keeps its own button and does not wipe the photo off this one.
+    The default account wins when it is open. Otherwise the first open
+    account is used. No open account leaves the plain logo.
     """
-    keys = []
-    icon = None
+    chosen = None
     for row in rows or []:
-        key = (row or {}).get("key") or ""
-        if not key:
+        icon = (row or {}).get("icon") or ""
+        if not icon:
             continue
-        keys.append(key)
-        if (row or {}).get("icon"):
-            icon = (row or {}).get("icon")
-    if len(set(keys)) != 1 or not icon:
-        return None
-    return icon
+        key = ((row or {}).get("key") or "").strip()
+        if (row or {}).get("front") or key == "Default":
+            return icon
+        if chosen is None:
+            chosen = icon
+    return chosen
+
+
+def _user_desktop_dirs(home_dir: str):
+    """Folders that hold the on-screen desktop shortcuts."""
+    found = []
+    config = os.path.join(home_dir, ".config", "user-dirs.dirs")
+    try:
+        with open(config, encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line.startswith("XDG_DESKTOP_DIR="):
+                    continue
+                value = line.split("=", 1)[1].strip().strip('"')
+                value = value.replace("$HOME", home_dir).replace("${HOME}", home_dir)
+                found.append(os.path.expanduser(value))
+    except OSError:
+        pass
+    found.append(os.path.join(home_dir, "Desktop"))
+    out = []
+    for path in found:
+        if path and path not in out and os.path.isdir(path):
+            out.append(path)
+    return out
+
+
+def _icon_is_default_chrome(icon: str) -> bool:
+    """True for the plain Chrome / DevOS Browser icon, not another app."""
+    current = (icon or "").strip()
+    if current in ("devos-browser", "google-chrome", "com.google.chrome"):
+        return True
+    base = os.path.basename(current)
+    if base in ("devos-browser.png", "google-chrome.png", "com.google.chrome.png"):
+        return True
+    return base.startswith("chrome-") and base.endswith(".png")
 
 
 def _point_shared_launchers(home_dir: str, target: str) -> bool:
-    """Point the pinned Chrome button at one account's badged icon."""
+    """Point the default Chrome button and the desktop shortcut at the photo."""
     if not target or not os.path.isfile(target):
         return False
     target = os.path.abspath(target)
@@ -3245,7 +3286,122 @@ def _point_shared_launchers(home_dir: str, target: str) -> bool:
                 continue
         if _swap_desktop_icon(path, target):
             changed = True
+    for folder in _user_desktop_dirs(home_dir):
+        try:
+            entries = os.listdir(folder)
+        except OSError:
+            continue
+        for name in entries:
+            if not name.endswith(".desktop"):
+                continue
+            path = os.path.join(folder, name)
+            try:
+                with open(path, encoding="utf-8") as handle:
+                    text = handle.read()
+            except OSError:
+                continue
+            found = re.search(r"(?m)^Icon=(.*)$", text)
+            if not found or not _icon_is_default_chrome(found.group(1)):
+                continue
+            if _swap_desktop_icon(path, target):
+                changed = True
     return changed
+
+
+def _hicolor_index_is_devos(text: str) -> bool:
+    """True when this theme file is the one that replaced the system icons."""
+    if "DevOS profile badges" in (text or ""):
+        return True
+    body = text or ""
+    return (
+        "Name=Hicolor" in body
+        and "Directories=48x48/apps,128x128/apps,256x256/apps" in body
+        and "Inherits=" not in body
+    )
+
+
+def _user_hicolor_has_chrome_badges(root: str) -> bool:
+    if os.path.isfile(os.path.join(root, ".devos-chrome-badge")):
+        return True
+    for folder in ("48x48", "128x128", "256x256"):
+        apps_dir = os.path.join(root, folder, "apps")
+        try:
+            names = os.listdir(apps_dir)
+        except OSError:
+            continue
+        for name in names:
+            if name in ("google-chrome.png", "devos-browser.png"):
+                return True
+            if name.startswith("chrome-") and name.endswith(".png"):
+                return True
+    return False
+
+
+def repair_user_icon_theme(home_dir=None) -> bool:
+    """Remove the private Hicolor theme that blanks application icons.
+
+    The Chrome account photo is a PNG in the home icon folder. Writing a
+    theme file named Hicolor in that same folder replaces
+    /usr/share/icons/hicolor. The pictures already on screen stay until the
+    PC is shut off. The next start reads the private theme, which only
+    lists the badge folders, so the other application icons are missing.
+    The badge PNGs stay.
+    """
+    home = home_dir or os.path.expanduser("~")
+    root = os.path.join(home, ".local/share/icons/hicolor")
+    index = os.path.join(root, "index.theme")
+    removed = False
+    index_left = os.path.isfile(index)
+    try:
+        if index_left:
+            with open(index, encoding="utf-8", errors="replace") as handle:
+                text = handle.read()
+            if _hicolor_index_is_devos(text):
+                os.remove(index)
+                removed = True
+                index_left = False
+    except OSError:
+        pass
+    cache = os.path.join(root, "icon-theme.cache")
+    # A cache in the home Hicolor folder hides the system icon list. Keep a
+    # cache only when a theme file we did not write is still there and this
+    # folder has no Chrome badges.
+    owns = removed or _user_hicolor_has_chrome_badges(root)
+    try:
+        if os.path.isfile(cache) and (owns or not index_left):
+            os.remove(cache)
+            removed = True
+    except OSError:
+        pass
+    if not removed:
+        return False
+    kcache = os.path.join(home, ".cache", "icon-cache.kcache")
+    try:
+        if os.path.isfile(kcache):
+            os.remove(kcache)
+    except OSError:
+        pass
+    _nudge_icon_theme()
+    return True
+
+
+def _nudge_icon_theme() -> None:
+    """Ask the running desktop to read icons again. Does not restart the panel."""
+    import subprocess
+    for cmd in (
+        ["busctl", "--user", "emit", "/KIconLoader", "org.kde.KIconLoader", "iconChanged", "i", "0"],
+        ["dbus-send", "--session", "--type=signal", "/KIconLoader", "org.kde.KIconLoader.iconChanged", "int32:0"],
+    ):
+        try:
+            subprocess.run(
+                cmd,
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=3,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            continue
 
 
 def _install_theme_chrome_icon(home_dir: str, badge_path: str) -> None:
@@ -3253,18 +3409,25 @@ def _install_theme_chrome_icon(home_dir: str, badge_path: str) -> None:
 
     The running task button uses that theme icon. An absolute Icon= path is
     not enough on its own, which is why the footer stayed the plain logo.
+    The PNG is enough. A Hicolor theme file in this folder replaces the
+    system icons, so it is never written.
     """
+    repair_user_icon_theme(home_dir)
     if not badge_path or not os.path.isfile(badge_path):
         return
     badge_path = os.path.abspath(badge_path)
     root = os.path.join(home_dir, ".local/share/icons/hicolor")
     marker = os.path.join(root, ".devos-chrome-badge")
-    sample = os.path.join(root, "48x48", "apps", "google-chrome.png")
+    samples = [
+        os.path.join(root, "48x48", "apps", "google-chrome.png"),
+        os.path.join(root, "48x48", "apps", "devos-browser.png"),
+    ]
     try:
-        if os.path.isfile(marker) and os.path.isfile(sample):
+        if os.path.isfile(marker) and all(os.path.isfile(path) for path in samples):
             with open(marker, encoding="utf-8") as handle:
                 same = handle.read().strip() == badge_path
-            if same and os.path.getmtime(sample) >= os.path.getmtime(badge_path):
+            fresh = min(os.path.getmtime(path) for path in samples) >= os.path.getmtime(badge_path)
+            if same and fresh:
                 return
     except OSError:
         pass
@@ -3290,42 +3453,15 @@ def _install_theme_chrome_icon(home_dir: str, badge_path: str) -> None:
                 img.resize((size, size), Image.Resampling.LANCZOS).save(dest, format="PNG")
             except OSError:
                 return
-    index = os.path.join(root, "index.theme")
-    if not os.path.isfile(index):
-        try:
-            with open(index, "w", encoding="utf-8") as handle:
-                handle.write(
-                    "[Icon Theme]\n"
-                    "Name=Hicolor\n"
-                    "Comment=DevOS profile badges\n"
-                    "Directories=48x48/apps,128x128/apps,256x256/apps\n"
-                    "\n"
-                    "[48x48/apps]\nSize=48\nContext=Applications\nType=Fixed\n"
-                    "\n"
-                    "[128x128/apps]\nSize=128\nContext=Applications\nType=Fixed\n"
-                    "\n"
-                    "[256x256/apps]\nSize=256\nContext=Applications\nType=Fixed\n"
-                )
-        except OSError:
-            pass
     try:
         with open(marker, "w", encoding="utf-8") as handle:
             handle.write(badge_path)
     except OSError:
         pass
-    import subprocess
-    cache_tool = shutil.which("gtk-update-icon-cache")
-    if cache_tool:
-        try:
-            subprocess.run(
-                [cache_tool, "-f", "-t", root],
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=15,
-            )
-        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-            pass
+    # Drop a cache left by an older update. Rebuilding it would hide the
+    # system icons again. The new PNG is found by name without that cache.
+    repair_user_icon_theme(home_dir)
+    _nudge_icon_theme()
 
 
 def _restore_theme_chrome_icon(home_dir: str) -> None:
@@ -3349,10 +3485,11 @@ def _restore_theme_chrome_icon(home_dir: str) -> None:
         os.remove(marker)
     except OSError:
         pass
+    repair_user_icon_theme(home_dir)
 
 
 def _apply_shared_launcher_icon(home_dir, rows) -> None:
-    """Show this account's photo on the button the footer actually draws."""
+    """Put the account photo on the default Chrome button and the desktop shortcut."""
     global _PHOTO_PUSHED
     target = _shared_launcher_icon(rows)
     if target:
@@ -3537,6 +3674,7 @@ def watch_chrome_windows(home_dir=None, poll_interval=None):
     try:
         keep_footer_visible(home_dir)
         repair_windows_app_launcher(home_dir)
+        repair_user_icon_theme(home_dir)
     except Exception:
         pass
     last_ident = None

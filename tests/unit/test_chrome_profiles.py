@@ -107,11 +107,13 @@ class TestChromeProfiles(unittest.TestCase):
             ]),
             badge,
         )
-        self.assertIsNone(
+        # A second account must not strip the photo off the default Chrome icon.
+        self.assertEqual(
             chrome_profiles._shared_launcher_icon([
-                {"key": "Default", "icon": badge, "avatar": "/tmp/face.png"},
                 {"key": "Profile 1", "icon": "/tmp/other.png", "avatar": "/tmp/other-face.png"},
-            ])
+                {"key": "Default", "icon": badge, "avatar": "/tmp/face.png"},
+            ]),
+            badge,
         )
         self.assertEqual(chrome_profiles._kde_desktop_file_name("chrome-imran-w1.desktop"), "chrome-imran-w1")
         win_app = {
@@ -330,6 +332,8 @@ class TestChromeProfiles(unittest.TestCase):
         self.assertIn("applications:chrome-work-w11.desktop", still_open)
         self.assertNotIn("applications:chrome-mirza-w22.desktop", still_open)
         self.assertIn("applications:devos-search.desktop", still_open)
+        # The window is still the normal Chrome class. Keep that button and
+        # put the photo on it. A second pin was the plain logo beside it.
         separate = chrome_profiles._reconcile_launcher_entries(
             existing,
             [
@@ -338,9 +342,15 @@ class TestChromeProfiles(unittest.TestCase):
             ],
             idle,
         )
-        self.assertIn("applications:chrome-work-w11.desktop", separate)
-        self.assertIn("applications:chrome-mirza-w22.desktop", separate)
-        self.assertNotIn("applications:devos-browser.desktop", separate)
+        self.assertIn("applications:devos-browser.desktop", separate)
+        self.assertNotIn("applications:chrome-work-w11.desktop", separate)
+        self.assertNotIn("applications:chrome-mirza-w22.desktop", separate)
+        self.assertNotIn(
+            "applications:devos-browser.desktop",
+            chrome_profiles._reconcile_launcher_entries(
+                existing, [{"id": 0x11, "wm_class": "chrome-work-w11"}], idle
+            ),
+        )
         closed = chrome_profiles._reconcile_launcher_entries(existing, [], idle)
         self.assertEqual(closed, ["applications:devos-search.desktop"])
         live = inspect.getsource(chrome_profiles.apply_plasma_launchers_live)
@@ -351,6 +361,31 @@ class TestChromeProfiles(unittest.TestCase):
         watch_src = inspect.getsource(chrome_profiles.watch_chrome_windows)
         self.assertIn("publish_chrome_task_launchers", watch_src)
         self.assertIn("if publish_chrome_task_launchers", watch_src)
+
+    def test_desktop_shortcut_uses_the_profile_photo(self):
+        from PIL import Image as PILImage
+
+        with tempfile.TemporaryDirectory() as tmp_home:
+            badge = os.path.join(tmp_home, "badge.png")
+            PILImage.new("RGB", (8, 8), (9, 8, 7)).save(badge)
+            desktop = os.path.join(tmp_home, "Desktop")
+            os.makedirs(desktop)
+            path = os.path.join(desktop, "browser.desktop")
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "[Desktop Entry]\nName=DevOS Browser\nIcon=devos-browser\nType=Application\n"
+                )
+            self.assertTrue(chrome_profiles._point_shared_launchers(tmp_home, badge))
+            text = open(path, encoding="utf-8").read()
+            self.assertIn(f"Icon={os.path.abspath(badge)}", text)
+            other = os.path.join(tmp_home, "other.png")
+            self.assertEqual(
+                chrome_profiles._shared_launcher_icon([
+                    {"key": "Profile 1", "icon": other},
+                    {"key": "Default", "icon": os.path.abspath(badge)},
+                ]),
+                os.path.abspath(badge),
+            )
 
     def test_same_pins_do_not_rewrite_the_panel(self):
         with tempfile.TemporaryDirectory() as tmp_home:
@@ -699,6 +734,74 @@ class TestChromeProfiles(unittest.TestCase):
         # Same title on two windows must not pin both to one desktop file.
         self.assertNotIn("Logs", by_title)
         self.assertEqual(by_title.get("Guest"), "chrome-guest-w3.desktop")
+
+    def test_chrome_badge_does_not_replace_system_icons(self):
+        from PIL import Image as PILImage
+
+        with tempfile.TemporaryDirectory() as tmp_home:
+            badge = os.path.join(tmp_home, "badge.png")
+            PILImage.new("RGBA", (32, 32), (10, 20, 30, 255)).save(badge)
+            root = os.path.join(tmp_home, ".local/share/icons/hicolor")
+            os.makedirs(root, exist_ok=True)
+            index = os.path.join(root, "index.theme")
+            with open(index, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "[Icon Theme]\nName=Hicolor\nComment=DevOS profile badges\n"
+                    "Directories=48x48/apps,128x128/apps,256x256/apps\n"
+                )
+            cache = os.path.join(root, "icon-theme.cache")
+            with open(cache, "wb") as handle:
+                handle.write(b"cache")
+            os.makedirs(os.path.join(tmp_home, ".cache"), exist_ok=True)
+            kcache = os.path.join(tmp_home, ".cache", "icon-cache.kcache")
+            with open(kcache, "wb") as handle:
+                handle.write(b"k")
+            with patch.object(chrome_profiles, "_nudge_icon_theme"):
+                chrome_profiles._install_theme_chrome_icon(tmp_home, badge)
+                self.assertFalse(os.path.isfile(index))
+                self.assertFalse(os.path.isfile(cache))
+                self.assertFalse(os.path.isfile(kcache))
+                png = os.path.join(root, "48x48", "apps", "google-chrome.png")
+                self.assertTrue(os.path.isfile(png))
+                # The photo is already installed. A later pass must not put
+                # the private theme file back, or the next start blanks icons.
+                chrome_profiles._install_theme_chrome_icon(tmp_home, badge)
+            self.assertFalse(os.path.isfile(index))
+            self.assertFalse(os.path.isfile(cache))
+            self.assertTrue(os.path.isfile(png))
+
+    def test_repair_leaves_a_foreign_icon_theme(self):
+        with tempfile.TemporaryDirectory() as tmp_home:
+            root = os.path.join(tmp_home, ".local/share/icons/hicolor")
+            os.makedirs(root, exist_ok=True)
+            index = os.path.join(root, "index.theme")
+            with open(index, "w", encoding="utf-8") as handle:
+                handle.write(
+                    "[Icon Theme]\nName=Hicolor\nInherits=Adwaita\n"
+                    "Directories=16x16/apps,48x48/apps\n"
+                )
+            cache = os.path.join(root, "icon-theme.cache")
+            with open(cache, "wb") as handle:
+                handle.write(b"keep")
+            self.assertFalse(chrome_profiles.repair_user_icon_theme(tmp_home))
+            self.assertTrue(os.path.isfile(index))
+            self.assertEqual(open(cache, "rb").read(), b"keep")
+
+    def test_repair_drops_an_orphan_icon_cache(self):
+        with tempfile.TemporaryDirectory() as tmp_home:
+            apps = os.path.join(tmp_home, ".local/share/icons/hicolor/48x48/apps")
+            os.makedirs(apps, exist_ok=True)
+            png = os.path.join(apps, "chrome-work.png")
+            with open(png, "wb") as handle:
+                handle.write(b"png")
+            cache = os.path.join(tmp_home, ".local/share/icons/hicolor/icon-theme.cache")
+            with open(cache, "wb") as handle:
+                handle.write(b"old")
+            with patch.object(chrome_profiles, "_nudge_icon_theme") as nudge:
+                self.assertTrue(chrome_profiles.repair_user_icon_theme(tmp_home))
+            nudge.assert_called()
+            self.assertFalse(os.path.isfile(cache))
+            self.assertTrue(os.path.isfile(png))
 
 
 def _save_portrait(path, center):
