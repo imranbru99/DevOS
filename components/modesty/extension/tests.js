@@ -23,7 +23,8 @@
   eq('open face just under the score stays clear', R.decide(D([F('female', .99, { score: .47 })]), women).blur, false);
   eq('small uncertain face ignored', R.decide(D([F('female', .99, { w: 12 })]), women).blur, false);
   eq('a girl face blurs the whole image', R.decide(D([F('female', .99)]), women).regions.map((r) => r.full), [true]);
-  eq('a girl face without a blur layer is not invented', R.decide({ ok: true, faces: [F('female', .99)] }, women).blur, false);
+  eq('a girl face without a blur bitmap still blurs the whole element', R.decide({ ok: true, faces: [F('female', .99)] }, women).blur, true);
+  eq('a girl face without a blur bitmap does not invent a mask', R.decide({ ok: true, faces: [F('female', .99)] }, women).regions, []);
   eq('unmatched body stays clear in women mode', R.decide(D([], [P(-1)]), women).blur, false);
   eq('low-skin unmatched body stays clear', R.decide(D([], [P(-1, { skinRatio: .08 })]), women).blur, false);
   eq('skin with no girl stays clear',
@@ -69,6 +70,22 @@
       [P(0, { skinRatio: .05, cx: 130, bw: 90 })]), women).blur, true);
   eq('close-up child stays clear even with a clothing flag',
     R.decide(D([F('female', .95, { age: 12, w: 80, h: 80, clothedAdult: true })]), women).blur, false);
+  eq('a woman in a video frame still blurs when age is misread',
+    R.decide(D([F('female', .62, { age: 9, w: 64, h: 70, score: .8, frameH: 720, frameW: 360 })]), women).blur, true);
+  eq('a video-frame woman blurs the whole frame',
+    R.decide(D([F('female', .62, { age: 9, w: 64, h: 70, score: .8, frameH: 720 })]), women).regions.map((r) => r.full), [true]);
+  eq('a close-up child in a tall frame stays clear',
+    R.decide(D([F('female', .95, { age: 11, w: 150, h: 170, frameH: 500, clothedAdult: true })]), women).blur, false);
+  eq('a man in a video frame stays clear',
+    R.decide(D([F('male', .92, { age: 28, w: 64, h: 70, frameH: 720 })]), women).blur, false);
+  eq('covered head in a video frame blurs when age is misread',
+    R.decide(D([F('male', .8, { age: 10, w: 50, h: 54, score: .7, headCovered: true, frameH: 640 })]), women).blur, true);
+  eq('bearded man in a video frame stays clear',
+    R.decide(D([F('male', .4, { age: 40, w: 64, h: 70, frameH: 720, bearded: true })]), women).blur, false);
+  const portraitTiles = R.faceTiles(360, 640);
+  eq('full-body frame is scanned in overlapping tiles', portraitTiles.length >= 4, true);
+  eq('tiles stay inside the video frame', portraitTiles.every((t) => t.x >= 0 && t.y >= 0 && t.x + t.w <= 360 && t.y + t.h <= 640 && t.w >= 96 && t.h >= 96), true);
+  eq('a tiny icon is not tiled', R.faceTiles(80, 80).length, 0);
   eq('a photo with a girl and a man blurs the whole image',
     R.decide(D([
       F('female', .56, { age: 9, w: 25, h: 25, score: .75, clothedAdult: true, x: 100, y: 40 }),

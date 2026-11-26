@@ -15,6 +15,7 @@ const POSE_INDEX = {
 let readyPromise = null;
 let backend = 'none';
 let useTinyFace = false;
+let tinyReady = false;
 let faceReady = false;
 let poseReady = false;
 let callSeq = 0;
@@ -74,18 +75,30 @@ async function pingVision(task) {
   return { ok: false, error: task + ' unavailable' };
 }
 
+async function ensureTiny() {
+  if (tinyReady) return true;
+  try {
+    await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
+    tinyReady = true;
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 async function init() {
   await initAgeGender();
   // Pose is not on the hot path. A girl decision only needs the face pass,
-  // then one blur of the whole photo.
+  // then one blur of the whole photo or video.
   const face = await pingVision('face');
   faceReady = !!(face && face.ok);
   if (!faceReady) {
-    await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
-    useTinyFace = true;
+    await ensureTiny();
+    useTinyFace = tinyReady;
     backend = 'tiny-face';
   } else {
     backend = 'blazeface';
+    ensureTiny();
   }
 }
 
@@ -174,13 +187,15 @@ function describeAppearance(data, w, h, face) {
   const cheekLum = cheeks.length ? cheeks.reduce((a, s) => a + s.lum, 0) / cheeks.length : 0;
   const bearded = !!(chin && cheekSkin > 0.22 && chin.skin < 0.55 && chin.lum + 12 < cheekLum);
 
-  const below = face.y + fh * 1.2;
-  const columnH = fh * 4.2;
+  const below = face.y + fh * 1.05;
+  const columnH = fh * 5.5;
   const room = h - below;
   let clothedAdult = false;
-  if (room >= fh * 3) {
-    const column = sampleRegion(data, w, h, face.x + fw / 2 - fw * 1.1, below, fw * 2.2, Math.min(columnH, room));
-    clothedAdult = !!(column && column.n >= 40 && column.dark >= 0.42);
+  if (room >= fh * 1.6) {
+    const column = sampleRegion(data, w, h, face.x + fw / 2 - fw * 1.3, below, fw * 2.6, Math.min(columnH, room));
+    // A sari, dress, or shirt counts even when the cloth is not dark.
+    // Bare skin under the face does not.
+    clothedAdult = !!(column && column.n >= 24 && column.skin < 0.45);
   }
   return { headCovered, bearded, clothedAdult };
 }
@@ -335,8 +350,14 @@ function loadUrl(url) {
   });
 }
 
+function withFrame(face, frame) {
+  face.frameW = frame.w;
+  face.frameH = frame.h;
+  return face;
+}
+
 async function facesFromTiny(img, frame) {
-  const opts = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.4 });
+  const opts = new faceapi.TinyFaceDetectorOptions({ inputSize: 512, scoreThreshold: 0.4 });
   const found = await faceapi.detectAllFaces(img, opts).withAgeAndGender();
   const faces = [];
   for (const f of found) {
@@ -344,7 +365,7 @@ async function facesFromTiny(img, frame) {
     const box = { x: b.x, y: b.y, w: b.width, h: b.height, score: f.detection.score };
     const look = describeAppearance(frame.data, frame.w, frame.h, box);
     const pFemale = f.gender === 'female' ? f.genderProbability : 1 - f.genderProbability;
-    faces.push({
+    faces.push(withFrame({
       score: +box.score.toFixed(3),
       gender: pFemale >= 0.5 ? 'female' : 'male',
       genderProbability: +(pFemale >= 0.5 ? pFemale : 1 - pFemale).toFixed(3),
@@ -353,7 +374,7 @@ async function facesFromTiny(img, frame) {
       headCovered: look.headCovered,
       bearded: look.bearded,
       clothedAdult: look.clothedAdult,
-    });
+    }, frame));
   }
   return faces;
 }
@@ -428,7 +449,7 @@ async function detectWithPose(img, dataUrl) {
 
 async function detectWithTinyFace(img) {
   const frame = pixelsOf(img);
-  const opts = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.4 });
+  const opts = new faceapi.TinyFaceDetectorOptions({ inputSize: 512, scoreThreshold: 0.4 });
   const found = await faceapi.detectAllFaces(img, opts).withAgeAndGender();
   const faces = [];
   for (const f of found) {
@@ -466,7 +487,7 @@ function blurEntire(img, w, h) {
   layer.width = w;
   layer.height = h;
   const ctx = layer.getContext('2d');
-  ctx.filter = 'blur(18px)';
+  ctx.filter = 'blur(24px)';
   ctx.drawImage(img, -12, -12, w + 24, h + 24);
   return layer.toDataURL('image/jpeg', 0.72);
 }
@@ -475,7 +496,7 @@ async function detectFast(img, dataUrl) {
   const frame = pixelsOf(img);
   const raw = [];
   if (faceReady) {
-    const faceMsg = await callVision('face', 'detect', { dataUrl }, 8000);
+    const faceMsg = await callVision('face', 'detect', { dataUrl }, 15000);
     if (faceMsg && faceMsg.ok) {
       for (const det of faceMsg.faces || []) {
         const box = clipBox(det.box || {}, frame.w, frame.h);
@@ -488,7 +509,7 @@ async function detectFast(img, dataUrl) {
   for (const box of dedupeFaces(raw)) {
     const look = describeAppearance(frame.data, frame.w, frame.h, box);
     const gender = await ageGenderOf(img, box);
-    faces.push({
+    faces.push(withFrame({
       score: +box.score.toFixed(3),
       gender: gender.gender,
       genderProbability: +(Number(gender.genderProbability) || 0).toFixed(3),
@@ -497,11 +518,17 @@ async function detectFast(img, dataUrl) {
       headCovered: look.headCovered,
       bearded: look.bearded,
       clothedAdult: look.clothedAdult,
-    });
+    }, frame));
   }
-  if (!faces.length && useTinyFace) {
+  // Short-range detection misses faces in a full-body video frame. The tiny
+  // model scans that same frame when nobody large was found.
+  const biggest = faces.reduce((m, f) => Math.max(m, f.h || 0), 0);
+  const scene = !faces.length || (frame.h > 0 && biggest < frame.h * 0.18);
+  if (scene && (tinyReady || useTinyFace || await ensureTiny())) {
     const tiny = await facesFromTiny(img, frame);
-    faces.push(...tiny);
+    for (const face of tiny) {
+      if (!faces.some((g) => iou(g, face) > 0.3)) faces.push(face);
+    }
   }
   const girl = faces.some((face) => {
     try { return ModestyRules.isAdultWomanFace(face, ModestyRules.DEFAULTS); } catch (e) { return false; }
@@ -522,7 +549,6 @@ function detect(dataUrl) {
   const job = queue.then(async () => {
     await ready();
     const img = await loadImage(dataUrl);
-    if (!faceReady && !useTinyFace) return detectWithTinyFace(img);
     return detectFast(img, dataUrl);
   });
   queue = job.catch(() => {});

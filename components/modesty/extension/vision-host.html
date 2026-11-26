@@ -2,6 +2,7 @@
 <meta charset="utf-8">
 <title>DevOS Modesty vision</title>
 <body>
+<script src="rules.js"></script>
 <script type="module">
 import { FaceDetector, FilesetResolver, PoseLandmarker } from './vendor/mediapipe/vision_bundle.mjs';
 
@@ -90,28 +91,41 @@ function maskUrl(mask) {
 }
 
 // Short-range BlazeFace matches this runtime (896 anchors). It sees faces
-// that fill a good part of the frame, so a full-body shot is also scanned
-// as a few overlapping tiles and the boxes are mapped back.
+// that fill a good part of the crop. A full-body photo or video is also
+// scanned as overlapping tiles and the boxes are mapped back to the frame.
 function detectFaces(img) {
   const found = [];
-  const take = (source, ox, oy) => {
+  const w = img.naturalWidth || img.width;
+  const h = img.naturalHeight || img.height;
+  const take = (source, ox, oy, sw, sh) => {
     let det;
     try { det = detector.detect(source); } catch (e) { return; }
     for (const d of (det && det.detections) || []) {
       const b = d.boundingBox;
       if (!b) continue;
+      let x = b.originX, y = b.originY, bw = b.width, bh = b.height;
+      if (bw <= 2 && bh <= 2) {
+        x *= sw; y *= sh; bw *= sw; bh *= sh;
+      }
       found.push({
         score: (d.categories && d.categories[0] && d.categories[0].score) || 0,
-        box: {
-          originX: b.originX + ox,
-          originY: b.originY + oy,
-          width: b.width,
-          height: b.height,
-        },
+        box: { originX: x + ox, originY: y + oy, width: bw, height: bh },
       });
     }
   };
-  take(img, 0, 0);
+  take(img, 0, 0, w, h);
+  const biggest = found.reduce((m, f) => Math.max(m, (f.box && f.box.height) || 0), 0);
+  // A close-up already fills the frame. A smaller face means a scene shot,
+  // so keep looking — the other person may be the one who must be blurred.
+  if (h > 0 && biggest / h >= 0.18) return found;
+  const tiles = (globalThis.ModestyRules && ModestyRules.faceTiles(w, h)) || [];
+  for (const tile of tiles) {
+    const canvas = document.createElement('canvas');
+    canvas.width = tile.w;
+    canvas.height = tile.h;
+    canvas.getContext('2d').drawImage(img, tile.x, tile.y, tile.w, tile.h, 0, 0, tile.w, tile.h);
+    take(canvas, tile.x, tile.y, tile.w, tile.h);
+  }
   return found;
 }
 

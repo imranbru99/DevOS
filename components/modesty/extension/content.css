@@ -2,5 +2,5 @@
    so the name and buttons beside it stay readable. */
 img[data-dm-girl="1"],
 video[data-dm-girl="1"] {
-  filter: blur(18px) !important;
+  filter: blur(24px) !important;
 }

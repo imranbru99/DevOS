@@ -99,12 +99,52 @@
     // A hijab often makes the gender net say "male". Covered hair and neck,
     // with no beard, is still an adult woman.
     if (adult && face.headCovered === true) return true;
-    // On a face under ~48px the age net is not evidence of childhood: the
-    // Facebook frame that started this measured an adult woman as age 9.
-    // A long dark garment under a female-leaning score is an adult figure.
-    // A close-up child has a larger face, so that age reading still wins.
-    if (size < 48 && face.clothedAdult === true && p >= 0.52 && Number(face.score) >= 0.55) return true;
+    // A face that does not fill the frame is someone standing in a photo or
+    // video. The age net on that face is not evidence of childhood: the
+    // Facebook reel that started this measured an adult woman as age 9.
+    // A close-up child fills the frame, so that age reading still wins.
+    const frameH = Number(face.frameH) || 0;
+    const frac = frameH > 0 ? (Number(face.h) || 0) / frameH : 0;
+    const scene = frameH >= 160 && frac > 0 && frac < 0.20;
+    if (scene) {
+      if (face.headCovered === true) return true;
+      if (p >= 0.55 && score >= 0.50) return true;
+      if (face.clothedAdult === true && p >= 0.50 && score >= 0.50) return true;
+    }
+    // On a face under ~48px the age net is not evidence of childhood either.
+    // Clothing under a female-leaning score is an adult figure.
+    if (size < 48 && face.clothedAdult === true && p >= 0.52 && score >= 0.55) return true;
     return false;
+  }
+
+  // Short-range face detection only sees faces that fill the crop. A full-body
+  // photo or video frame is scanned as a few overlapping zooms, then the
+  // boxes are mapped back onto the full picture.
+  function faceTiles(w, h) {
+    w = Math.round(Number(w) || 0);
+    h = Math.round(Number(h) || 0);
+    if (w < 160 || h < 160) return [];
+    const tiles = [];
+    const seen = new Set();
+    const push = (x, y, tw, th) => {
+      x = Math.max(0, Math.round(x));
+      y = Math.max(0, Math.round(y));
+      tw = Math.round(Math.min(tw, w - x));
+      th = Math.round(Math.min(th, h - y));
+      if (tw < 96 || th < 96) return;
+      if (tw >= w - 4 && th >= h - 4) return;
+      const key = x + ':' + y + ':' + tw + ':' + th;
+      if (seen.has(key)) return;
+      seen.add(key);
+      tiles.push({ x, y, w: tw, h: th });
+    };
+    push(0, 0, w * 0.62, h * 0.48);
+    push(w * 0.38, 0, w * 0.62, h * 0.48);
+    push(0, h * 0.26, w * 0.62, h * 0.48);
+    push(w * 0.38, h * 0.26, w * 0.62, h * 0.48);
+    push(w * 0.15, h * 0.06, w * 0.7, h * 0.42);
+    push(0, h * 0.4, w, h * 0.42);
+    return tiles;
   }
 
   function fullImage(result) {
@@ -130,12 +170,12 @@
     const faces = result.faces || [];
     const girl = faces.some((face) => isAdultWomanFace(face, s));
     if (s.mode === 'people' && faces.some((face) => realFace(face, s))) {
-      const regions = fullImage(result);
-      return { blur: regions.length > 0, reason: regions.length ? 'person' : 'no-girl', regions };
+      return { blur: true, reason: 'person', regions: fullImage(result) };
     }
     if (!girl) return { blur: false, reason: 'no-girl', regions: [] };
-    const regions = fullImage(result);
-    return { blur: regions.length > 0, reason: regions.length ? 'girl' : 'no-girl', regions };
+    // The element itself is blurred. A missing bitmap must not leave the
+    // photo or video sharp.
+    return { blur: true, reason: 'girl', regions: fullImage(result) };
   }
 
   function matchFace(pose, faces, used) {
@@ -219,5 +259,5 @@
     return false;
   }
 
-  root.ModestyRules = { MODES, DEFAULTS, effectiveSettings, decide, isAdultWomanFace, femaleProbability, isIconSized, stricterMode, matchFace, matchFaceByTorso, fitBox, cssLayers };
+  root.ModestyRules = { MODES, DEFAULTS, effectiveSettings, decide, isAdultWomanFace, femaleProbability, isIconSized, stricterMode, matchFace, matchFaceByTorso, fitBox, cssLayers, faceTiles };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
