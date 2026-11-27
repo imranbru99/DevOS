@@ -73,6 +73,14 @@ class UpdaterTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 updater.unpack(bundle(entries))
 
+    def test_clipboard_update_installs_wayland_and_x11_helpers(self):
+        with mock.patch.object(updater.subprocess, "run",
+                               return_value=mock.Mock(returncode=1, stdout="")) as command:
+            updater.prepare_dependencies({"components/clipboard/clipboard.py": (b"", 0)})
+        self.assertEqual(command.call_args_list[-1].args[0],
+                         ["apt-get", "install", "-y", "--no-install-recommends",
+                          "wl-clipboard", "xclip"])
+
     def test_checksum_failure_is_rejected(self):
         manifest = {"format": 1, "version": "v1", "files": {"components/x": "0" * 64}}
         data = bundle([('manifest.json', json.dumps(manifest).encode(), tarfile.REGTYPE),

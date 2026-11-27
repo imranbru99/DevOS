@@ -86,14 +86,32 @@ def read_klipper(run):
     return []
 
 
-def read_clipboard(run):
-    try:
-        result = run(["xclip", "-selection", "clipboard", "-o"])
-    except OSError:
-        return ""
-    if not result or getattr(result, "returncode", 1) != 0:
-        return ""
-    return getattr(result, "stdout", "") or ""
+def read_clipboard(run, selection=False):
+    """Read Wayland first, with X11 support for terminals such as PuTTY."""
+    commands = [
+        ["wl-paste", "--no-newline", *(["--primary"] if selection else [])],
+        ["xclip", "-selection", "primary" if selection else "clipboard", "-o"],
+    ]
+    for command in commands:
+        try:
+            result = run(command)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if result and result.returncode == 0 and result.stdout:
+            return result.stdout
+    return ""
+
+
+def write_clipboard(text, run):
+    """Keep the clipboard owned after this window closes on either desktop."""
+    for command in (["wl-copy"], set_clipboard_command(text)):
+        try:
+            result = run(command, input_text=text)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if result and result.returncode == 0:
+            return True
+    return False
 
 
 def active_window(run):
@@ -136,6 +154,8 @@ def main(argv=None):
         for i, text in enumerate(load_saved(), 1):
             print(f"{i}. {preview(text)}")
         return 0
+    # Capture PRIMARY before opening our window can change the focused selection.
+    selected_text = read_clipboard(_run, selection=True)
     window = active_window(_run)
     items = refresh(None, _run)
     try:
@@ -161,7 +181,7 @@ def main(argv=None):
         app.setDesktopFileName("devos-clipboard")
         from app_identity import apply as apply_identity
         apply_identity(app, "devos-clipboard")
-    win = _Window(items, window, QtCore, QtGui, QtWidgets)
+    win = _Window(items, window, QtCore, QtGui, QtWidgets, selected_text)
     win.show()
     return app.exec_()
 
@@ -170,7 +190,7 @@ class _Window:
     """Filled in main() once PyQt5 is imported. Placeholder for the class built there."""
 
 
-def _build_window(QtCore, QtGui, QtWidgets, items, window_id):
+def _build_window(QtCore, QtGui, QtWidgets, items, window_id, selected_text=""):
     class Window(QtWidgets.QDialog):
         def __init__(self):
             super().__init__(None, QtCore.Qt.Tool | QtCore.Qt.WindowStaysOnTopHint | QtCore.Qt.FramelessWindowHint)
@@ -186,6 +206,16 @@ def _build_window(QtCore, QtGui, QtWidgets, items, window_id):
             title = QtWidgets.QLabel("Clipboard")
             title.setStyleSheet("color:#e2e8f0;font-size:16px;font-weight:700;")
             layout.addWidget(title)
+            self.selection_text = selected_text
+            copy_selection = QtWidgets.QPushButton("Copy selected text")
+            copy_selection.clicked.connect(self._copy_selection)
+            layout.addWidget(copy_selection)
+            self.status = QtWidgets.QLabel(
+                preview(selected_text, 90) if selected_text
+                else "Mark text in your terminal, then open Clipboard with Win+V."
+            )
+            self.status.setWordWrap(True)
+            layout.addWidget(self.status)
             self.list = QtWidgets.QListWidget()
             for text in items:
                 item = QtWidgets.QListWidgetItem(preview(text, 90))
@@ -196,7 +226,7 @@ def _build_window(QtCore, QtGui, QtWidgets, items, window_id):
                 self.list.addItem("Nothing copied yet")
             self.list.itemActivated.connect(self._pick)
             layout.addWidget(self.list)
-            layout.addWidget(QtWidgets.QLabel("Enter pastes into the app you were using. Esc closes."))
+            layout.addWidget(QtWidgets.QLabel("Choose an item to copy. Esc closes."))
             if self.list.count() and items:
                 self.list.setCurrentRow(0)
             geo = QtWidgets.QApplication.primaryScreen().availableGeometry()
@@ -217,10 +247,9 @@ def _build_window(QtCore, QtGui, QtWidgets, items, window_id):
             text = item.data(QtCore.Qt.UserRole)
             if not text:
                 return
-            try:
-                subprocess.run(set_clipboard_command(text), input=text, text=True, timeout=3)
-            except OSError:
-                pass
+            if not write_clipboard(text, _run):
+                self.status.setText("Could not access the desktop clipboard. Try again.")
+                return
             self.close()
             for cmd in paste_commands(window_id):
                 try:
@@ -228,12 +257,23 @@ def _build_window(QtCore, QtGui, QtWidgets, items, window_id):
                 except OSError:
                     break
 
+        def _copy_selection(self):
+            text = self.selection_text or read_clipboard(_run, selection=True)
+            if not text:
+                self.status.setText("No selected text available. Mark text in your terminal and reopen with Win+V.")
+                return
+            if not write_clipboard(text, _run):
+                self.status.setText("Could not access the desktop clipboard. Try again.")
+                return
+            save_history(add_entry(items, text))
+            self.status.setText("Copied. You can paste with Ctrl+V.")
+
     return Window()
 
 
 # Rebuild the placeholder so `main` can call one function.
-def _Window(items, window_id, QtCore, QtGui, QtWidgets):
-    return _build_window(QtCore, QtGui, QtWidgets, items, window_id)
+def _Window(items, window_id, QtCore, QtGui, QtWidgets, selected_text=""):
+    return _build_window(QtCore, QtGui, QtWidgets, items, window_id, selected_text)
 
 
 if __name__ == "__main__":

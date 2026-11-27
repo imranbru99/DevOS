@@ -272,6 +272,8 @@ def prepare_dependencies(files):
     required = list(KIDS_PACKAGES) if "components/kids/kids_mode.py" in files else []
     if "components/devos_dialogs.py" in files:
         required.extend(("qt5-style-kvantum", "qt6-style-kvantum"))
+    if "components/clipboard/clipboard.py" in files:
+        required.extend(("wl-clipboard", "xclip"))
     missing = []
     for package in required:
         check = subprocess.run(["dpkg-query", "-W", "-f=${db:Status-Status}", package],

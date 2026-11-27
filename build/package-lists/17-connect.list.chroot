@@ -2,6 +2,7 @@
 # Phone Link: QR code for pairing, clipboard fallback, native phone app support.
 python3-qrcode
 xclip
+wl-clipboard
 kdeconnect
 # DevOS Share: SSH tunnel (localhost.run) and UPnP for "Direct (my IP)".
 # cloudflared is downloaded on first use, not shipped.
