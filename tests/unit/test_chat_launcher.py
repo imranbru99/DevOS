@@ -2,6 +2,12 @@
 """DevOS AI launcher must prefer Qt assistant; HTML page is recovery only."""
 
 from pathlib import Path
+import ast
+from types import SimpleNamespace
+from unittest.mock import Mock
+import sys
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 LAUNCHER = ROOT / "build/includes.chroot/usr/local/bin/devos-chat"
@@ -15,6 +21,32 @@ ASSISTANT_CHROOT = (
 )
 VOICE = ROOT / "components/assistant/voice.py"
 VOICE_CHROOT = ROOT / "build/includes.chroot/usr/local/share/devos/components/assistant/voice.py"
+
+
+@pytest.mark.parametrize("method", ["preload_chat_model", "ensure_model_warm", None])
+def test_model_preload_supports_older_engines(method):
+    tree = ast.parse(ASSISTANT.read_text(encoding="utf-8"))
+    function = next(node for node in tree.body
+                    if isinstance(node, ast.FunctionDef) and node.name == "start_model_preload")
+    callback = Mock()
+    engine = SimpleNamespace(**({method: callback} if method else {}))
+    thread = Mock()
+    namespace = {"engine": engine, "threading": SimpleNamespace(Thread=thread), "sys": sys}
+    exec(compile(ast.Module(body=[function], type_ignores=[]), str(ASSISTANT), "exec"), namespace)
+    namespace["start_model_preload"]("test-preload")
+    if method is None:
+        thread.assert_not_called()
+        return
+    thread.return_value.start.assert_called_once()
+    target = thread.call_args.kwargs["target"]
+    target()
+    callback.assert_called_once_with()
+    callback.side_effect = RuntimeError("service unavailable")
+    target()
+
+
+def test_assistant_source_matches_build_copy():
+    assert ASSISTANT.read_bytes() == ASSISTANT_CHROOT.read_bytes()
 
 
 def test_launcher_logs_and_retries_qt_before_fallback():

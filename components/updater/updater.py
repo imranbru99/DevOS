@@ -204,6 +204,16 @@ def restore(root, backup, record):
 
 def install(root, manifest, files):
     root = Path(root).resolve()
+    # The chat window and its engine must come from the same release bundle.
+    assistant = "components/assistant/assistant.py"
+    if assistant in files and "components/assistant/engine.py" not in files:
+        raise ValueError("Assistant update is incomplete: engine.py is required.")
+    for name, (body, _) in files.items():
+        if name.endswith(".py"):
+            try:
+                compile(body, name, "exec")
+            except (SyntaxError, ValueError) as exc:
+                raise ValueError(f"Invalid Python in update: {name}: {exc}") from exc
     if ubuntu_series(root) not in manifest.get("ubuntu_series", []):
         raise ValueError("This release needs a different Ubuntu base. Use devos update --os-upgrade first.")
     state = root / STATE

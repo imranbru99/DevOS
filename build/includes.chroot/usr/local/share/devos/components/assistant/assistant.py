@@ -42,6 +42,27 @@ import subprocess  # noqa: E402
 
 APP_TITLE = "DevOS AI"
 
+
+def start_model_preload(name):
+    """Warm the model when supported, without blocking chat startup."""
+    preload = getattr(engine, "preload_chat_model", None)
+    if not callable(preload):
+        preload = getattr(engine, "ensure_model_warm", None)
+    if not callable(preload):
+        print(
+            f"DevOS AI: model warm-up unavailable in {getattr(engine, '__file__', 'engine')}",
+            file=sys.stderr,
+        )
+        return
+
+    def warm_model():
+        try:
+            preload()
+        except Exception as exc:
+            print(f"DevOS AI: model warm-up failed: {exc}", file=sys.stderr)
+
+    threading.Thread(target=warm_model, daemon=True, name=name).start()
+
 # -- palette ---------------------------------------------------------------
 BG = "#07090f"
 SIDEBAR_BG = "#0b0e16"
@@ -4218,7 +4239,7 @@ class AssistantWindow(QtWidgets.QWidget):
 
         # Load the same system prompt chat() uses, while the person is still
         # talking, so Thinking… is not the model reading that prompt from scratch.
-        threading.Thread(target=engine.preload_chat_model, daemon=True, name="devos-llm-warm").start()
+        start_model_preload("devos-llm-warm")
         # Free the mic: pause the always-on Mira daemon while this call owns it.
         try:
             listen.save_config(paused=True)
@@ -4554,7 +4575,7 @@ def main(argv=None):
     win = AssistantWindow()
     show_window(win, "devos-chat")
     # Read the model into memory before the first question, so Thinking… is short.
-    threading.Thread(target=engine.preload_chat_model, daemon=True, name="devos-llm-preload").start()
+    start_model_preload("devos-llm-preload")
     # "Open in DevOS AI" from the voice overlay: devos-chat --ask "what was said"
     if "--ask" in argv:
         i = argv.index("--ask")

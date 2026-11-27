@@ -97,6 +97,23 @@ class UpdaterTests(unittest.TestCase):
             updater.install(self.root, self.manifest, self.files)
         self.assertFalse((self.root / updater.STATE).exists())
 
+    def test_assistant_update_requires_matching_engine(self):
+        files = {"components/assistant/assistant.py": (b"pass\n", 0)}
+        with self.assertRaisesRegex(ValueError, "engine.py is required"):
+            updater.install(self.root, self.manifest, files)
+        self.assertFalse((self.root / updater.STATE).exists())
+        files["components/assistant/engine.py"] = (b"pass\n", 0)
+        updater.install(self.root, self.manifest, files)
+        self.assertTrue((self.root / "usr/local/share/devos/components/assistant/engine.py").exists())
+
+    def test_invalid_python_rejected_before_any_file_is_written(self):
+        files = dict(self.files)
+        files["components/broken.py"] = (b"def broken(:\n", 0)
+        with self.assertRaisesRegex(ValueError, "Invalid Python"):
+            updater.install(self.root, self.manifest, files)
+        self.assertFalse((self.root / updater.STATE).exists())
+        self.assertFalse((self.root / "usr/local/share/devos/components/demo.py").exists())
+
     def test_successful_update_can_be_rolled_back(self):
         target = self.root / updater.destination("components/demo.py")
         target.parent.mkdir(parents=True)
